@@ -10,7 +10,7 @@ import {
   Wrench,
   Users,
   Package,
-  PotIcon,
+  FlaskConical,
   Utensils,
   ClipboardList,
   Factory,
@@ -54,7 +54,7 @@ const navGroups = [
     label: 'PRODUCTS',
     items: [
       { label: '1 - Raw Materials',  href: '/products/raw-materials',  icon: Package },
-      { label: '2 - Semi Finished',  href: '/products/semi-finished',  icon: PotIcon },
+      { label: '2 - Semi Finished',  href: '/products/semi-finished',  icon: FlaskConical },
       { label: '3 - Finished',       href: '/products/finished',       icon: Utensils },
     ],
   },
