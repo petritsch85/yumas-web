@@ -27,7 +27,7 @@ export default function SupplierDetailPage() {
     queryFn: async () => {
       const { data } = await supabase
         .from('supplier_items')
-        .select('*, item:items(id, name, sku, unit:units(abbreviation))')
+        .select('*, item:items(id, name, sku, unit:units_of_measure(abbreviation))')
         .eq('supplier_id', id)
         .order('is_preferred', { ascending: false });
       return data ?? [];

@@ -38,7 +38,7 @@ export default function PODetailPage() {
           *,
           supplier:suppliers(id, name, contact_name, email, phone),
           destination_location:locations(id, name),
-          lines:purchase_order_lines(*, item:items(name, sku, unit:units(abbreviation)))
+          lines:purchase_order_lines(*, item:items(name, sku, unit:units_of_measure(abbreviation)))
         `)
         .eq('id', id)
         .single();

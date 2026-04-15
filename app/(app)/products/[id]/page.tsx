@@ -16,7 +16,7 @@ export default function ProductDetailPage() {
     queryFn: async () => {
       const { data } = await supabase
         .from('items')
-        .select('*, category:categories(id, name, color_hex), unit:units(id, name, abbreviation)')
+        .select('*, category:categories(id, name, color_hex), unit:units_of_measure(id, name, abbreviation)')
         .eq('id', id)
         .single();
       return data;
@@ -53,7 +53,7 @@ export default function ProductDetailPage() {
       // Get recipe where this item is the output
       const { data: recipe } = await supabase
         .from('recipes')
-        .select('*, lines:recipe_lines(*, ingredient:items(name), unit:units(abbreviation))')
+        .select('*, lines:recipe_lines(*, ingredient:items(name), unit:units_of_measure(abbreviation))')
         .eq('output_item_id', id)
         .single();
       return recipe;

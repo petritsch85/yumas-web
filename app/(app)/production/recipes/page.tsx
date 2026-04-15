@@ -13,7 +13,7 @@ export default function RecipesPage() {
     queryFn: async () => {
       const { data } = await supabase
         .from('recipes')
-        .select('*, output_item:items(name, unit:units(abbreviation)), lines:recipe_lines(count)')
+        .select('*, output_item:items(name, unit:units_of_measure(abbreviation)), lines:recipe_lines(count)')
         .order('name');
       return data ?? [];
     },
@@ -25,7 +25,7 @@ export default function RecipesPage() {
     queryFn: async () => {
       const { data } = await supabase
         .from('recipes')
-        .select('*, lines:recipe_lines(*, ingredient:items(name), unit:units(abbreviation))')
+        .select('*, lines:recipe_lines(*, ingredient:items(name), unit:units_of_measure(abbreviation))')
         .eq('id', expandedId!)
         .single();
       return data;
