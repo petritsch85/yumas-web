@@ -60,7 +60,6 @@ const navGroups = [
       { label: 'Add New Inventory',  href: '/inventory/add',           icon: FilePlus },
       { label: 'Current Inventory',  href: '/inventory/counts',        icon: ClipboardList },
       { label: 'Production',         href: '/production',           icon: Factory },
-      { label: 'Recipes',            href: '/production/recipes',   icon: ClipboardList, indent: true },
       { label: 'Buying',             href: '/coming-soon/buying',   icon: ShoppingCart },
       { label: 'Controlling',        href: '/coming-soon/controlling', icon: TrendingUp },
       { label: 'Waste Log',          href: '/waste',                icon: Trash2 },
