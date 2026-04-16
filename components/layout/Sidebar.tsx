@@ -61,7 +61,8 @@ const navGroups = [
   {
     label: 'SUPPLY CHAIN',
     items: [
-      { label: 'Inventory',          href: '/inventory/counts',     icon: ClipboardList },
+      { label: 'Add New Inventory',  href: '/inventory/add',        icon: FilePlus },
+      { label: 'Current Inventory',  href: '/inventory/counts',     icon: ClipboardList },
       { label: 'Production',         href: '/production',           icon: Factory },
       { label: 'Buying',             href: '/coming-soon/buying',   icon: ShoppingCart },
       { label: 'Controlling',        href: '/coming-soon/controlling', icon: TrendingUp },
