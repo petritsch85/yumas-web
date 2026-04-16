@@ -2,10 +2,12 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { Search, Plus } from 'lucide-react';
 import type { Item } from '@/types';
+
+const FOOD_CATEGORIES = ['Meat & Fish', 'Dairy & Eggs', 'Fruit & Vegetables', 'Dry Goods', 'Prepared Items'];
 
 export default function RawMaterialsPage() {
   const router = useRouter();
@@ -24,6 +26,17 @@ export default function RawMaterialsPage() {
     },
   });
 
+  // Build SKU map: food items → 1-1…N alphabetically, drinks → 1-(N+1)… alphabetically
+  const skuMap = useMemo(() => {
+    if (!items) return {} as Record<string, string>;
+    const foodItems = items.filter(i => !i.category || FOOD_CATEGORIES.includes(i.category.name));
+    const drinkItems = items.filter(i => i.category?.name === 'Beverages');
+    const map: Record<string, string> = {};
+    foodItems.forEach((item, i) => { map[item.id] = `1-${i + 1}`; });
+    drinkItems.forEach((item, i) => { map[item.id] = `1-${foodItems.length + i + 1}`; });
+    return map;
+  }, [items]);
+
   const filtered = (items ?? []).filter((i) =>
     i.name.toLowerCase().includes(search.toLowerCase())
   );
@@ -32,9 +45,7 @@ export default function RawMaterialsPage() {
     <div>
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold text-gray-900">Raw Materials</h1>
-        <button
-          className="bg-[#1B5E20] text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-[#2E7D32] transition-colors flex items-center gap-2"
-        >
+        <button className="bg-[#1B5E20] text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-[#2E7D32] transition-colors flex items-center gap-2">
           <Plus size={16} />
           Add Item
         </button>
@@ -74,13 +85,13 @@ export default function RawMaterialsPage() {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((item, idx) => (
+                {filtered.map((item) => (
                   <tr
                     key={item.id}
                     className="border-t border-gray-100 hover:bg-gray-50 cursor-pointer"
                     onClick={() => router.push(`/products/${item.id}`)}
                   >
-                    <td className="px-4 py-3 text-gray-500 font-mono text-xs">{item.sku ?? `1-${idx + 1}`}</td>
+                    <td className="px-4 py-3 text-gray-500 font-mono text-xs">{skuMap[item.id] ?? '—'}</td>
                     <td className="px-4 py-3 text-gray-900 font-medium">{item.name}</td>
                     <td className="px-4 py-3">
                       {item.category ? (
