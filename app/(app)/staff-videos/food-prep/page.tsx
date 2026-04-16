@@ -176,7 +176,8 @@ export default function FoodPrepPage() {
               <video
                 src={getPublicUrl(video.storage_path)}
                 controls
-                className="w-full aspect-video bg-black"
+                className="w-full bg-black"
+                style={{ aspectRatio: '9/16', maxHeight: '70vh' }}
               />
               <div className="px-4 py-3 flex items-center justify-between">
                 <p className="font-medium text-gray-900">{video.title}</p>
