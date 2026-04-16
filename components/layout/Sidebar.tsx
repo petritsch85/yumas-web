@@ -51,16 +51,11 @@ const navGroups = [
     ],
   },
   {
-    label: 'PRODUCTS',
+    label: 'SUPPLY CHAIN',
     items: [
       { label: '1 - Raw Materials',  href: '/products/raw-materials',  icon: Package },
       { label: '2 - Semi Finished',  href: '/products/semi-finished',  icon: FlaskConical },
       { label: '3 - Finished',       href: '/products/finished',       icon: Utensils },
-    ],
-  },
-  {
-    label: 'SUPPLY CHAIN',
-    items: [
       { label: 'Add New Inventory',  href: '/inventory/add',        icon: FilePlus },
       { label: 'Current Inventory',  href: '/inventory/counts',     icon: ClipboardList },
       { label: 'Production',         href: '/production',           icon: Factory },
