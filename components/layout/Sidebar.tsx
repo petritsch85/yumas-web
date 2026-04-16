@@ -84,7 +84,6 @@ const navGroups: NavGroup[] = [
       {
         label: 'Inventory', href: '/inventory', icon: ClipboardList,
         children: [
-          { label: 'Add New Inventory', href: '/inventory/add',    icon: FilePlus },
           { label: 'Current Inventory', href: '/inventory/counts', icon: ClipboardList },
         ],
       },
@@ -102,9 +101,16 @@ const navGroups: NavGroup[] = [
     ],
   },
   {
+    label: 'IN STORE',
+    items: [
+      { label: 'Staff Videos',      href: '/coming-soon/staff-videos',  icon: Users },
+      { label: 'Add New Inventory', href: '/inventory/add',             icon: FilePlus },
+      { label: 'Shift Roster',      href: '/coming-soon/shift-roster',  icon: CalendarDays },
+    ],
+  },
+  {
     label: 'STAFFING',
     items: [
-      { label: 'Shift Roster',    href: '/coming-soon/shift-roster',    icon: CalendarDays },
       { label: 'Holidays',        href: '/coming-soon/holidays',        icon: CalendarDays },
       { label: 'Sick Days',       href: '/coming-soon/sick-days',       icon: CalendarDays },
       { label: 'Training',        href: '/coming-soon/training',        icon: Users },
