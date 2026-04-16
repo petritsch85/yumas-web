@@ -103,7 +103,13 @@ const navGroups: NavGroup[] = [
   {
     label: 'IN STORE',
     items: [
-      { label: 'Staff Videos',      href: '/coming-soon/staff-videos',  icon: Users },
+      {
+        label: 'Staff Videos', href: '/staff-videos', icon: Users,
+        children: [
+          { label: 'Food Prep',   href: '/staff-videos/food-prep',   icon: UtensilsCrossed },
+          { label: 'Drinks Prep', href: '/staff-videos/drinks-prep', icon: Utensils },
+        ],
+      },
       { label: 'Add New Inventory', href: '/inventory/add',             icon: FilePlus },
       { label: 'Shift Roster',      href: '/coming-soon/shift-roster',  icon: CalendarDays },
     ],
