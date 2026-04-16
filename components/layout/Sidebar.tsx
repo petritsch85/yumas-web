@@ -28,12 +28,32 @@ import {
   FolderOpen,
   LogOut,
   Truck,
+  ChevronDown,
+  ChevronRight,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase-browser';
 import { useEffect, useState } from 'react';
 import type { Profile } from '@/types';
 
-const navGroups = [
+type ChildItem = {
+  label: string;
+  href: string;
+  icon: React.ComponentType<{ size?: number; style?: React.CSSProperties }>;
+};
+
+type NavItem = {
+  label: string;
+  href: string;
+  icon: React.ComponentType<{ size?: number; style?: React.CSSProperties }>;
+  children?: ChildItem[];
+};
+
+type NavGroup = {
+  label: string;
+  items: NavItem[];
+};
+
+const navGroups: NavGroup[] = [
   {
     label: 'OVERVIEW',
     items: [
@@ -53,20 +73,32 @@ const navGroups = [
   {
     label: 'SUPPLY CHAIN',
     items: [
-      { label: 'Products',              href: '/products',                icon: Package },
-      { label: '1 - Raw Materials',   href: '/products/raw-materials',  icon: Package,      indent: true },
-      { label: '2 - Semi Finished',   href: '/products/semi-finished',  icon: FlaskConical, indent: true },
-      { label: '3 - Finished',        href: '/products/finished',       icon: Utensils,     indent: true },
-      { label: 'Inventory',           href: '/inventory',               icon: ClipboardList },
-      { label: 'Add New Inventory',   href: '/inventory/add',           icon: FilePlus,     indent: true },
-      { label: 'Current Inventory',   href: '/inventory/counts',        icon: ClipboardList, indent: true },
-      { label: 'Production',          href: '/production',              icon: Factory },
-      { label: 'Batches',             href: '/production',              icon: Factory,      indent: true },
-      { label: 'Recipes',             href: '/production/recipes',      icon: ClipboardList, indent: true },
-      { label: 'Buying',              href: '/coming-soon/buying',      icon: ShoppingCart },
+      {
+        label: 'Products', href: '/products', icon: Package,
+        children: [
+          { label: '1 - Raw Materials', href: '/products/raw-materials', icon: Package },
+          { label: '2 - Semi Finished', href: '/products/semi-finished', icon: FlaskConical },
+          { label: '3 - Finished',      href: '/products/finished',      icon: Utensils },
+        ],
+      },
+      {
+        label: 'Inventory', href: '/inventory', icon: ClipboardList,
+        children: [
+          { label: 'Add New Inventory', href: '/inventory/add',    icon: FilePlus },
+          { label: 'Current Inventory', href: '/inventory/counts', icon: ClipboardList },
+        ],
+      },
+      {
+        label: 'Production', href: '/production', icon: Factory,
+        children: [
+          { label: 'Batches', href: '/production',         icon: Factory },
+          { label: 'Recipes', href: '/production/recipes', icon: ClipboardList },
+        ],
+      },
+      { label: 'Buying',             href: '/coming-soon/buying',      icon: ShoppingCart },
       { label: 'Controlling',        href: '/coming-soon/controlling', icon: TrendingUp },
-      { label: 'Waste Log',          href: '/waste',                icon: Trash2 },
-      { label: 'Delivery Schedule',  href: '/calendar',             icon: CalendarDays },
+      { label: 'Waste Log',          href: '/waste',                   icon: Trash2 },
+      { label: 'Delivery Schedule',  href: '/calendar',                icon: CalendarDays },
     ],
   },
   {
@@ -118,6 +150,23 @@ export default function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const [profile, setProfile] = useState<Profile | null>(null);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+
+  // Auto-expand any parent whose children include the current path
+  useEffect(() => {
+    const toExpand = new Set<string>();
+    for (const group of navGroups) {
+      for (const item of group.items) {
+        if (item.children) {
+          const childActive = item.children.some((c) =>
+            pathname === c.href || pathname.startsWith(c.href + '/')
+          );
+          if (childActive) toExpand.add(item.href);
+        }
+      }
+    }
+    setExpanded(toExpand);
+  }, [pathname]);
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
@@ -141,7 +190,19 @@ export default function Sidebar() {
 
   const isActive = (href: string) => {
     if (href === '/') return pathname === '/';
-    return pathname.startsWith(href);
+    return pathname === href || pathname.startsWith(href + '/');
+  };
+
+  const toggleExpanded = (href: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(href)) {
+        next.delete(href);
+      } else {
+        next.add(href);
+      }
+      return next;
+    });
   };
 
   return (
@@ -164,30 +225,77 @@ export default function Sidebar() {
                 const Icon = item.icon;
                 const active = isActive(item.href);
                 const isComingSoon = item.href.startsWith('/coming-soon');
-                const indented = (item as any).indent === true;
+                const hasChildren = !!item.children?.length;
+                const isExpanded = expanded.has(item.href);
+
                 return (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    className={`flex items-center gap-3 rounded-lg text-sm font-medium transition-colors ${
-                      indented ? 'px-3 py-1.5 ml-4' : 'px-3 py-2'
-                    } ${
-                      active
-                        ? 'text-white'
-                        : isComingSoon
-                        ? 'text-white/40 cursor-default pointer-events-none'
-                        : indented
-                        ? 'text-white/50 hover:text-white/80 hover:bg-white/10'
-                        : 'text-white/70 hover:text-white hover:bg-white/10'
-                    }`}
-                    style={active ? { backgroundColor: '#2E7D32' } : undefined}
-                  >
-                    <Icon size={indented ? 14 : 16} />
-                    <span className={`truncate ${indented ? 'text-xs' : ''}`}>{item.label}</span>
-                    {isComingSoon && (
-                      <span className="ml-auto text-white/30 text-xs">Soon</span>
+                  <div key={item.href}>
+                    {/* Parent row */}
+                    {hasChildren ? (
+                      <button
+                        onClick={() => {
+                          router.push(item.href);
+                          toggleExpanded(item.href);
+                        }}
+                        className={`w-full flex items-center gap-3 rounded-lg text-sm font-medium transition-colors px-3 py-2 ${
+                          active
+                            ? 'text-white'
+                            : 'text-white/70 hover:text-white hover:bg-white/10'
+                        }`}
+                        style={active ? { backgroundColor: '#2E7D32' } : undefined}
+                      >
+                        <Icon size={16} />
+                        <span className="truncate flex-1 text-left">{item.label}</span>
+                        {isExpanded
+                          ? <ChevronDown size={14} className="flex-shrink-0 opacity-60" />
+                          : <ChevronRight size={14} className="flex-shrink-0 opacity-60" />
+                        }
+                      </button>
+                    ) : (
+                      <Link
+                        href={item.href}
+                        className={`flex items-center gap-3 rounded-lg text-sm font-medium transition-colors px-3 py-2 ${
+                          active
+                            ? 'text-white'
+                            : isComingSoon
+                            ? 'text-white/40 cursor-default pointer-events-none'
+                            : 'text-white/70 hover:text-white hover:bg-white/10'
+                        }`}
+                        style={active ? { backgroundColor: '#2E7D32' } : undefined}
+                      >
+                        <Icon size={16} />
+                        <span className="truncate">{item.label}</span>
+                        {isComingSoon && (
+                          <span className="ml-auto text-white/30 text-xs">Soon</span>
+                        )}
+                      </Link>
                     )}
-                  </Link>
+
+                    {/* Children (collapsible) */}
+                    {hasChildren && isExpanded && (
+                      <div className="mt-0.5 space-y-0.5">
+                        {item.children!.map((child) => {
+                          const ChildIcon = child.icon;
+                          const childActive = isActive(child.href);
+                          return (
+                            <Link
+                              key={child.href}
+                              href={child.href}
+                              className={`flex items-center gap-3 rounded-lg text-xs font-medium transition-colors px-3 py-1.5 ml-4 ${
+                                childActive
+                                  ? 'text-white'
+                                  : 'text-white/50 hover:text-white/80 hover:bg-white/10'
+                              }`}
+                              style={childActive ? { backgroundColor: '#2E7D32' } : undefined}
+                            >
+                              <ChildIcon size={14} />
+                              <span className="truncate">{child.label}</span>
+                            </Link>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
                 );
               })}
             </div>
