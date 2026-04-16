@@ -3,12 +3,36 @@
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
 import { useState } from 'react';
-import { Plus } from 'lucide-react';
-import { StatusBadge } from '@/components/ui/StatusBadge';
-import { formatDate } from '@/lib/utils';
+import { ChevronDown, ChevronRight } from 'lucide-react';
 
-export default function InventoryCountsPage() {
+type SubmissionRow = {
+  id: string;
+  location_name: string;
+  submitted_at: string;
+  submitted_by: string | null;
+  data: { section: string; name: string; unit: string; quantity: number }[];
+  profile: { full_name: string } | null;
+};
+
+function groupBySection(data: SubmissionRow['data']) {
+  const map: Record<string, { name: string; unit: string; quantity: number }[]> = {};
+  for (const item of data) {
+    if (!map[item.section]) map[item.section] = [];
+    map[item.section].push({ name: item.name, unit: item.unit, quantity: item.quantity });
+  }
+  return map;
+}
+
+function formatDate(iso: string) {
+  return new Date(iso).toLocaleString('de-DE', {
+    day: '2-digit', month: '2-digit', year: 'numeric',
+    hour: '2-digit', minute: '2-digit',
+  });
+}
+
+export default function CurrentInventoryPage() {
   const [locationFilter, setLocationFilter] = useState('all');
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
 
   const { data: locations } = useQuery({
     queryKey: ['locations-list'],
@@ -18,27 +42,51 @@ export default function InventoryCountsPage() {
     },
   });
 
-  const { data: counts, isLoading } = useQuery({
-    queryKey: ['inventory-counts', locationFilter],
+  const { data: submissions, isLoading } = useQuery({
+    queryKey: ['inventory-submissions', locationFilter],
     queryFn: async () => {
       let q = supabase
-        .from('inventory_counts')
-        .select('*, location:locations(name), lines:inventory_count_lines(count)')
-        .order('count_date', { ascending: false });
-      if (locationFilter !== 'all') q = q.eq('location_id', locationFilter);
-      const { data } = await q;
-      return data ?? [];
+        .from('inventory_submissions')
+        .select('id, location_name, submitted_at, submitted_by, data')
+        .order('submitted_at', { ascending: false });
+      if (locationFilter !== 'all') q = q.eq('location_name', locationFilter);
+      const { data, error } = await q;
+      if (error) throw error;
+
+      // Resolve submitter names
+      const rows = data ?? [];
+      const userIds = [...new Set(rows.map((r) => r.submitted_by).filter(Boolean))] as string[];
+      let profileMap: Record<string, string> = {};
+      if (userIds.length) {
+        const { data: profiles } = await supabase
+          .from('profiles')
+          .select('id, full_name')
+          .in('id', userIds);
+        for (const p of profiles ?? []) profileMap[p.id] = p.full_name;
+      }
+
+      return rows.map((r) => ({
+        ...r,
+        submitterName: r.submitted_by ? (profileMap[r.submitted_by] ?? 'Unknown') : 'Unknown',
+      }));
     },
   });
+
+  const toggleExpand = (id: string) => {
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  // Unique location names for filter
+  const locationNames = [...new Set((locations as { id: string; name: string }[] ?? []).map((l) => l.name))];
 
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Inventory Counts</h1>
-        <button className="bg-[#1B5E20] text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-[#2E7D32] transition-colors flex items-center gap-2">
-          <Plus size={16} />
-          New Count
-        </button>
+        <h1 className="text-2xl font-bold text-gray-900">Current Inventory</h1>
       </div>
 
       {/* Location filter */}
@@ -50,47 +98,83 @@ export default function InventoryCountsPage() {
           className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]"
         >
           <option value="all">All Locations</option>
-          {(locations as { id: string; name: string }[])?.map((l) => (
-            <option key={l.id} value={l.id}>{l.name}</option>
+          {locationNames.map((name) => (
+            <option key={name} value={name}>{name}</option>
           ))}
         </select>
       </div>
 
-      <div className="bg-white rounded-lg shadow-sm border border-gray-100">
-        <div className="overflow-x-auto">
-          {isLoading ? (
-            <div className="p-6 space-y-3">
-              {[...Array(6)].map((_, i) => <div key={i} className="h-4 bg-gray-100 rounded animate-pulse" />)}
-            </div>
-          ) : !counts || counts.length === 0 ? (
-            <div className="p-8 text-center text-gray-400 text-sm">No inventory counts found</div>
-          ) : (
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Location</th>
-                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Items</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(counts as Record<string, unknown>[]).map((count) => {
-                  const lineCount = (count.lines as { count: number }[] | null)?.[0]?.count ?? 0;
-                  return (
-                    <tr key={count.id as string} className="border-t border-gray-100 hover:bg-gray-50 cursor-pointer">
-                      <td className="px-4 py-3 text-gray-800">{formatDate(count.count_date as string)}</td>
-                      <td className="px-4 py-3 text-gray-800">{(count.location as { name: string } | null)?.name ?? '—'}</td>
-                      <td className="px-4 py-3 text-right text-gray-600">{lineCount}</td>
-                      <td className="px-4 py-3"><StatusBadge status={count.status as string ?? 'pending'} /></td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          )}
+      {isLoading ? (
+        <div className="space-y-3">
+          {[...Array(4)].map((_, i) => (
+            <div key={i} className="h-16 bg-gray-100 rounded-lg animate-pulse" />
+          ))}
         </div>
-      </div>
+      ) : !submissions || submissions.length === 0 ? (
+        <div className="bg-white rounded-lg shadow-sm border border-gray-100 p-8 text-center text-gray-400 text-sm">
+          No inventory submissions found
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {submissions.map((sub) => {
+            const isExpanded = expandedIds.has(sub.id);
+            const sections = groupBySection(sub.data ?? []);
+            const totalFilled = (sub.data ?? []).filter((i) => i.quantity > 0).length;
+            const totalItems = (sub.data ?? []).length;
+
+            return (
+              <div key={sub.id} className="bg-white rounded-lg shadow-sm border border-gray-100 overflow-hidden">
+                {/* Card header — click to expand */}
+                <button
+                  onClick={() => toggleExpand(sub.id)}
+                  className="w-full flex items-center gap-4 px-4 py-3.5 hover:bg-gray-50 transition-colors text-left"
+                >
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold text-gray-900 text-sm">{sub.location_name}</span>
+                      <span className="text-xs text-gray-400">·</span>
+                      <span className="text-xs text-gray-500">{sub.submitterName}</span>
+                    </div>
+                    <div className="text-xs text-gray-400 mt-0.5">{formatDate(sub.submitted_at)}</div>
+                  </div>
+                  <span className="text-xs text-gray-500 flex-shrink-0">{totalFilled}/{totalItems} filled</span>
+                  {isExpanded
+                    ? <ChevronDown size={16} className="text-gray-400 flex-shrink-0" />
+                    : <ChevronRight size={16} className="text-gray-400 flex-shrink-0" />
+                  }
+                </button>
+
+                {/* Expanded detail */}
+                {isExpanded && (
+                  <div className="border-t border-gray-100">
+                    {Object.entries(sections).map(([sectionTitle, items]) => (
+                      <div key={sectionTitle}>
+                        <div className="px-4 py-2 bg-gray-50 border-b border-gray-100">
+                          <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">{sectionTitle}</span>
+                        </div>
+                        {items.map((item, idx) => (
+                          <div
+                            key={item.name}
+                            className={`flex items-center gap-4 px-4 py-2.5 ${idx < items.length - 1 ? 'border-b border-gray-50' : ''}`}
+                          >
+                            <div className="flex-1 min-w-0">
+                              <span className="text-sm text-gray-800">{item.name}</span>
+                              <span className="text-xs text-gray-400 ml-2">{item.unit}</span>
+                            </div>
+                            <span className={`text-sm font-semibold tabular-nums ${item.quantity > 0 ? 'text-[#2E7D32]' : 'text-gray-300'}`}>
+                              {item.quantity}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
