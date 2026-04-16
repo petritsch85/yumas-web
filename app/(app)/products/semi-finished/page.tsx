@@ -24,11 +24,11 @@ export default function SemiFinishedPage() {
     },
   });
 
-  // Build SKU map: D2-1, D2-2… alphabetically
+  // Build SKU map: F2-1, F2-2… alphabetically
   const skuMap = useMemo(() => {
     if (!items) return {} as Record<string, string>;
     const map: Record<string, string> = {};
-    items.forEach((item, i) => { map[item.id] = `D2-${i + 1}`; });
+    items.forEach((item, i) => { map[item.id] = `F2-${i + 1}`; });
     return map;
   }, [items]);
 
