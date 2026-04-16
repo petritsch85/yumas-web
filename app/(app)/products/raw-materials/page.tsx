@@ -32,7 +32,7 @@ export default function RawMaterialsPage() {
     const foodItems = items.filter(i => !i.category || FOOD_CATEGORIES.includes(i.category.name));
     const drinkItems = items.filter(i => i.category?.name === 'Beverages');
     const map: Record<string, string> = {};
-    foodItems.forEach((item, i) => { map[item.id] = `1-${i + 1}`; });
+    foodItems.forEach((item, i) => { map[item.id] = `F1-${i + 1}`; });
     drinkItems.forEach((item, i) => { map[item.id] = `1-${foodItems.length + i + 1}`; });
     return map;
   }, [items]);
