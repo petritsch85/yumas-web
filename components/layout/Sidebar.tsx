@@ -53,11 +53,12 @@ const navGroups = [
   {
     label: 'SUPPLY CHAIN',
     items: [
-      { label: '1 - Raw Materials',  href: '/products/raw-materials',  icon: Package },
-      { label: '2 - Semi Finished',  href: '/products/semi-finished',  icon: FlaskConical },
-      { label: '3 - Finished',       href: '/products/finished',       icon: Utensils },
-      { label: 'Add New Inventory',  href: '/inventory/add',        icon: FilePlus },
-      { label: 'Current Inventory',  href: '/inventory/counts',     icon: ClipboardList },
+      { label: 'Products',           href: '/products',                icon: Package },
+      { label: '1 - Raw Materials',  href: '/products/raw-materials',  icon: Package,      indent: true },
+      { label: '2 - Semi Finished',  href: '/products/semi-finished',  icon: FlaskConical, indent: true },
+      { label: '3 - Finished',       href: '/products/finished',       icon: Utensils,     indent: true },
+      { label: 'Add New Inventory',  href: '/inventory/add',           icon: FilePlus },
+      { label: 'Current Inventory',  href: '/inventory/counts',        icon: ClipboardList },
       { label: 'Production',         href: '/production',           icon: Factory },
       { label: 'Buying',             href: '/coming-soon/buying',   icon: ShoppingCart },
       { label: 'Controlling',        href: '/coming-soon/controlling', icon: TrendingUp },
@@ -160,21 +161,26 @@ export default function Sidebar() {
                 const Icon = item.icon;
                 const active = isActive(item.href);
                 const isComingSoon = item.href.startsWith('/coming-soon');
+                const indented = (item as any).indent === true;
                 return (
                   <Link
                     key={item.href}
                     href={item.href}
-                    className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                    className={`flex items-center gap-3 rounded-lg text-sm font-medium transition-colors ${
+                      indented ? 'px-3 py-1.5 ml-4' : 'px-3 py-2'
+                    } ${
                       active
                         ? 'text-white'
                         : isComingSoon
                         ? 'text-white/40 cursor-default pointer-events-none'
+                        : indented
+                        ? 'text-white/50 hover:text-white/80 hover:bg-white/10'
                         : 'text-white/70 hover:text-white hover:bg-white/10'
                     }`}
                     style={active ? { backgroundColor: '#2E7D32' } : undefined}
                   >
-                    <Icon size={16} />
-                    <span className="truncate">{item.label}</span>
+                    <Icon size={indented ? 14 : 16} />
+                    <span className={`truncate ${indented ? 'text-xs' : ''}`}>{item.label}</span>
                     {isComingSoon && (
                       <span className="ml-auto text-white/30 text-xs">Soon</span>
                     )}
