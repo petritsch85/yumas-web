@@ -2,7 +2,7 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { Search, Plus } from 'lucide-react';
 import type { Item } from '@/types';
@@ -23,6 +23,14 @@ export default function SemiFinishedPage() {
       return (data ?? []) as Item[];
     },
   });
+
+  // Build SKU map: D2-1, D2-2… alphabetically
+  const skuMap = useMemo(() => {
+    if (!items) return {} as Record<string, string>;
+    const map: Record<string, string> = {};
+    items.forEach((item, i) => { map[item.id] = `D2-${i + 1}`; });
+    return map;
+  }, [items]);
 
   const filtered = (items ?? []).filter((i) =>
     i.name.toLowerCase().includes(search.toLowerCase())
@@ -62,6 +70,7 @@ export default function SemiFinishedPage() {
             <table className="w-full text-sm">
               <thead className="bg-gray-50">
                 <tr>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">SKU</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Category</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Unit</th>
@@ -75,6 +84,7 @@ export default function SemiFinishedPage() {
                     className="border-t border-gray-100 hover:bg-gray-50 cursor-pointer"
                     onClick={() => router.push(`/products/${item.id}`)}
                   >
+                    <td className="px-4 py-3 text-gray-500 font-mono text-xs">{skuMap[item.id] ?? '—'}</td>
                     <td className="px-4 py-3 text-gray-900 font-medium">{item.name}</td>
                     <td className="px-4 py-3 text-gray-600">
                       {item.category ? (
