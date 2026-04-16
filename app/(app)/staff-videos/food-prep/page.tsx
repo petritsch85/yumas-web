@@ -1,7 +1,12 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { ChevronLeft, UtensilsCrossed } from 'lucide-react';
+import { ChevronLeft } from 'lucide-react';
+
+const VIDEOS = [
+  { id: 'pk8HjKC7pfM', title: 'Test' },
+  // Add more videos here: { id: 'YOUTUBE_ID', title: 'Video Title' }
+];
 
 export default function FoodPrepPage() {
   const router = useRouter();
@@ -20,12 +25,23 @@ export default function FoodPrepPage() {
         <h1 className="text-2xl font-bold text-gray-900">Food Prep</h1>
       </div>
 
-      <div className="flex flex-col items-center justify-center py-24 gap-3 text-center">
-        <div className="w-16 h-16 rounded-full bg-green-50 flex items-center justify-center">
-          <UtensilsCrossed size={32} className="text-gray-300" />
-        </div>
-        <p className="text-gray-800 font-semibold mt-2">Food Prep Videos</p>
-        <p className="text-sm text-gray-400">Training videos coming soon</p>
+      <div className="space-y-6 max-w-2xl">
+        {VIDEOS.map((video) => (
+          <div key={video.id} className="bg-white rounded-lg shadow-sm border border-gray-100 overflow-hidden">
+            <div className="aspect-video w-full">
+              <iframe
+                src={`https://www.youtube.com/embed/${video.id}`}
+                title={video.title}
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                allowFullScreen
+                className="w-full h-full"
+              />
+            </div>
+            <div className="px-4 py-3">
+              <p className="font-medium text-gray-900">{video.title}</p>
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );
