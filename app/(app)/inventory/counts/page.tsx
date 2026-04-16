@@ -119,7 +119,7 @@ export default function CurrentInventoryPage() {
           {submissions.map((sub) => {
             const isExpanded = expandedIds.has(sub.id);
             const sections = groupBySection(sub.data ?? []);
-            const totalFilled = (sub.data ?? []).filter((i) => i.quantity > 0).length;
+            const totalFilled = (sub.data ?? []).filter((i: { quantity: number }) => i.quantity > 0).length;
             const totalItems = (sub.data ?? []).length;
 
             return (
