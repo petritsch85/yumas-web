@@ -94,7 +94,7 @@ const navGroups: NavGroup[] = [
           { label: 'Recipes', href: '/production/recipes', icon: ClipboardList },
         ],
       },
-      { label: 'Buying',             href: '/coming-soon/buying',      icon: ShoppingCart },
+      { label: 'Buying',             href: '/purchase-orders',         icon: ShoppingCart },
       { label: 'Controlling',        href: '/coming-soon/controlling', icon: TrendingUp },
       { label: 'Waste Log',          href: '/waste',                   icon: Trash2 },
       { label: 'Delivery Schedule',  href: '/calendar',                icon: CalendarDays },

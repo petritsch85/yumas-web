@@ -1,6 +1,6 @@
 export type ProductType = 'raw_material' | 'semi_finished' | 'finished' | 'menu_item';
 export type UserRole = 'admin' | 'manager' | 'staff';
-export type POStatus = 'draft' | 'sent' | 'confirmed' | 'partial' | 'received' | 'cancelled';
+export type POStatus = 'draft' | 'pending_approval' | 'approved' | 'sent' | 'confirmed' | 'partial' | 'received' | 'cancelled';
 export type TransferStatus = 'pending' | 'in_transit' | 'received';
 export type WasteReason = 'expired' | 'damaged' | 'spoiled' | 'other';
 export type ProductionStatus = 'planned' | 'in_progress' | 'completed' | 'cancelled';
@@ -21,6 +21,12 @@ export interface Supplier {
   payment_terms: string | null; is_active: boolean; created_at: string;
 }
 
+export interface SupplierProduct {
+  id: string; supplier_id: string; display_name: string;
+  einheit: string; item_id: string | null;
+  unit_price: number | null; is_active: boolean; created_at: string;
+}
+
 export interface PurchaseOrder {
   id: string; po_number: string; supplier_id: string;
   destination_location_id: string; ordered_by: string;
@@ -33,10 +39,13 @@ export interface PurchaseOrder {
 }
 
 export interface PurchaseOrderLine {
-  id: string; po_id: string; item_id: string;
-  quantity_ordered: number; quantity_received: number;
-  unit_price: number; line_total: number; notes: string | null;
+  id: string; po_id: string; item_id: string | null;
+  supplier_product_id: string | null; display_name: string | null;
+  einheit: string | null; quantity_ordered: number;
+  quantity_received: number; unit_price: number;
+  line_total: number; notes: string | null;
   item?: Item;
+  supplier_product?: SupplierProduct;
 }
 
 export interface WasteLog {
