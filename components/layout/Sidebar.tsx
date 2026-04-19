@@ -130,7 +130,7 @@ const navGroups: NavGroup[] = [
     label: 'P&L REPORTS',
     items: [
       { label: 'CSV Importer',   href: '/pl-reports/csv-importer', icon: FileUp },
-      { label: 'Weekly Sales',   href: '/coming-soon/weekly-sales', icon: LineChart },
+      { label: 'Weekly Sales',   href: '/pl-reports/weekly-sales',  icon: LineChart },
       { label: 'Monthly P&L',    href: '/coming-soon/monthly-pl',  icon: TableProperties },
     ],
   },
