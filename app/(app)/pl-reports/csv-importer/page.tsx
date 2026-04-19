@@ -407,56 +407,31 @@ export default function CSVImporterPage() {
 
       {/* ═══════ UPLOAD TAB ═══════ */}
       {tab === 'upload' && (
-        <div>
-
-          {/* ── Top action bar ── */}
-          <div className="flex items-center gap-4 mb-6 p-4 bg-white border border-gray-200 rounded-xl shadow-sm flex-wrap">
-            {/* Location pills */}
-            <div className="flex items-center gap-2 flex-wrap flex-1">
-              <span className="text-xs font-bold text-gray-400 uppercase tracking-wider whitespace-nowrap">Location</span>
-              {locations.map((l) => (
-                <button
-                  key={l.id}
-                  onClick={() => setLocation(l)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium border transition-colors ${
-                    location?.id === l.id
-                      ? 'bg-[#1B5E20] text-white border-[#1B5E20]'
-                      : 'bg-white text-gray-600 border-gray-200 hover:border-[#1B5E20] hover:text-[#1B5E20]'
-                  }`}
-                >
-                  <MapPin size={12} />
-                  {l.name}
-                </button>
-              ))}
-            </div>
-
-            {/* Save button — always visible */}
-            <button
-              onClick={handleImport}
-              disabled={!canImport}
-              className={`flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-bold transition-colors whitespace-nowrap flex-shrink-0 ${
-                canImport
-                  ? 'bg-[#1B5E20] text-white hover:bg-[#2E7D32] shadow-md'
-                  : 'bg-gray-100 text-gray-400 cursor-not-allowed'
-              }`}
-            >
-              {importing ? (
-                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-              ) : (
-                <DatabaseZap size={16} />
-              )}
-              {canImport
-                ? `Save to database · ${fmt(summary!.grossTotal)}`
-                : parsed && !location
-                ? 'Select a location above'
-                : 'Drop a CSV file below'}
-            </button>
-          </div>
-
         <div className="flex gap-6 items-start">
 
           {/* ── Left panel ── */}
-          <div className="w-80 flex-shrink-0 space-y-5">
+          <div className="w-80 flex-shrink-0 space-y-4">
+
+            {/* Location */}
+            <div>
+              <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Location</label>
+              <div className="flex flex-wrap gap-2">
+                {locations.map((l) => (
+                  <button
+                    key={l.id}
+                    onClick={() => setLocation(l)}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium border transition-colors ${
+                      location?.id === l.id
+                        ? 'bg-[#1B5E20] text-white border-[#1B5E20]'
+                        : 'bg-white text-gray-600 border-gray-200 hover:border-[#1B5E20] hover:text-[#1B5E20]'
+                    }`}
+                  >
+                    <MapPin size={12} />
+                    {l.name}
+                  </button>
+                ))}
+              </div>
+            </div>
 
             {/* Drop zone */}
             <div>
@@ -505,6 +480,28 @@ export default function CSVImporterPage() {
                   <p className="text-xs text-red-700">{parseError}</p>
                 </div>
               )}
+
+              {/* ── Save button — directly below the file picker ── */}
+              <button
+                onClick={handleImport}
+                disabled={!canImport}
+                className={`mt-3 w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-bold transition-colors ${
+                  canImport
+                    ? 'bg-[#1B5E20] text-white hover:bg-[#2E7D32]'
+                    : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                }`}
+              >
+                {importing ? (
+                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                ) : (
+                  <DatabaseZap size={16} />
+                )}
+                {canImport
+                  ? `Save to database · ${fmt(summary!.grossTotal)}`
+                  : !location
+                  ? 'Select a location first'
+                  : 'Drop a CSV file above'}
+              </button>
             </div>
 
             {/* ── Financial summary cards ── */}
