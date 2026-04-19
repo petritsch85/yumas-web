@@ -30,6 +30,9 @@ import {
   Truck,
   ChevronDown,
   ChevronRight,
+  FileUp,
+  LineChart,
+  TableProperties,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase-browser';
 import { useEffect, useState } from 'react';
@@ -121,6 +124,14 @@ const navGroups: NavGroup[] = [
       { label: 'Sick Days',       href: '/coming-soon/sick-days',       icon: CalendarDays },
       { label: 'Training',        href: '/coming-soon/training',        icon: Users },
       { label: 'Health & Safety', href: '/coming-soon/health-safety',   icon: Users },
+    ],
+  },
+  {
+    label: 'P&L REPORTS',
+    items: [
+      { label: 'CSV Importer',   href: '/pl-reports/csv-importer', icon: FileUp },
+      { label: 'Weekly Sales',   href: '/coming-soon/weekly-sales', icon: LineChart },
+      { label: 'Monthly P&L',    href: '/coming-soon/monthly-pl',  icon: TableProperties },
     ],
   },
   {
