@@ -6,38 +6,59 @@ import { supabase } from '@/lib/supabase-browser';
 import {
   Upload, FileCheck, AlertCircle, DatabaseZap,
   History, MapPin, Trash2, ChevronLeft, ChevronRight,
+  TrendingUp, Receipt, Percent, Euro,
 } from 'lucide-react';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type Location = { id: string; name: string };
 
-type ParsedRow = {
-  sale_date:      string | null;
-  sale_time:      string | null;
-  item_name:      string;
-  category:       string | null;
-  quantity:       number;
-  unit_price:     number;
-  total_price:    number;
-  payment_method: string | null;
-  receipt_number: string | null;
+type ProductRow = {
+  item_name:        string;
+  category:         string | null;
+  quantity:         number;
+  unit_price:       number;
+  total_price:      number;
+  inhouse_revenue:  number;
+  takeaway_revenue: number;
+};
+
+type Summary = {
+  weekStart:       string | null;
+  weekEnd:         string | null;
+  grossTotal:      number;
+  grossFood:       number;
+  grossDrinks:     number;
+  netTotal:        number;
+  taxTotal:        number;
+  tips:            number;
+  inhouseTotal:    number;
+  takeawayTotal:   number;
+};
+
+type ParseResult = {
+  rows:            ProductRow[];
+  summary:         Summary | null;
+  categoryRevenue: Record<string, number>;
+  error?:          string;
 };
 
 type ImportRecord = {
-  id:            string;
-  created_at:    string;
-  file_name:     string;
-  week_start:    string | null;
-  week_end:      string | null;
-  row_count:     number;
-  total_revenue: number;
-  location_name: string;
+  id:               string;
+  created_at:       string;
+  file_name:        string;
+  week_start:       string | null;
+  week_end:         string | null;
+  row_count:        number;
+  total_revenue:    number;
+  location_name:    string;
 };
 
-// ── CSV helpers ───────────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 function parseNum(s: string): number {
   if (!s) return 0;
-  const c = s.trim().replace(/[€$\s]/g, '');
+  const c = s.trim().replace(/[€$\s%]/g, '');
+  if (!c) return 0;
+  // German format: 1.234,56  →  remove dots, swap comma
   if (c.includes(',') && c.includes('.')) return parseFloat(c.replace(/\./g, '').replace(',', '.')) || 0;
   if (c.includes(',')) return parseFloat(c.replace(',', '.')) || 0;
   return parseFloat(c) || 0;
@@ -52,88 +73,174 @@ function parseDate(s: string): string | null {
   return null;
 }
 
-const COL_MAP: Record<string, string[]> = {
-  date:        ['datum', 'date', 'verkaufsdatum', 'sale date', 'belegdatum'],
-  time:        ['uhrzeit', 'time', 'verkaufszeit', 'belegzeit'],
-  item:        ['artikel', 'artikelname', 'bezeichnung', 'item', 'product', 'produktname', 'name'],
-  category:    ['kategorie', 'category', 'warengruppe', 'gruppe'],
-  quantity:    ['menge', 'anzahl', 'quantity', 'qty', 'stück', 'stk'],
-  unit_price:  ['einzelpreis', 'einzelbetrag', 'preis', 'unit price', 'price', 'vk-preis'],
-  total_price: ['gesamtpreis', 'gesamtbetrag', 'betrag', 'total', 'umsatz', 'brutto', 'summe', 'revenue'],
-  payment:     ['zahlungsart', 'payment', 'bezahlart'],
-  receipt:     ['bonnummer', 'bon-nr', 'receipt', 'belegnummer'],
-};
+// ── Orderbird Z-report parser ─────────────────────────────────────────────────
+const SECTION_NAMES = new Set([
+  'turnover', 'gross turnover', 'net turnover', 'taxes',
+  'types of payment', 'taxes by payment method', 'revenue breakdown',
+  'cancellations', 'discounts', 'tables', 'guests',
+  'main categories', 'categories', 'products',
+]);
 
-function findCol(headers: string[], field: string): number {
-  for (const v of COL_MAP[field] ?? []) {
-    const idx = headers.findIndex((h) => h.includes(v));
-    if (idx !== -1) return idx;
-  }
-  return -1;
-}
-
-function parseCSV(raw: string): { rows: ParsedRow[]; error?: string } {
+function parseCSV(raw: string): ParseResult {
   const content = raw.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
   const lines   = content.split('\n').map((l) => l.trim()).filter((l) => l.length > 0);
-  if (lines.length < 2) return { rows: [], error: 'File appears to be empty.' };
 
-  const delimiter = lines[0].split(';').length > lines[0].split(',').length ? ';' : ',';
-  const split     = (line: string) => line.split(delimiter).map((v) => v.replace(/^"|"$/g, '').trim());
+  if (lines.length < 5) return { rows: [], summary: null, categoryRevenue: {}, error: 'File appears to be empty.' };
 
-  const headers = split(lines[0]).map((h) => h.toLowerCase());
+  const split = (line: string) => line.split(';').map((v) => v.replace(/^"|"$/g, '').trim());
 
-  const colDate  = findCol(headers, 'date');
-  const colTime  = findCol(headers, 'time');
-  const colItem  = findCol(headers, 'item');
-  const colCat   = findCol(headers, 'category');
-  const colQty   = findCol(headers, 'quantity');
-  const colUnit  = findCol(headers, 'unit_price');
-  const colTotal = findCol(headers, 'total_price');
-  const colPay   = findCol(headers, 'payment');
-  const colRec   = findCol(headers, 'receipt');
+  // Detect date range — row like: "Date:;13.04.2026;19.04.2026;;"
+  let weekStart: string | null = null;
+  let weekEnd:   string | null = null;
+  for (let i = 0; i < Math.min(10, lines.length); i++) {
+    const cols = split(lines[i]);
+    if (cols[0].toLowerCase().startsWith('date')) {
+      weekStart = parseDate(cols[1] ?? '');
+      weekEnd   = parseDate(cols[2] ?? '');
+      break;
+    }
+  }
 
-  if (colItem === -1 && colTotal === -1)
-    return { rows: [], error: 'Could not detect item or revenue columns. Please check the CSV format.' };
+  // State machine
+  let section = '';
+  const rows: ProductRow[]              = [];
+  const categoryRevenue: Record<string, number> = {};
 
-  const rows: ParsedRow[] = lines.slice(1).map((line) => {
-    const v = split(line);
+  let grossFood = 0, grossDrinks = 0, grossTotal = 0;
+  let netTotal  = 0, taxTotal    = 0, tips       = 0;
+  let inhouseTotal = 0, takeawayTotal = 0;
+  let inhouseSet = false;
+
+  for (const line of lines) {
+    const cols  = split(line);
+    const first = cols[0].toLowerCase();
+
+    // Empty line → end of section
+    if (cols.every((c) => c === '')) { section = ''; continue; }
+
+    // Section header detection
+    if (SECTION_NAMES.has(first)) { section = first; continue; }
+
+    // Skip meta rows
+    if (first === 'date:' || first.startsWith(';') || first === 'z report:') continue;
+    if (first === 'total') continue;   // summary totals already captured from named rows
+
+    switch (section) {
+      case 'turnover':
+        if (first === 'tip') tips = parseNum(cols[3]);
+        break;
+
+      case 'gross turnover':
+        if (first.startsWith('7.')) { grossFood   = parseNum(cols[3]); }
+        else if (first.startsWith('19.')) { grossDrinks = parseNum(cols[3]); }
+        else if (first === 'total') { grossTotal  = parseNum(cols[3]); }
+        break;
+
+      case 'net turnover':
+        if (first === 'total') netTotal = parseNum(cols[3]);
+        break;
+
+      case 'taxes':
+        if (first === 'total') taxTotal = parseNum(cols[3]);
+        break;
+
+      case 'main categories':
+        // cols: name;;count;total;%;;inhouse_count;inhouse_total;;takeaway_count;takeaway_total
+        if (cols[0] && !inhouseSet) {
+          inhouseTotal  += parseNum(cols[7]);
+          takeawayTotal += parseNum(cols[10]);
+        }
+        break;
+
+      case 'categories':
+        // Store every non-empty category with revenue > 0
+        if (cols[0] && parseNum(cols[3]) > 0) {
+          categoryRevenue[cols[0]] = parseNum(cols[3]);
+        }
+        break;
+
+      case 'products':
+        // cols: name;PLU;count;total;%;;inhouse_count;inhouse_total;;takeaway_count;takeaway_total
+        if (!cols[0]) break;
+        const count    = parseNum(cols[2]);
+        const total    = parseNum(cols[3]);
+        const inhouse  = parseNum(cols[7]);
+        const takeaway = parseNum(cols[10]);
+        if (cols[0] && (total > 0 || count > 0)) {
+          rows.push({
+            item_name:        cols[0],
+            category:         null,
+            quantity:         count,
+            unit_price:       count > 0 ? Math.round((total / count) * 100) / 100 : 0,
+            total_price:      total,
+            inhouse_revenue:  inhouse,
+            takeaway_revenue: takeaway,
+          });
+        }
+        break;
+    }
+  }
+
+  // If main categories was parsed, mark done to avoid double-counting
+  inhouseSet = true;
+
+  if (rows.length === 0 && grossTotal === 0) {
     return {
-      sale_date:      colDate  !== -1 ? parseDate(v[colDate] ?? '')  : null,
-      sale_time:      colTime  !== -1 ? (v[colTime] ?? null)         : null,
-      item_name:      colItem  !== -1 ? (v[colItem] ?? 'Unknown')    : 'Unknown',
-      category:       colCat   !== -1 ? (v[colCat] ?? null)          : null,
-      quantity:       colQty   !== -1 ? parseNum(v[colQty] ?? '1')   : 1,
-      unit_price:     colUnit  !== -1 ? parseNum(v[colUnit] ?? '0')  : 0,
-      total_price:    colTotal !== -1 ? parseNum(v[colTotal] ?? '0') : 0,
-      payment_method: colPay   !== -1 ? (v[colPay] ?? null)          : null,
-      receipt_number: colRec   !== -1 ? (v[colRec] ?? null)          : null,
+      rows: [],
+      summary: null,
+      categoryRevenue: {},
+      error: 'Could not parse this file as an Orderbird Z-report. Please export via MY orderbird → Reports → Z-Report → Export CSV.',
     };
-  }).filter((r) => r.item_name !== 'Unknown' || r.total_price > 0);
+  }
 
-  return { rows };
+  // Fallback: derive inhouse/takeaway from product rows if main categories was empty
+  if (inhouseTotal === 0 && takeawayTotal === 0 && rows.length > 0) {
+    inhouseTotal  = rows.reduce((s, r) => s + r.inhouse_revenue,  0);
+    takeawayTotal = rows.reduce((s, r) => s + r.takeaway_revenue, 0);
+  }
+
+  // Fallback for grossTotal if not found
+  if (grossTotal === 0) grossTotal = grossFood + grossDrinks;
+
+  const summary: Summary = {
+    weekStart, weekEnd,
+    grossTotal, grossFood, grossDrinks,
+    netTotal, taxTotal, tips,
+    inhouseTotal, takeawayTotal,
+  };
+
+  return { rows, summary, categoryRevenue };
 }
 
+// ── Formatters ────────────────────────────────────────────────────────────────
 const fmt = (n: number) =>
   new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(n);
-const fmtDate = (d: string | null) =>
-  d ? new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
 
-const PAGE_SIZE = 25;
+const fmtDate = (d: string | null) =>
+  d
+    ? new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+    : '—';
+
+const PAGE_SIZE = 30;
 
 // ── Page component ────────────────────────────────────────────────────────────
 export default function CSVImporterPage() {
   const queryClient = useQueryClient();
-  const [tab, setTab]             = useState<'upload' | 'history'>('upload');
-  const [location, setLocation]   = useState<Location | null>(null);
-  const [fileName, setFileName]   = useState<string | null>(null);
-  const [parsed, setParsed]       = useState<ParsedRow[] | null>(null);
+  const [tab, setTab]               = useState<'upload' | 'history'>('upload');
+  const [location, setLocation]     = useState<Location | null>(null);
+  const [fileName, setFileName]     = useState<string | null>(null);
+  const [parseResult, setParseResult] = useState<ParseResult | null>(null);
   const [parseError, setParseError] = useState<string | null>(null);
-  const [importing, setImporting] = useState(false);
+  const [importing, setImporting]   = useState(false);
   const [isDragging, setIsDragging] = useState(false);
-  const [page, setPage]           = useState(0);
-  const fileInputRef              = useRef<HTMLInputElement>(null);
+  const [page, setPage]             = useState(0);
+  const fileInputRef                = useRef<HTMLInputElement>(null);
 
-  // ── Queries ──
+  const parsed  = parseResult?.rows    ?? null;
+  const summary = parseResult?.summary ?? null;
+  const catRevenue = parseResult?.categoryRevenue ?? {};
+
+  // ── Queries ──────────────────────────────────────────────────────────────────
   const { data: locations = [] } = useQuery({
     queryKey: ['locations-active'],
     queryFn: async () => {
@@ -142,7 +249,7 @@ export default function CSVImporterPage() {
     },
   });
 
-  const { data: history = [], isLoading: histLoading, refetch: refetchHistory } = useQuery({
+  const { data: history = [], isLoading: histLoading } = useQuery({
     queryKey: ['sales-imports'],
     queryFn: async () => {
       const { data } = await supabase
@@ -162,37 +269,32 @@ export default function CSVImporterPage() {
     },
   });
 
-  // ── Stats ──
-  const stats = useMemo(() => {
-    if (!parsed || parsed.length === 0) return null;
-    const totalRevenue = parsed.reduce((s, r) => s + r.total_price, 0);
-    const dates = [...new Set(parsed.map((r) => r.sale_date).filter(Boolean) as string[])].sort();
-    const categories = parsed.reduce<Record<string, number>>((acc, r) => {
-      const k = r.category ?? 'Other'; acc[k] = (acc[k] ?? 0) + r.total_price; return acc;
-    }, {});
-    const topItems = Object.entries(
-      parsed.reduce<Record<string, number>>((acc, r) => {
-        acc[r.item_name] = (acc[r.item_name] ?? 0) + r.total_price; return acc;
-      }, {})
-    ).sort((a, b) => b[1] - a[1]).slice(0, 10);
-    const byDay = dates.reduce<Record<string, number>>((acc, d) => {
-      acc[d] = parsed.filter((r) => r.sale_date === d).reduce((s, r) => s + r.total_price, 0); return acc;
-    }, {});
-    return { totalRevenue, weekStart: dates[0] ?? null, weekEnd: dates[dates.length - 1] ?? null, categories, topItems, byDay, rowCount: parsed.length };
-  }, [parsed]);
+  // ── Top categories (sorted) ───────────────────────────────────────────────
+  const topCats = useMemo(() =>
+    Object.entries(catRevenue)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 12),
+    [catRevenue]
+  );
 
-  // ── File handling ──
+  // ── Top products ─────────────────────────────────────────────────────────
+  const topProducts = useMemo(() =>
+    parsed ? [...parsed].sort((a, b) => b.total_price - a.total_price).slice(0, 10) : [],
+    [parsed]
+  );
+
+  // ── File handling ─────────────────────────────────────────────────────────
   const processFile = useCallback((file: File) => {
     setFileName(file.name);
-    setParsed(null);
+    setParseResult(null);
     setParseError(null);
     setPage(0);
     const reader = new FileReader();
     reader.onload = (e) => {
       const content = e.target?.result as string;
-      const { rows, error } = parseCSV(content ?? '');
-      if (error) { setParseError(error); return; }
-      setParsed(rows);
+      const result  = parseCSV(content ?? '');
+      if (result.error) { setParseError(result.error); return; }
+      setParseResult(result);
     };
     reader.readAsText(file, 'UTF-8');
   }, []);
@@ -204,43 +306,60 @@ export default function CSVImporterPage() {
     if (file) processFile(file);
   }, [processFile]);
 
-  // ── Import ──
+  // ── Import ────────────────────────────────────────────────────────────────
   const handleImport = useCallback(async () => {
-    if (!location || !parsed || !stats) return;
+    if (!location || !parsed || !summary) return;
     setImporting(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
       const { data: imp, error: impErr } = await supabase
         .from('sales_imports')
         .insert({
-          location_id:   location.id,
-          file_name:     fileName ?? 'unknown.csv',
-          week_start:    stats.weekStart,
-          week_end:      stats.weekEnd,
-          row_count:     parsed.length,
-          total_revenue: stats.totalRevenue,
-          imported_by:   user?.id ?? null,
+          location_id:      location.id,
+          file_name:        fileName ?? 'unknown.csv',
+          week_start:       summary.weekStart,
+          week_end:         summary.weekEnd,
+          row_count:        parsed.length,
+          total_revenue:    summary.grossTotal,
+          net_revenue:      summary.netTotal,
+          tax_total:        summary.taxTotal,
+          tips:             summary.tips,
+          gross_food:       summary.grossFood,
+          gross_drinks:     summary.grossDrinks,
+          inhouse_revenue:  summary.inhouseTotal,
+          takeaway_revenue: summary.takeawayTotal,
+          imported_by:      user?.id ?? null,
         })
         .select('id').single();
       if (impErr) throw impErr;
 
+      // Insert product lines in batches of 200
       for (let i = 0; i < parsed.length; i += 200) {
-        const chunk = parsed.slice(i, i + 200).map((r) => ({ import_id: imp.id, ...r }));
+        const chunk = parsed.slice(i, i + 200).map((r) => ({
+          import_id:        imp.id,
+          item_name:        r.item_name,
+          category:         r.category,
+          quantity:         r.quantity,
+          unit_price:       r.unit_price,
+          total_price:      r.total_price,
+          inhouse_revenue:  r.inhouse_revenue,
+          takeaway_revenue: r.takeaway_revenue,
+        }));
         const { error } = await supabase.from('sales_import_lines').insert(chunk);
         if (error) throw error;
       }
+
       queryClient.invalidateQueries({ queryKey: ['sales-imports'] });
-      setParsed(null); setFileName(null); setPage(0);
+      setParseResult(null); setFileName(null); setPage(0);
       setTab('history');
-      alert(`✅ Imported ${parsed.length} rows for ${location.name} — ${fmt(stats.totalRevenue)}`);
     } catch (e: any) {
       alert(`Import failed: ${e.message}`);
     } finally {
       setImporting(false);
     }
-  }, [location, parsed, fileName, stats, queryClient]);
+  }, [location, parsed, fileName, summary, queryClient]);
 
-  // ── Delete ──
+  // ── Delete ────────────────────────────────────────────────────────────────
   const deleteImport = useCallback(async (id: string) => {
     if (!confirm('Delete this import and all its lines?')) return;
     await supabase.from('sales_imports').delete().eq('id', id);
@@ -257,7 +376,7 @@ export default function CSVImporterPage() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">CSV Importer</h1>
-          <p className="text-sm text-gray-500 mt-0.5">Upload weekly Orderbird sales exports</p>
+          <p className="text-sm text-gray-500 mt-0.5">Upload weekly Orderbird Z-report exports</p>
         </div>
       </div>
 
@@ -290,7 +409,7 @@ export default function CSVImporterPage() {
       {tab === 'upload' && (
         <div className="flex gap-6 items-start">
 
-          {/* Left panel */}
+          {/* ── Left panel ── */}
           <div className="w-80 flex-shrink-0 space-y-5">
 
             {/* Location */}
@@ -316,42 +435,43 @@ export default function CSVImporterPage() {
 
             {/* Drop zone */}
             <div>
-              <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Orderbird CSV File</label>
+              <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Orderbird Z-Report CSV</label>
               <div
                 onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
                 onDragLeave={() => setIsDragging(false)}
                 onDrop={handleDrop}
-                className={`relative border-2 border-dashed rounded-xl p-8 text-center transition-colors ${
+                className={`relative border-2 border-dashed rounded-xl p-8 text-center transition-colors cursor-pointer ${
                   isDragging
                     ? 'border-[#1B5E20] bg-green-50'
-                    : fileName
+                    : fileName && !parseError
                     ? 'border-green-400 bg-green-50'
+                    : parseError
+                    ? 'border-red-300 bg-red-50'
                     : 'border-gray-200 bg-white hover:border-gray-300'
                 }`}
+                onClick={() => fileInputRef.current?.click()}
               >
-                {fileName
+                {fileName && !parseError
                   ? <FileCheck className="mx-auto mb-2 text-green-600" size={32} />
                   : <Upload className="mx-auto mb-2 text-gray-400" size={32} />
                 }
-                <p className={`text-sm font-semibold mb-1 ${fileName ? 'text-green-700' : 'text-gray-600'}`}>
+                <p className={`text-sm font-semibold mb-1 ${fileName && !parseError ? 'text-green-700' : 'text-gray-600'}`}>
                   {fileName ?? 'Drop CSV here'}
                 </p>
                 <p className="text-xs text-gray-400 mb-3">
-                  {parsed ? `${parsed.length} rows ready to import` : 'or click to browse'}
+                  {parsed ? `${parsed.length} products parsed` : 'or click to browse'}
                 </p>
                 <input
                   ref={fileInputRef}
                   type="file"
                   accept=".csv,text/csv,text/plain"
                   className="hidden"
+                  onClick={(e) => e.stopPropagation()}
                   onChange={(e) => { const f = e.target.files?.[0]; if (f) processFile(f); e.target.value = ''; }}
                 />
-                <button
-                  onClick={() => fileInputRef.current?.click()}
-                  className="px-4 py-1.5 bg-white border border-gray-200 rounded-lg text-xs font-semibold text-gray-600 hover:bg-gray-50 transition-colors"
-                >
+                <span className="px-4 py-1.5 bg-white border border-gray-200 rounded-lg text-xs font-semibold text-gray-600 hover:bg-gray-50 transition-colors inline-block">
                   {fileName ? 'Replace file' : 'Browse files'}
-                </button>
+                </span>
               </div>
 
               {parseError && (
@@ -362,65 +482,66 @@ export default function CSVImporterPage() {
               )}
             </div>
 
-            {/* Stats */}
-            {stats && (
+            {/* ── Financial summary cards ── */}
+            {summary && (
               <>
-                <div className="grid grid-cols-3 gap-2">
+                <div>
+                  <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">
+                    {fmtDate(summary.weekStart)} – {fmtDate(summary.weekEnd)}
+                  </p>
+                  <div className="grid grid-cols-2 gap-2">
+                    {[
+                      { icon: Euro,      label: 'Gross Revenue', value: fmt(summary.grossTotal),  color: 'text-[#1B5E20]' },
+                      { icon: Receipt,   label: 'Net Revenue',   value: fmt(summary.netTotal),    color: 'text-blue-700'  },
+                      { icon: Percent,   label: 'VAT',           value: fmt(summary.taxTotal),    color: 'text-amber-700' },
+                      { icon: TrendingUp,label: 'Tips',          value: fmt(summary.tips),        color: 'text-purple-700'},
+                    ].map((s) => (
+                      <div key={s.label} className="bg-white border border-gray-100 rounded-xl p-3 shadow-sm">
+                        <div className="flex items-center gap-1.5 mb-1">
+                          <s.icon size={12} className={s.color} />
+                          <p className="text-xs text-gray-400 font-semibold uppercase tracking-wide">{s.label}</p>
+                        </div>
+                        <p className={`text-sm font-bold ${s.color} leading-tight`}>{s.value}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* VAT split */}
+                <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm">
+                  <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Gross Revenue Split</p>
                   {[
-                    { label: 'Rows',    value: stats.rowCount.toLocaleString() },
-                    { label: 'Revenue', value: fmt(stats.totalRevenue) },
-                    { label: 'Days',    value: Object.keys(stats.byDay).length.toString() },
-                  ].map((s) => (
-                    <div key={s.label} className="bg-white border border-gray-100 rounded-xl p-3 text-center shadow-sm">
-                      <p className="text-xs text-gray-400 font-semibold uppercase tracking-wide mb-1">{s.label}</p>
-                      <p className="text-base font-bold text-gray-900 leading-tight">{s.value}</p>
+                    { label: 'Food (7% VAT)',    value: summary.grossFood,   pct: summary.grossTotal > 0 ? summary.grossFood   / summary.grossTotal * 100 : 0, color: '#2E7D32' },
+                    { label: 'Drinks (19% VAT)', value: summary.grossDrinks, pct: summary.grossTotal > 0 ? summary.grossDrinks / summary.grossTotal * 100 : 0, color: '#1565C0' },
+                  ].map((row) => (
+                    <div key={row.label} className="mb-2 last:mb-0">
+                      <div className="flex justify-between text-xs mb-1">
+                        <span className="text-gray-700 font-medium">{row.label}</span>
+                        <span className="text-gray-500">{fmt(row.value)} · {row.pct.toFixed(1)}%</span>
+                      </div>
+                      <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                        <div className="h-full rounded-full" style={{ width: `${row.pct}%`, backgroundColor: row.color }} />
+                      </div>
                     </div>
                   ))}
                 </div>
 
-                <div className="text-xs text-gray-500 text-center">
-                  {fmtDate(stats.weekStart)} → {fmtDate(stats.weekEnd)}
-                </div>
-
-                {/* By category */}
-                <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm">
-                  <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Revenue by Category</p>
-                  {Object.entries(stats.categories).sort((a, b) => b[1] - a[1]).map(([cat, rev]) => {
-                    const pct = stats.totalRevenue > 0 ? (rev / stats.totalRevenue) * 100 : 0;
-                    return (
-                      <div key={cat} className="mb-2 last:mb-0">
+                {/* In-house vs takeaway */}
+                {(summary.inhouseTotal > 0 || summary.takeawayTotal > 0) && (
+                  <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm">
+                    <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">In-house vs Takeaway</p>
+                    {[
+                      { label: 'In-house',  value: summary.inhouseTotal,  pct: summary.grossTotal > 0 ? summary.inhouseTotal  / summary.grossTotal * 100 : 0, color: '#2E7D32' },
+                      { label: 'Takeaway',  value: summary.takeawayTotal, pct: summary.grossTotal > 0 ? summary.takeawayTotal / summary.grossTotal * 100 : 0, color: '#E65100' },
+                    ].map((row) => (
+                      <div key={row.label} className="mb-2 last:mb-0">
                         <div className="flex justify-between text-xs mb-1">
-                          <span className="text-gray-700 font-medium">{cat}</span>
-                          <span className="text-gray-500">{fmt(rev)} · {pct.toFixed(1)}%</span>
+                          <span className="text-gray-700 font-medium">{row.label}</span>
+                          <span className="text-gray-500">{fmt(row.value)} · {row.pct.toFixed(1)}%</span>
                         </div>
                         <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                          <div className="h-full bg-[#2E7D32] rounded-full" style={{ width: `${pct}%` }} />
+                          <div className="h-full rounded-full" style={{ width: `${row.pct}%`, backgroundColor: row.color }} />
                         </div>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                {/* Top items */}
-                <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm">
-                  <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Top 10 Items</p>
-                  {stats.topItems.map(([name, rev], i) => (
-                    <div key={name} className="flex items-center gap-2 py-1.5 border-b border-gray-50 last:border-0">
-                      <span className="text-xs text-gray-400 w-4">{i + 1}</span>
-                      <span className="text-xs text-gray-700 flex-1 truncate">{name}</span>
-                      <span className="text-xs font-semibold text-gray-900">{fmt(rev)}</span>
-                    </div>
-                  ))}
-                </div>
-
-                {/* Daily breakdown */}
-                {Object.keys(stats.byDay).length > 1 && (
-                  <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm">
-                    <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Daily Breakdown</p>
-                    {Object.entries(stats.byDay).sort().map(([date, rev]) => (
-                      <div key={date} className="flex justify-between py-1.5 border-b border-gray-50 last:border-0">
-                        <span className="text-xs text-gray-600">{fmtDate(date)}</span>
-                        <span className="text-xs font-semibold text-gray-900">{fmt(rev)}</span>
                       </div>
                     ))}
                   </div>
@@ -443,74 +564,107 @@ export default function CSVImporterPage() {
               ) : (
                 <DatabaseZap size={16} />
               )}
-              {parsed ? `Import ${parsed.length} rows${location ? ` · ${location.name}` : ''}` : 'Select location & file'}
+              {parsed && summary
+                ? `Import ${parsed.length} products · ${fmt(summary.grossTotal)}${location ? ` · ${location.name}` : ''}`
+                : 'Select location & file'}
             </button>
 
             <p className="text-xs text-gray-400 text-center leading-relaxed">
-              Export from MY orderbird → Reports → Cashbook → Export CSV.<br />
+              Export from MY orderbird → Reports → Z-Report → select week → Export CSV.<br />
               Upload one file per location per week.
             </p>
           </div>
 
-          {/* Right panel — data table */}
-          {parsed && parsed.length > 0 && (
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">Data Preview</p>
-                <p className="text-xs text-gray-400">{parsed.length} rows · page {page + 1} of {totalPages}</p>
-              </div>
+          {/* ── Right panel ── */}
+          {summary && parsed && parsed.length > 0 && (
+            <div className="flex-1 min-w-0 space-y-5">
 
-              <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-xs">
-                    <thead>
-                      <tr className="bg-gray-50 border-b border-gray-200">
-                        <th className="px-3 py-2.5 text-left font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">Date</th>
-                        <th className="px-3 py-2.5 text-left font-semibold text-gray-500 uppercase tracking-wide">Item</th>
-                        <th className="px-3 py-2.5 text-right font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">Qty</th>
-                        <th className="px-3 py-2.5 text-right font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">Unit €</th>
-                        <th className="px-3 py-2.5 text-right font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">Total €</th>
-                        <th className="px-3 py-2.5 text-left font-semibold text-gray-500 uppercase tracking-wide">Category</th>
-                        <th className="px-3 py-2.5 text-left font-semibold text-gray-500 uppercase tracking-wide">Payment</th>
-                        <th className="px-3 py-2.5 text-left font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">Receipt #</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-100">
-                      {pageRows.map((r, i) => (
-                        <tr key={i} className="hover:bg-gray-50 transition-colors">
-                          <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{r.sale_date ?? '—'}</td>
-                          <td className="px-3 py-2 text-gray-900 font-medium max-w-[200px] truncate">{r.item_name}</td>
-                          <td className="px-3 py-2 text-right text-gray-600">{r.quantity}</td>
-                          <td className="px-3 py-2 text-right text-gray-600">{r.unit_price > 0 ? fmt(r.unit_price) : '—'}</td>
-                          <td className="px-3 py-2 text-right font-semibold text-gray-900">{fmt(r.total_price)}</td>
-                          <td className="px-3 py-2 text-gray-500 max-w-[100px] truncate">{r.category ?? '—'}</td>
-                          <td className="px-3 py-2 text-gray-500">{r.payment_method ?? '—'}</td>
-                          <td className="px-3 py-2 text-gray-400">{r.receipt_number ?? '—'}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+              {/* Category breakdown */}
+              {topCats.length > 0 && (
+                <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm">
+                  <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Revenue by Category</p>
+                  <div className="space-y-2">
+                    {topCats.map(([cat, rev]) => {
+                      const pct = summary.grossTotal > 0 ? (rev / summary.grossTotal) * 100 : 0;
+                      return (
+                        <div key={cat}>
+                          <div className="flex justify-between text-xs mb-1">
+                            <span className="text-gray-700 font-medium">{cat}</span>
+                            <span className="text-gray-500">{fmt(rev)} · {pct.toFixed(1)}%</span>
+                          </div>
+                          <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                            <div className="h-full bg-[#2E7D32] rounded-full" style={{ width: `${pct}%` }} />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Products table */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">All Products</p>
+                  <p className="text-xs text-gray-400">{parsed.length} products · page {page + 1} of {totalPages}</p>
                 </div>
 
-                {/* Pagination */}
-                <div className="flex items-center justify-between px-4 py-2.5 border-t border-gray-100 bg-gray-50">
-                  <button
-                    onClick={() => setPage((p) => Math.max(0, p - 1))}
-                    disabled={page === 0}
-                    className="flex items-center gap-1 text-xs font-semibold text-gray-500 hover:text-gray-700 disabled:opacity-30 disabled:cursor-not-allowed"
-                  >
-                    <ChevronLeft size={14} /> Prev
-                  </button>
-                  <span className="text-xs text-gray-400">
-                    Rows {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, parsed.length)} of {parsed.length}
-                  </span>
-                  <button
-                    onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
-                    disabled={page === totalPages - 1}
-                    className="flex items-center gap-1 text-xs font-semibold text-gray-500 hover:text-gray-700 disabled:opacity-30 disabled:cursor-not-allowed"
-                  >
-                    Next <ChevronRight size={14} />
-                  </button>
+                <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="bg-gray-50 border-b border-gray-200">
+                          <th className="px-3 py-2.5 text-left font-semibold text-gray-500 uppercase tracking-wide">#</th>
+                          <th className="px-3 py-2.5 text-left font-semibold text-gray-500 uppercase tracking-wide">Product</th>
+                          <th className="px-3 py-2.5 text-right font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">Qty</th>
+                          <th className="px-3 py-2.5 text-right font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">Unit €</th>
+                          <th className="px-3 py-2.5 text-right font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">Revenue</th>
+                          <th className="px-3 py-2.5 text-right font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">In-house</th>
+                          <th className="px-3 py-2.5 text-right font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">Takeaway</th>
+                          <th className="px-3 py-2.5 text-right font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">% Share</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {pageRows.map((r, i) => {
+                          const rank   = page * PAGE_SIZE + i + 1;
+                          const pct    = summary.grossTotal > 0 ? (r.total_price / summary.grossTotal) * 100 : 0;
+                          return (
+                            <tr key={i} className="hover:bg-gray-50 transition-colors">
+                              <td className="px-3 py-2 text-gray-400 tabular-nums">{rank}</td>
+                              <td className="px-3 py-2 text-gray-900 font-medium max-w-[220px] truncate">{r.item_name}</td>
+                              <td className="px-3 py-2 text-right text-gray-600 tabular-nums">{r.quantity.toLocaleString('de-DE')}</td>
+                              <td className="px-3 py-2 text-right text-gray-500 tabular-nums">{r.unit_price > 0 ? fmt(r.unit_price) : '—'}</td>
+                              <td className="px-3 py-2 text-right font-semibold text-gray-900 tabular-nums">{fmt(r.total_price)}</td>
+                              <td className="px-3 py-2 text-right text-gray-500 tabular-nums">{r.inhouse_revenue > 0 ? fmt(r.inhouse_revenue) : '—'}</td>
+                              <td className="px-3 py-2 text-right text-gray-500 tabular-nums">{r.takeaway_revenue > 0 ? fmt(r.takeaway_revenue) : '—'}</td>
+                              <td className="px-3 py-2 text-right text-gray-400 tabular-nums">{pct.toFixed(1)}%</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Pagination */}
+                  <div className="flex items-center justify-between px-4 py-2.5 border-t border-gray-100 bg-gray-50">
+                    <button
+                      onClick={() => setPage((p) => Math.max(0, p - 1))}
+                      disabled={page === 0}
+                      className="flex items-center gap-1 text-xs font-semibold text-gray-500 hover:text-gray-700 disabled:opacity-30 disabled:cursor-not-allowed"
+                    >
+                      <ChevronLeft size={14} /> Prev
+                    </button>
+                    <span className="text-xs text-gray-400">
+                      {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, parsed.length)} of {parsed.length}
+                    </span>
+                    <button
+                      onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+                      disabled={page === totalPages - 1 || totalPages === 0}
+                      className="flex items-center gap-1 text-xs font-semibold text-gray-500 hover:text-gray-700 disabled:opacity-30 disabled:cursor-not-allowed"
+                    >
+                      Next <ChevronRight size={14} />
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -530,52 +684,50 @@ export default function CSVImporterPage() {
             <p className="text-gray-400 text-sm">No imports yet</p>
           </div>
         ) : (
-          <div>
-            <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="bg-gray-50 border-b border-gray-200">
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Location</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">File</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">Week start</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">Week end</th>
-                    <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Rows</th>
-                    <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Revenue</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Imported</th>
-                    <th className="px-4 py-3 w-10"></th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {history.map((h) => (
-                    <tr key={h.id} className="hover:bg-gray-50 transition-colors">
-                      <td className="px-4 py-3 font-semibold text-gray-900">{h.location_name}</td>
-                      <td className="px-4 py-3 text-gray-500 max-w-[200px] truncate">{h.file_name}</td>
-                      <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{fmtDate(h.week_start)}</td>
-                      <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{fmtDate(h.week_end)}</td>
-                      <td className="px-4 py-3 text-right text-gray-600">{h.row_count.toLocaleString()}</td>
-                      <td className="px-4 py-3 text-right font-bold text-[#1B5E20]">{fmt(h.total_revenue)}</td>
-                      <td className="px-4 py-3 text-gray-400 whitespace-nowrap">
-                        {new Date(h.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
-                      </td>
-                      <td className="px-4 py-3">
-                        <button onClick={() => deleteImport(h.id)} className="text-gray-300 hover:text-red-500 transition-colors">
-                          <Trash2 size={15} />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-                <tfoot>
-                  <tr className="bg-gray-50 border-t-2 border-gray-200">
-                    <td colSpan={5} className="px-4 py-3 text-xs font-semibold text-gray-500">{history.length} imports total</td>
-                    <td className="px-4 py-3 text-right font-bold text-[#1B5E20]">
-                      {fmt(history.reduce((s, h) => s + h.total_revenue, 0))}
+          <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-gray-50 border-b border-gray-200">
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Location</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">File</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">Week</th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Products</th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Revenue</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Imported</th>
+                  <th className="px-4 py-3 w-10"></th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {history.map((h) => (
+                  <tr key={h.id} className="hover:bg-gray-50 transition-colors">
+                    <td className="px-4 py-3 font-semibold text-gray-900">{h.location_name}</td>
+                    <td className="px-4 py-3 text-gray-500 max-w-[200px] truncate">{h.file_name}</td>
+                    <td className="px-4 py-3 text-gray-600 whitespace-nowrap">
+                      {fmtDate(h.week_start)} – {fmtDate(h.week_end)}
                     </td>
-                    <td colSpan={2} />
+                    <td className="px-4 py-3 text-right text-gray-600">{h.row_count.toLocaleString()}</td>
+                    <td className="px-4 py-3 text-right font-bold text-[#1B5E20]">{fmt(h.total_revenue)}</td>
+                    <td className="px-4 py-3 text-gray-400 whitespace-nowrap">
+                      {new Date(h.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                    </td>
+                    <td className="px-4 py-3">
+                      <button onClick={() => deleteImport(h.id)} className="text-gray-300 hover:text-red-500 transition-colors">
+                        <Trash2 size={15} />
+                      </button>
+                    </td>
                   </tr>
-                </tfoot>
-              </table>
-            </div>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr className="bg-gray-50 border-t-2 border-gray-200">
+                  <td colSpan={4} className="px-4 py-3 text-xs font-semibold text-gray-500">{history.length} imports total</td>
+                  <td className="px-4 py-3 text-right font-bold text-[#1B5E20]">
+                    {fmt(history.reduce((s, h) => s + h.total_revenue, 0))}
+                  </td>
+                  <td colSpan={2} />
+                </tr>
+              </tfoot>
+            </table>
           </div>
         )
       )}
