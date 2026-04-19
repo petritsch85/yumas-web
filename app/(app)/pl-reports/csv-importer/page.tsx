@@ -482,6 +482,28 @@ export default function CSVImporterPage() {
               )}
             </div>
 
+            {/* ── Import button (always visible after file is loaded) ── */}
+            <button
+              onClick={handleImport}
+              disabled={!canImport}
+              className={`w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-bold transition-colors ${
+                canImport
+                  ? 'bg-[#1B5E20] text-white hover:bg-[#2E7D32]'
+                  : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+              }`}
+            >
+              {importing ? (
+                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+              ) : (
+                <DatabaseZap size={16} />
+              )}
+              {parsed && summary
+                ? `Save to database · ${fmt(summary.grossTotal)}${location ? ` · ${location.name}` : ''}`
+                : !location
+                ? 'Select a location first'
+                : 'Drop a CSV file to import'}
+            </button>
+
             {/* ── Financial summary cards ── */}
             {summary && (
               <>
@@ -548,26 +570,6 @@ export default function CSVImporterPage() {
                 )}
               </>
             )}
-
-            {/* Import button */}
-            <button
-              onClick={handleImport}
-              disabled={!canImport}
-              className={`w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-bold transition-colors ${
-                canImport
-                  ? 'bg-[#1B5E20] text-white hover:bg-[#2E7D32]'
-                  : 'bg-gray-100 text-gray-400 cursor-not-allowed'
-              }`}
-            >
-              {importing ? (
-                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-              ) : (
-                <DatabaseZap size={16} />
-              )}
-              {parsed && summary
-                ? `Import ${parsed.length} products · ${fmt(summary.grossTotal)}${location ? ` · ${location.name}` : ''}`
-                : 'Select location & file'}
-            </button>
 
             <p className="text-xs text-gray-400 text-center leading-relaxed">
               Export from MY orderbird → Reports → Z-Report → select week → Export CSV.<br />
