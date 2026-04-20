@@ -783,17 +783,24 @@ export default function SalesReportsPage() {
   const dailyCols = useMemo<DailyCol[]>(() => {
     const result: DailyCol[] = [];
     let wDays: number[] = [];
-    let wNum = 1;
+    const mm = String(month).padStart(2, '0');
     for (const d of days) {
       const dow = new Date(year, month - 1, d).getDay(); // 0=Sun
       result.push({ type: 'day', day: d, dow: DOW_SHORT[dow] });
       wDays.push(d);
       if (dow === 0) {
-        result.push({ type: 'week', label: `W${wNum++}`, wDays: [...wDays] });
+        // Use the Sunday's date to get the correct ISO calendar week
+        const cw = isoWeek(`${year}-${mm}-${String(d).padStart(2,'0')}`);
+        result.push({ type: 'week', label: `CW${cw}`, wDays: [...wDays] });
         wDays = [];
       }
     }
-    if (wDays.length > 0) result.push({ type: 'week', label: `W${wNum}`, wDays: [...wDays] });
+    if (wDays.length > 0) {
+      // Trailing partial week — use the last day to get its CW
+      const lastD = wDays[wDays.length - 1];
+      const cw = isoWeek(`${year}-${mm}-${String(lastD).padStart(2,'0')}`);
+      result.push({ type: 'week', label: `CW${cw}`, wDays: [...wDays] });
+    }
     return result;
   }, [days, year, month]);
 
