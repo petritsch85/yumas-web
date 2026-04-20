@@ -1798,12 +1798,9 @@ export default function SalesReportsPage() {
                       </td>
                     </tr>
                     {([
-                      { label:'☀️  Lunch · Sales', map: lunchMap,  qTotal: lunchQtrTotal,  field:'grossTotal' as const, bold:false },
-                      { label:'☀️  Lunch · VAT',   map: lunchMap,  qTotal: lunchQtrTotal,  field:'vatTotal'   as const, bold:false },
-                      { label:'🌙  Dinner · Sales', map: dinnerMap, qTotal: dinnerQtrTotal, field:'grossTotal' as const, bold:false },
-                      { label:'🌙  Dinner · VAT',   map: dinnerMap, qTotal: dinnerQtrTotal, field:'vatTotal'   as const, bold:false },
-                      { label:'∑   Total · Sales',  map: totalMap,  qTotal: totalQtrTotal,  field:'grossTotal' as const, bold:true  },
-                      { label:'∑   Total · VAT',    map: totalMap,  qTotal: totalQtrTotal,  field:'vatTotal'   as const, bold:true  },
+                      { label:'☀️  Lunch · Net Revenue',  map: lunchMap,  qTotal: lunchQtrTotal,  field:'netTotal' as const, bold:false },
+                      { label:'🌙  Dinner · Net Revenue', map: dinnerMap, qTotal: dinnerQtrTotal, field:'netTotal' as const, bold:false },
+                      { label:'∑   Total · Net Revenue',  map: totalMap,  qTotal: totalQtrTotal,  field:'netTotal' as const, bold:true  },
                     ] as const).map((row, i) => {
                       const todayKey = `${todayYear}-${String(todayMonth).padStart(2,'0')}-${String(todayDay).padStart(2,'0')}`;
                       const bg = row.bold ? '#f0fdf4' : '#ffffff';
