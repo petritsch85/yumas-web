@@ -6,7 +6,7 @@ import { supabase } from '@/lib/supabase-browser';
 import {
   Upload, FileCheck, AlertCircle, Loader2,
   CheckCircle2, Clock, Banknote, Trash2,
-  ChevronDown, Eye, X, FilePlus,
+  ChevronDown, Eye, X, FilePlus, Save,
 } from 'lucide-react';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -31,6 +31,17 @@ type Extracted = {
   gross_amount:       number;
   suggested_category: string;
   lines:              ExtractedLine[];
+};
+
+// One item in the bulk queue
+type QueueItem = {
+  id:        string;          // random key
+  fileName:  string;
+  base64:    string;
+  status:    'waiting' | 'extracting' | 'done' | 'error';
+  data?:     Extracted;       // filled after extraction
+  error?:    string;
+  saved?:    boolean;
 };
 
 type Bill = {
@@ -61,34 +72,71 @@ const STATUS_STYLES: Record<string, string> = {
   paid:     'bg-green-50 text-green-700 border-green-200',
 };
 
-const STATUS_ICONS: Record<string, React.ReactNode> = {
-  pending:  <Clock size={11} />,
-  approved: <CheckCircle2 size={11} />,
-  paid:     <Banknote size={11} />,
-};
-
 const fmt = (n: number) =>
   new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(n);
 
 const fmtDate = (d: string | null) =>
   d ? new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
 
+function uid() { return Math.random().toString(36).slice(2); }
+
+// ── Save one bill to DB ───────────────────────────────────────────────────────
+async function saveBillToDB(item: QueueItem, userId: string | null): Promise<void> {
+  const d = item.data!;
+
+  let file_path: string | null = null;
+  const bytes = Uint8Array.from(atob(item.base64), (c) => c.charCodeAt(0));
+  const blob  = new Blob([bytes], { type: 'application/pdf' });
+  const path  = `bills/${Date.now()}_${item.fileName}`;
+  const { error: upErr } = await supabase.storage.from('bills').upload(path, blob);
+  if (!upErr) file_path = path;
+
+  const { data: bill, error: billErr } = await supabase
+    .from('bills')
+    .insert({
+      supplier_name:  d.supplier_name,
+      invoice_number: d.invoice_number  ?? null,
+      invoice_date:   d.invoice_date    ?? null,
+      due_date:       d.due_date        ?? null,
+      net_amount:     d.net_amount      ?? 0,
+      vat_amount:     d.vat_amount      ?? 0,
+      gross_amount:   d.gross_amount    ?? 0,
+      currency:       d.currency        ?? 'EUR',
+      category:       d.suggested_category ?? null,
+      payment_method: d.payment_method  ?? null,
+      status:         'pending',
+      file_path,
+      uploaded_by:    userId,
+    })
+    .select('id').single();
+  if (billErr) throw billErr;
+
+  if (d.lines?.length) {
+    const { error: lineErr } = await supabase.from('bill_lines').insert(
+      d.lines.map((l) => ({
+        bill_id:     bill.id,
+        description: l.description,
+        quantity:    l.quantity,
+        unit_price:  l.unit_price,
+        vat_rate:    l.vat_rate,
+        line_total:  l.line_total,
+        category:    d.suggested_category ?? null,
+      }))
+    );
+    if (lineErr) throw lineErr;
+  }
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default function BillsPage() {
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const [tab, setTab]               = useState<'upload' | 'bills'>('bills');
+  const [tab, setTab]             = useState<'upload' | 'bills'>('bills');
   const [isDragging, setIsDragging] = useState(false);
-  const [extracting, setExtracting] = useState(false);
-  const [saving, setSaving]         = useState(false);
-  const [fileName, setFileName]     = useState<string | null>(null);
-  const [pdfBase64, setPdfBase64]   = useState<string | null>(null);
-  const [extracted, setExtracted]   = useState<Extracted | null>(null);
-  const [extractError, setExtractError] = useState<string | null>(null);
-
-  // Editable review form state
-  const [form, setForm] = useState<Partial<Extracted>>({});
+  const [queue, setQueue]         = useState<QueueItem[]>([]);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [savingAll, setSavingAll] = useState(false);
 
   // Filters
   const [filterStatus,   setFilterStatus]   = useState<string>('all');
@@ -118,116 +166,96 @@ export default function BillsPage() {
     vat:   filtered.reduce((s, b) => s + b.vat_amount,   0),
   };
 
-  // ── File handling ──
-  const processFile = useCallback(async (file: File) => {
-    if (!file.name.toLowerCase().endsWith('.pdf')) {
-      setExtractError('Please upload a PDF file.');
-      return;
+  // ── Extract one item via Claude ──
+  const extractItem = useCallback(async (item: QueueItem) => {
+    setQueue((q) => q.map((i) => i.id === item.id ? { ...i, status: 'extracting' } : i));
+    try {
+      const res  = await fetch('/api/extract-bill', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ pdfBase64: item.base64, fileName: item.fileName }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? 'Extraction failed');
+      setQueue((q) => q.map((i) => i.id === item.id
+        ? { ...i, status: 'done', data: json.data }
+        : i
+      ));
+    } catch (err: any) {
+      setQueue((q) => q.map((i) => i.id === item.id
+        ? { ...i, status: 'error', error: err.message }
+        : i
+      ));
     }
-    setFileName(file.name);
-    setExtracted(null);
-    setExtractError(null);
-    setExtracting(true);
-
-    const reader = new FileReader();
-    reader.onload = async (e) => {
-      const dataUrl  = e.target?.result as string;
-      const base64   = dataUrl.split(',')[1];
-      setPdfBase64(base64);
-
-      try {
-        const res  = await fetch('/api/extract-bill', {
-          method:  'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body:    JSON.stringify({ pdfBase64: base64, fileName: file.name }),
-        });
-        const json = await res.json();
-        if (!res.ok) throw new Error(json.error ?? 'Extraction failed');
-
-        const data = json.data as Extracted;
-        setExtracted(data);
-        setForm(data);
-      } catch (err: any) {
-        setExtractError(err.message);
-      } finally {
-        setExtracting(false);
-      }
-    };
-    reader.readAsDataURL(file);
   }, []);
+
+  // ── Add files → queue → extract sequentially ──
+  const processFiles = useCallback(async (files: File[]) => {
+    const pdfs = files.filter((f) => f.name.toLowerCase().endsWith('.pdf'));
+    if (!pdfs.length) return;
+
+    // Read all files as base64 first
+    const newItems: QueueItem[] = await Promise.all(
+      pdfs.map((file) => new Promise<QueueItem>((resolve) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          const dataUrl = e.target?.result as string;
+          resolve({
+            id:       uid(),
+            fileName: file.name,
+            base64:   dataUrl.split(',')[1],
+            status:   'waiting',
+          });
+        };
+        reader.readAsDataURL(file);
+      }))
+    );
+
+    setQueue((q) => [...q, ...newItems]);
+    setTab('upload');
+
+    // Extract sequentially (one at a time to respect rate limits)
+    for (const item of newItems) {
+      await extractItem(item);
+    }
+  }, [extractItem]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
-    const file = e.dataTransfer.files?.[0];
-    if (file) processFile(file);
-  }, [processFile]);
+    const files = Array.from(e.dataTransfer.files);
+    processFiles(files);
+  }, [processFiles]);
 
-  // ── Save to DB ──
-  const handleSave = useCallback(async () => {
-    if (!form.supplier_name) return;
-    setSaving(true);
+  // ── Update a field in a queue item's data ──
+  const updateField = (id: string, field: keyof Extracted, value: any) => {
+    setQueue((q) => q.map((i) => i.id === id
+      ? { ...i, data: { ...i.data!, [field]: value } }
+      : i
+    ));
+  };
+
+  // ── Save all done items ──
+  const saveAll = useCallback(async () => {
+    const toSave = queue.filter((i) => i.status === 'done' && !i.saved);
+    if (!toSave.length) return;
+    setSavingAll(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
-
-      // Upload PDF to Supabase Storage
-      let file_path: string | null = null;
-      if (pdfBase64 && fileName) {
-        const bytes    = Uint8Array.from(atob(pdfBase64), (c) => c.charCodeAt(0));
-        const blob     = new Blob([bytes], { type: 'application/pdf' });
-        const path     = `bills/${Date.now()}_${fileName}`;
-        const { error: upErr } = await supabase.storage.from('bills').upload(path, blob);
-        if (!upErr) file_path = path;
+      for (const item of toSave) {
+        await saveBillToDB(item, user?.id ?? null);
+        setQueue((q) => q.map((i) => i.id === item.id ? { ...i, saved: true } : i));
       }
-
-      // Insert bill header
-      const { data: bill, error: billErr } = await supabase
-        .from('bills')
-        .insert({
-          supplier_name:  form.supplier_name,
-          invoice_number: form.invoice_number ?? null,
-          invoice_date:   form.invoice_date   ?? null,
-          due_date:       form.due_date        ?? null,
-          net_amount:     form.net_amount      ?? 0,
-          vat_amount:     form.vat_amount      ?? 0,
-          gross_amount:   form.gross_amount    ?? 0,
-          currency:       form.currency        ?? 'EUR',
-          category:       form.suggested_category ?? null,
-          payment_method: form.payment_method  ?? null,
-          status:         'pending',
-          file_path,
-          uploaded_by:    user?.id ?? null,
-        })
-        .select('id').single();
-      if (billErr) throw billErr;
-
-      // Insert line items
-      if (form.lines && form.lines.length > 0) {
-        const lineRows = form.lines.map((l) => ({
-          bill_id:     bill.id,
-          description: l.description,
-          quantity:    l.quantity,
-          unit_price:  l.unit_price,
-          vat_rate:    l.vat_rate,
-          line_total:  l.line_total,
-          category:    form.suggested_category ?? null,
-        }));
-        const { error: lineErr } = await supabase.from('bill_lines').insert(lineRows);
-        if (lineErr) throw lineErr;
-      }
-
       queryClient.invalidateQueries({ queryKey: ['bills'] });
-
-      // Reset
-      setExtracted(null); setForm({});
-      setFileName(null);  setPdfBase64(null);
-      setTab('bills');
     } catch (err: any) {
       alert(`Save failed: ${err.message}`);
     } finally {
-      setSaving(false);
+      setSavingAll(false);
     }
-  }, [form, pdfBase64, fileName, queryClient]);
+  }, [queue, queryClient]);
+
+  // ── Remove from queue ──
+  const removeFromQueue = (id: string) => setQueue((q) => q.filter((i) => i.id !== id));
 
   // ── Status update ──
   const updateStatus = async (id: string, status: string) => {
@@ -242,7 +270,9 @@ export default function BillsPage() {
     queryClient.invalidateQueries({ queryKey: ['bills'] });
   };
 
-  const canSave = !!extracted && !!form.supplier_name && !saving;
+  const doneCount   = queue.filter((i) => i.status === 'done' && !i.saved).length;
+  const savedCount  = queue.filter((i) => i.saved).length;
+  const activeCount = queue.filter((i) => !i.saved).length;
 
   return (
     <div>
@@ -253,18 +283,18 @@ export default function BillsPage() {
           <p className="text-sm text-gray-500 mt-0.5">Upload invoices · AI extracts the data · review and save</p>
         </div>
         <button
-          onClick={() => setTab('upload')}
+          onClick={() => { setTab('upload'); setTimeout(() => fileInputRef.current?.click(), 100); }}
           className="flex items-center gap-2 px-4 py-2 bg-[#1B5E20] text-white text-sm font-semibold rounded-xl hover:bg-[#2E7D32] transition-colors"
         >
           <FilePlus size={15} />
-          Upload Bill
+          Upload Bills
         </button>
       </div>
 
       {/* Tabs */}
       <div className="border-b border-gray-200 mb-6">
         <nav className="flex gap-6">
-          {([['bills', 'All Bills'], ['upload', 'Upload New']] as const).map(([t, label]) => (
+          {([['bills', 'All Bills'], ['upload', 'Upload']] as const).map(([t, label]) => (
             <button
               key={t}
               onClick={() => setTab(t)}
@@ -281,6 +311,11 @@ export default function BillsPage() {
                   {bills.length}
                 </span>
               )}
+              {t === 'upload' && activeCount > 0 && (
+                <span className="bg-[#1B5E20] text-white text-xs font-bold px-1.5 py-0.5 rounded-full">
+                  {activeCount}
+                </span>
+              )}
             </button>
           ))}
         </nav>
@@ -288,205 +323,199 @@ export default function BillsPage() {
 
       {/* ═══════ UPLOAD TAB ═══════ */}
       {tab === 'upload' && (
-        <div className="flex gap-6 items-start">
+        <div className="space-y-5">
 
-          {/* Left — drop zone */}
-          <div className="w-80 flex-shrink-0 space-y-4">
-            <div>
-              <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">PDF Invoice</label>
-
-              <div
-                onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
-                onDragLeave={() => setIsDragging(false)}
-                onDrop={handleDrop}
-                onClick={() => fileInputRef.current?.click()}
-                className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-colors ${
-                  isDragging          ? 'border-[#1B5E20] bg-green-50' :
-                  extracting          ? 'border-blue-300 bg-blue-50'  :
-                  extracted           ? 'border-green-400 bg-green-50' :
-                  extractError        ? 'border-red-300 bg-red-50'    :
-                  'border-gray-200 bg-white hover:border-gray-300'
-                }`}
-              >
-                {extracting ? (
-                  <>
-                    <Loader2 className="mx-auto mb-2 text-blue-500 animate-spin" size={32} />
-                    <p className="text-sm font-semibold text-blue-600">Claude is reading the invoice…</p>
-                    <p className="text-xs text-blue-400 mt-1">This takes a few seconds</p>
-                  </>
-                ) : extracted ? (
-                  <>
-                    <FileCheck className="mx-auto mb-2 text-green-600" size={32} />
-                    <p className="text-sm font-semibold text-green-700">{fileName}</p>
-                    <p className="text-xs text-green-500 mt-1">Data extracted — review below</p>
-                  </>
-                ) : (
-                  <>
-                    <Upload className="mx-auto mb-2 text-gray-400" size={32} />
-                    <p className="text-sm font-semibold text-gray-600">{fileName ?? 'Drop PDF here'}</p>
-                    <p className="text-xs text-gray-400 mt-1 mb-3">or click to browse</p>
-                    <span className="px-4 py-1.5 bg-white border border-gray-200 rounded-lg text-xs font-semibold text-gray-600 inline-block">
-                      Browse files
-                    </span>
-                  </>
-                )}
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".pdf,application/pdf"
-                  className="hidden"
-                  onClick={(e) => e.stopPropagation()}
-                  onChange={(e) => { const f = e.target.files?.[0]; if (f) processFile(f); e.target.value = ''; }}
-                />
-              </div>
-
-              {extractError && (
-                <div className="mt-2 flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded-lg">
-                  <AlertCircle size={15} className="text-red-500 flex-shrink-0 mt-0.5" />
-                  <p className="text-xs text-red-700">{extractError}</p>
-                </div>
-              )}
-            </div>
-
-            {/* Save button */}
-            <button
-              onClick={handleSave}
-              disabled={!canSave}
-              className={`w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-bold transition-colors ${
-                canSave
-                  ? 'bg-[#1B5E20] text-white hover:bg-[#2E7D32]'
-                  : 'bg-gray-100 text-gray-400 cursor-not-allowed'
-              }`}
-            >
-              {saving
-                ? <Loader2 size={16} className="animate-spin" />
-                : <CheckCircle2 size={16} />
-              }
-              {saving ? 'Saving…' : extracted ? `Save · ${fmt(form.gross_amount ?? 0)}` : 'Drop a PDF to start'}
-            </button>
-
-            <p className="text-xs text-gray-400 text-center">
-              Claude reads the PDF and extracts all invoice data automatically.
-              Review and correct before saving.
+          {/* Drop zone */}
+          <div
+            onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+            onDragLeave={() => setIsDragging(false)}
+            onDrop={handleDrop}
+            onClick={() => fileInputRef.current?.click()}
+            className={`border-2 border-dashed rounded-xl p-10 text-center cursor-pointer transition-colors ${
+              isDragging ? 'border-[#1B5E20] bg-green-50' : 'border-gray-200 bg-white hover:border-gray-300'
+            }`}
+          >
+            <Upload className={`mx-auto mb-3 ${isDragging ? 'text-[#1B5E20]' : 'text-gray-300'}`} size={36} />
+            <p className="text-sm font-semibold text-gray-600 mb-1">
+              Drop multiple PDF invoices here
             </p>
+            <p className="text-xs text-gray-400 mb-4">
+              or click to browse — you can select several files at once
+            </p>
+            <span className="px-5 py-2 bg-[#1B5E20] text-white rounded-lg text-xs font-bold inline-block">
+              Browse Files
+            </span>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".pdf,application/pdf"
+              multiple
+              className="hidden"
+              onClick={(e) => e.stopPropagation()}
+              onChange={(e) => {
+                const files = Array.from(e.target.files ?? []);
+                if (files.length) processFiles(files);
+                e.target.value = '';
+              }}
+            />
           </div>
 
-          {/* Right — review form */}
-          {extracted && (
-            <div className="flex-1 min-w-0 space-y-5">
-
-              {/* Header fields */}
-              <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm">
-                <h2 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">Invoice Details</h2>
-                <div className="grid grid-cols-2 gap-4">
-                  {[
-                    { label: 'Supplier',        key: 'supplier_name',      type: 'text' },
-                    { label: 'Invoice Number',  key: 'invoice_number',     type: 'text' },
-                    { label: 'Invoice Date',    key: 'invoice_date',       type: 'date' },
-                    { label: 'Due Date',        key: 'due_date',           type: 'date' },
-                    { label: 'Payment Method',  key: 'payment_method',     type: 'text' },
-                  ].map(({ label, key, type }) => (
-                    <div key={key}>
-                      <label className="block text-xs font-semibold text-gray-500 mb-1">{label}</label>
-                      <input
-                        type={type}
-                        value={(form as any)[key] ?? ''}
-                        onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value || null }))}
-                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20]"
-                      />
-                    </div>
-                  ))}
-
-                  {/* Category */}
-                  <div>
-                    <label className="block text-xs font-semibold text-gray-500 mb-1">Category</label>
-                    <div className="relative">
-                      <select
-                        value={form.suggested_category ?? ''}
-                        onChange={(e) => setForm((f) => ({ ...f, suggested_category: e.target.value }))}
-                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20] appearance-none pr-8"
-                      >
-                        {CATEGORIES.map((c) => <option key={c}>{c}</option>)}
-                      </select>
-                      <ChevronDown size={14} className="absolute right-2.5 top-3 text-gray-400 pointer-events-none" />
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Amounts */}
-              <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm">
-                <h2 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">Amounts (EUR)</h2>
-                <div className="grid grid-cols-3 gap-4">
-                  {[
-                    { label: 'Net Amount',   key: 'net_amount'   },
-                    { label: 'VAT',          key: 'vat_amount'   },
-                    { label: 'Gross Total',  key: 'gross_amount' },
-                  ].map(({ label, key }) => (
-                    <div key={key}>
-                      <label className="block text-xs font-semibold text-gray-500 mb-1">{label}</label>
-                      <input
-                        type="number"
-                        step="0.01"
-                        value={(form as any)[key] ?? ''}
-                        onChange={(e) => setForm((f) => ({ ...f, [key]: parseFloat(e.target.value) || 0 }))}
-                        className={`w-full border rounded-lg px-3 py-2 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20] ${
-                          key === 'gross_amount'
-                            ? 'border-[#1B5E20] text-[#1B5E20] bg-green-50'
-                            : 'border-gray-200 text-gray-900'
-                        }`}
-                      />
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Line items */}
-              {form.lines && form.lines.length > 0 && (
-                <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
-                  <div className="px-5 py-3 border-b border-gray-100">
-                    <h2 className="text-xs font-bold text-gray-400 uppercase tracking-wider">Line Items</h2>
-                  </div>
-                  <table className="w-full text-xs">
-                    <thead>
-                      <tr className="bg-gray-50 border-b border-gray-100">
-                        <th className="px-4 py-2.5 text-left font-semibold text-gray-500 uppercase tracking-wide">Description</th>
-                        <th className="px-3 py-2.5 text-right font-semibold text-gray-500 uppercase tracking-wide">Qty</th>
-                        <th className="px-3 py-2.5 text-right font-semibold text-gray-500 uppercase tracking-wide">Unit €</th>
-                        <th className="px-3 py-2.5 text-right font-semibold text-gray-500 uppercase tracking-wide">VAT%</th>
-                        <th className="px-3 py-2.5 text-right font-semibold text-gray-500 uppercase tracking-wide">Total €</th>
-                        <th className="px-3 py-2.5 w-6"></th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-50">
-                      {form.lines.map((line, i) => (
-                        <tr key={i} className={line.is_deposit ? 'bg-gray-50/50' : ''}>
-                          <td className="px-4 py-2">
-                            <span className={line.is_deposit ? 'text-gray-400 italic' : 'text-gray-800'}>
-                              {line.description}
-                              {line.is_deposit && <span className="ml-1 text-gray-400 text-xs">(deposit)</span>}
-                            </span>
-                          </td>
-                          <td className="px-3 py-2 text-right text-gray-600 tabular-nums">{line.quantity}</td>
-                          <td className="px-3 py-2 text-right text-gray-600 tabular-nums">{line.unit_price.toFixed(2)}</td>
-                          <td className="px-3 py-2 text-right text-gray-500 tabular-nums">{line.vat_rate}%</td>
-                          <td className={`px-3 py-2 text-right font-semibold tabular-nums ${line.line_total < 0 ? 'text-red-500' : 'text-gray-900'}`}>
-                            {line.line_total.toFixed(2)}
-                          </td>
-                          <td className="px-3 py-2">
-                            <button
-                              onClick={() => setForm((f) => ({ ...f, lines: f.lines?.filter((_, j) => j !== i) }))}
-                              className="text-gray-300 hover:text-red-400 transition-colors"
-                            >
-                              <X size={12} />
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+          {/* Queue */}
+          {queue.length > 0 && (
+            <div className="space-y-3">
+              {/* Bulk save bar */}
+              {doneCount > 0 && (
+                <div className="flex items-center justify-between bg-green-50 border border-green-200 rounded-xl px-4 py-3">
+                  <p className="text-sm font-semibold text-green-800">
+                    {doneCount} bill{doneCount !== 1 ? 's' : ''} ready to save
+                    {savedCount > 0 && <span className="text-green-600 font-normal"> · {savedCount} already saved</span>}
+                  </p>
+                  <button
+                    onClick={saveAll}
+                    disabled={savingAll}
+                    className="flex items-center gap-2 px-4 py-2 bg-[#1B5E20] text-white text-sm font-bold rounded-lg hover:bg-[#2E7D32] disabled:opacity-50 transition-colors"
+                  >
+                    {savingAll ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+                    {savingAll ? 'Saving…' : `Save All ${doneCount} Bills`}
+                  </button>
                 </div>
               )}
+
+              {/* Queue items */}
+              {queue.map((item) => (
+                <div
+                  key={item.id}
+                  className={`bg-white border rounded-xl overflow-hidden shadow-sm ${
+                    item.saved ? 'border-green-200 opacity-60' : 'border-gray-200'
+                  }`}
+                >
+                  {/* Item header row */}
+                  <div className="flex items-center gap-3 px-4 py-3">
+                    {/* Status icon */}
+                    <div className="flex-shrink-0">
+                      {item.status === 'waiting'    && <Clock size={18} className="text-gray-300" />}
+                      {item.status === 'extracting' && <Loader2 size={18} className="text-blue-500 animate-spin" />}
+                      {item.status === 'done' && !item.saved && <FileCheck size={18} className="text-green-500" />}
+                      {item.status === 'done' && item.saved  && <CheckCircle2 size={18} className="text-green-400" />}
+                      {item.status === 'error'      && <AlertCircle size={18} className="text-red-400" />}
+                    </div>
+
+                    {/* File name + extracted summary */}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs text-gray-400 truncate">{item.fileName}</p>
+                      {item.status === 'extracting' && (
+                        <p className="text-sm font-semibold text-blue-600">Claude is reading…</p>
+                      )}
+                      {item.status === 'waiting' && (
+                        <p className="text-sm text-gray-400">Waiting…</p>
+                      )}
+                      {item.status === 'done' && item.data && (
+                        <p className="text-sm font-semibold text-gray-900">
+                          {item.data.supplier_name}
+                          <span className="ml-2 text-[#1B5E20] font-bold">{fmt(item.data.gross_amount)}</span>
+                          <span className="ml-2 text-xs font-normal text-gray-400">{item.data.suggested_category}</span>
+                          {item.saved && <span className="ml-2 text-xs text-green-500">✓ Saved</span>}
+                        </p>
+                      )}
+                      {item.status === 'error' && (
+                        <p className="text-sm text-red-500">{item.error}</p>
+                      )}
+                    </div>
+
+                    {/* Actions */}
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      {item.status === 'done' && !item.saved && (
+                        <button
+                          onClick={() => setExpandedId(expandedId === item.id ? null : item.id)}
+                          className="flex items-center gap-1 text-xs font-semibold text-gray-500 hover:text-gray-700 px-2 py-1 border border-gray-200 rounded-lg"
+                        >
+                          {expandedId === item.id ? 'Hide' : 'Review'}
+                          <ChevronDown size={12} className={`transition-transform ${expandedId === item.id ? 'rotate-180' : ''}`} />
+                        </button>
+                      )}
+                      <button
+                        onClick={() => removeFromQueue(item.id)}
+                        className="text-gray-300 hover:text-red-400 transition-colors"
+                      >
+                        <X size={16} />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Expandable review form */}
+                  {expandedId === item.id && item.data && (
+                    <div className="border-t border-gray-100 px-4 py-4 bg-gray-50 space-y-4">
+                      <div className="grid grid-cols-3 gap-3">
+                        {[
+                          { label: 'Supplier',       field: 'supplier_name'  as keyof Extracted, type: 'text' },
+                          { label: 'Invoice Number', field: 'invoice_number' as keyof Extracted, type: 'text' },
+                          { label: 'Invoice Date',   field: 'invoice_date'   as keyof Extracted, type: 'date' },
+                          { label: 'Due Date',       field: 'due_date'       as keyof Extracted, type: 'date' },
+                          { label: 'Net (€)',        field: 'net_amount'     as keyof Extracted, type: 'number' },
+                          { label: 'VAT (€)',        field: 'vat_amount'     as keyof Extracted, type: 'number' },
+                          { label: 'Gross (€)',      field: 'gross_amount'   as keyof Extracted, type: 'number' },
+                        ].map(({ label, field, type }) => (
+                          <div key={field}>
+                            <label className="block text-xs font-semibold text-gray-500 mb-1">{label}</label>
+                            <input
+                              type={type}
+                              step={type === 'number' ? '0.01' : undefined}
+                              value={(item.data as any)[field] ?? ''}
+                              onChange={(e) => updateField(item.id, field, type === 'number' ? parseFloat(e.target.value) || 0 : e.target.value || null)}
+                              className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30"
+                            />
+                          </div>
+                        ))}
+
+                        {/* Category dropdown */}
+                        <div>
+                          <label className="block text-xs font-semibold text-gray-500 mb-1">Category</label>
+                          <div className="relative">
+                            <select
+                              value={item.data.suggested_category}
+                              onChange={(e) => updateField(item.id, 'suggested_category', e.target.value)}
+                              className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 appearance-none pr-6"
+                            >
+                              {CATEGORIES.map((c) => <option key={c}>{c}</option>)}
+                            </select>
+                            <ChevronDown size={12} className="absolute right-2 top-2 text-gray-400 pointer-events-none" />
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Line items */}
+                      {item.data.lines.length > 0 && (
+                        <div className="bg-white border border-gray-100 rounded-lg overflow-hidden">
+                          <table className="w-full text-xs">
+                            <thead>
+                              <tr className="bg-gray-50 border-b border-gray-100">
+                                <th className="px-3 py-2 text-left font-semibold text-gray-500">Description</th>
+                                <th className="px-3 py-2 text-right font-semibold text-gray-500">Qty</th>
+                                <th className="px-3 py-2 text-right font-semibold text-gray-500">Unit €</th>
+                                <th className="px-3 py-2 text-right font-semibold text-gray-500">VAT%</th>
+                                <th className="px-3 py-2 text-right font-semibold text-gray-500">Total €</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-50">
+                              {item.data.lines.map((line, i) => (
+                                <tr key={i} className={line.is_deposit ? 'text-gray-400 italic' : ''}>
+                                  <td className="px-3 py-1.5">{line.description}{line.is_deposit && ' (deposit)'}</td>
+                                  <td className="px-3 py-1.5 text-right tabular-nums">{line.quantity}</td>
+                                  <td className="px-3 py-1.5 text-right tabular-nums">{line.unit_price.toFixed(2)}</td>
+                                  <td className="px-3 py-1.5 text-right tabular-nums">{line.vat_rate}%</td>
+                                  <td className={`px-3 py-1.5 text-right font-semibold tabular-nums ${line.line_total < 0 ? 'text-red-400' : ''}`}>
+                                    {line.line_total.toFixed(2)}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))}
             </div>
           )}
         </div>
@@ -499,9 +528,9 @@ export default function BillsPage() {
           {bills.length > 0 && (
             <div className="grid grid-cols-3 gap-4 mb-5">
               {[
-                { label: 'Gross Total',  value: fmt(totals.gross), color: 'text-gray-900' },
-                { label: 'Net Total',    value: fmt(totals.net),   color: 'text-blue-700' },
-                { label: 'VAT Total',    value: fmt(totals.vat),   color: 'text-amber-700' },
+                { label: 'Gross Total', value: fmt(totals.gross), color: 'text-gray-900' },
+                { label: 'Net Total',   value: fmt(totals.net),   color: 'text-blue-700' },
+                { label: 'VAT Total',   value: fmt(totals.vat),   color: 'text-amber-700' },
               ].map((s) => (
                 <div key={s.label} className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm">
                   <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">{s.label}</p>
@@ -542,12 +571,12 @@ export default function BillsPage() {
           ) : filtered.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-48 border border-dashed border-gray-200 rounded-xl gap-3">
               <Banknote size={36} className="text-gray-200" />
-              <p className="text-sm text-gray-400">No bills yet — upload your first invoice</p>
+              <p className="text-sm text-gray-400">No bills yet — upload your first invoices</p>
               <button
                 onClick={() => setTab('upload')}
                 className="px-4 py-2 bg-[#1B5E20] text-white text-xs font-bold rounded-lg hover:bg-[#2E7D32] transition-colors"
               >
-                Upload Bill
+                Upload Bills
               </button>
             </div>
           ) : (
