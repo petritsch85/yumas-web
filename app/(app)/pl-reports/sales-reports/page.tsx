@@ -621,6 +621,7 @@ export default function SalesReportsPage() {
 
   // Tab / sub-tab
   const [activeTab,   setActiveTab]   = useState<'upload'|'daily'>('daily');
+  const [subTab,      setSubTab]      = useState<'daily'|'weekly'|'monthly'>('daily');
   const [reportType,  setReportType]  = useState<'weekly'|'shift'|'monthly'>('shift');
 
   // Shared controls
@@ -1028,41 +1029,56 @@ export default function SalesReportsPage() {
         </nav>
       </div>
 
-      {/* ── Shared controls (location + year + month) ── */}
+      {/* ── Shared controls ── */}
       {activeTab !== 'upload' && (
-        <div className="flex items-center gap-6 mb-5 flex-wrap">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Location</span>
-            {locations.map(l => (
-              <button key={l.id} onClick={() => setLocation(l)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
-                  location?.id === l.id ? 'bg-[#1B5E20] text-white border-[#1B5E20]' : 'bg-white text-gray-600 border-gray-200 hover:border-[#1B5E20] hover:text-[#1B5E20]'
-                }`}
-              ><MapPin size={11} />{l.name}</button>
-            ))}
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Year</span>
-            {[2025, 2026, 2027].map(y => (
-              <button key={y} onClick={() => setYear(y)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors ${
-                  year === y ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'
-                }`}
-              >{y}</button>
-            ))}
-          </div>
-          {activeTab === 'daily' && (
-            <div className="flex items-center gap-1.5">
-              <span className="text-xs font-bold text-gray-400 uppercase tracking-wider mr-1">Quarter</span>
-              {(['Q1','Q2','Q3','Q4'] as const).map((qLabel, i) => (
-                <button key={qLabel} onClick={() => setQuarter(i+1)}
-                  className={`px-2.5 py-1.5 rounded-lg text-xs font-bold border transition-colors ${
-                    quarter === i+1 ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'
+        <div className="mb-5 space-y-3">
+          {/* Row 1: Location + Year */}
+          <div className="flex items-center gap-6 flex-wrap">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Location</span>
+              {locations.map(l => (
+                <button key={l.id} onClick={() => setLocation(l)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
+                    location?.id === l.id ? 'bg-[#1B5E20] text-white border-[#1B5E20]' : 'bg-white text-gray-600 border-gray-200 hover:border-[#1B5E20] hover:text-[#1B5E20]'
                   }`}
-                >{qLabel}</button>
+                ><MapPin size={11} />{l.name}</button>
               ))}
             </div>
-          )}
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Year</span>
+              {[2025, 2026, 2027].map(y => (
+                <button key={y} onClick={() => setYear(y)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors ${
+                    year === y ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'
+                  }`}
+                >{y}</button>
+              ))}
+            </div>
+          </div>
+          {/* Row 2: Daily / Weekly / Monthly sub-tabs + Quarter picker */}
+          <div className="flex items-center gap-6 flex-wrap">
+            <div className="flex items-center gap-1.5">
+              {(['daily','weekly','monthly'] as const).map(st => (
+                <button key={st} onClick={() => setSubTab(st)}
+                  className={`px-4 py-1.5 rounded-lg text-xs font-bold border transition-colors capitalize ${
+                    subTab === st ? 'bg-[#1B5E20] text-white border-[#1B5E20]' : 'bg-white text-gray-600 border-gray-200 hover:border-[#1B5E20] hover:text-[#1B5E20]'
+                  }`}
+                >{st.charAt(0).toUpperCase() + st.slice(1)}</button>
+              ))}
+            </div>
+            {subTab === 'daily' && (
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs font-bold text-gray-400 uppercase tracking-wider mr-1">Quarter</span>
+                {(['Q1','Q2','Q3','Q4'] as const).map((qLabel, i) => (
+                  <button key={qLabel} onClick={() => setQuarter(i+1)}
+                    className={`px-2.5 py-1.5 rounded-lg text-xs font-bold border transition-colors ${
+                      quarter === i+1 ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'
+                    }`}
+                  >{qLabel}</button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
@@ -1467,10 +1483,10 @@ export default function SalesReportsPage() {
       ══════════════════════════════════════════════════════════════════ */}
       {activeTab === 'daily' && (
         <>
-        {!location ? (
+        {subTab === 'daily' && (!location ? (
           <div className="flex flex-col items-center justify-center h-64 text-gray-400 gap-2 border border-dashed border-gray-200 rounded-xl">
             <MapPin size={36} className="text-gray-200" />
-            <p className="text-sm">Select a location to view the P&amp;L</p>
+            <p className="text-sm">Select a location to view the daily P&amp;L</p>
           </div>
         ) : (() => {
           const totalCols = dailyCols.length + 2; // label + day/week cols + month total
@@ -1616,15 +1632,16 @@ export default function SalesReportsPage() {
               </div>
             </div>
           );
-        })()}
+        })())}
 
         {/* ── Weekly P&L ───────────────────────────────────────────────── */}
-        {location && (
-          <div className="mt-8">
-            <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3 flex items-center gap-2">
-              <BarChart3 size={13} /> Weekly P&amp;L · {year}
-            </h3>
-            <div className="border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+        {subTab === 'weekly' && (!location ? (
+          <div className="flex flex-col items-center justify-center h-64 text-gray-400 gap-2 border border-dashed border-gray-200 rounded-xl">
+            <MapPin size={36} className="text-gray-200" />
+            <p className="text-sm">Select a location to view the weekly P&amp;L</p>
+          </div>
+        ) : (
+          <div className="border border-gray-200 rounded-xl overflow-hidden shadow-sm">
               <div className="overflow-auto" style={{ maxHeight: 'calc(100vh - 260px)' }}>
                 <table className="text-xs border-collapse" style={{ minWidth: LABEL_W + (TOTAL_WEEKS + 1) * COL_W_WK }}>
                   <thead className="sticky top-0 z-30">
@@ -1706,16 +1723,15 @@ export default function SalesReportsPage() {
                 )}
               </div>
             </div>
-          </div>
-        )}
+        ))}
 
         {/* ── Monthly P&L ──────────────────────────────────────────────── */}
-        {location && (
-          <div className="mt-8 mb-4">
-            <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3 flex items-center gap-2">
-              <TableProperties size={13} /> Monthly P&amp;L · {year}
-            </h3>
-            {monthlyReports.length === 0 ? (
+        {subTab === 'monthly' && (!location ? (
+          <div className="flex flex-col items-center justify-center h-64 text-gray-400 gap-2 border border-dashed border-gray-200 rounded-xl">
+            <MapPin size={36} className="text-gray-200" />
+            <p className="text-sm">Select a location to view the monthly P&amp;L</p>
+          </div>
+        ) : monthlyReports.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-40 text-gray-400 gap-2 border border-dashed border-gray-200 rounded-xl">
                 <TableProperties size={28} className="text-gray-200" />
                 <p className="text-sm font-medium">No monthly reports for {location.name} · {year}</p>
@@ -1809,9 +1825,7 @@ export default function SalesReportsPage() {
                   )}
                 </div>
               </div>
-            )}
-          </div>
-        )}
+        ))}
         </>
       )}
     </div>
