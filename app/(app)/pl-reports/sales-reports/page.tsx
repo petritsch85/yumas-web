@@ -97,6 +97,24 @@ type ShiftCat = {
   takeawayRevenue: number;
 };
 
+type MonthlyParseResult = {
+  year:               number;
+  month:              number;
+  fromZ:              string;
+  toZ:                string;
+  grossTotal:         number;
+  grossFood:          number;
+  grossDrinks:        number;
+  netTotal:           number;
+  vatTotal:           number;
+  tips:               number;
+  inhouseTotal:       number;
+  takeawayTotal:      number;
+  cancellationsCount: number;
+  cancellationsTotal: number;
+  error?:             string;
+};
+
 type ShiftParseResult = {
   date:               string;
   zReportNumber:      string;
@@ -401,6 +419,71 @@ function parseShiftCSV(raw: string): ShiftParseResult {
   return { date, zReportNumber, grossTotal, grossFood, grossDrinks, netTotal, vatTotal, tips, inhouseTotal, takeawayTotal, cancellationsCount, cancellationsTotal, categories };
 }
 
+function parseMonthlyCSV(raw: string): MonthlyParseResult {
+  const empty: MonthlyParseResult = { year:0, month:0, fromZ:'', toZ:'', grossTotal:0, grossFood:0, grossDrinks:0, netTotal:0, vatTotal:0, tips:0, inhouseTotal:0, takeawayTotal:0, cancellationsCount:0, cancellationsTotal:0 };
+
+  const content = raw.replace(/^\uFEFF/,'').replace(/\r\n/g,'\n').replace(/\r/g,'\n');
+  const lines   = content.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+  if (lines.length < 5) return { ...empty, error:'File appears to be empty.' };
+
+  const split = (line: string) => line.split(';').map(v => v.replace(/^"|"$/g,'').trim());
+
+  let year = 0, month = 0, fromZ = '', toZ = '';
+  for (let i = 0; i < Math.min(10, lines.length); i++) {
+    const cols = split(lines[i]);
+    if (cols[0].toLowerCase().startsWith('date')) {
+      const d = parseDate(cols[1] ?? '');
+      if (d) { year = parseInt(d.slice(0,4), 10); month = parseInt(d.slice(5,7), 10); }
+    }
+    if (cols[0].toLowerCase().includes('z report')) { fromZ = cols[1] ?? ''; toZ = cols[2] ?? ''; }
+  }
+
+  let section = '';
+  let grossTotal = 0, grossFood = 0, grossDrinks = 0;
+  let netTotal = 0, vatTotal = 0, tips = 0;
+  let inhouseTotal = 0, takeawayTotal = 0;
+  let cancellationsCount = 0, cancellationsTotal = 0;
+
+  for (const line of lines) {
+    const cols  = split(line);
+    const first = cols[0].toLowerCase();
+    if (cols.every(c => c === '')) { section = ''; continue; }
+    if (SECTION_NAMES.has(first))  { section = first; continue; }
+    if (first === 'date:' || first === 'z report:') continue;
+
+    switch (section) {
+      case 'turnover':
+        if (first === 'tip') tips = parseNum(cols[3]);
+        break;
+      case 'gross turnover':
+        if      (first.startsWith('7.'))  grossFood   = parseNum(cols[3]);
+        else if (first.startsWith('19.')) grossDrinks = parseNum(cols[3]);
+        else if (first === 'total')       grossTotal  = parseNum(cols[3]);
+        break;
+      case 'net turnover':
+        if (first === 'total') netTotal = parseNum(cols[3]);
+        break;
+      case 'taxes':
+        if (first === 'total') vatTotal = parseNum(cols[3]);
+        break;
+      case 'cancellations':
+        if (first === 'total') { cancellationsCount = Math.round(parseNum(cols[2])); cancellationsTotal = parseNum(cols[3]); }
+        break;
+      case 'main categories': {
+        if (!cols[0] || first === 'total') break;
+        inhouseTotal  += parseNum(cols[7]);
+        takeawayTotal += parseNum(cols[10]);
+        break;
+      }
+    }
+  }
+
+  if (grossTotal === 0 && year === 0)
+    return { ...empty, error:'Could not parse this file as an Orderbird monthly report. Make sure the date range spans a full month.' };
+
+  return { year, month, fromZ, toZ, grossTotal, grossFood, grossDrinks, netTotal, vatTotal, tips, inhouseTotal, takeawayTotal, cancellationsCount, cancellationsTotal };
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // ROW DEFINITIONS
 // ─────────────────────────────────────────────────────────────────────────────
@@ -471,7 +554,7 @@ export default function SalesReportsPage() {
 
   // Tab / sub-tab
   const [activeTab,   setActiveTab]   = useState<'upload'|'daily'|'weekly'>('daily');
-  const [reportType,  setReportType]  = useState<'weekly'|'shift'>('shift');
+  const [reportType,  setReportType]  = useState<'weekly'|'shift'|'monthly'>('shift');
 
   // Shared controls
   const [location, setLocation] = useState<Location | null>(null);
@@ -479,10 +562,11 @@ export default function SalesReportsPage() {
   const [month,    setMonth]    = useState(new Date().getMonth() + 1);
 
   // Upload state
-  const [fileName,      setFileName]      = useState<string | null>(null);
-  const [weeklyResult,  setWeeklyResult]  = useState<WeeklyParseResult | null>(null);
-  const [shiftResult,   setShiftResult]   = useState<ShiftParseResult | null>(null);
-  const [parseError,    setParseError]    = useState<string | null>(null);
+  const [fileName,       setFileName]       = useState<string | null>(null);
+  const [weeklyResult,   setWeeklyResult]   = useState<WeeklyParseResult | null>(null);
+  const [shiftResult,    setShiftResult]    = useState<ShiftParseResult | null>(null);
+  const [monthlyResult,  setMonthlyResult]  = useState<MonthlyParseResult | null>(null);
+  const [parseError,     setParseError]     = useState<string | null>(null);
   const [importing,     setImporting]     = useState(false);
   const [isDragging,    setIsDragging]    = useState(false);
   const [weeklyPage,    setWeeklyPage]    = useState(0);
@@ -496,7 +580,6 @@ export default function SalesReportsPage() {
       return ((data ?? []) as { id: string; name: string; type: string }[])
         .filter(l => l.type === 'restaurant')
         .map(({ id, name }) => ({ id, name })) as Location[];
-      return (data ?? []) as Location[];
     },
   });
 
@@ -596,19 +679,20 @@ export default function SalesReportsPage() {
     [weeklyResult]
   );
 
-  const canImportWeekly = !!location && !!weeklyResult?.rows?.length && !importing;
-  const canImportShift  = !!location && !!shiftResult && !shiftResult.error && !!shiftResult.date && !importing;
+  const canImportWeekly  = !!location && !!weeklyResult?.rows?.length && !importing;
+  const canImportShift   = !!location && !!shiftResult && !shiftResult.error && !!shiftResult.date && !importing;
+  const canImportMonthly = !!location && !!monthlyResult && !monthlyResult.error && monthlyResult.year > 0 && !importing;
 
   // ── Handlers ───────────────────────────────────────────────────────────────
 
   const resetUpload = useCallback(() => {
-    setFileName(null); setWeeklyResult(null); setShiftResult(null);
+    setFileName(null); setWeeklyResult(null); setShiftResult(null); setMonthlyResult(null);
     setParseError(null); setWeeklyPage(0);
   }, []);
 
   const processFile = useCallback((file: File) => {
     setFileName(file.name);
-    setWeeklyResult(null); setShiftResult(null); setParseError(null); setWeeklyPage(0);
+    setWeeklyResult(null); setShiftResult(null); setMonthlyResult(null); setParseError(null); setWeeklyPage(0);
     const reader = new FileReader();
     reader.onload = (e) => {
       const content = e.target?.result as string;
@@ -616,6 +700,10 @@ export default function SalesReportsPage() {
         const r = parseWeeklyCSV(content ?? '');
         if (r.error) { setParseError(r.error); return; }
         setWeeklyResult(r);
+      } else if (reportType === 'monthly') {
+        const r = parseMonthlyCSV(content ?? '');
+        if (r.error) { setParseError(r.error); return; }
+        setMonthlyResult(r);
       } else {
         const r = parseShiftCSV(content ?? '');
         if (r.error) { setParseError(r.error); return; }
@@ -698,6 +786,36 @@ export default function SalesReportsPage() {
     } catch (e: any) { alert(`Import failed: ${e.message}`); }
     finally { setImporting(false); }
   }, [location, shiftResult, queryClient, resetUpload]);
+
+  const handleImportMonthly = useCallback(async () => {
+    if (!location || !monthlyResult || monthlyResult.year === 0) return;
+    setImporting(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      const { error } = await supabase.from('monthly_reports').upsert({
+        location_id:         location.id,
+        report_year:         monthlyResult.year,
+        report_month:        monthlyResult.month,
+        from_z:              monthlyResult.fromZ,
+        to_z:                monthlyResult.toZ,
+        gross_total:         monthlyResult.grossTotal,
+        gross_food:          monthlyResult.grossFood,
+        gross_beverages:     monthlyResult.grossDrinks,
+        net_total:           monthlyResult.netTotal,
+        vat_total:           monthlyResult.vatTotal,
+        tips:                monthlyResult.tips,
+        inhouse_total:       monthlyResult.inhouseTotal,
+        takeaway_total:      monthlyResult.takeawayTotal,
+        cancellations_count: monthlyResult.cancellationsCount,
+        cancellations_total: monthlyResult.cancellationsTotal,
+        uploaded_by:         user?.id ?? null,
+      }, { onConflict: 'location_id,report_year,report_month' });
+      if (error) throw error;
+      queryClient.invalidateQueries({ queryKey: ['monthly-reports'] });
+      resetUpload();
+    } catch (e: any) { alert(`Import failed: ${e.message}`); }
+    finally { setImporting(false); }
+  }, [location, monthlyResult, queryClient, resetUpload]);
 
   // ── Cell renderers ─────────────────────────────────────────────────────────
 
@@ -812,10 +930,11 @@ export default function SalesReportsPage() {
       {activeTab === 'upload' && (
         <div>
           {/* Report type toggle */}
-          <div className="flex gap-3 mb-5 max-w-xl">
+          <div className="flex gap-3 mb-5">
             {([
-              ['shift',  '⏱', 'Shift Report',   'Single shift Z-report (lunch or dinner)'],
-              ['weekly', '📋', 'Weekly Report',  'KW report covering a full week'],
+              ['shift',   '⏱',  'Shift Report',   'Single shift Z-report (lunch or dinner)'],
+              ['monthly', '📅', 'Monthly Report', 'Full-month Z-report aggregate'],
+              ['weekly',  '📋', 'Weekly Report',  'KW report covering a full week'],
             ] as const).map(([t, emoji, label, desc]) => (
               <button key={t} onClick={() => { setReportType(t); resetUpload(); }}
                 className={`flex-1 py-3 px-4 rounded-xl border-2 text-left transition-colors ${
@@ -849,7 +968,7 @@ export default function SalesReportsPage() {
               {/* Drop zone */}
               <div>
                 <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">
-                  Orderbird Z-Report CSV — {reportType === 'shift' ? 'Shift' : 'Weekly'}
+                  Orderbird Z-Report CSV — {reportType === 'shift' ? 'Shift' : reportType === 'monthly' ? 'Monthly' : 'Weekly'}
                 </label>
                 <div
                   onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
@@ -870,8 +989,9 @@ export default function SalesReportsPage() {
                     {fileName ?? 'Drop CSV here'}
                   </p>
                   <p className="text-xs text-gray-400 mb-3">
-                    {weeklyResult ? `${weeklyResult.rows.length} products parsed` :
-                     shiftResult  ? `Z-Report ${shiftResult.zReportNumber} · ${fmtDate(shiftResult.date)}` :
+                    {weeklyResult   ? `${weeklyResult.rows.length} products parsed` :
+                     shiftResult    ? `Z-Report ${shiftResult.zReportNumber} · ${fmtDate(shiftResult.date)}` :
+                     monthlyResult  ? `Z ${monthlyResult.fromZ}–${monthlyResult.toZ} · ${MONTHS[monthlyResult.month-1]} ${monthlyResult.year}` :
                      'or click to browse'}
                   </p>
                   <input ref={fileInputRef} type="file" accept=".csv,text/csv,text/plain" className="hidden"
@@ -892,10 +1012,10 @@ export default function SalesReportsPage() {
 
                 {/* Save button */}
                 <button
-                  onClick={reportType === 'weekly' ? handleImportWeekly : handleImportShift}
-                  disabled={reportType === 'weekly' ? !canImportWeekly : !canImportShift}
+                  onClick={reportType === 'weekly' ? handleImportWeekly : reportType === 'monthly' ? handleImportMonthly : handleImportShift}
+                  disabled={reportType === 'weekly' ? !canImportWeekly : reportType === 'monthly' ? !canImportMonthly : !canImportShift}
                   className={`mt-3 w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-bold transition-colors ${
-                    (reportType === 'weekly' ? canImportWeekly : canImportShift)
+                    (reportType === 'weekly' ? canImportWeekly : reportType === 'monthly' ? canImportMonthly : canImportShift)
                       ? 'bg-[#1B5E20] text-white hover:bg-[#2E7D32]'
                       : 'bg-gray-100 text-gray-400 cursor-not-allowed'
                   }`}
@@ -906,8 +1026,10 @@ export default function SalesReportsPage() {
                   {importing ? 'Saving…' :
                    !location ? 'Select a location first' :
                    reportType === 'weekly'
-                     ? (canImportWeekly ? `Save weekly report · ${fmt(weeklyResult!.summary!.grossTotal)}` : 'Drop a CSV file above')
-                     : (canImportShift  ? `Save shift report · ${fmt(shiftResult!.grossTotal)}`            : 'Drop a CSV file above')}
+                     ? (canImportWeekly  ? `Save weekly report · ${fmt(weeklyResult!.summary!.grossTotal)}`                                         : 'Drop a CSV file above')
+                     : reportType === 'monthly'
+                     ? (canImportMonthly ? `Save monthly report · ${MONTHS[monthlyResult!.month-1]} ${monthlyResult!.year} · ${fmt(monthlyResult!.grossTotal)}` : 'Drop a CSV file above')
+                     : (canImportShift   ? `Save shift report · ${fmt(shiftResult!.grossTotal)}`                                                    : 'Drop a CSV file above')}
                 </button>
               </div>
 
@@ -1132,12 +1254,64 @@ export default function SalesReportsPage() {
                 </div>
               )}
 
+              {/* Monthly: summary cards + channel split */}
+              {reportType === 'monthly' && monthlyResult && !monthlyResult.error && (
+                <div className="space-y-4">
+                  <div>
+                    <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">
+                      {MONTHS[monthlyResult.month-1]} {monthlyResult.year} · Z-Reports {monthlyResult.fromZ}–{monthlyResult.toZ}
+                    </p>
+                    <div className="grid grid-cols-2 gap-2">
+                      {[
+                        { label:'Gross Revenue', value: fmt(monthlyResult.grossTotal),         color:'text-[#1B5E20]'  },
+                        { label:'Net Revenue',   value: fmt(monthlyResult.netTotal),            color:'text-blue-700'   },
+                        { label:'VAT',           value: fmt(monthlyResult.vatTotal),            color:'text-amber-700'  },
+                        { label:'Tips',          value: fmt(monthlyResult.tips),               color:'text-purple-700' },
+                      ].map(s => (
+                        <div key={s.label} className="bg-white border border-gray-100 rounded-xl p-3 shadow-sm">
+                          <p className="text-xs text-gray-400 font-semibold uppercase mb-1">{s.label}</p>
+                          <p className={`text-sm font-bold ${s.color}`}>{s.value}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm">
+                    <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Revenue Split</p>
+                    {[
+                      { label:'Food (7% VAT)',    value:monthlyResult.grossFood,   color:'#2E7D32' },
+                      { label:'Drinks (19% VAT)', value:monthlyResult.grossDrinks, color:'#1565C0' },
+                      { label:'In-house',         value:monthlyResult.inhouseTotal,  color:'#0F766E' },
+                      { label:'Takeaway',         value:monthlyResult.takeawayTotal, color:'#E65100' },
+                    ].map(row => {
+                      const p = monthlyResult.grossTotal > 0 ? (row.value / monthlyResult.grossTotal) * 100 : 0;
+                      return (
+                        <div key={row.label} className="mb-2 last:mb-0">
+                          <div className="flex justify-between text-xs mb-1">
+                            <span className="text-gray-700 font-medium">{row.label}</span>
+                            <span className="text-gray-500">{fmt(row.value)} · {p.toFixed(1)}%</span>
+                          </div>
+                          <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden"><div className="h-full rounded-full" style={{ width:`${p}%`, backgroundColor:row.color }} /></div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {monthlyResult.cancellationsTotal > 0 && (
+                    <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs">
+                      <span className="font-semibold text-amber-800">Cancellations: </span>
+                      <span className="text-amber-700">{monthlyResult.cancellationsCount}× · {fmt(monthlyResult.cancellationsTotal)}</span>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Empty state */}
-              {!weeklyResult && !shiftResult && !parseError && (
+              {!weeklyResult && !shiftResult && !monthlyResult && !parseError && (
                 <div className="flex flex-col items-center justify-center h-64 border-2 border-dashed border-gray-200 rounded-xl gap-3">
                   <Upload size={40} className="text-gray-200" />
                   <p className="text-sm text-gray-400">
-                    {reportType === 'shift' ? 'Drop a shift Z-report CSV to preview data' : 'Drop a weekly Z-report CSV to preview data'}
+                    {reportType === 'shift'   ? 'Drop a shift Z-report CSV to preview data'   :
+                     reportType === 'monthly' ? 'Drop a monthly Z-report CSV to preview data' :
+                                               'Drop a weekly Z-report CSV to preview data'}
                   </p>
                 </div>
               )}
