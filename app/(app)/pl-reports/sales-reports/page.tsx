@@ -1214,10 +1214,10 @@ export default function SalesReportsPage() {
 
           return (
             <div className="border border-gray-200 rounded-xl overflow-hidden shadow-sm">
-              <div className="overflow-x-auto">
+              <div className="overflow-auto" style={{ maxHeight: 'calc(100vh - 260px)' }}>
                 <table className="text-xs border-collapse" style={{ minWidth: LABEL_W + (days.length + 1) * COL_W_D }}>
                   {/* Sticky column header */}
-                  <thead>
+                  <thead className="sticky top-0 z-30">
                     <tr style={{ backgroundColor:'#111827' }}>
                       <th className="sticky left-0 z-20 px-4 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider whitespace-nowrap border-r border-gray-700"
                         style={{ backgroundColor:'#111827', minWidth:LABEL_W, width:LABEL_W }}>
@@ -1274,9 +1274,9 @@ export default function SalesReportsPage() {
           </div>
         ) : (
           <div className="border border-gray-200 rounded-xl overflow-hidden shadow-sm">
-            <div className="overflow-x-auto">
+            <div className="overflow-auto" style={{ maxHeight: 'calc(100vh - 260px)' }}>
               <table className="text-xs border-collapse" style={{ minWidth: LABEL_W + (TOTAL_WEEKS + 1) * COL_W_WK }}>
-                <thead>
+                <thead className="sticky top-0 z-30">
                   <tr style={{ backgroundColor:'#111827' }}>
                     <th className="sticky left-0 z-20 px-4 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider whitespace-nowrap border-r border-gray-700"
                       style={{ backgroundColor:'#111827', minWidth:LABEL_W, width:LABEL_W }}>
