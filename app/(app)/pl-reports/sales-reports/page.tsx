@@ -1848,6 +1848,8 @@ export default function SalesReportsPage() {
                     })}
                   </tbody>
 
+                  <tbody><tr><td colSpan={totalCols} style={{ height: 12, backgroundColor:'#f9fafb' }} /></tr></tbody>
+
                   {renderBlock(lunchMap,  lunchQtrTotal,  '☀️  Lunch Shift',  '#92400E')}
                   {renderBlock(dinnerMap, dinnerQtrTotal, '🌙  Dinner Shift', '#1E3A5F')}
                   {renderBlock(totalMap,  totalQtrTotal,  '∑   Daily Total',  '#111827')}
