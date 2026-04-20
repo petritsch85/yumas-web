@@ -492,7 +492,10 @@ export default function SalesReportsPage() {
   const { data: locations = [] } = useQuery({
     queryKey: ['locations-active'],
     queryFn: async () => {
-      const { data } = await supabase.from('locations').select('id, name').eq('is_active', true).eq('type', 'restaurant').order('name');
+      const { data } = await supabase.from('locations').select('id, name, type').eq('is_active', true).order('name');
+      return ((data ?? []) as { id: string; name: string; type: string }[])
+        .filter(l => l.type === 'restaurant')
+        .map(({ id, name }) => ({ id, name })) as Location[];
       return (data ?? []) as Location[];
     },
   });
