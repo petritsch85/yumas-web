@@ -133,11 +133,16 @@ type ShiftParseResult = {
   error?:             string;
 };
 
+type ShiftConfidence = 'high' | 'medium' | 'low';
+
 type ShiftBatchItem = {
-  fileName: string;
-  result:   ShiftParseResult;
-  status:   'pending' | 'saving' | 'saved' | 'error';
-  errorMsg?: string;
+  fileName:          string;
+  result:            ShiftParseResult;
+  detectedType:      'lunch' | 'dinner';
+  confidence:        ShiftConfidence;
+  manualOverride?:   'lunch' | 'dinner';
+  status:            'pending' | 'saving' | 'saved' | 'error';
+  errorMsg?:         string;
 };
 
 type RowType   = 'section' | 'bold' | 'normal' | 'pct';
@@ -499,6 +504,48 @@ function parseMonthlyCSV(raw: string): MonthlyParseResult {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// SHIFT AUTO-CLASSIFIER
+// ─────────────────────────────────────────────────────────────────────────────
+
+const LUNCH_KEYWORDS  = /burrito|bowl|taco|enchilada|nacho|quesadilla/i;
+const DINNER_KEYWORDS = /cocktail|beer|bier|wine|wein|gin|rum|tequila|vodka|whisky|whiskey|spirit|prosecco|sekt|shot|aperol|campari|margarita|mojito|negroni/i;
+
+function classifyShiftType(r: ShiftParseResult): { type: 'lunch' | 'dinner'; confidence: ShiftConfidence } {
+  if (r.grossTotal === 0) return { type: 'dinner', confidence: 'low' };
+
+  let lunchScore  = 0;
+  let dinnerScore = 0;
+
+  // Signal 1 — drinks share (19% VAT): strongest signal; no alcohol at lunch
+  const drinksShare = r.grossDrinks / r.grossTotal;
+  if      (drinksShare < 0.03) lunchScore  += 3;
+  else if (drinksShare < 0.08) lunchScore  += 1;
+  else if (drinksShare > 0.20) dinnerScore += 3;
+  else if (drinksShare > 0.12) dinnerScore += 1;
+
+  // Signal 2 — food share (7% VAT): lunch is almost pure food
+  const foodShare = r.grossFood / r.grossTotal;
+  if (foodShare > 0.92) lunchScore += 1;
+
+  // Signal 3 — category keyword scan
+  for (const cat of r.categories) {
+    if (LUNCH_KEYWORDS.test(cat.name))  { lunchScore  += 2; break; }
+    if (DINNER_KEYWORDS.test(cat.name)) { dinnerScore += 2; break; }
+  }
+
+  // Signal 4 — tips share: evening guests tip more
+  const tipsShare = r.grossTotal > 0 ? r.tips / r.grossTotal : 0;
+  if      (tipsShare < 0.015) lunchScore  += 1;
+  else if (tipsShare > 0.04)  dinnerScore += 1;
+
+  const type = lunchScore >= dinnerScore ? 'lunch' : 'dinner';
+  const diff = Math.abs(lunchScore - dinnerScore);
+  const confidence: ShiftConfidence = diff >= 3 ? 'high' : diff >= 1 ? 'medium' : 'low';
+
+  return { type, confidence };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // ROW DEFINITIONS
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -639,7 +686,6 @@ export default function SalesReportsPage() {
 
   // Upload state
   const [fileName,       setFileName]       = useState<string | null>(null);
-  const [shiftType,      setShiftType]      = useState<'lunch'|'dinner'>('dinner');
   const [weeklyResult,   setWeeklyResult]   = useState<WeeklyParseResult | null>(null);
   const [shiftBatch,     setShiftBatch]     = useState<ShiftBatchItem[]>([]);
   const [monthlyResult,  setMonthlyResult]  = useState<MonthlyParseResult | null>(null);
@@ -853,7 +899,8 @@ export default function SalesReportsPage() {
         const r = parseShiftCSV(content ?? '');
         if (r.error) { setParseError(r.error); return; }
         setParseError(null);
-        setShiftBatch(prev => [...prev, { fileName: file.name, result: r, status: 'pending' }]);
+        const { type: detectedType, confidence } = classifyShiftType(r);
+        setShiftBatch(prev => [...prev, { fileName: file.name, result: r, detectedType, confidence, status: 'pending' }]);
       } else {
         setFileName(file.name);
         setWeeklyResult(null); setMonthlyResult(null); setParseError(null); setWeeklyPage(0);
@@ -918,10 +965,11 @@ export default function SalesReportsPage() {
       setShiftBatch(prev => prev.map(i => i === item ? { ...i, status: 'saving' } : i));
       try {
         const sr = item.result;
+        const effectiveType = item.manualOverride ?? item.detectedType;
         const { data: inserted, error: srErr } = await supabase.from('shift_reports').insert({
           location_id: location.id, report_date: sr.date,
           z_report_number: sr.zReportNumber,
-          shift_type: shiftType,
+          shift_type: effectiveType,
           gross_total: sr.grossTotal, gross_food: sr.grossFood,
           gross_beverages: sr.grossDrinks, net_total: sr.netTotal,
           vat_total: sr.vatTotal, tips: sr.tips,
@@ -958,7 +1006,7 @@ export default function SalesReportsPage() {
     if (shiftBatch.every(i => i.status === 'saved' || i.status === 'error')) {
       setActiveTab('daily');
     }
-  }, [location, shiftBatch, shiftType, queryClient]);
+  }, [location, shiftBatch, queryClient]);
 
   const handleImportMonthly = useCallback(async () => {
     if (!location || !monthlyResult || monthlyResult.year === 0) return;
@@ -1150,25 +1198,6 @@ export default function SalesReportsPage() {
             ))}
           </div>
 
-          {/* Lunch / Dinner toggle — only for shift reports */}
-          {reportType === 'shift' && (
-            <div className="flex items-center gap-3 mb-5">
-              <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Shift</span>
-              {(['lunch','dinner'] as const).map(st => (
-                <button key={st} onClick={() => setShiftType(st)}
-                  className={`px-5 py-2 rounded-lg text-sm font-bold border-2 transition-colors ${
-                    shiftType === st
-                      ? st === 'lunch'
-                        ? 'bg-amber-700 text-white border-amber-700'
-                        : 'bg-[#1E3A5F] text-white border-[#1E3A5F]'
-                      : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'
-                  }`}
-                >
-                  {st === 'lunch' ? '☀️ Lunch' : '🌙 Dinner'}
-                </button>
-              ))}
-            </div>
-          )}
 
           <div className="flex gap-6 items-start">
             {/* ── Left panel ── */}
@@ -1260,9 +1289,13 @@ export default function SalesReportsPage() {
                      ? (canImportMonthly ? `Save monthly report · ${MONTHS[monthlyResult!.month-1]} ${monthlyResult!.year} · ${fmt(monthlyResult!.grossTotal)}` : 'Drop a CSV file above')
                      : (() => {
                          const pending = shiftBatch.filter(i => i.status === 'pending' && !i.result.error);
-                         return canImportShift
-                           ? `Save ${pending.length} shift report${pending.length > 1 ? 's' : ''} · ${shiftType === 'lunch' ? '☀️ Lunch' : '🌙 Dinner'}`
-                           : (shiftBatch.length > 0 ? 'No pending reports to save' : 'Drop a CSV file above');
+                         if (!canImportShift) return shiftBatch.length > 0 ? 'No pending reports to save' : 'Drop a CSV file above';
+                         const nLunch  = pending.filter(i => (i.manualOverride ?? i.detectedType) === 'lunch').length;
+                         const nDinner = pending.filter(i => (i.manualOverride ?? i.detectedType) === 'dinner').length;
+                         const parts   = [];
+                         if (nLunch)  parts.push(`${nLunch} × ☀️ Lunch`);
+                         if (nDinner) parts.push(`${nDinner} × 🌙 Dinner`);
+                         return `Save ${parts.join(' · ')}`;
                        })()}
                 </button>
               </div>
@@ -1300,6 +1333,12 @@ export default function SalesReportsPage() {
                   </p>
                   <div className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
                     {shiftBatch.map((item, idx) => {
+                      const effectiveType = item.manualOverride ?? item.detectedType;
+                      const isLunch = effectiveType === 'lunch';
+                      const isOverridden = !!item.manualOverride;
+                      const confDots =
+                        item.confidence === 'high'   ? '●●●' :
+                        item.confidence === 'medium' ? '●●○' : '●○○';
                       const statusIcon =
                         item.status === 'saved'  ? '✓' :
                         item.status === 'error'  ? '✗' :
@@ -1320,10 +1359,33 @@ export default function SalesReportsPage() {
                               <p className="text-xs text-red-500 truncate">{item.errorMsg}</p>
                             )}
                           </div>
+                          {/* Shift type badge — click to toggle */}
+                          {item.status === 'pending' && (
+                            <button
+                              title={`${isOverridden ? 'Manually set' : 'Auto-detected'} · ${item.confidence} confidence (${confDots})\nClick to flip`}
+                              onClick={() => setShiftBatch(prev => prev.map((it, i) =>
+                                i !== idx ? it : { ...it, manualOverride: effectiveType === 'lunch' ? 'dinner' : 'lunch' }
+                              ))}
+                              className={`flex-shrink-0 flex items-center gap-0.5 px-2 py-0.5 rounded-full text-xs font-bold border transition-colors ${
+                                isLunch
+                                  ? 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100'
+                                  : 'bg-blue-50 text-blue-800 border-blue-200 hover:bg-blue-100'
+                              } ${isOverridden ? 'ring-1 ring-offset-1 ring-gray-400' : ''}`}
+                            >
+                              {isLunch ? '☀️' : '🌙'}
+                              <span className="ml-0.5">{isLunch ? 'L' : 'D'}</span>
+                              <span className={`ml-1 text-[8px] tracking-tighter ${isLunch ? 'text-amber-400' : 'text-blue-300'}`}>{confDots}</span>
+                            </button>
+                          )}
+                          {item.status === 'saved' && (
+                            <span className={`flex-shrink-0 text-xs font-semibold px-1.5 py-0.5 rounded-full ${
+                              isLunch ? 'bg-amber-50 text-amber-600' : 'bg-blue-50 text-blue-700'
+                            }`}>{isLunch ? '☀️' : '🌙'}</span>
+                          )}
                           {item.status === 'pending' && (
                             <button
                               onClick={() => setShiftBatch(prev => prev.filter((_, i) => i !== idx))}
-                              className="flex-shrink-0 text-gray-300 hover:text-red-400 text-xs font-bold transition-colors"
+                              className="flex-shrink-0 text-gray-300 hover:text-red-400 text-xs font-bold transition-colors ml-0.5"
                               title="Remove"
                             >✕</button>
                           )}
@@ -1452,21 +1514,31 @@ export default function SalesReportsPage() {
               {/* Shift: batch summary table */}
               {reportType === 'shift' && shiftBatch.length > 0 && (
                 <div className="bg-white border border-gray-100 rounded-xl overflow-hidden shadow-sm">
-                  <div className="px-4 py-3 border-b border-gray-100 bg-gray-50">
+                  <div className="px-4 py-3 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
                     <p className="text-xs font-bold text-gray-500 uppercase tracking-wider">
-                      {shiftType === 'lunch' ? '☀️ Lunch' : '🌙 Dinner'} · {shiftBatch.length} file{shiftBatch.length > 1 ? 's' : ''} queued
+                      {shiftBatch.length} file{shiftBatch.length > 1 ? 's' : ''} queued
+                    </p>
+                    <p className="text-xs text-gray-400">
+                      {shiftBatch.filter(i => (i.manualOverride ?? i.detectedType) === 'lunch').length} × ☀️&nbsp;
+                      {shiftBatch.filter(i => (i.manualOverride ?? i.detectedType) === 'dinner').length} × 🌙
                     </p>
                   </div>
                   <table className="w-full text-xs">
                     <thead>
                       <tr className="border-b border-gray-100">
-                        {['Date','Z-Report','Gross','Net','VAT','Tips','Status'].map(h => (
-                          <th key={h} className={`px-3 py-2 font-semibold text-gray-400 uppercase tracking-wide ${h === 'Date' || h === 'Z-Report' ? 'text-left' : h === 'Status' ? 'text-center' : 'text-right'}`}>{h}</th>
+                        {['Shift','Date','Z-Report','Gross','Net','VAT','Tips','Conf.','Status'].map(h => (
+                          <th key={h} className={`px-3 py-2 font-semibold text-gray-400 uppercase tracking-wide ${h === 'Date' || h === 'Z-Report' ? 'text-left' : h === 'Status' || h === 'Shift' || h === 'Conf.' ? 'text-center' : 'text-right'}`}>{h}</th>
                         ))}
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-50">
                       {shiftBatch.map((item, idx) => {
+                        const effectiveType = item.manualOverride ?? item.detectedType;
+                        const isLunch = effectiveType === 'lunch';
+                        const isOverridden = !!item.manualOverride;
+                        const confDots =
+                          item.confidence === 'high'   ? '●●●' :
+                          item.confidence === 'medium' ? '●●○' : '●○○';
                         const statusIcon =
                           item.status === 'saved'  ? '✓' :
                           item.status === 'error'  ? '✗' :
@@ -1477,12 +1549,22 @@ export default function SalesReportsPage() {
                           item.status === 'saving' ? 'text-blue-500'            : 'text-gray-400';
                         return (
                           <tr key={idx} className="hover:bg-gray-50/60">
+                            <td className="px-3 py-2 text-center">
+                              <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-xs font-bold ${
+                                isLunch ? 'bg-amber-50 text-amber-700' : 'bg-blue-50 text-blue-800'
+                              } ${isOverridden ? 'ring-1 ring-gray-400' : ''}`}>
+                                {isLunch ? '☀️' : '🌙'}
+                              </span>
+                            </td>
                             <td className="px-3 py-2 text-gray-800 font-medium">{fmtDate(item.result.date)}</td>
                             <td className="px-3 py-2 text-gray-500">{item.result.zReportNumber || '—'}</td>
                             <td className="px-3 py-2 text-right tabular-nums text-[#1B5E20] font-semibold">{fmtNum(item.result.grossTotal)}</td>
                             <td className="px-3 py-2 text-right tabular-nums text-blue-700">{fmtNum(item.result.netTotal)}</td>
                             <td className="px-3 py-2 text-right tabular-nums text-gray-500">{fmtNum(item.result.vatTotal)}</td>
                             <td className="px-3 py-2 text-right tabular-nums text-purple-700">{fmtNum(item.result.tips)}</td>
+                            <td className={`px-3 py-2 text-center text-[10px] tracking-tighter ${
+                              item.confidence === 'high' ? 'text-green-500' : item.confidence === 'medium' ? 'text-amber-500' : 'text-red-400'
+                            }`} title={`${item.confidence} confidence${isOverridden ? ' · manually overridden' : ''}`}>{confDots}</td>
                             <td className={`px-3 py-2 text-center ${statusColor}`} title={item.errorMsg}>{statusIcon}</td>
                           </tr>
                         );
