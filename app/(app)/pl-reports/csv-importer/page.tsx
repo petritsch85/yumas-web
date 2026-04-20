@@ -672,7 +672,6 @@ export default function CSVImporterPage() {
             </div>
           )}
         </div>
-        </div>
       )}
 
       {/* ═══════ HISTORY TAB ═══════ */}
