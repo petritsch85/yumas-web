@@ -133,6 +133,13 @@ type ShiftParseResult = {
   error?:             string;
 };
 
+type ShiftBatchItem = {
+  fileName: string;
+  result:   ShiftParseResult;
+  status:   'pending' | 'saving' | 'saved' | 'error';
+  errorMsg?: string;
+};
+
 type RowType   = 'section' | 'bold' | 'normal' | 'pct';
 type RowFormat = 'currency' | 'pct' | 'pct_delta' | 'count';
 
@@ -634,7 +641,7 @@ export default function SalesReportsPage() {
   const [fileName,       setFileName]       = useState<string | null>(null);
   const [shiftType,      setShiftType]      = useState<'lunch'|'dinner'>('dinner');
   const [weeklyResult,   setWeeklyResult]   = useState<WeeklyParseResult | null>(null);
-  const [shiftResult,    setShiftResult]    = useState<ShiftParseResult | null>(null);
+  const [shiftBatch,     setShiftBatch]     = useState<ShiftBatchItem[]>([]);
   const [monthlyResult,  setMonthlyResult]  = useState<MonthlyParseResult | null>(null);
   const [parseError,     setParseError]     = useState<string | null>(null);
   const [importing,     setImporting]     = useState(false);
@@ -828,34 +835,37 @@ export default function SalesReportsPage() {
   );
 
   const canImportWeekly  = !!location && !!weeklyResult?.rows?.length && !importing;
-  const canImportShift   = !!location && !!shiftResult && !shiftResult.error && !!shiftResult.date && !importing;
+  const canImportShift   = !!location && shiftBatch.some(i => i.status === 'pending' && !i.result.error) && !importing;
   const canImportMonthly = !!location && !!monthlyResult && !monthlyResult.error && monthlyResult.year > 0 && !importing;
 
   // ── Handlers ───────────────────────────────────────────────────────────────
 
   const resetUpload = useCallback(() => {
-    setFileName(null); setWeeklyResult(null); setShiftResult(null); setMonthlyResult(null);
+    setFileName(null); setWeeklyResult(null); setShiftBatch([]); setMonthlyResult(null);
     setParseError(null); setWeeklyPage(0);
   }, []);
 
   const processFile = useCallback((file: File) => {
-    setFileName(file.name);
-    setWeeklyResult(null); setShiftResult(null); setMonthlyResult(null); setParseError(null); setWeeklyPage(0);
     const reader = new FileReader();
     reader.onload = (e) => {
       const content = e.target?.result as string;
-      if (reportType === 'weekly') {
-        const r = parseWeeklyCSV(content ?? '');
-        if (r.error) { setParseError(r.error); return; }
-        setWeeklyResult(r);
-      } else if (reportType === 'monthly') {
-        const r = parseMonthlyCSV(content ?? '');
-        if (r.error) { setParseError(r.error); return; }
-        setMonthlyResult(r);
-      } else {
+      if (reportType === 'shift') {
         const r = parseShiftCSV(content ?? '');
         if (r.error) { setParseError(r.error); return; }
-        setShiftResult(r);
+        setParseError(null);
+        setShiftBatch(prev => [...prev, { fileName: file.name, result: r, status: 'pending' }]);
+      } else {
+        setFileName(file.name);
+        setWeeklyResult(null); setMonthlyResult(null); setParseError(null); setWeeklyPage(0);
+        if (reportType === 'weekly') {
+          const r = parseWeeklyCSV(content ?? '');
+          if (r.error) { setParseError(r.error); return; }
+          setWeeklyResult(r);
+        } else {
+          const r = parseMonthlyCSV(content ?? '');
+          if (r.error) { setParseError(r.error); return; }
+          setMonthlyResult(r);
+        }
       }
     };
     reader.readAsText(file, 'UTF-8');
@@ -863,7 +873,7 @@ export default function SalesReportsPage() {
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault(); setIsDragging(false);
-    const f = e.dataTransfer.files?.[0]; if (f) processFile(f);
+    Array.from(e.dataTransfer.files ?? []).forEach(f => processFile(f));
   }, [processFile]);
 
   const handleImportWeekly = useCallback(async () => {
@@ -899,42 +909,56 @@ export default function SalesReportsPage() {
   }, [location, weeklyResult, fileName, queryClient, resetUpload]);
 
   const handleImportShift = useCallback(async () => {
-    if (!location || !shiftResult || !shiftResult.date) return;
+    const pending = shiftBatch.filter(i => i.status === 'pending' && !i.result.error);
+    if (!location || !pending.length) return;
     setImporting(true);
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      const { data: inserted, error: srErr } = await supabase.from('shift_reports').insert({
-        location_id: location.id, report_date: shiftResult.date,
-        z_report_number: shiftResult.zReportNumber,
-        shift_type: shiftType,
-        gross_total: shiftResult.grossTotal, gross_food: shiftResult.grossFood,
-        gross_beverages: shiftResult.grossDrinks, net_total: shiftResult.netTotal,
-        vat_total: shiftResult.vatTotal, tips: shiftResult.tips,
-        inhouse_total: shiftResult.inhouseTotal, takeaway_total: shiftResult.takeawayTotal,
-        cancellations_count: shiftResult.cancellationsCount,
-        cancellations_total: shiftResult.cancellationsTotal,
-        uploaded_by: user?.id ?? null,
-      }).select('id').single();
-      if (srErr) throw srErr;
-      if (shiftResult.categories.length > 0) {
-        const { error: catErr } = await supabase.from('shift_report_categories').insert(
-          shiftResult.categories.map(c => ({
-            shift_report_id: inserted.id, category_name: c.name,
-            quantity: c.quantity, total_revenue: c.revenue,
-            inhouse_revenue: c.inhouseRevenue, takeaway_revenue: c.takeawayRevenue,
-            is_main_category: c.isMain,
-          }))
-        );
-        if (catErr) throw catErr;
+    const { data: { user } } = await supabase.auth.getUser();
+    let lastDate = '';
+    for (const item of pending) {
+      setShiftBatch(prev => prev.map(i => i === item ? { ...i, status: 'saving' } : i));
+      try {
+        const sr = item.result;
+        const { data: inserted, error: srErr } = await supabase.from('shift_reports').insert({
+          location_id: location.id, report_date: sr.date,
+          z_report_number: sr.zReportNumber,
+          shift_type: shiftType,
+          gross_total: sr.grossTotal, gross_food: sr.grossFood,
+          gross_beverages: sr.grossDrinks, net_total: sr.netTotal,
+          vat_total: sr.vatTotal, tips: sr.tips,
+          inhouse_total: sr.inhouseTotal, takeaway_total: sr.takeawayTotal,
+          cancellations_count: sr.cancellationsCount,
+          cancellations_total: sr.cancellationsTotal,
+          uploaded_by: user?.id ?? null,
+        }).select('id').single();
+        if (srErr) throw srErr;
+        if (sr.categories.length > 0) {
+          const { error: catErr } = await supabase.from('shift_report_categories').insert(
+            sr.categories.map(c => ({
+              shift_report_id: inserted.id, category_name: c.name,
+              quantity: c.quantity, total_revenue: c.revenue,
+              inhouse_revenue: c.inhouseRevenue, takeaway_revenue: c.takeawayRevenue,
+              is_main_category: c.isMain,
+            }))
+          );
+          if (catErr) throw catErr;
+        }
+        lastDate = sr.date;
+        setShiftBatch(prev => prev.map(i => i === item ? { ...i, status: 'saved' } : i));
+      } catch (e: any) {
+        setShiftBatch(prev => prev.map(i => i === item ? { ...i, status: 'error', errorMsg: e.message } : i));
       }
-      // Navigate to the month of the imported shift
-      const d = new Date(shiftResult.date + 'T12:00:00Z');
+    }
+    queryClient.invalidateQueries({ queryKey: ['shift-reports'] });
+    setImporting(false);
+    if (lastDate) {
+      const d = new Date(lastDate + 'T12:00:00Z');
       setYear(d.getUTCFullYear()); setQuarter(Math.ceil((d.getUTCMonth() + 1) / 3));
-      queryClient.invalidateQueries({ queryKey: ['shift-reports'] });
-      resetUpload(); setActiveTab('daily');
-    } catch (e: any) { alert(`Import failed: ${e.message}`); }
-    finally { setImporting(false); }
-  }, [location, shiftResult, queryClient, resetUpload]);
+    }
+    // Only switch tab if all saved (no errors)
+    if (shiftBatch.every(i => i.status === 'saved' || i.status === 'error')) {
+      setActiveTab('daily');
+    }
+  }, [location, shiftBatch, shiftType, queryClient]);
 
   const handleImportMonthly = useCallback(async () => {
     if (!location || !monthlyResult || monthlyResult.year === 0) return;
@@ -1176,29 +1200,35 @@ export default function SalesReportsPage() {
                   onClick={() => fileInputRef.current?.click()}
                   className={`relative border-2 border-dashed rounded-xl p-8 text-center transition-colors cursor-pointer ${
                     isDragging ? 'border-[#1B5E20] bg-green-50' :
-                    fileName && !parseError ? 'border-green-400 bg-green-50' :
+                    (reportType === 'shift' ? shiftBatch.length > 0 : !!fileName) && !parseError ? 'border-green-400 bg-green-50' :
                     parseError ? 'border-red-300 bg-red-50' :
                     'border-gray-200 bg-white hover:border-gray-300'
                   }`}
                 >
-                  {fileName && !parseError
+                  {(reportType === 'shift' ? shiftBatch.length > 0 : !!fileName) && !parseError
                     ? <FileCheck className="mx-auto mb-2 text-green-600" size={32} />
                     : <Upload    className="mx-auto mb-2 text-gray-400"   size={32} />}
-                  <p className={`text-sm font-semibold mb-1 ${fileName && !parseError ? 'text-green-700' : 'text-gray-600'}`}>
-                    {fileName ?? 'Drop CSV here'}
+                  <p className={`text-sm font-semibold mb-1 ${(reportType === 'shift' ? shiftBatch.length > 0 : !!fileName) && !parseError ? 'text-green-700' : 'text-gray-600'}`}>
+                    {reportType === 'shift'
+                      ? (shiftBatch.length > 0 ? `${shiftBatch.length} file${shiftBatch.length > 1 ? 's' : ''} queued` : 'Drop CSV files here')
+                      : (fileName ?? 'Drop CSV here')}
                   </p>
                   <p className="text-xs text-gray-400 mb-3">
-                    {weeklyResult   ? `${weeklyResult.rows.length} products parsed` :
-                     shiftResult    ? `Z-Report ${shiftResult.zReportNumber} · ${fmtDate(shiftResult.date)}` :
-                     monthlyResult  ? `Z ${monthlyResult.fromZ}–${monthlyResult.toZ} · ${MONTHS[monthlyResult.month-1]} ${monthlyResult.year}` :
-                     'or click to browse'}
+                    {weeklyResult  ? `${weeklyResult.rows.length} products parsed` :
+                     monthlyResult ? `Z ${monthlyResult.fromZ}–${monthlyResult.toZ} · ${MONTHS[monthlyResult.month-1]} ${monthlyResult.year}` :
+                     reportType === 'shift' && shiftBatch.length > 0
+                       ? `${shiftBatch.filter(i => i.status === 'pending').length} pending · ${shiftBatch.filter(i => i.status === 'saved').length} saved`
+                       : 'or click to browse'}
                   </p>
                   <input ref={fileInputRef} type="file" accept=".csv,text/csv,text/plain" className="hidden"
+                    multiple={reportType === 'shift'}
                     onClick={(e) => e.stopPropagation()}
-                    onChange={(e) => { const f = e.target.files?.[0]; if (f) processFile(f); e.target.value = ''; }}
+                    onChange={(e) => { Array.from(e.target.files ?? []).forEach(f => processFile(f)); e.target.value = ''; }}
                   />
                   <span className="px-4 py-1.5 bg-white border border-gray-200 rounded-lg text-xs font-semibold text-gray-600 hover:bg-gray-50 transition-colors inline-block">
-                    {fileName ? 'Replace file' : 'Browse files'}
+                    {reportType === 'shift'
+                      ? (shiftBatch.length > 0 ? 'Add more files' : 'Browse files')
+                      : (fileName ? 'Replace file' : 'Browse files')}
                   </span>
                 </div>
 
@@ -1225,10 +1255,15 @@ export default function SalesReportsPage() {
                   {importing ? 'Saving…' :
                    !location ? 'Select a location first' :
                    reportType === 'weekly'
-                     ? (canImportWeekly  ? `Save weekly report · ${fmt(weeklyResult!.summary!.grossTotal)}`                                         : 'Drop a CSV file above')
+                     ? (canImportWeekly  ? `Save weekly report · ${fmt(weeklyResult!.summary!.grossTotal)}`                                                     : 'Drop a CSV file above')
                      : reportType === 'monthly'
                      ? (canImportMonthly ? `Save monthly report · ${MONTHS[monthlyResult!.month-1]} ${monthlyResult!.year} · ${fmt(monthlyResult!.grossTotal)}` : 'Drop a CSV file above')
-                     : (canImportShift   ? `Save shift report · ${fmt(shiftResult!.grossTotal)}`                                                    : 'Drop a CSV file above')}
+                     : (() => {
+                         const pending = shiftBatch.filter(i => i.status === 'pending' && !i.result.error);
+                         return canImportShift
+                           ? `Save ${pending.length} shift report${pending.length > 1 ? 's' : ''} · ${shiftType === 'lunch' ? '☀️ Lunch' : '🌙 Dinner'}`
+                           : (shiftBatch.length > 0 ? 'No pending reports to save' : 'Drop a CSV file above');
+                       })()}
                 </button>
               </div>
 
@@ -1257,38 +1292,45 @@ export default function SalesReportsPage() {
                 </div>
               )}
 
-              {/* ── Shift summary cards ── */}
-              {reportType === 'shift' && shiftResult && !shiftResult.error && (
-                <div className="space-y-3">
-                  <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm flex items-center gap-5">
-                    <div>
-                      <p className="text-xs text-gray-400 font-semibold uppercase tracking-wide">Date</p>
-                      <p className="text-base font-bold text-gray-900 mt-0.5">{fmtDate(shiftResult.date)}</p>
-                    </div>
-                    <div className="border-l border-gray-200 pl-5">
-                      <p className="text-xs text-gray-400 font-semibold uppercase tracking-wide">Z-Report #</p>
-                      <p className="text-base font-bold text-gray-900 mt-0.5">{shiftResult.zReportNumber || '—'}</p>
-                    </div>
+              {/* ── Shift batch list ── */}
+              {reportType === 'shift' && shiftBatch.length > 0 && (
+                <div>
+                  <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">
+                    Queued shifts
+                  </p>
+                  <div className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
+                    {shiftBatch.map((item, idx) => {
+                      const statusIcon =
+                        item.status === 'saved'  ? '✓' :
+                        item.status === 'error'  ? '✗' :
+                        item.status === 'saving' ? '…' : '○';
+                      const statusColor =
+                        item.status === 'saved'  ? 'text-green-600' :
+                        item.status === 'error'  ? 'text-red-500'   :
+                        item.status === 'saving' ? 'text-blue-500'  : 'text-gray-400';
+                      return (
+                        <div key={idx} className="bg-white border border-gray-100 rounded-lg px-3 py-2 flex items-center gap-2 shadow-sm">
+                          <span className={`text-sm font-bold flex-shrink-0 w-4 text-center ${statusColor}`}>{statusIcon}</span>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs font-semibold text-gray-800 truncate">{fmtDate(item.result.date)}</p>
+                            <p className="text-xs text-gray-400">
+                              Z-{item.result.zReportNumber || '?'} · {fmt(item.result.grossTotal)}
+                            </p>
+                            {item.status === 'error' && item.errorMsg && (
+                              <p className="text-xs text-red-500 truncate">{item.errorMsg}</p>
+                            )}
+                          </div>
+                          {item.status === 'pending' && (
+                            <button
+                              onClick={() => setShiftBatch(prev => prev.filter((_, i) => i !== idx))}
+                              className="flex-shrink-0 text-gray-300 hover:text-red-400 text-xs font-bold transition-colors"
+                              title="Remove"
+                            >✕</button>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    {[
-                      { label:'Gross Revenue', value: fmt(shiftResult.grossTotal),         color:'text-[#1B5E20]'  },
-                      { label:'Net Revenue',   value: fmt(shiftResult.netTotal),            color:'text-blue-700'   },
-                      { label:'VAT',           value: fmt(shiftResult.vatTotal),            color:'text-amber-700'  },
-                      { label:'Tips',          value: fmt(shiftResult.tips),               color:'text-purple-700' },
-                    ].map(s => (
-                      <div key={s.label} className="bg-white border border-gray-100 rounded-xl p-3 shadow-sm">
-                        <p className="text-xs text-gray-400 font-semibold uppercase mb-1">{s.label}</p>
-                        <p className={`text-sm font-bold ${s.color}`}>{s.value}</p>
-                      </div>
-                    ))}
-                  </div>
-                  {shiftResult.cancellationsTotal > 0 && (
-                    <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs">
-                      <span className="font-semibold text-amber-800">Cancellations: </span>
-                      <span className="text-amber-700">{shiftResult.cancellationsCount}× · {fmt(shiftResult.cancellationsTotal)}</span>
-                    </div>
-                  )}
                 </div>
               )}
 
@@ -1407,49 +1449,58 @@ export default function SalesReportsPage() {
                 </>
               )}
 
-              {/* Shift: category breakdown */}
-              {reportType === 'shift' && shiftResult && !shiftResult.error && (
-                <div className="space-y-4">
-                  {/* Main categories */}
-                  {shiftResult.categories.filter(c => c.isMain).length > 0 && (
-                    <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm">
-                      <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Main Categories</p>
-                      {shiftResult.categories.filter(c => c.isMain).map(cat => {
-                        const p = shiftResult.grossTotal > 0 ? (cat.revenue / shiftResult.grossTotal) * 100 : 0;
+              {/* Shift: batch summary table */}
+              {reportType === 'shift' && shiftBatch.length > 0 && (
+                <div className="bg-white border border-gray-100 rounded-xl overflow-hidden shadow-sm">
+                  <div className="px-4 py-3 border-b border-gray-100 bg-gray-50">
+                    <p className="text-xs font-bold text-gray-500 uppercase tracking-wider">
+                      {shiftType === 'lunch' ? '☀️ Lunch' : '🌙 Dinner'} · {shiftBatch.length} file{shiftBatch.length > 1 ? 's' : ''} queued
+                    </p>
+                  </div>
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="border-b border-gray-100">
+                        {['Date','Z-Report','Gross','Net','VAT','Tips','Status'].map(h => (
+                          <th key={h} className={`px-3 py-2 font-semibold text-gray-400 uppercase tracking-wide ${h === 'Date' || h === 'Z-Report' ? 'text-left' : h === 'Status' ? 'text-center' : 'text-right'}`}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-50">
+                      {shiftBatch.map((item, idx) => {
+                        const statusIcon =
+                          item.status === 'saved'  ? '✓' :
+                          item.status === 'error'  ? '✗' :
+                          item.status === 'saving' ? '…' : '○';
+                        const statusColor =
+                          item.status === 'saved'  ? 'text-green-600 font-bold' :
+                          item.status === 'error'  ? 'text-red-500 font-bold'   :
+                          item.status === 'saving' ? 'text-blue-500'            : 'text-gray-400';
                         return (
-                          <div key={cat.name} className="mb-3 last:mb-0">
-                            <div className="flex justify-between text-xs mb-1">
-                              <span className="font-medium text-gray-700">{cat.name}</span>
-                              <span className="text-gray-500">{fmt(cat.revenue)} · {p.toFixed(1)}%</span>
-                            </div>
-                            <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden"><div className="h-full bg-[#2E7D32] rounded-full" style={{ width:`${p}%` }} /></div>
-                            <div className="flex gap-4 mt-1 text-xs text-gray-400">
-                              <span>In-house: {fmt(cat.inhouseRevenue)}</span>
-                              {cat.takeawayRevenue > 0 && <span>Takeaway: {fmt(cat.takeawayRevenue)}</span>}
-                            </div>
-                          </div>
+                          <tr key={idx} className="hover:bg-gray-50/60">
+                            <td className="px-3 py-2 text-gray-800 font-medium">{fmtDate(item.result.date)}</td>
+                            <td className="px-3 py-2 text-gray-500">{item.result.zReportNumber || '—'}</td>
+                            <td className="px-3 py-2 text-right tabular-nums text-[#1B5E20] font-semibold">{fmtNum(item.result.grossTotal)}</td>
+                            <td className="px-3 py-2 text-right tabular-nums text-blue-700">{fmtNum(item.result.netTotal)}</td>
+                            <td className="px-3 py-2 text-right tabular-nums text-gray-500">{fmtNum(item.result.vatTotal)}</td>
+                            <td className="px-3 py-2 text-right tabular-nums text-purple-700">{fmtNum(item.result.tips)}</td>
+                            <td className={`px-3 py-2 text-center ${statusColor}`} title={item.errorMsg}>{statusIcon}</td>
+                          </tr>
                         );
                       })}
-                    </div>
-                  )}
-                  {/* Sub-categories */}
-                  {shiftResult.categories.filter(c => !c.isMain && c.revenue > 0).length > 0 && (
-                    <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm">
-                      <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Categories</p>
-                      {shiftResult.categories.filter(c => !c.isMain && c.revenue > 0).sort((a,b) => b.revenue - a.revenue).slice(0, 12).map(cat => {
-                        const p = shiftResult.grossTotal > 0 ? (cat.revenue / shiftResult.grossTotal) * 100 : 0;
-                        return (
-                          <div key={cat.name} className="mb-2 last:mb-0">
-                            <div className="flex justify-between text-xs mb-1">
-                              <span className="text-gray-700">{cat.name} <span className="text-gray-400">×{cat.quantity}</span></span>
-                              <span className="text-gray-500">{fmt(cat.revenue)} · {p.toFixed(1)}%</span>
-                            </div>
-                            <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden"><div className="h-full bg-blue-500 rounded-full" style={{ width:`${p}%` }} /></div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
+                    </tbody>
+                    {shiftBatch.length > 1 && (
+                      <tfoot>
+                        <tr className="border-t-2 border-gray-200 bg-gray-50 font-bold">
+                          <td className="px-3 py-2 text-gray-600" colSpan={2}>Total ({shiftBatch.length} shifts)</td>
+                          <td className="px-3 py-2 text-right tabular-nums text-[#1B5E20]">{fmtNum(shiftBatch.reduce((s,i) => s + i.result.grossTotal, 0))}</td>
+                          <td className="px-3 py-2 text-right tabular-nums text-blue-700">{fmtNum(shiftBatch.reduce((s,i) => s + i.result.netTotal, 0))}</td>
+                          <td className="px-3 py-2 text-right tabular-nums text-gray-500">{fmtNum(shiftBatch.reduce((s,i) => s + i.result.vatTotal, 0))}</td>
+                          <td className="px-3 py-2 text-right tabular-nums text-purple-700">{fmtNum(shiftBatch.reduce((s,i) => s + i.result.tips, 0))}</td>
+                          <td />
+                        </tr>
+                      </tfoot>
+                    )}
+                  </table>
                 </div>
               )}
 
@@ -1504,7 +1555,7 @@ export default function SalesReportsPage() {
               )}
 
               {/* Empty state */}
-              {!weeklyResult && !shiftResult && !monthlyResult && !parseError && (
+              {!weeklyResult && shiftBatch.length === 0 && !monthlyResult && !parseError && (
                 <div className="flex flex-col items-center justify-center h-64 border-2 border-dashed border-gray-200 rounded-xl gap-3">
                   <Upload size={40} className="text-gray-200" />
                   <p className="text-sm text-gray-400">
