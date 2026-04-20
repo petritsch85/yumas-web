@@ -147,6 +147,7 @@ const navGroups: NavGroup[] = [
     items: [
       { label: 'Accounts',      href: '/coming-soon/accounts',       icon: Building2 },
       { label: 'Bills',         href: '/bills',                      icon: FilePlus },
+      { label: 'Create Bills',  href: '/bills/new',                  icon: FileCheck },
       { label: 'Approve Bills', href: '/coming-soon/approve-bills',  icon: FileCheck },
     ],
   },
