@@ -5,7 +5,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
 import {
   Upload, FileCheck, AlertCircle, DatabaseZap,
-  MapPin, CalendarDays, BarChart3,
+  MapPin, CalendarDays, BarChart3, TableProperties,
   ChevronLeft, ChevronRight, TrendingUp, Receipt, Percent, Euro,
   Loader2,
 } from 'lucide-react';
@@ -545,6 +545,67 @@ const DAILY_ROWS: DRow[] = [
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
+// MONTHLY P&L TYPES + ROWS
+// ─────────────────────────────────────────────────────────────────────────────
+
+type MonthlyReportData = {
+  report_month:        number;
+  report_year:         number;
+  gross_total:         number | null;
+  gross_food:          number | null;
+  gross_beverages:     number | null;
+  net_total:           number | null;
+  vat_total:           number | null;
+  tips:                number | null;
+  inhouse_total:       number | null;
+  takeaway_total:      number | null;
+  cancellations_count: number | null;
+  cancellations_total: number | null;
+};
+
+type MRow = {
+  type:      RowType;
+  label:     string;
+  color?:    string;
+  format?:   RowFormat;
+  getValue?: (m: MonthlyReportData | null, pm: MonthlyReportData | null) => number | null;
+};
+
+const MONTHLY_ROWS: MRow[] = [
+  { type:'section', label:'REVENUE' },
+  { type:'bold',   label:'Total Gross Revenue',      color:'blue',  format:'currency',  getValue:(m)=>safeNum(m?.gross_total) },
+  { type:'pct',    label:'Revenue growth (%)',        color:'black', format:'pct_delta', getValue:(m,pm)=>growth(safeNum(m?.gross_total), safeNum(pm?.gross_total)) },
+  { type:'normal', label:'Food Revenue (7% VAT)',     color:'blue',  format:'currency',  getValue:(m)=>safeNum(m?.gross_food) },
+  { type:'pct',    label:'Food share (%)',            color:'black', format:'pct',       getValue:(m)=>pct(safeNum(m?.gross_food), safeNum(m?.gross_total)) },
+  { type:'normal', label:'Drinks Revenue (19% VAT)',  color:'blue',  format:'currency',  getValue:(m)=>safeNum(m?.gross_beverages) },
+  { type:'pct',    label:'Drinks share (%)',          color:'black', format:'pct',       getValue:(m)=>pct(safeNum(m?.gross_beverages), safeNum(m?.gross_total)) },
+  { type:'normal', label:'Tips',                      color:'blue',  format:'currency',  getValue:(m)=>safeNum(m?.tips) },
+  { type:'section', label:'NET REVENUE' },
+  { type:'bold',   label:'Net Revenue',               color:'blue',  format:'currency',  getValue:(m)=>safeNum(m?.net_total) },
+  { type:'pct',    label:'Net growth (%)',            color:'black', format:'pct_delta', getValue:(m,pm)=>growth(safeNum(m?.net_total), safeNum(pm?.net_total)) },
+  { type:'normal', label:'VAT',                       color:'blue',  format:'currency',  getValue:(m)=>safeNum(m?.vat_total) },
+  { type:'pct',    label:'Effective VAT rate (%)',    color:'black', format:'pct',       getValue:(m)=>pct(safeNum(m?.vat_total), safeNum(m?.net_total)) },
+  { type:'section', label:'CHANNEL MIX' },
+  { type:'normal', label:'In-house Revenue',          color:'blue',  format:'currency',  getValue:(m)=>safeNum(m?.inhouse_total) },
+  { type:'pct',    label:'In-house share (%)',        color:'black', format:'pct',       getValue:(m)=>pct(safeNum(m?.inhouse_total), safeNum(m?.gross_total)) },
+  { type:'normal', label:'Takeaway Revenue',          color:'blue',  format:'currency',  getValue:(m)=>safeNum(m?.takeaway_total) },
+  { type:'pct',    label:'Takeaway share (%)',        color:'black', format:'pct',       getValue:(m)=>pct(safeNum(m?.takeaway_total), safeNum(m?.gross_total)) },
+  { type:'section', label:'CANCELLATIONS' },
+  { type:'normal', label:'Cancellation count',        color:'black', format:'count',     getValue:(m)=>safeNum(m?.cancellations_count) },
+  { type:'normal', label:'Cancellation value (€)',    color:'black', format:'currency',  getValue:(m)=>safeNum(m?.cancellations_total) },
+  { type:'section', label:'COSTS' },
+  { type:'normal', label:'Food Cost',                 color:'black', format:'currency',  getValue:()=>null },
+  { type:'pct',    label:'Food cost (%)',             color:'black', format:'pct',       getValue:()=>null },
+  { type:'normal', label:'Labour Cost',               color:'black', format:'currency',  getValue:()=>null },
+  { type:'pct',    label:'Labour cost (%)',           color:'black', format:'pct',       getValue:()=>null },
+  { type:'section', label:'PROFITABILITY' },
+  { type:'bold',   label:'Gross Profit',              color:'black', format:'currency',  getValue:()=>null },
+  { type:'pct',    label:'Gross margin (%)',          color:'black', format:'pct',       getValue:()=>null },
+  { type:'bold',   label:'EBITDA',                    color:'black', format:'currency',  getValue:()=>null },
+  { type:'pct',    label:'EBITDA margin (%)',         color:'black', format:'pct',       getValue:()=>null },
+];
+
+// ─────────────────────────────────────────────────────────────────────────────
 // PAGE
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -553,7 +614,7 @@ export default function SalesReportsPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Tab / sub-tab
-  const [activeTab,   setActiveTab]   = useState<'upload'|'daily'|'weekly'>('daily');
+  const [activeTab,   setActiveTab]   = useState<'upload'|'daily'|'weekly'|'monthly'>('daily');
   const [reportType,  setReportType]  = useState<'weekly'|'shift'|'monthly'>('shift');
 
   // Shared controls
@@ -599,6 +660,21 @@ export default function SalesReportsPage() {
     },
   });
 
+  // Monthly reports
+  const { data: monthlyReports = [] } = useQuery({
+    queryKey: ['monthly-reports', location?.id, year],
+    enabled: !!location && activeTab === 'monthly',
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('monthly_reports')
+        .select('report_month,report_year,gross_total,gross_food,gross_beverages,net_total,vat_total,tips,inhouse_total,takeaway_total,cancellations_count,cancellations_total')
+        .eq('location_id', location!.id)
+        .eq('report_year', year)
+        .order('report_month', { ascending: true });
+      return (data ?? []) as MonthlyReportData[];
+    },
+  });
+
   // Shift reports for daily view
   const { data: shiftRows = [] } = useQuery({
     queryKey: ['shift-reports', location?.id, year, month],
@@ -618,6 +694,30 @@ export default function SalesReportsPage() {
   });
 
   // ── Derived data ───────────────────────────────────────────────────────────
+
+  const monthMap = useMemo<Record<number, MonthlyReportData>>(() => {
+    const m: Record<number, MonthlyReportData> = {};
+    for (const r of monthlyReports) m[r.report_month] = r;
+    return m;
+  }, [monthlyReports]);
+
+  const yearMonthTotal = useMemo<MonthlyReportData | null>(() => {
+    const rows = Object.values(monthMap);
+    if (!rows.length) return null;
+    return rows.reduce<MonthlyReportData>((acc, m) => ({
+      report_month: 0, report_year: year,
+      gross_total:         (acc.gross_total         ?? 0) + (m.gross_total         ?? 0),
+      gross_food:          (acc.gross_food          ?? 0) + (m.gross_food          ?? 0),
+      gross_beverages:     (acc.gross_beverages     ?? 0) + (m.gross_beverages     ?? 0),
+      net_total:           (acc.net_total           ?? 0) + (m.net_total           ?? 0),
+      vat_total:           (acc.vat_total           ?? 0) + (m.vat_total           ?? 0),
+      tips:                (acc.tips                ?? 0) + (m.tips                ?? 0),
+      inhouse_total:       (acc.inhouse_total       ?? 0) + (m.inhouse_total       ?? 0),
+      takeaway_total:      (acc.takeaway_total      ?? 0) + (m.takeaway_total      ?? 0),
+      cancellations_count: (acc.cancellations_count ?? 0) + (m.cancellations_count ?? 0),
+      cancellations_total: (acc.cancellations_total ?? 0) + (m.cancellations_total ?? 0),
+    }), { report_month:0, report_year:year, gross_total:0, gross_food:0, gross_beverages:0, net_total:0, vat_total:0, tips:0, inhouse_total:0, takeaway_total:0, cancellations_count:0, cancellations_total:0 });
+  }, [monthMap, year]);
 
   const weekMap = useMemo<Record<number, WeekData>>(() => {
     const m: Record<number, WeekData> = {};
@@ -840,6 +940,21 @@ export default function SalesReportsPage() {
     return <span>{fmtNum(val)}</span>;
   };
 
+  const renderMonthCell = (row: MRow, mn: number) => {
+    if (row.type === 'section') return null;
+    const m = monthMap[mn] ?? null, pm = monthMap[mn-1] ?? null;
+    const val = row.getValue?.(m, pm) ?? null;
+    if (val === null) return <span className="text-gray-300 select-none">—</span>;
+    if (row.format === 'currency') return <span className={row.color === 'blue' ? 'text-blue-700' : 'text-gray-900'}>{fmtNum(val)}</span>;
+    if (row.format === 'pct')      return <span className="text-gray-500">{val.toFixed(1)}%</span>;
+    if (row.format === 'count')    return <span className="text-gray-700">{Math.round(val)}</span>;
+    if (row.format === 'pct_delta') {
+      const s = val >= 0 ? '+' : '', cl = val >= 0 ? 'text-green-600' : 'text-red-500';
+      return <span className={cl}>{s}{val.toFixed(1)}%</span>;
+    }
+    return <span>{fmtNum(val)}</span>;
+  };
+
   // ── Shared controls UI ─────────────────────────────────────────────────────
 
   const today = new Date();
@@ -849,6 +964,7 @@ export default function SalesReportsPage() {
 
   const LABEL_W  = 220;
   const COL_W_WK = 76;
+  const COL_W_MN = 90;
   const COL_W_D  = 68;
 
   // ── Render ─────────────────────────────────────────────────────────────────
@@ -871,9 +987,10 @@ export default function SalesReportsPage() {
       <div className="border-b border-gray-200 mb-5">
         <nav className="flex gap-6">
           {([
-            ['upload',  <Upload size={14} />,      'Upload'],
-            ['daily',   <CalendarDays size={14} />, 'Daily P&L'],
-            ['weekly',  <BarChart3 size={14} />,   'Weekly P&L'],
+            ['upload',  <Upload size={14} />,        'Upload'],
+            ['daily',   <CalendarDays size={14} />,  'Daily P&L'],
+            ['monthly', <TableProperties size={14} />, 'Monthly P&L'],
+            ['weekly',  <BarChart3 size={14} />,     'Weekly P&L'],
           ] as const).map(([t, icon, label]) => (
             <button key={t} onClick={() => setActiveTab(t)}
               className={`flex items-center gap-2 pb-3 text-sm font-semibold border-b-2 transition-colors ${
@@ -1528,6 +1645,112 @@ export default function SalesReportsPage() {
               {yearTotal && (
                 <span className="text-xs text-gray-400">
                   Total gross {year}: <span className="font-bold text-[#1B5E20]">{fmt(yearTotal.total_revenue)}</span>
+                </span>
+              )}
+            </div>
+          </div>
+        )
+      )}
+
+      {/* ══════════════════════════════════════════════════════════════════
+          MONTHLY P&L TAB
+      ══════════════════════════════════════════════════════════════════ */}
+      {activeTab === 'monthly' && (
+        !location ? (
+          <div className="flex flex-col items-center justify-center h-64 text-gray-400 gap-2 border border-dashed border-gray-200 rounded-xl">
+            <MapPin size={36} className="text-gray-200" />
+            <p className="text-sm">Select a location to view the monthly P&amp;L</p>
+          </div>
+        ) : monthlyReports.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-64 text-gray-400 gap-2 border border-dashed border-gray-200 rounded-xl">
+            <TableProperties size={36} className="text-gray-200" />
+            <p className="text-sm font-medium">No monthly reports for {location.name} · {year}</p>
+            <p className="text-xs">Upload a monthly Z-report CSV in the Upload tab</p>
+            <button onClick={() => setActiveTab('upload')}
+              className="mt-1 px-4 py-2 bg-[#1B5E20] text-white text-xs font-semibold rounded-lg hover:bg-[#2E7D32] transition-colors">
+              Go to Upload
+            </button>
+          </div>
+        ) : (
+          <div className="border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+            <div className="overflow-auto" style={{ maxHeight: 'calc(100vh - 260px)' }}>
+              <table className="text-xs border-collapse" style={{ minWidth: LABEL_W + 13 * COL_W_MN }}>
+                <thead className="sticky top-0 z-30">
+                  <tr style={{ backgroundColor:'#111827' }}>
+                    <th className="sticky left-0 z-20 px-4 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider whitespace-nowrap border-r border-gray-700"
+                      style={{ backgroundColor:'#111827', minWidth:LABEL_W, width:LABEL_W }}>
+                      METRIC / MONTH · {year}
+                    </th>
+                    {MONTHS.map((mn, i) => {
+                      const hasData   = !!monthMap[i+1];
+                      const isCurMon  = year === todayYear && i+1 === todayMonth;
+                      return (
+                        <th key={mn} className="py-3 text-right font-bold whitespace-nowrap tabular-nums"
+                          style={{ minWidth:COL_W_MN, width:COL_W_MN, paddingLeft:4, paddingRight:10,
+                            color: isCurMon ? '#ffffff' : hasData ? '#93c5fd' : '#4b5563',
+                            borderBottom: isCurMon ? '2px solid #3b82f6' : 'none' }}>
+                          {mn}
+                        </th>
+                      );
+                    })}
+                    <th className="py-3 text-right font-bold whitespace-nowrap border-l border-gray-700"
+                      style={{ minWidth:COL_W_MN+8, paddingLeft:4, paddingRight:10, color:'#e5e7eb' }}>
+                      FY {year}
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {MONTHLY_ROWS.map((row, i) => {
+                    if (row.type === 'section') {
+                      return (
+                        <tr key={i}>
+                          <td colSpan={14} className="sticky left-0 px-4 py-2 text-xs font-bold uppercase tracking-widest"
+                            style={{ backgroundColor:'#f3f4f6', color:'#374151', letterSpacing:'0.08em' }}>
+                            {row.label}
+                          </td>
+                        </tr>
+                      );
+                    }
+                    const isBold = row.type === 'bold';
+                    const isPct  = row.type === 'pct';
+                    const bg     = isBold ? '#f0fdf4' : '#ffffff';
+                    return (
+                      <tr key={i} className="border-b border-gray-100 hover:bg-gray-50/60 group" style={{ backgroundColor:bg }}>
+                        <td className={`sticky left-0 z-10 px-4 py-2 whitespace-nowrap border-r border-gray-100 group-hover:bg-gray-50/60 transition-colors ${
+                          isBold ? 'font-bold text-gray-900' : isPct ? 'pl-8 text-gray-400 italic' : 'text-gray-700'
+                        }`} style={{ backgroundColor:bg }}>
+                          {row.label}
+                        </td>
+                        {MONTHS.map((_, mi) => {
+                          const isCurMon = year === todayYear && mi+1 === todayMonth;
+                          return (
+                            <td key={mi} className={`py-2 text-right tabular-nums ${isBold ? 'font-bold' : ''}`}
+                              style={{ paddingLeft:4, paddingRight:10, backgroundColor: isCurMon ? 'rgba(59,130,246,0.04)' : undefined }}>
+                              {renderMonthCell(row, mi+1)}
+                            </td>
+                          );
+                        })}
+                        <td className={`py-2 text-right tabular-nums border-l border-gray-200 ${isBold ? 'font-bold' : ''}`}
+                          style={{ paddingLeft:4, paddingRight:10 }}>
+                          {isPct || !yearMonthTotal ? <span className="text-gray-300">—</span> : (() => {
+                            const val = row.getValue?.(yearMonthTotal, null) ?? null;
+                            if (val === null) return <span className="text-gray-300">—</span>;
+                            if (row.format === 'currency') return <span className={row.color === 'blue' ? 'text-blue-700' : 'text-gray-900'}>{fmtNum(val)}</span>;
+                            if (row.format === 'count')    return <span className="text-gray-700">{Math.round(val)}</span>;
+                            return <span className="text-gray-300">—</span>;
+                          })()}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <div className="px-4 py-2.5 bg-gray-50 border-t border-gray-100 flex items-center justify-between">
+              <span className="text-xs text-gray-400">{monthlyReports.length} month{monthlyReports.length !== 1 ? 's' : ''} imported</span>
+              {yearMonthTotal && (
+                <span className="text-xs text-gray-400">
+                  Total gross {year}: <span className="font-bold text-[#1B5E20]">{fmt(yearMonthTotal.gross_total ?? 0)}</span>
                 </span>
               )}
             </div>
