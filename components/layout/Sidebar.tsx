@@ -146,7 +146,7 @@ const navGroups: NavGroup[] = [
     label: 'ADMIN',
     items: [
       { label: 'Accounts',      href: '/coming-soon/accounts',       icon: Building2 },
-      { label: 'Create Bills',  href: '/bills/new',                  icon: FilePlus },
+      { label: 'Bills',         href: '/bills',                      icon: FilePlus },
       { label: 'Approve Bills', href: '/coming-soon/approve-bills',  icon: FileCheck },
     ],
   },
