@@ -215,9 +215,10 @@ const fmtDate = (d: string | null) =>
 
 const MONTHS  = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const DOW_SHORT = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+const QUARTER_MONTHS: [number,number,number][] = [[1,2,3],[4,5,6],[7,8,9],[10,11,12]];
 
-type DayCol  = { type: 'day';  day: number; dow: string };
-type WeekCol = { type: 'week'; label: string; wDays: number[] };
+type DayCol  = { type: 'day';  dateKey: string; day: number; month: number; dow: string };
+type WeekCol = { type: 'week'; label: string; wDateKeys: string[] };
 type DailyCol = DayCol | WeekCol;
 const PAGE_SIZE = 30;
 const TOTAL_WEEKS = 52;
@@ -260,7 +261,7 @@ function addAgg(a: DayAgg, b: DayAgg): DayAgg {
 
 const EMPTY_AGG: DayAgg = { shiftCount:0, grossTotal:0, grossFood:0, grossDrinks:0, netTotal:0, vatTotal:0, tips:0, inhouseTotal:0, takeawayTotal:0, cancellationsCount:0, cancellationsTotal:0 };
 
-function sumMap(map: Record<number, DayAgg>): DayAgg | null {
+function sumMap(map: Record<string, DayAgg>): DayAgg | null {
   const vals = Object.values(map);
   if (!vals.length) return null;
   return vals.reduce<DayAgg>((acc, d) => addAgg(acc, d), { ...EMPTY_AGG });
@@ -619,13 +620,13 @@ export default function SalesReportsPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Tab / sub-tab
-  const [activeTab,   setActiveTab]   = useState<'upload'|'daily'|'weekly'|'monthly'>('daily');
+  const [activeTab,   setActiveTab]   = useState<'upload'|'daily'>('daily');
   const [reportType,  setReportType]  = useState<'weekly'|'shift'|'monthly'>('shift');
 
   // Shared controls
   const [location, setLocation] = useState<Location | null>(null);
   const [year,     setYear]     = useState(new Date().getFullYear());
-  const [month,    setMonth]    = useState(new Date().getMonth() + 1);
+  const [quarter,  setQuarter]  = useState<number>(Math.ceil((new Date().getMonth() + 1) / 3));
 
   // Upload state
   const [fileName,       setFileName]       = useState<string | null>(null);
@@ -652,7 +653,7 @@ export default function SalesReportsPage() {
   // Weekly imports
   const { data: weeklyImports = [] } = useQuery({
     queryKey: ['weekly-sales', location?.id, year],
-    enabled: !!location && activeTab === 'weekly',
+    enabled: !!location && activeTab === 'daily',
     queryFn: async () => {
       const { data } = await supabase
         .from('sales_imports')
@@ -668,7 +669,7 @@ export default function SalesReportsPage() {
   // Monthly reports
   const { data: monthlyReports = [] } = useQuery({
     queryKey: ['monthly-reports', location?.id, year],
-    enabled: !!location && activeTab === 'monthly',
+    enabled: !!location && activeTab === 'daily',
     queryFn: async () => {
       const { data } = await supabase
         .from('monthly_reports')
@@ -680,19 +681,20 @@ export default function SalesReportsPage() {
     },
   });
 
-  // Shift reports for daily view
+  // Shift reports for daily view — fetch the full quarter at once
   const { data: shiftRows = [] } = useQuery({
-    queryKey: ['shift-reports', location?.id, year, month],
+    queryKey: ['shift-reports', location?.id, year, quarter],
     enabled: !!location && activeTab === 'daily',
     queryFn: async () => {
-      const mm   = String(month).padStart(2, '0');
-      const last = daysInMonth(year, month);
+      const [firstM, , lastM] = QUARTER_MONTHS[quarter - 1];
+      const qStart = `${year}-${String(firstM).padStart(2,'0')}-01`;
+      const qEnd   = `${year}-${String(lastM).padStart(2,'0')}-${String(daysInMonth(year, lastM)).padStart(2,'0')}`;
       const { data } = await supabase
         .from('shift_reports')
         .select('report_date,z_report_number,gross_total,gross_food,gross_beverages,net_total,vat_total,tips,inhouse_total,takeaway_total,cancellations_count,cancellations_total')
         .eq('location_id', location!.id)
-        .gte('report_date', `${year}-${mm}-01`)
-        .lte('report_date', `${year}-${mm}-${String(last).padStart(2,'0')}`)
+        .gte('report_date', qStart)
+        .lte('report_date', qEnd)
         .order('report_date', { ascending: true });
       return (data ?? []) as ShiftRow[];
     },
@@ -747,62 +749,57 @@ export default function SalesReportsPage() {
     }), { week_start:'', week_end:null, total_revenue:0, gross_food:0, gross_drinks:0, net_revenue:0, tax_total:0, tips:0, inhouse_revenue:0, takeaway_revenue:0 });
   }, [weeklyImports]);
 
-  // Split shifts per day: sort by z_report_number (lower = lunch, higher = dinner)
+  // Split shifts per day: keyed by full ISO dateKey, sort by z_report_number
   const { lunchMap, dinnerMap, totalMap } = useMemo(() => {
-    const byDay: Record<number, ShiftRow[]> = {};
+    const byDate: Record<string, ShiftRow[]> = {};
     for (const sr of shiftRows) {
-      const day = new Date(sr.report_date + 'T12:00:00Z').getUTCDate();
-      if (!byDay[day]) byDay[day] = [];
-      byDay[day].push(sr);
+      if (!byDate[sr.report_date]) byDate[sr.report_date] = [];
+      byDate[sr.report_date].push(sr);
     }
-    for (const day in byDay) {
-      byDay[day].sort((a, b) => parseInt(a.z_report_number || '0', 10) - parseInt(b.z_report_number || '0', 10));
+    for (const dk in byDate) {
+      byDate[dk].sort((a, b) => parseInt(a.z_report_number || '0', 10) - parseInt(b.z_report_number || '0', 10));
     }
-    const lunchMap:  Record<number, DayAgg> = {};
-    const dinnerMap: Record<number, DayAgg> = {};
-    const totalMap:  Record<number, DayAgg> = {};
-    for (const [dayStr, shifts] of Object.entries(byDay)) {
-      const day = parseInt(dayStr, 10);
+    const lunchMap:  Record<string, DayAgg> = {};
+    const dinnerMap: Record<string, DayAgg> = {};
+    const totalMap:  Record<string, DayAgg> = {};
+    for (const [dk, shifts] of Object.entries(byDate)) {
       let total: DayAgg | null = null;
-      if (shifts[0]) { lunchMap[day]  = shiftToAgg(shifts[0]); total = shiftToAgg(shifts[0]); }
-      if (shifts[1]) { dinnerMap[day] = shiftToAgg(shifts[1]); total = total ? addAgg(total, shiftToAgg(shifts[1])) : shiftToAgg(shifts[1]); }
+      if (shifts[0]) { lunchMap[dk]  = shiftToAgg(shifts[0]); total = shiftToAgg(shifts[0]); }
+      if (shifts[1]) { dinnerMap[dk] = shiftToAgg(shifts[1]); total = total ? addAgg(total, shiftToAgg(shifts[1])) : shiftToAgg(shifts[1]); }
       for (let i = 2; i < shifts.length; i++) if (total) total = addAgg(total, shiftToAgg(shifts[i]));
-      if (total) totalMap[day] = total;
+      if (total) totalMap[dk] = total;
     }
     return { lunchMap, dinnerMap, totalMap };
   }, [shiftRows]);
 
-  const lunchMonthTotal  = useMemo(() => sumMap(lunchMap),  [lunchMap]);
-  const dinnerMonthTotal = useMemo(() => sumMap(dinnerMap), [dinnerMap]);
-  const totalMonthTotal  = useMemo(() => sumMap(totalMap),  [totalMap]);
+  const lunchQtrTotal  = useMemo(() => sumMap(lunchMap),  [lunchMap]);
+  const dinnerQtrTotal = useMemo(() => sumMap(dinnerMap), [dinnerMap]);
+  const totalQtrTotal  = useMemo(() => sumMap(totalMap),  [totalMap]);
 
-  const totalDays = useMemo(() => daysInMonth(year, month), [year, month]);
-  const days      = useMemo(() => Array.from({ length: totalDays }, (_, i) => i + 1), [totalDays]);
-
-  // Build day + week-summary column sequence for the daily P&L
+  // Build day + week-summary column sequence covering the full quarter
   const dailyCols = useMemo<DailyCol[]>(() => {
     const result: DailyCol[] = [];
-    let wDays: number[] = [];
-    const mm = String(month).padStart(2, '0');
-    for (const d of days) {
-      const dow = new Date(year, month - 1, d).getDay(); // 0=Sun
-      result.push({ type: 'day', day: d, dow: DOW_SHORT[dow] });
-      wDays.push(d);
-      if (dow === 0) {
-        // Use the Sunday's date to get the correct ISO calendar week
-        const cw = isoWeek(`${year}-${mm}-${String(d).padStart(2,'0')}`);
-        result.push({ type: 'week', label: `CW${cw}`, wDays: [...wDays] });
-        wDays = [];
+    let wDateKeys: string[] = [];
+    for (const m of QUARTER_MONTHS[quarter - 1]) {
+      const mm = String(m).padStart(2, '0');
+      for (let d = 1; d <= daysInMonth(year, m); d++) {
+        const dd = String(d).padStart(2, '0');
+        const dateKey = `${year}-${mm}-${dd}`;
+        const dow = new Date(year, m - 1, d).getDay();
+        result.push({ type: 'day', dateKey, day: d, month: m, dow: DOW_SHORT[dow] });
+        wDateKeys.push(dateKey);
+        if (dow === 0) {
+          result.push({ type: 'week', label: `CW${isoWeek(dateKey)}`, wDateKeys: [...wDateKeys] });
+          wDateKeys = [];
+        }
       }
     }
-    if (wDays.length > 0) {
-      // Trailing partial week — use the last day to get its CW
-      const lastD = wDays[wDays.length - 1];
-      const cw = isoWeek(`${year}-${mm}-${String(lastD).padStart(2,'0')}`);
-      result.push({ type: 'week', label: `CW${cw}`, wDays: [...wDays] });
+    if (wDateKeys.length > 0) {
+      const lastKey = wDateKeys[wDateKeys.length - 1];
+      result.push({ type: 'week', label: `CW${isoWeek(lastKey)}`, wDateKeys: [...wDateKeys] });
     }
     return result;
-  }, [days, year, month]);
+  }, [quarter, year]);
 
   const topCats = useMemo(() =>
     Object.entries(weeklyResult?.categoryRevenue ?? {}).sort((a,b) => b[1]-a[1]).slice(0, 12),
@@ -875,7 +872,7 @@ export default function SalesReportsPage() {
       }
       queryClient.invalidateQueries({ queryKey: ['sales-imports'] });
       queryClient.invalidateQueries({ queryKey: ['weekly-sales'] });
-      resetUpload(); setActiveTab('weekly');
+      resetUpload(); setActiveTab('daily');
     } catch (e: any) { alert(`Import failed: ${e.message}`); }
     finally { setImporting(false); }
   }, [location, weeklyResult, fileName, queryClient, resetUpload]);
@@ -910,7 +907,7 @@ export default function SalesReportsPage() {
       }
       // Navigate to the month of the imported shift
       const d = new Date(shiftResult.date + 'T12:00:00Z');
-      setYear(d.getUTCFullYear()); setMonth(d.getUTCMonth() + 1);
+      setYear(d.getUTCFullYear()); setQuarter(Math.ceil((d.getUTCMonth() + 1) / 3));
       queryClient.invalidateQueries({ queryKey: ['shift-reports'] });
       resetUpload(); setActiveTab('daily');
     } catch (e: any) { alert(`Import failed: ${e.message}`); }
@@ -1017,10 +1014,8 @@ export default function SalesReportsPage() {
       <div className="border-b border-gray-200 mb-5">
         <nav className="flex gap-6">
           {([
-            ['upload',  <Upload size={14} />,        'Upload'],
-            ['daily',   <CalendarDays size={14} />,  'Daily P&L'],
-            ['monthly', <TableProperties size={14} />, 'Monthly P&L'],
-            ['weekly',  <BarChart3 size={14} />,     'Weekly P&L'],
+            ['upload', <Upload size={14} />,       'Upload'],
+            ['daily',  <CalendarDays size={14} />, 'P&L'],
           ] as const).map(([t, icon, label]) => (
             <button key={t} onClick={() => setActiveTab(t)}
               className={`flex items-center gap-2 pb-3 text-sm font-semibold border-b-2 transition-colors ${
@@ -1058,13 +1053,13 @@ export default function SalesReportsPage() {
           </div>
           {activeTab === 'daily' && (
             <div className="flex items-center gap-1.5">
-              <span className="text-xs font-bold text-gray-400 uppercase tracking-wider mr-1">Month</span>
-              {MONTHS.map((mn, i) => (
-                <button key={mn} onClick={() => setMonth(i+1)}
+              <span className="text-xs font-bold text-gray-400 uppercase tracking-wider mr-1">Quarter</span>
+              {(['Q1','Q2','Q3','Q4'] as const).map((qLabel, i) => (
+                <button key={qLabel} onClick={() => setQuarter(i+1)}
                   className={`px-2.5 py-1.5 rounded-lg text-xs font-bold border transition-colors ${
-                    month === i+1 ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'
+                    quarter === i+1 ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'
                   }`}
-                >{mn}</button>
+                >{qLabel}</button>
               ))}
             </div>
           )}
@@ -1471,17 +1466,18 @@ export default function SalesReportsPage() {
           DAILY P&L TAB
       ══════════════════════════════════════════════════════════════════ */}
       {activeTab === 'daily' && (
-        !location ? (
+        <>
+        {!location ? (
           <div className="flex flex-col items-center justify-center h-64 text-gray-400 gap-2 border border-dashed border-gray-200 rounded-xl">
             <MapPin size={36} className="text-gray-200" />
-            <p className="text-sm">Select a location to view the daily P&amp;L</p>
+            <p className="text-sm">Select a location to view the P&amp;L</p>
           </div>
         ) : (() => {
           const totalCols = dailyCols.length + 2; // label + day/week cols + month total
 
           // Helper: render one P&L block (lunch / dinner / total) as a <tbody>
           const renderBlock = (
-            map:      Record<number, DayAgg>,
+            map:      Record<string, DayAgg>,
             mTotal:   DayAgg | null,
             label:    string,
             headerBg: string,
@@ -1519,17 +1515,18 @@ export default function SalesReportsPage() {
                     </td>
                     {dailyCols.map((col, ci) => {
                       if (col.type === 'day') {
-                        const isCurDay = year===todayYear && month===todayMonth && col.day===todayDay;
+                        const todayKey = `${todayYear}-${String(todayMonth).padStart(2,'0')}-${String(todayDay).padStart(2,'0')}`;
+                        const isCurDay = col.dateKey === todayKey;
                         return (
                           <td key={ci} className={`py-2 text-right tabular-nums ${isBold ? 'font-bold' : ''}`}
                             style={{ paddingLeft:4, paddingRight:8, backgroundColor: isCurDay ? 'rgba(59,130,246,0.04)' : undefined }}>
-                            {renderDayCell(row, map[col.day] ?? null)}
+                            {renderDayCell(row, map[col.dateKey] ?? null)}
                           </td>
                         );
                       } else {
-                        const present = col.wDays.filter(d => map[d]);
+                        const present = col.wDateKeys.filter(k => map[k]);
                         const wAgg = present.length > 0
-                          ? present.reduce<DayAgg>((acc, d) => addAgg(acc, map[d]), { ...EMPTY_AGG })
+                          ? present.reduce<DayAgg>((acc, k) => addAgg(acc, map[k]), { ...EMPTY_AGG })
                           : null;
                         return (
                           <td key={ci} className={`py-2 text-right tabular-nums ${isBold ? 'font-bold' : ''}`}
@@ -1560,20 +1557,24 @@ export default function SalesReportsPage() {
                     <tr style={{ backgroundColor:'#111827' }}>
                       <th className="sticky left-0 z-20 px-4 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider whitespace-nowrap border-r border-gray-700"
                         style={{ backgroundColor:'#111827', minWidth:LABEL_W, width:LABEL_W }}>
-                        METRIC / DAY · {MONTHS[month-1]} {year}
+                        METRIC / DAY · Q{quarter} {year}
                       </th>
                       {dailyCols.map((col, ci) => {
                         if (col.type === 'day') {
-                          const hasData  = !!totalMap[col.day];
-                          const isCurDay = year===todayYear && month===todayMonth && col.day===todayDay;
+                          const todayKey = `${todayYear}-${String(todayMonth).padStart(2,'0')}-${String(todayDay).padStart(2,'0')}`;
+                          const hasData  = !!totalMap[col.dateKey];
+                          const isCurDay = col.dateKey === todayKey;
                           const isSun    = col.dow === 'Sun';
                           return (
                             <th key={ci} className="py-2 text-right font-bold whitespace-nowrap tabular-nums"
                               style={{ minWidth:COL_W_D, width:COL_W_D, paddingLeft:4, paddingRight:8,
                                 color: isCurDay ? '#ffffff' : hasData ? '#93c5fd' : '#4b5563',
                                 borderBottom: isCurDay ? '2px solid #3b82f6' : isSun ? '2px solid #7c3aed' : 'none',
+                                borderLeft: col.day === 1 && col.month !== QUARTER_MONTHS[quarter-1][0] ? '2px solid #4b5563' : undefined,
                                 borderRight: isSun ? '1px solid #374151' : undefined }}>
-                              <div style={{ fontSize:9, fontWeight:400, opacity:0.55, marginBottom:1 }}>{col.dow}</div>
+                              <div style={{ fontSize:9, fontWeight:400, opacity:0.55, marginBottom:1 }}>
+                                {col.day === 1 ? MONTHS[col.month-1] : col.dow}
+                              </div>
                               <div>{col.day}</div>
                             </th>
                           );
@@ -1592,14 +1593,14 @@ export default function SalesReportsPage() {
                       <th className="py-2 text-right font-bold whitespace-nowrap border-l border-gray-700"
                         style={{ minWidth:COL_W_D+8, paddingLeft:4, paddingRight:8, color:'#e5e7eb' }}>
                         <div style={{ fontSize:9, fontWeight:400, opacity:0.55, marginBottom:1 }}>TOTAL</div>
-                        <div>{MONTHS[month-1]}</div>
+                        <div>Q{quarter}</div>
                       </th>
                     </tr>
                   </thead>
 
-                  {renderBlock(lunchMap,  lunchMonthTotal,  '☀️  Lunch Shift',  '#92400E')}
-                  {renderBlock(dinnerMap, dinnerMonthTotal, '🌙  Dinner Shift', '#1E3A5F')}
-                  {renderBlock(totalMap,  totalMonthTotal,  '∑   Daily Total',  '#111827')}
+                  {renderBlock(lunchMap,  lunchQtrTotal,  '☀️  Lunch Shift',  '#92400E')}
+                  {renderBlock(dinnerMap, dinnerQtrTotal, '🌙  Dinner Shift', '#1E3A5F')}
+                  {renderBlock(totalMap,  totalQtrTotal,  '∑   Daily Total',  '#111827')}
                 </table>
               </div>
               <div className="px-4 py-2.5 bg-gray-50 border-t border-gray-100 flex items-center justify-between">
@@ -1607,216 +1608,211 @@ export default function SalesReportsPage() {
                   {shiftRows.length} shift report{shiftRows.length !== 1 ? 's' : ''} ·{' '}
                   {Object.keys(totalMap).length} day{Object.keys(totalMap).length !== 1 ? 's' : ''} with data
                 </span>
-                {totalMonthTotal && (
+                {totalQtrTotal && (
                   <span className="text-xs text-gray-400">
-                    Monthly gross: <span className="font-bold text-[#1B5E20]">{fmt(totalMonthTotal.grossTotal)}</span>
+                    Q{quarter} gross: <span className="font-bold text-[#1B5E20]">{fmt(totalQtrTotal.grossTotal)}</span>
                   </span>
                 )}
               </div>
             </div>
           );
-        })()
-      )}
+        })()}
 
-      {/* ══════════════════════════════════════════════════════════════════
-          WEEKLY P&L TAB
-      ══════════════════════════════════════════════════════════════════ */}
-      {activeTab === 'weekly' && (
-        !location ? (
-          <div className="flex flex-col items-center justify-center h-64 text-gray-400 gap-2 border border-dashed border-gray-200 rounded-xl">
-            <MapPin size={36} className="text-gray-200" />
-            <p className="text-sm">Select a location to view the weekly P&amp;L</p>
-          </div>
-        ) : (
-          <div className="border border-gray-200 rounded-xl overflow-hidden shadow-sm">
-            <div className="overflow-auto" style={{ maxHeight: 'calc(100vh - 260px)' }}>
-              <table className="text-xs border-collapse" style={{ minWidth: LABEL_W + (TOTAL_WEEKS + 1) * COL_W_WK }}>
-                <thead className="sticky top-0 z-30">
-                  <tr style={{ backgroundColor:'#111827' }}>
-                    <th className="sticky left-0 z-20 px-4 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider whitespace-nowrap border-r border-gray-700"
-                      style={{ backgroundColor:'#111827', minWidth:LABEL_W, width:LABEL_W }}>
-                      METRIC / PERIOD · {year}
-                    </th>
-                    {Array.from({ length: TOTAL_WEEKS }, (_, i) => i+1).map(kw => {
-                      const hasWeek  = !!weekMap[kw];
-                      const isCurWk  = kw === cwk;
+        {/* ── Weekly P&L ───────────────────────────────────────────────── */}
+        {location && (
+          <div className="mt-8">
+            <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3 flex items-center gap-2">
+              <BarChart3 size={13} /> Weekly P&amp;L · {year}
+            </h3>
+            <div className="border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+              <div className="overflow-auto" style={{ maxHeight: 'calc(100vh - 260px)' }}>
+                <table className="text-xs border-collapse" style={{ minWidth: LABEL_W + (TOTAL_WEEKS + 1) * COL_W_WK }}>
+                  <thead className="sticky top-0 z-30">
+                    <tr style={{ backgroundColor:'#111827' }}>
+                      <th className="sticky left-0 z-20 px-4 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider whitespace-nowrap border-r border-gray-700"
+                        style={{ backgroundColor:'#111827', minWidth:LABEL_W, width:LABEL_W }}>
+                        METRIC / PERIOD · {year}
+                      </th>
+                      {Array.from({ length: TOTAL_WEEKS }, (_, i) => i+1).map(kw => {
+                        const hasWeek = !!weekMap[kw];
+                        const isCurWk = kw === cwk;
+                        return (
+                          <th key={kw} className="py-3 text-right font-bold whitespace-nowrap tabular-nums"
+                            style={{ minWidth:COL_W_WK, width:COL_W_WK, paddingLeft:4, paddingRight:10,
+                              color: isCurWk ? '#ffffff' : hasWeek ? '#93c5fd' : '#4b5563',
+                              borderBottom: isCurWk ? '2px solid #3b82f6' : 'none' }}>
+                            KW{kw}
+                          </th>
+                        );
+                      })}
+                      <th className="py-3 text-right font-bold whitespace-nowrap border-l border-gray-700"
+                        style={{ minWidth:COL_W_WK+8, paddingLeft:4, paddingRight:10, color:'#e5e7eb' }}>
+                        FY {year}
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {WEEKLY_ROWS.map((row, i) => {
+                      if (row.type === 'section') {
+                        return (
+                          <tr key={i}>
+                            <td colSpan={TOTAL_WEEKS + 2} className="sticky left-0 px-4 py-2 text-xs font-bold uppercase tracking-widest"
+                              style={{ backgroundColor:'#f3f4f6', color:'#374151', letterSpacing:'0.08em' }}>
+                              {row.label}
+                            </td>
+                          </tr>
+                        );
+                      }
+                      const isBold = row.type === 'bold';
+                      const isPct  = row.type === 'pct';
+                      const bg     = isBold ? '#f0fdf4' : '#ffffff';
                       return (
-                        <th key={kw} className="py-3 text-right font-bold whitespace-nowrap tabular-nums"
-                          style={{ minWidth:COL_W_WK, width:COL_W_WK, paddingLeft:4, paddingRight:10,
-                            color: isCurWk ? '#ffffff' : hasWeek ? '#93c5fd' : '#4b5563',
-                            borderBottom: isCurWk ? '2px solid #3b82f6' : 'none' }}>
-                          KW{kw}
-                        </th>
-                      );
-                    })}
-                    <th className="py-3 text-right font-bold whitespace-nowrap border-l border-gray-700"
-                      style={{ minWidth:COL_W_WK+8, paddingLeft:4, paddingRight:10, color:'#e5e7eb' }}>
-                      FY {year}
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {WEEKLY_ROWS.map((row, i) => {
-                    if (row.type === 'section') {
-                      return (
-                        <tr key={i}>
-                          <td colSpan={TOTAL_WEEKS + 2} className="sticky left-0 px-4 py-2 text-xs font-bold uppercase tracking-widest"
-                            style={{ backgroundColor:'#f3f4f6', color:'#374151', letterSpacing:'0.08em' }}>
+                        <tr key={i} className="border-b border-gray-100 hover:bg-gray-50/60 group" style={{ backgroundColor:bg }}>
+                          <td className={`sticky left-0 z-10 px-4 py-2 whitespace-nowrap border-r border-gray-100 group-hover:bg-gray-50/60 transition-colors ${
+                            isBold ? 'font-bold text-gray-900' : isPct ? 'pl-8 text-gray-400 italic' : 'text-gray-700'
+                          }`} style={{ backgroundColor:bg }}>
                             {row.label}
+                          </td>
+                          {Array.from({ length: TOTAL_WEEKS }, (_, j) => j+1).map(kw => {
+                            const isCurWk = kw === cwk;
+                            return (
+                              <td key={kw} className={`py-2 text-right tabular-nums ${isBold ? 'font-bold' : ''}`}
+                                style={{ paddingLeft:4, paddingRight:10, backgroundColor: isCurWk ? 'rgba(59,130,246,0.04)' : undefined }}>
+                                {renderWeeklyCell(row, kw)}
+                              </td>
+                            );
+                          })}
+                          <td className={`py-2 text-right tabular-nums border-l border-gray-200 ${isBold ? 'font-bold' : ''}`}
+                            style={{ paddingLeft:4, paddingRight:10 }}>
+                            {isPct || !yearTotal ? <span className="text-gray-300">—</span> : (() => {
+                              const val = row.getValue?.(yearTotal, null) ?? null;
+                              if (val === null) return <span className="text-gray-300">—</span>;
+                              if (row.format === 'currency') return <span className={row.color==='blue'?'text-blue-700':'text-gray-900'}>{fmtNum(val)}</span>;
+                              return <span className="text-gray-300">—</span>;
+                            })()}
                           </td>
                         </tr>
                       );
-                    }
-                    const isBold = row.type === 'bold';
-                    const isPct  = row.type === 'pct';
-                    const bg     = isBold ? '#f0fdf4' : '#ffffff';
-                    return (
-                      <tr key={i} className="border-b border-gray-100 hover:bg-gray-50/60 group" style={{ backgroundColor:bg }}>
-                        <td className={`sticky left-0 z-10 px-4 py-2 whitespace-nowrap border-r border-gray-100 group-hover:bg-gray-50/60 transition-colors ${
-                          isBold ? 'font-bold text-gray-900' : isPct ? 'pl-8 text-gray-400 italic' : 'text-gray-700'
-                        }`} style={{ backgroundColor:bg }}>
-                          {row.label}
-                        </td>
-                        {Array.from({ length: TOTAL_WEEKS }, (_, j) => j+1).map(kw => {
-                          const isCurWk = kw === cwk;
-                          return (
-                            <td key={kw} className={`py-2 text-right tabular-nums ${isBold ? 'font-bold' : ''}`}
-                              style={{ paddingLeft:4, paddingRight:10, backgroundColor: isCurWk ? 'rgba(59,130,246,0.04)' : undefined }}>
-                              {renderWeeklyCell(row, kw)}
-                            </td>
-                          );
-                        })}
-                        <td className={`py-2 text-right tabular-nums border-l border-gray-200 ${isBold ? 'font-bold' : ''}`}
-                          style={{ paddingLeft:4, paddingRight:10 }}>
-                          {isPct || !yearTotal ? <span className="text-gray-300">—</span> : (() => {
-                            const val = row.getValue?.(yearTotal, null) ?? null;
-                            if (val === null) return <span className="text-gray-300">—</span>;
-                            if (row.format === 'currency') return <span className={row.color==='blue'?'text-blue-700':'text-gray-900'}>{fmtNum(val)}</span>;
-                            return <span className="text-gray-300">—</span>;
-                          })()}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-            <div className="px-4 py-2.5 bg-gray-50 border-t border-gray-100 flex items-center justify-between">
-              <span className="text-xs text-gray-400">{weeklyImports.length} week{weeklyImports.length!==1?'s':''} imported</span>
-              {yearTotal && (
-                <span className="text-xs text-gray-400">
-                  Total gross {year}: <span className="font-bold text-[#1B5E20]">{fmt(yearTotal.total_revenue)}</span>
-                </span>
-              )}
-            </div>
-          </div>
-        )
-      )}
-
-      {/* ══════════════════════════════════════════════════════════════════
-          MONTHLY P&L TAB
-      ══════════════════════════════════════════════════════════════════ */}
-      {activeTab === 'monthly' && (
-        !location ? (
-          <div className="flex flex-col items-center justify-center h-64 text-gray-400 gap-2 border border-dashed border-gray-200 rounded-xl">
-            <MapPin size={36} className="text-gray-200" />
-            <p className="text-sm">Select a location to view the monthly P&amp;L</p>
-          </div>
-        ) : monthlyReports.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-64 text-gray-400 gap-2 border border-dashed border-gray-200 rounded-xl">
-            <TableProperties size={36} className="text-gray-200" />
-            <p className="text-sm font-medium">No monthly reports for {location.name} · {year}</p>
-            <p className="text-xs">Upload a monthly Z-report CSV in the Upload tab</p>
-            <button onClick={() => setActiveTab('upload')}
-              className="mt-1 px-4 py-2 bg-[#1B5E20] text-white text-xs font-semibold rounded-lg hover:bg-[#2E7D32] transition-colors">
-              Go to Upload
-            </button>
-          </div>
-        ) : (
-          <div className="border border-gray-200 rounded-xl overflow-hidden shadow-sm">
-            <div className="overflow-auto" style={{ maxHeight: 'calc(100vh - 260px)' }}>
-              <table className="text-xs border-collapse" style={{ minWidth: LABEL_W + 13 * COL_W_MN }}>
-                <thead className="sticky top-0 z-30">
-                  <tr style={{ backgroundColor:'#111827' }}>
-                    <th className="sticky left-0 z-20 px-4 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider whitespace-nowrap border-r border-gray-700"
-                      style={{ backgroundColor:'#111827', minWidth:LABEL_W, width:LABEL_W }}>
-                      METRIC / MONTH · {year}
-                    </th>
-                    {MONTHS.map((mn, i) => {
-                      const hasData   = !!monthMap[i+1];
-                      const isCurMon  = year === todayYear && i+1 === todayMonth;
-                      return (
-                        <th key={mn} className="py-3 text-right font-bold whitespace-nowrap tabular-nums"
-                          style={{ minWidth:COL_W_MN, width:COL_W_MN, paddingLeft:4, paddingRight:10,
-                            color: isCurMon ? '#ffffff' : hasData ? '#93c5fd' : '#4b5563',
-                            borderBottom: isCurMon ? '2px solid #3b82f6' : 'none' }}>
-                          {mn}
-                        </th>
-                      );
                     })}
-                    <th className="py-3 text-right font-bold whitespace-nowrap border-l border-gray-700"
-                      style={{ minWidth:COL_W_MN+8, paddingLeft:4, paddingRight:10, color:'#e5e7eb' }}>
-                      FY {year}
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {MONTHLY_ROWS.map((row, i) => {
-                    if (row.type === 'section') {
-                      return (
-                        <tr key={i}>
-                          <td colSpan={14} className="sticky left-0 px-4 py-2 text-xs font-bold uppercase tracking-widest"
-                            style={{ backgroundColor:'#f3f4f6', color:'#374151', letterSpacing:'0.08em' }}>
-                            {row.label}
-                          </td>
-                        </tr>
-                      );
-                    }
-                    const isBold = row.type === 'bold';
-                    const isPct  = row.type === 'pct';
-                    const bg     = isBold ? '#f0fdf4' : '#ffffff';
-                    return (
-                      <tr key={i} className="border-b border-gray-100 hover:bg-gray-50/60 group" style={{ backgroundColor:bg }}>
-                        <td className={`sticky left-0 z-10 px-4 py-2 whitespace-nowrap border-r border-gray-100 group-hover:bg-gray-50/60 transition-colors ${
-                          isBold ? 'font-bold text-gray-900' : isPct ? 'pl-8 text-gray-400 italic' : 'text-gray-700'
-                        }`} style={{ backgroundColor:bg }}>
-                          {row.label}
-                        </td>
-                        {MONTHS.map((_, mi) => {
-                          const isCurMon = year === todayYear && mi+1 === todayMonth;
-                          return (
-                            <td key={mi} className={`py-2 text-right tabular-nums ${isBold ? 'font-bold' : ''}`}
-                              style={{ paddingLeft:4, paddingRight:10, backgroundColor: isCurMon ? 'rgba(59,130,246,0.04)' : undefined }}>
-                              {renderMonthCell(row, mi+1)}
-                            </td>
-                          );
-                        })}
-                        <td className={`py-2 text-right tabular-nums border-l border-gray-200 ${isBold ? 'font-bold' : ''}`}
-                          style={{ paddingLeft:4, paddingRight:10 }}>
-                          {isPct || !yearMonthTotal ? <span className="text-gray-300">—</span> : (() => {
-                            const val = row.getValue?.(yearMonthTotal, null) ?? null;
-                            if (val === null) return <span className="text-gray-300">—</span>;
-                            if (row.format === 'currency') return <span className={row.color === 'blue' ? 'text-blue-700' : 'text-gray-900'}>{fmtNum(val)}</span>;
-                            if (row.format === 'count')    return <span className="text-gray-700">{Math.round(val)}</span>;
-                            return <span className="text-gray-300">—</span>;
-                          })()}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-            <div className="px-4 py-2.5 bg-gray-50 border-t border-gray-100 flex items-center justify-between">
-              <span className="text-xs text-gray-400">{monthlyReports.length} month{monthlyReports.length !== 1 ? 's' : ''} imported</span>
-              {yearMonthTotal && (
-                <span className="text-xs text-gray-400">
-                  Total gross {year}: <span className="font-bold text-[#1B5E20]">{fmt(yearMonthTotal.gross_total ?? 0)}</span>
-                </span>
-              )}
+                  </tbody>
+                </table>
+              </div>
+              <div className="px-4 py-2.5 bg-gray-50 border-t border-gray-100 flex items-center justify-between">
+                <span className="text-xs text-gray-400">{weeklyImports.length} week{weeklyImports.length!==1?'s':''} imported</span>
+                {yearTotal && (
+                  <span className="text-xs text-gray-400">
+                    Total gross {year}: <span className="font-bold text-[#1B5E20]">{fmt(yearTotal.total_revenue)}</span>
+                  </span>
+                )}
+              </div>
             </div>
           </div>
-        )
+        )}
+
+        {/* ── Monthly P&L ──────────────────────────────────────────────── */}
+        {location && (
+          <div className="mt-8 mb-4">
+            <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3 flex items-center gap-2">
+              <TableProperties size={13} /> Monthly P&amp;L · {year}
+            </h3>
+            {monthlyReports.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-40 text-gray-400 gap-2 border border-dashed border-gray-200 rounded-xl">
+                <TableProperties size={28} className="text-gray-200" />
+                <p className="text-sm font-medium">No monthly reports for {location.name} · {year}</p>
+                <p className="text-xs">Upload a monthly Z-report CSV in the Upload tab</p>
+                <button onClick={() => setActiveTab('upload')}
+                  className="mt-1 px-4 py-2 bg-[#1B5E20] text-white text-xs font-semibold rounded-lg hover:bg-[#2E7D32] transition-colors">
+                  Go to Upload
+                </button>
+              </div>
+            ) : (
+              <div className="border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+                <div className="overflow-auto" style={{ maxHeight: 'calc(100vh - 260px)' }}>
+                  <table className="text-xs border-collapse" style={{ minWidth: LABEL_W + 13 * COL_W_MN }}>
+                    <thead className="sticky top-0 z-30">
+                      <tr style={{ backgroundColor:'#111827' }}>
+                        <th className="sticky left-0 z-20 px-4 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider whitespace-nowrap border-r border-gray-700"
+                          style={{ backgroundColor:'#111827', minWidth:LABEL_W, width:LABEL_W }}>
+                          METRIC / MONTH · {year}
+                        </th>
+                        {MONTHS.map((mn, i) => {
+                          const hasData  = !!monthMap[i+1];
+                          const isCurMon = year === todayYear && i+1 === todayMonth;
+                          return (
+                            <th key={mn} className="py-3 text-right font-bold whitespace-nowrap tabular-nums"
+                              style={{ minWidth:COL_W_MN, width:COL_W_MN, paddingLeft:4, paddingRight:10,
+                                color: isCurMon ? '#ffffff' : hasData ? '#93c5fd' : '#4b5563',
+                                borderBottom: isCurMon ? '2px solid #3b82f6' : 'none' }}>
+                              {mn}
+                            </th>
+                          );
+                        })}
+                        <th className="py-3 text-right font-bold whitespace-nowrap border-l border-gray-700"
+                          style={{ minWidth:COL_W_MN+8, paddingLeft:4, paddingRight:10, color:'#e5e7eb' }}>
+                          FY {year}
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {MONTHLY_ROWS.map((row, i) => {
+                        if (row.type === 'section') {
+                          return (
+                            <tr key={i}>
+                              <td colSpan={14} className="sticky left-0 px-4 py-2 text-xs font-bold uppercase tracking-widest"
+                                style={{ backgroundColor:'#f3f4f6', color:'#374151', letterSpacing:'0.08em' }}>
+                                {row.label}
+                              </td>
+                            </tr>
+                          );
+                        }
+                        const isBold = row.type === 'bold';
+                        const isPct  = row.type === 'pct';
+                        const bg     = isBold ? '#f0fdf4' : '#ffffff';
+                        return (
+                          <tr key={i} className="border-b border-gray-100 hover:bg-gray-50/60 group" style={{ backgroundColor:bg }}>
+                            <td className={`sticky left-0 z-10 px-4 py-2 whitespace-nowrap border-r border-gray-100 group-hover:bg-gray-50/60 transition-colors ${
+                              isBold ? 'font-bold text-gray-900' : isPct ? 'pl-8 text-gray-400 italic' : 'text-gray-700'
+                            }`} style={{ backgroundColor:bg }}>
+                              {row.label}
+                            </td>
+                            {MONTHS.map((_, mi) => {
+                              const isCurMon = year === todayYear && mi+1 === todayMonth;
+                              return (
+                                <td key={mi} className={`py-2 text-right tabular-nums ${isBold ? 'font-bold' : ''}`}
+                                  style={{ paddingLeft:4, paddingRight:10, backgroundColor: isCurMon ? 'rgba(59,130,246,0.04)' : undefined }}>
+                                  {renderMonthCell(row, mi+1)}
+                                </td>
+                              );
+                            })}
+                            <td className={`py-2 text-right tabular-nums border-l border-gray-200 ${isBold ? 'font-bold' : ''}`}
+                              style={{ paddingLeft:4, paddingRight:10 }}>
+                              {isPct || !yearMonthTotal ? <span className="text-gray-300">—</span> : (() => {
+                                const val = row.getValue?.(yearMonthTotal, null) ?? null;
+                                if (val === null) return <span className="text-gray-300">—</span>;
+                                if (row.format === 'currency') return <span className={row.color === 'blue' ? 'text-blue-700' : 'text-gray-900'}>{fmtNum(val)}</span>;
+                                if (row.format === 'count')    return <span className="text-gray-700">{Math.round(val)}</span>;
+                                return <span className="text-gray-300">—</span>;
+                              })()}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="px-4 py-2.5 bg-gray-50 border-t border-gray-100 flex items-center justify-between">
+                  <span className="text-xs text-gray-400">{monthlyReports.length} month{monthlyReports.length !== 1 ? 's' : ''} imported</span>
+                  {yearMonthTotal && (
+                    <span className="text-xs text-gray-400">
+                      Total gross {year}: <span className="font-bold text-[#1B5E20]">{fmt(yearMonthTotal.gross_total ?? 0)}</span>
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+        </>
       )}
     </div>
   );
