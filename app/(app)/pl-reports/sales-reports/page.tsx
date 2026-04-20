@@ -32,6 +32,7 @@ type WeekData = {
 type ShiftRow = {
   report_date:         string;
   z_report_number:     string;
+  shift_type:          'lunch' | 'dinner' | null;
   gross_total:         number;
   gross_food:          number;
   gross_beverages:     number;
@@ -631,6 +632,7 @@ export default function SalesReportsPage() {
 
   // Upload state
   const [fileName,       setFileName]       = useState<string | null>(null);
+  const [shiftType,      setShiftType]      = useState<'lunch'|'dinner'>('dinner');
   const [weeklyResult,   setWeeklyResult]   = useState<WeeklyParseResult | null>(null);
   const [shiftResult,    setShiftResult]    = useState<ShiftParseResult | null>(null);
   const [monthlyResult,  setMonthlyResult]  = useState<MonthlyParseResult | null>(null);
@@ -692,7 +694,7 @@ export default function SalesReportsPage() {
       const qEnd   = `${year}-${String(lastM).padStart(2,'0')}-${String(daysInMonth(year, lastM)).padStart(2,'0')}`;
       const { data } = await supabase
         .from('shift_reports')
-        .select('report_date,z_report_number,gross_total,gross_food,gross_beverages,net_total,vat_total,tips,inhouse_total,takeaway_total,cancellations_count,cancellations_total')
+        .select('report_date,z_report_number,shift_type,gross_total,gross_food,gross_beverages,net_total,vat_total,tips,inhouse_total,takeaway_total,cancellations_count,cancellations_total')
         .eq('location_id', location!.id)
         .gte('report_date', qStart)
         .lte('report_date', qEnd)
@@ -750,25 +752,43 @@ export default function SalesReportsPage() {
     }), { week_start:'', week_end:null, total_revenue:0, gross_food:0, gross_drinks:0, net_revenue:0, tax_total:0, tips:0, inhouse_revenue:0, takeaway_revenue:0 });
   }, [weeklyImports]);
 
-  // Split shifts per day: keyed by full ISO dateKey, sort by z_report_number
+  // Split shifts per day into lunch / dinner using explicit shift_type when set
   const { lunchMap, dinnerMap, totalMap } = useMemo(() => {
+    const lunchMap:  Record<string, DayAgg> = {};
+    const dinnerMap: Record<string, DayAgg> = {};
+    const totalMap:  Record<string, DayAgg> = {};
+
+    // Group by date
     const byDate: Record<string, ShiftRow[]> = {};
     for (const sr of shiftRows) {
       if (!byDate[sr.report_date]) byDate[sr.report_date] = [];
       byDate[sr.report_date].push(sr);
     }
-    for (const dk in byDate) {
-      byDate[dk].sort((a, b) => parseInt(b.z_report_number || '0', 10) - parseInt(a.z_report_number || '0', 10));
-    }
-    const lunchMap:  Record<string, DayAgg> = {};
-    const dinnerMap: Record<string, DayAgg> = {};
-    const totalMap:  Record<string, DayAgg> = {};
+
     for (const [dk, shifts] of Object.entries(byDate)) {
-      let total: DayAgg | null = null;
-      if (shifts[0]) { lunchMap[dk]  = shiftToAgg(shifts[0]); total = shiftToAgg(shifts[0]); }
-      if (shifts[1]) { dinnerMap[dk] = shiftToAgg(shifts[1]); total = total ? addAgg(total, shiftToAgg(shifts[1])) : shiftToAgg(shifts[1]); }
-      for (let i = 2; i < shifts.length; i++) if (total) total = addAgg(total, shiftToAgg(shifts[i]));
-      if (total) totalMap[dk] = total;
+      // If every shift on this day has an explicit shift_type, use it directly
+      const allTagged = shifts.every(s => s.shift_type === 'lunch' || s.shift_type === 'dinner');
+      if (allTagged) {
+        for (const s of shifts) {
+          const agg = shiftToAgg(s);
+          if (s.shift_type === 'lunch') {
+            lunchMap[dk] = lunchMap[dk] ? addAgg(lunchMap[dk], agg) : agg;
+          } else {
+            dinnerMap[dk] = dinnerMap[dk] ? addAgg(dinnerMap[dk], agg) : agg;
+          }
+          totalMap[dk] = totalMap[dk] ? addAgg(totalMap[dk], agg) : agg;
+        }
+      } else {
+        // Legacy fallback: sort ascending by Z-report number (lower = lunch)
+        const sorted = [...shifts].sort((a, b) =>
+          parseInt(a.z_report_number || '0', 10) - parseInt(b.z_report_number || '0', 10)
+        );
+        let total: DayAgg | null = null;
+        if (sorted[0]) { lunchMap[dk]  = shiftToAgg(sorted[0]); total = shiftToAgg(sorted[0]); }
+        if (sorted[1]) { dinnerMap[dk] = shiftToAgg(sorted[1]); total = total ? addAgg(total, shiftToAgg(sorted[1])) : shiftToAgg(sorted[1]); }
+        for (let i = 2; i < sorted.length; i++) if (total) total = addAgg(total, shiftToAgg(sorted[i]));
+        if (total) totalMap[dk] = total;
+      }
     }
     return { lunchMap, dinnerMap, totalMap };
   }, [shiftRows]);
@@ -886,6 +906,7 @@ export default function SalesReportsPage() {
       const { data: inserted, error: srErr } = await supabase.from('shift_reports').insert({
         location_id: location.id, report_date: shiftResult.date,
         z_report_number: shiftResult.zReportNumber,
+        shift_type: shiftType,
         gross_total: shiftResult.grossTotal, gross_food: shiftResult.grossFood,
         gross_beverages: shiftResult.grossDrinks, net_total: shiftResult.netTotal,
         vat_total: shiftResult.vatTotal, tips: shiftResult.tips,
@@ -1104,6 +1125,26 @@ export default function SalesReportsPage() {
               </button>
             ))}
           </div>
+
+          {/* Lunch / Dinner toggle — only for shift reports */}
+          {reportType === 'shift' && (
+            <div className="flex items-center gap-3 mb-5">
+              <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Shift</span>
+              {(['lunch','dinner'] as const).map(st => (
+                <button key={st} onClick={() => setShiftType(st)}
+                  className={`px-5 py-2 rounded-lg text-sm font-bold border-2 transition-colors ${
+                    shiftType === st
+                      ? st === 'lunch'
+                        ? 'bg-amber-700 text-white border-amber-700'
+                        : 'bg-[#1E3A5F] text-white border-[#1E3A5F]'
+                      : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'
+                  }`}
+                >
+                  {st === 'lunch' ? '☀️ Lunch' : '🌙 Dinner'}
+                </button>
+              ))}
+            </div>
+          )}
 
           <div className="flex gap-6 items-start">
             {/* ── Left panel ── */}
