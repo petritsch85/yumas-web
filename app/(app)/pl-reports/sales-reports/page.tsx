@@ -1788,6 +1788,69 @@ export default function SalesReportsPage() {
                     </tr>
                   </thead>
 
+                  {/* ── Summary P&L ── */}
+                  <tbody>
+                    <tr>
+                      <td colSpan={totalCols}
+                        className="sticky left-0 px-4 py-2 text-xs font-bold uppercase tracking-widest text-white"
+                        style={{ backgroundColor: '#0f172a' }}>
+                        Summary
+                      </td>
+                    </tr>
+                    {([
+                      { label:'☀️  Lunch · Sales', map: lunchMap,  qTotal: lunchQtrTotal,  field:'grossTotal' as const, bold:false },
+                      { label:'☀️  Lunch · VAT',   map: lunchMap,  qTotal: lunchQtrTotal,  field:'vatTotal'   as const, bold:false },
+                      { label:'🌙  Dinner · Sales', map: dinnerMap, qTotal: dinnerQtrTotal, field:'grossTotal' as const, bold:false },
+                      { label:'🌙  Dinner · VAT',   map: dinnerMap, qTotal: dinnerQtrTotal, field:'vatTotal'   as const, bold:false },
+                      { label:'∑   Total · Sales',  map: totalMap,  qTotal: totalQtrTotal,  field:'grossTotal' as const, bold:true  },
+                      { label:'∑   Total · VAT',    map: totalMap,  qTotal: totalQtrTotal,  field:'vatTotal'   as const, bold:true  },
+                    ] as const).map((row, i) => {
+                      const todayKey = `${todayYear}-${String(todayMonth).padStart(2,'0')}-${String(todayDay).padStart(2,'0')}`;
+                      const bg = row.bold ? '#f0fdf4' : '#ffffff';
+                      return (
+                        <tr key={i} className="border-b border-gray-100 hover:bg-gray-50/60 group" style={{ backgroundColor: bg }}>
+                          <td className={`sticky left-0 z-10 px-4 py-2 whitespace-nowrap border-r border-gray-100 group-hover:bg-gray-50/60 transition-colors ${row.bold ? 'font-bold text-gray-900' : 'text-gray-700'}`}
+                            style={{ backgroundColor: bg }}>
+                            {row.label}
+                          </td>
+                          {dailyCols.map((col, ci) => {
+                            if (col.type === 'day') {
+                              const isCurDay = col.dateKey === todayKey;
+                              const val = row.map[col.dateKey]?.[row.field] ?? null;
+                              return (
+                                <td key={ci} className={`py-2 text-right tabular-nums ${row.bold ? 'font-bold' : ''}`}
+                                  style={{ paddingLeft:4, paddingRight:8, backgroundColor: isCurDay ? 'rgba(59,130,246,0.04)' : undefined }}>
+                                  {val !== null && val > 0
+                                    ? <span className={row.bold ? 'text-[#1B5E20]' : 'text-blue-700'}>{fmtNum(val)}</span>
+                                    : <span className="text-gray-300">—</span>}
+                                </td>
+                              );
+                            } else {
+                              const present = col.wDateKeys.filter(k => row.map[k]);
+                              const wVal = present.length > 0
+                                ? present.reduce((s, k) => s + (row.map[k][row.field] ?? 0), 0)
+                                : null;
+                              return (
+                                <td key={ci} className={`py-2 text-right tabular-nums ${row.bold ? 'font-bold' : ''}`}
+                                  style={{ paddingLeft:4, paddingRight:6, backgroundColor:'#fffbeb', borderLeft:'1px solid #fde68a', borderRight:'1px solid #fde68a' }}>
+                                  {wVal !== null
+                                    ? <span className={row.bold ? 'text-gray-900' : 'text-blue-700'}>{fmtNum(wVal)}</span>
+                                    : <span className="text-gray-300">—</span>}
+                                </td>
+                              );
+                            }
+                          })}
+                          <td className={`py-2 text-right tabular-nums border-l border-gray-200 ${row.bold ? 'font-bold' : ''}`}
+                            style={{ paddingLeft:4, paddingRight:8 }}>
+                            {row.qTotal
+                              ? <span className={row.bold ? 'text-[#1B5E20]' : 'text-blue-700'}>{fmtNum(row.qTotal[row.field])}</span>
+                              : <span className="text-gray-300">—</span>}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+
                   {renderBlock(lunchMap,  lunchQtrTotal,  '☀️  Lunch Shift',  '#92400E')}
                   {renderBlock(dinnerMap, dinnerQtrTotal, '🌙  Dinner Shift', '#1E3A5F')}
                   {renderBlock(totalMap,  totalQtrTotal,  '∑   Daily Total',  '#111827')}
