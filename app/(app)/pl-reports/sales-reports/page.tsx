@@ -492,7 +492,7 @@ export default function SalesReportsPage() {
   const { data: locations = [] } = useQuery({
     queryKey: ['locations-active'],
     queryFn: async () => {
-      const { data } = await supabase.from('locations').select('id, name').eq('is_active', true).order('name');
+      const { data } = await supabase.from('locations').select('id, name').eq('is_active', true).eq('type', 'restaurant').order('name');
       return (data ?? []) as Location[];
     },
   });
