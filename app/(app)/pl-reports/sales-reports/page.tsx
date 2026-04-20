@@ -31,6 +31,7 @@ type WeekData = {
 
 type ShiftRow = {
   report_date:         string;
+  z_report_number:     string;
   gross_total:         number;
   gross_food:          number;
   gross_beverages:     number;
@@ -197,6 +198,50 @@ const fmtDate = (d: string | null) =>
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const PAGE_SIZE = 30;
 const TOTAL_WEEKS = 52;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SHIFT AGGREGATION HELPERS
+// ─────────────────────────────────────────────────────────────────────────────
+
+function shiftToAgg(sr: ShiftRow): DayAgg {
+  return {
+    shiftCount:          1,
+    grossTotal:          sr.gross_total         ?? 0,
+    grossFood:           sr.gross_food          ?? 0,
+    grossDrinks:         sr.gross_beverages     ?? 0,
+    netTotal:            sr.net_total           ?? 0,
+    vatTotal:            sr.vat_total           ?? 0,
+    tips:                sr.tips                ?? 0,
+    inhouseTotal:        sr.inhouse_total       ?? 0,
+    takeawayTotal:       sr.takeaway_total      ?? 0,
+    cancellationsCount:  sr.cancellations_count ?? 0,
+    cancellationsTotal:  sr.cancellations_total ?? 0,
+  };
+}
+
+function addAgg(a: DayAgg, b: DayAgg): DayAgg {
+  return {
+    shiftCount:          a.shiftCount          + b.shiftCount,
+    grossTotal:          a.grossTotal          + b.grossTotal,
+    grossFood:           a.grossFood           + b.grossFood,
+    grossDrinks:         a.grossDrinks         + b.grossDrinks,
+    netTotal:            a.netTotal            + b.netTotal,
+    vatTotal:            a.vatTotal            + b.vatTotal,
+    tips:                a.tips                + b.tips,
+    inhouseTotal:        a.inhouseTotal        + b.inhouseTotal,
+    takeawayTotal:       a.takeawayTotal       + b.takeawayTotal,
+    cancellationsCount:  a.cancellationsCount  + b.cancellationsCount,
+    cancellationsTotal:  a.cancellationsTotal  + b.cancellationsTotal,
+  };
+}
+
+const EMPTY_AGG: DayAgg = { shiftCount:0, grossTotal:0, grossFood:0, grossDrinks:0, netTotal:0, vatTotal:0, tips:0, inhouseTotal:0, takeawayTotal:0, cancellationsCount:0, cancellationsTotal:0 };
+
+function sumMap(map: Record<number, DayAgg>): DayAgg | null {
+  const vals = Object.values(map);
+  if (!vals.length) return null;
+  return vals.reduce<DayAgg>((acc, d) => addAgg(acc, d), { ...EMPTY_AGG });
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CSV PARSERS
@@ -477,7 +522,7 @@ export default function SalesReportsPage() {
       const last = daysInMonth(year, month);
       const { data } = await supabase
         .from('shift_reports')
-        .select('report_date,gross_total,gross_food,gross_beverages,net_total,vat_total,tips,inhouse_total,takeaway_total,cancellations_count,cancellations_total')
+        .select('report_date,z_report_number,gross_total,gross_food,gross_beverages,net_total,vat_total,tips,inhouse_total,takeaway_total,cancellations_count,cancellations_total')
         .eq('location_id', location!.id)
         .gte('report_date', `${year}-${mm}-01`)
         .lte('report_date', `${year}-${mm}-${String(last).padStart(2,'0')}`)
@@ -511,43 +556,34 @@ export default function SalesReportsPage() {
     }), { week_start:'', week_end:null, total_revenue:0, gross_food:0, gross_drinks:0, net_revenue:0, tax_total:0, tips:0, inhouse_revenue:0, takeaway_revenue:0 });
   }, [weeklyImports]);
 
-  const dayMap = useMemo<Record<number, DayAgg>>(() => {
-    const m: Record<number, DayAgg> = {};
+  // Split shifts per day: sort by z_report_number (lower = lunch, higher = dinner)
+  const { lunchMap, dinnerMap, totalMap } = useMemo(() => {
+    const byDay: Record<number, ShiftRow[]> = {};
     for (const sr of shiftRows) {
       const day = new Date(sr.report_date + 'T12:00:00Z').getUTCDate();
-      if (!m[day]) m[day] = { shiftCount:0, grossTotal:0, grossFood:0, grossDrinks:0, netTotal:0, vatTotal:0, tips:0, inhouseTotal:0, takeawayTotal:0, cancellationsCount:0, cancellationsTotal:0 };
-      m[day].shiftCount          += 1;
-      m[day].grossTotal          += sr.gross_total         ?? 0;
-      m[day].grossFood           += sr.gross_food          ?? 0;
-      m[day].grossDrinks         += sr.gross_beverages     ?? 0;
-      m[day].netTotal            += sr.net_total           ?? 0;
-      m[day].vatTotal            += sr.vat_total           ?? 0;
-      m[day].tips                += sr.tips                ?? 0;
-      m[day].inhouseTotal        += sr.inhouse_total       ?? 0;
-      m[day].takeawayTotal       += sr.takeaway_total      ?? 0;
-      m[day].cancellationsCount  += sr.cancellations_count ?? 0;
-      m[day].cancellationsTotal  += sr.cancellations_total ?? 0;
+      if (!byDay[day]) byDay[day] = [];
+      byDay[day].push(sr);
     }
-    return m;
+    for (const day in byDay) {
+      byDay[day].sort((a, b) => parseInt(a.z_report_number || '0', 10) - parseInt(b.z_report_number || '0', 10));
+    }
+    const lunchMap:  Record<number, DayAgg> = {};
+    const dinnerMap: Record<number, DayAgg> = {};
+    const totalMap:  Record<number, DayAgg> = {};
+    for (const [dayStr, shifts] of Object.entries(byDay)) {
+      const day = parseInt(dayStr, 10);
+      let total: DayAgg | null = null;
+      if (shifts[0]) { lunchMap[day]  = shiftToAgg(shifts[0]); total = shiftToAgg(shifts[0]); }
+      if (shifts[1]) { dinnerMap[day] = shiftToAgg(shifts[1]); total = total ? addAgg(total, shiftToAgg(shifts[1])) : shiftToAgg(shifts[1]); }
+      for (let i = 2; i < shifts.length; i++) if (total) total = addAgg(total, shiftToAgg(shifts[i]));
+      if (total) totalMap[day] = total;
+    }
+    return { lunchMap, dinnerMap, totalMap };
   }, [shiftRows]);
 
-  const monthTotal = useMemo<DayAgg | null>(() => {
-    const vals = Object.values(dayMap);
-    if (!vals.length) return null;
-    return vals.reduce<DayAgg>((acc, d) => ({
-      shiftCount:         acc.shiftCount         + d.shiftCount,
-      grossTotal:         acc.grossTotal         + d.grossTotal,
-      grossFood:          acc.grossFood          + d.grossFood,
-      grossDrinks:        acc.grossDrinks        + d.grossDrinks,
-      netTotal:           acc.netTotal           + d.netTotal,
-      vatTotal:           acc.vatTotal           + d.vatTotal,
-      tips:               acc.tips               + d.tips,
-      inhouseTotal:       acc.inhouseTotal       + d.inhouseTotal,
-      takeawayTotal:      acc.takeawayTotal      + d.takeawayTotal,
-      cancellationsCount: acc.cancellationsCount + d.cancellationsCount,
-      cancellationsTotal: acc.cancellationsTotal + d.cancellationsTotal,
-    }), { shiftCount:0, grossTotal:0, grossFood:0, grossDrinks:0, netTotal:0, vatTotal:0, tips:0, inhouseTotal:0, takeawayTotal:0, cancellationsCount:0, cancellationsTotal:0 });
-  }, [dayMap]);
+  const lunchMonthTotal  = useMemo(() => sumMap(lunchMap),  [lunchMap]);
+  const dinnerMonthTotal = useMemo(() => sumMap(dinnerMap), [dinnerMap]);
+  const totalMonthTotal  = useMemo(() => sumMap(totalMap),  [totalMap]);
 
   const totalDays = useMemo(() => daysInMonth(year, month), [year, month]);
   const days      = useMemo(() => Array.from({ length: totalDays }, (_, i) => i + 1), [totalDays]);
@@ -1116,89 +1152,115 @@ export default function SalesReportsPage() {
             <MapPin size={36} className="text-gray-200" />
             <p className="text-sm">Select a location to view the daily P&amp;L</p>
           </div>
-        ) : (
-          <div className="border border-gray-200 rounded-xl overflow-hidden shadow-sm">
-            <div className="overflow-x-auto">
-              <table className="text-xs border-collapse" style={{ minWidth: LABEL_W + (days.length + 1) * COL_W_D }}>
-                <thead>
-                  <tr style={{ backgroundColor:'#111827' }}>
-                    <th className="sticky left-0 z-20 px-4 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider whitespace-nowrap border-r border-gray-700"
-                      style={{ backgroundColor:'#111827', minWidth:LABEL_W, width:LABEL_W }}>
-                      METRIC / DAY · {MONTHS[month-1]} {year}
-                    </th>
+        ) : (() => {
+          // Helper: render one P&L block (lunch / dinner / total) as a <tbody>
+          const renderBlock = (
+            map:    Record<number, DayAgg>,
+            mTotal: DayAgg | null,
+            label:  string,
+            headerBg: string,
+          ) => (
+            <tbody key={label}>
+              {/* Block banner */}
+              <tr>
+                <td colSpan={days.length + 2}
+                  className="px-4 py-2 text-xs font-bold uppercase tracking-widest text-white"
+                  style={{ backgroundColor: headerBg }}>
+                  {label}
+                </td>
+              </tr>
+              {DAILY_ROWS.map((row, i) => {
+                if (row.type === 'section') {
+                  return (
+                    <tr key={i}>
+                      <td colSpan={days.length + 2}
+                        className="sticky left-0 px-4 py-1.5 text-xs font-semibold uppercase tracking-widest"
+                        style={{ backgroundColor:'#f3f4f6', color:'#6b7280', letterSpacing:'0.07em' }}>
+                        {row.label}
+                      </td>
+                    </tr>
+                  );
+                }
+                const isBold = row.type === 'bold';
+                const isPct  = row.type === 'pct';
+                const bg     = isBold ? '#f0fdf4' : '#ffffff';
+                return (
+                  <tr key={i} className="border-b border-gray-100 hover:bg-gray-50/60 group" style={{ backgroundColor:bg }}>
+                    <td className={`sticky left-0 z-10 px-4 py-2 whitespace-nowrap border-r border-gray-100 group-hover:bg-gray-50/60 transition-colors ${
+                      isBold ? 'font-bold text-gray-900' : isPct ? 'pl-8 text-gray-400 italic' : 'text-gray-700'
+                    }`} style={{ backgroundColor:bg }}>
+                      {row.label}
+                    </td>
                     {days.map(d => {
-                      const hasData  = !!dayMap[d];
                       const isCurDay = year===todayYear && month===todayMonth && d===todayDay;
                       return (
-                        <th key={d} className="py-3 text-right font-bold whitespace-nowrap tabular-nums"
-                          style={{ minWidth:COL_W_D, width:COL_W_D, paddingLeft:4, paddingRight:8,
-                            color: isCurDay ? '#ffffff' : hasData ? '#93c5fd' : '#4b5563',
-                            borderBottom: isCurDay ? '2px solid #3b82f6' : 'none' }}>
-                          {d}
-                        </th>
+                        <td key={d} className={`py-2 text-right tabular-nums ${isBold ? 'font-bold' : ''}`}
+                          style={{ paddingLeft:4, paddingRight:8, backgroundColor: isCurDay ? 'rgba(59,130,246,0.04)' : undefined }}>
+                          {renderDayCell(row, map[d] ?? null)}
+                        </td>
                       );
                     })}
-                    <th className="py-3 text-right font-bold whitespace-nowrap border-l border-gray-700"
-                      style={{ minWidth:COL_W_D+8, paddingLeft:4, paddingRight:8, color:'#e5e7eb' }}>
-                      {MONTHS[month-1]}
-                    </th>
+                    <td className={`py-2 text-right tabular-nums border-l border-gray-200 ${isBold ? 'font-bold' : ''}`}
+                      style={{ paddingLeft:4, paddingRight:8 }}>
+                      {isPct || !mTotal
+                        ? <span className="text-gray-300">—</span>
+                        : renderDayCell(row, mTotal)}
+                    </td>
                   </tr>
-                </thead>
-                <tbody>
-                  {DAILY_ROWS.map((row, i) => {
-                    if (row.type === 'section') {
-                      return (
-                        <tr key={i}>
-                          <td colSpan={days.length + 2} className="sticky left-0 px-4 py-2 text-xs font-bold uppercase tracking-widest"
-                            style={{ backgroundColor:'#f3f4f6', color:'#374151', letterSpacing:'0.08em' }}>
-                            {row.label}
-                          </td>
-                        </tr>
-                      );
-                    }
-                    const isBold = row.type === 'bold';
-                    const isPct  = row.type === 'pct';
-                    const bg     = isBold ? '#f0fdf4' : '#ffffff';
-                    return (
-                      <tr key={i} className="border-b border-gray-100 hover:bg-gray-50/60 group" style={{ backgroundColor:bg }}>
-                        <td className={`sticky left-0 z-10 px-4 py-2 whitespace-nowrap border-r border-gray-100 group-hover:bg-gray-50/60 transition-colors ${
-                          isBold ? 'font-bold text-gray-900' : isPct ? 'pl-8 text-gray-400 italic' : 'text-gray-700'
-                        }`} style={{ backgroundColor:bg }}>
-                          {row.label}
-                        </td>
-                        {days.map(d => {
-                          const isCurDay = year===todayYear && month===todayMonth && d===todayDay;
-                          return (
-                            <td key={d} className={`py-2 text-right tabular-nums ${isBold ? 'font-bold' : ''}`}
-                              style={{ paddingLeft:4, paddingRight:8, backgroundColor: isCurDay ? 'rgba(59,130,246,0.04)' : undefined }}>
-                              {renderDayCell(row, dayMap[d] ?? null)}
-                            </td>
-                          );
-                        })}
-                        <td className={`py-2 text-right tabular-nums border-l border-gray-200 ${isBold ? 'font-bold' : ''}`}
-                          style={{ paddingLeft:4, paddingRight:8 }}>
-                          {isPct || !monthTotal
-                            ? <span className="text-gray-300">—</span>
-                            : renderDayCell(row, monthTotal)}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-            <div className="px-4 py-2.5 bg-gray-50 border-t border-gray-100 flex items-center justify-between">
-              <span className="text-xs text-gray-400">
-                {shiftRows.length} shift report{shiftRows.length !== 1 ? 's' : ''} · {Object.keys(dayMap).length} day{Object.keys(dayMap).length !== 1 ? 's' : ''} with data
-              </span>
-              {monthTotal && (
+                );
+              })}
+            </tbody>
+          );
+
+          return (
+            <div className="border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+              <div className="overflow-x-auto">
+                <table className="text-xs border-collapse" style={{ minWidth: LABEL_W + (days.length + 1) * COL_W_D }}>
+                  {/* Sticky column header */}
+                  <thead>
+                    <tr style={{ backgroundColor:'#111827' }}>
+                      <th className="sticky left-0 z-20 px-4 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider whitespace-nowrap border-r border-gray-700"
+                        style={{ backgroundColor:'#111827', minWidth:LABEL_W, width:LABEL_W }}>
+                        METRIC / DAY · {MONTHS[month-1]} {year}
+                      </th>
+                      {days.map(d => {
+                        const hasData  = !!totalMap[d];
+                        const isCurDay = year===todayYear && month===todayMonth && d===todayDay;
+                        return (
+                          <th key={d} className="py-3 text-right font-bold whitespace-nowrap tabular-nums"
+                            style={{ minWidth:COL_W_D, width:COL_W_D, paddingLeft:4, paddingRight:8,
+                              color: isCurDay ? '#ffffff' : hasData ? '#93c5fd' : '#4b5563',
+                              borderBottom: isCurDay ? '2px solid #3b82f6' : 'none' }}>
+                            {d}
+                          </th>
+                        );
+                      })}
+                      <th className="py-3 text-right font-bold whitespace-nowrap border-l border-gray-700"
+                        style={{ minWidth:COL_W_D+8, paddingLeft:4, paddingRight:8, color:'#e5e7eb' }}>
+                        {MONTHS[month-1]}
+                      </th>
+                    </tr>
+                  </thead>
+
+                  {renderBlock(lunchMap,  lunchMonthTotal,  '☀️  Lunch Shift',  '#92400E')}
+                  {renderBlock(dinnerMap, dinnerMonthTotal, '🌙  Dinner Shift', '#1E3A5F')}
+                  {renderBlock(totalMap,  totalMonthTotal,  '∑   Daily Total',  '#111827')}
+                </table>
+              </div>
+              <div className="px-4 py-2.5 bg-gray-50 border-t border-gray-100 flex items-center justify-between">
                 <span className="text-xs text-gray-400">
-                  Monthly gross: <span className="font-bold text-[#1B5E20]">{fmt(monthTotal.grossTotal)}</span>
+                  {shiftRows.length} shift report{shiftRows.length !== 1 ? 's' : ''} ·{' '}
+                  {Object.keys(totalMap).length} day{Object.keys(totalMap).length !== 1 ? 's' : ''} with data
                 </span>
-              )}
+                {totalMonthTotal && (
+                  <span className="text-xs text-gray-400">
+                    Monthly gross: <span className="font-bold text-[#1B5E20]">{fmt(totalMonthTotal.grossTotal)}</span>
+                  </span>
+                )}
+              </div>
             </div>
-          </div>
-        )
+          );
+        })()
       )}
 
       {/* ══════════════════════════════════════════════════════════════════
