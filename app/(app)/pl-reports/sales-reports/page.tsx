@@ -1487,10 +1487,10 @@ export default function SalesReportsPage() {
             headerBg: string,
           ) => (
             <tbody key={label}>
-              {/* Block banner */}
+              {/* Block banner — sticky left so label stays visible when scrolling right */}
               <tr>
                 <td colSpan={totalCols}
-                  className="px-4 py-2 text-xs font-bold uppercase tracking-widest text-white"
+                  className="sticky left-0 px-4 py-2 text-xs font-bold uppercase tracking-widest text-white"
                   style={{ backgroundColor: headerBg }}>
                   {label}
                 </td>
