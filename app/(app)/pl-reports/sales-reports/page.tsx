@@ -758,7 +758,7 @@ export default function SalesReportsPage() {
       byDate[sr.report_date].push(sr);
     }
     for (const dk in byDate) {
-      byDate[dk].sort((a, b) => parseInt(a.z_report_number || '0', 10) - parseInt(b.z_report_number || '0', 10));
+      byDate[dk].sort((a, b) => parseInt(b.z_report_number || '0', 10) - parseInt(a.z_report_number || '0', 10));
     }
     const lunchMap:  Record<string, DayAgg> = {};
     const dinnerMap: Record<string, DayAgg> = {};
