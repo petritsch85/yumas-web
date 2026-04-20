@@ -213,7 +213,12 @@ const fmtNum = (n: number) =>
 const fmtDate = (d: string | null) =>
   d ? new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
 
-const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const MONTHS  = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const DOW_SHORT = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+
+type DayCol  = { type: 'day';  day: number; dow: string };
+type WeekCol = { type: 'week'; label: string; wDays: number[] };
+type DailyCol = DayCol | WeekCol;
 const PAGE_SIZE = 30;
 const TOTAL_WEEKS = 52;
 
@@ -773,6 +778,24 @@ export default function SalesReportsPage() {
 
   const totalDays = useMemo(() => daysInMonth(year, month), [year, month]);
   const days      = useMemo(() => Array.from({ length: totalDays }, (_, i) => i + 1), [totalDays]);
+
+  // Build day + week-summary column sequence for the daily P&L
+  const dailyCols = useMemo<DailyCol[]>(() => {
+    const result: DailyCol[] = [];
+    let wDays: number[] = [];
+    let wNum = 1;
+    for (const d of days) {
+      const dow = new Date(year, month - 1, d).getDay(); // 0=Sun
+      result.push({ type: 'day', day: d, dow: DOW_SHORT[dow] });
+      wDays.push(d);
+      if (dow === 0) {
+        result.push({ type: 'week', label: `W${wNum++}`, wDays: [...wDays] });
+        wDays = [];
+      }
+    }
+    if (wDays.length > 0) result.push({ type: 'week', label: `W${wNum}`, wDays: [...wDays] });
+    return result;
+  }, [days, year, month]);
 
   const topCats = useMemo(() =>
     Object.entries(weeklyResult?.categoryRevenue ?? {}).sort((a,b) => b[1]-a[1]).slice(0, 12),
@@ -1447,17 +1470,19 @@ export default function SalesReportsPage() {
             <p className="text-sm">Select a location to view the daily P&amp;L</p>
           </div>
         ) : (() => {
+          const totalCols = dailyCols.length + 2; // label + day/week cols + month total
+
           // Helper: render one P&L block (lunch / dinner / total) as a <tbody>
           const renderBlock = (
-            map:    Record<number, DayAgg>,
-            mTotal: DayAgg | null,
-            label:  string,
+            map:      Record<number, DayAgg>,
+            mTotal:   DayAgg | null,
+            label:    string,
             headerBg: string,
           ) => (
             <tbody key={label}>
               {/* Block banner */}
               <tr>
-                <td colSpan={days.length + 2}
+                <td colSpan={totalCols}
                   className="px-4 py-2 text-xs font-bold uppercase tracking-widest text-white"
                   style={{ backgroundColor: headerBg }}>
                   {label}
@@ -1467,7 +1492,7 @@ export default function SalesReportsPage() {
                 if (row.type === 'section') {
                   return (
                     <tr key={i}>
-                      <td colSpan={days.length + 2}
+                      <td colSpan={totalCols}
                         className="sticky left-0 px-4 py-1.5 text-xs font-semibold uppercase tracking-widest"
                         style={{ backgroundColor:'#f3f4f6', color:'#6b7280', letterSpacing:'0.07em' }}>
                         {row.label}
@@ -1485,14 +1510,27 @@ export default function SalesReportsPage() {
                     }`} style={{ backgroundColor:bg }}>
                       {row.label}
                     </td>
-                    {days.map(d => {
-                      const isCurDay = year===todayYear && month===todayMonth && d===todayDay;
-                      return (
-                        <td key={d} className={`py-2 text-right tabular-nums ${isBold ? 'font-bold' : ''}`}
-                          style={{ paddingLeft:4, paddingRight:8, backgroundColor: isCurDay ? 'rgba(59,130,246,0.04)' : undefined }}>
-                          {renderDayCell(row, map[d] ?? null)}
-                        </td>
-                      );
+                    {dailyCols.map((col, ci) => {
+                      if (col.type === 'day') {
+                        const isCurDay = year===todayYear && month===todayMonth && col.day===todayDay;
+                        return (
+                          <td key={ci} className={`py-2 text-right tabular-nums ${isBold ? 'font-bold' : ''}`}
+                            style={{ paddingLeft:4, paddingRight:8, backgroundColor: isCurDay ? 'rgba(59,130,246,0.04)' : undefined }}>
+                            {renderDayCell(row, map[col.day] ?? null)}
+                          </td>
+                        );
+                      } else {
+                        const present = col.wDays.filter(d => map[d]);
+                        const wAgg = present.length > 0
+                          ? present.reduce<DayAgg>((acc, d) => addAgg(acc, map[d]), { ...EMPTY_AGG })
+                          : null;
+                        return (
+                          <td key={ci} className={`py-2 text-right tabular-nums ${isBold ? 'font-bold' : ''}`}
+                            style={{ paddingLeft:4, paddingRight:6, backgroundColor:'#fffbeb', borderLeft:'1px solid #fde68a', borderRight:'1px solid #fde68a' }}>
+                            {isPct ? <span className="text-gray-300">—</span> : renderDayCell(row, wAgg)}
+                          </td>
+                        );
+                      }
                     })}
                     <td className={`py-2 text-right tabular-nums border-l border-gray-200 ${isBold ? 'font-bold' : ''}`}
                       style={{ paddingLeft:4, paddingRight:8 }}>
@@ -1509,7 +1547,7 @@ export default function SalesReportsPage() {
           return (
             <div className="border border-gray-200 rounded-xl overflow-hidden shadow-sm">
               <div className="overflow-auto" style={{ maxHeight: 'calc(100vh - 260px)' }}>
-                <table className="text-xs border-collapse" style={{ minWidth: LABEL_W + (days.length + 1) * COL_W_D }}>
+                <table className="text-xs border-collapse" style={{ minWidth: LABEL_W + (dailyCols.length + 1) * COL_W_D }}>
                   {/* Sticky column header */}
                   <thead className="sticky top-0 z-30">
                     <tr style={{ backgroundColor:'#111827' }}>
@@ -1517,21 +1555,37 @@ export default function SalesReportsPage() {
                         style={{ backgroundColor:'#111827', minWidth:LABEL_W, width:LABEL_W }}>
                         METRIC / DAY · {MONTHS[month-1]} {year}
                       </th>
-                      {days.map(d => {
-                        const hasData  = !!totalMap[d];
-                        const isCurDay = year===todayYear && month===todayMonth && d===todayDay;
-                        return (
-                          <th key={d} className="py-3 text-right font-bold whitespace-nowrap tabular-nums"
-                            style={{ minWidth:COL_W_D, width:COL_W_D, paddingLeft:4, paddingRight:8,
-                              color: isCurDay ? '#ffffff' : hasData ? '#93c5fd' : '#4b5563',
-                              borderBottom: isCurDay ? '2px solid #3b82f6' : 'none' }}>
-                            {d}
-                          </th>
-                        );
+                      {dailyCols.map((col, ci) => {
+                        if (col.type === 'day') {
+                          const hasData  = !!totalMap[col.day];
+                          const isCurDay = year===todayYear && month===todayMonth && col.day===todayDay;
+                          const isSun    = col.dow === 'Sun';
+                          return (
+                            <th key={ci} className="py-2 text-right font-bold whitespace-nowrap tabular-nums"
+                              style={{ minWidth:COL_W_D, width:COL_W_D, paddingLeft:4, paddingRight:8,
+                                color: isCurDay ? '#ffffff' : hasData ? '#93c5fd' : '#4b5563',
+                                borderBottom: isCurDay ? '2px solid #3b82f6' : isSun ? '2px solid #7c3aed' : 'none',
+                                borderRight: isSun ? '1px solid #374151' : undefined }}>
+                              <div style={{ fontSize:9, fontWeight:400, opacity:0.55, marginBottom:1 }}>{col.dow}</div>
+                              <div>{col.day}</div>
+                            </th>
+                          );
+                        } else {
+                          return (
+                            <th key={ci} className="py-2 text-right font-bold whitespace-nowrap tabular-nums"
+                              style={{ minWidth:COL_W_D, width:COL_W_D, paddingLeft:4, paddingRight:8,
+                                color:'#fbbf24', backgroundColor:'#1c1917',
+                                borderLeft:'1px solid #374151', borderRight:'1px solid #374151' }}>
+                              <div style={{ fontSize:9, fontWeight:400, opacity:0.6, marginBottom:1 }}>WEEK</div>
+                              <div>{col.label}</div>
+                            </th>
+                          );
+                        }
                       })}
-                      <th className="py-3 text-right font-bold whitespace-nowrap border-l border-gray-700"
+                      <th className="py-2 text-right font-bold whitespace-nowrap border-l border-gray-700"
                         style={{ minWidth:COL_W_D+8, paddingLeft:4, paddingRight:8, color:'#e5e7eb' }}>
-                        {MONTHS[month-1]}
+                        <div style={{ fontSize:9, fontWeight:400, opacity:0.55, marginBottom:1 }}>TOTAL</div>
+                        <div>{MONTHS[month-1]}</div>
                       </th>
                     </tr>
                   </thead>
