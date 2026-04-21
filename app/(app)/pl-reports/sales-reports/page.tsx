@@ -133,6 +133,13 @@ type ShiftParseResult = {
   error?:             string;
 };
 
+type WeeklyBatchItem = {
+  fileName: string;
+  result:   WeeklyParseResult;
+  status:   'pending' | 'saving' | 'saved' | 'error';
+  errorMsg?: string;
+};
+
 type ShiftConfidence = 'high' | 'medium' | 'low';
 
 type ShiftBatchItem = {
@@ -776,6 +783,7 @@ export default function SalesReportsPage() {
   // Upload state
   const [fileName,       setFileName]       = useState<string | null>(null);
   const [weeklyResult,   setWeeklyResult]   = useState<WeeklyParseResult | null>(null);
+  const [weeklyBatch,    setWeeklyBatch]    = useState<WeeklyBatchItem[]>([]);
   const [shiftBatch,     setShiftBatch]     = useState<ShiftBatchItem[]>([]);
   const [monthlyResult,  setMonthlyResult]  = useState<MonthlyParseResult | null>(null);
   const [parseError,     setParseError]     = useState<string | null>(null);
@@ -1080,15 +1088,15 @@ export default function SalesReportsPage() {
     [weeklyResult]
   );
 
-  const canImportWeekly  = !!location && !!weeklyResult?.rows?.length && !importing;
+  const canImportWeekly  = !!location && weeklyBatch.some(i => i.status === 'pending' && !i.result.error) && !importing;
   const canImportShift   = !!location && shiftBatch.some(i => i.status === 'pending' && !i.result.error) && !importing;
   const canImportMonthly = !!location && !!monthlyResult && !monthlyResult.error && monthlyResult.year > 0 && !importing;
 
   // ── Handlers ───────────────────────────────────────────────────────────────
 
   const resetUpload = useCallback(() => {
-    setFileName(null); setWeeklyResult(null); setShiftBatch([]); setMonthlyResult(null);
-    setParseError(null); setWeeklyPage(0);
+    setFileName(null); setWeeklyResult(null); setWeeklyBatch([]); setShiftBatch([]);
+    setMonthlyResult(null); setParseError(null); setWeeklyPage(0);
   }, []);
 
   const processFile = useCallback((file: File) => {
@@ -1101,18 +1109,16 @@ export default function SalesReportsPage() {
         setParseError(null);
         const { type: detectedType, confidence } = classifyShiftType(r);
         setShiftBatch(prev => [...prev, { fileName: file.name, result: r, detectedType, confidence, status: 'pending' }]);
+      } else if (reportType === 'weekly') {
+        const r = parseWeeklyCSV(content ?? '');
+        setParseError(null);
+        setWeeklyBatch(prev => [...prev, { fileName: file.name, result: r, status: 'pending' }]);
       } else {
         setFileName(file.name);
-        setWeeklyResult(null); setMonthlyResult(null); setParseError(null); setWeeklyPage(0);
-        if (reportType === 'weekly') {
-          const r = parseWeeklyCSV(content ?? '');
-          if (r.error) { setParseError(r.error); return; }
-          setWeeklyResult(r);
-        } else {
-          const r = parseMonthlyCSV(content ?? '');
-          if (r.error) { setParseError(r.error); return; }
-          setMonthlyResult(r);
-        }
+        setMonthlyResult(null); setParseError(null);
+        const r = parseMonthlyCSV(content ?? '');
+        if (r.error) { setParseError(r.error); return; }
+        setMonthlyResult(r);
       }
     };
     reader.readAsText(file, 'UTF-8');
@@ -1124,36 +1130,42 @@ export default function SalesReportsPage() {
   }, [processFile]);
 
   const handleImportWeekly = useCallback(async () => {
-    if (!location || !weeklyResult?.rows || !weeklyResult?.summary) return;
+    const pending = weeklyBatch.filter(i => i.status === 'pending' && !i.result.error);
+    if (!location || !pending.length) return;
     setImporting(true);
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      const s = weeklyResult.summary;
-      const { data: imp, error: impErr } = await supabase.from('sales_imports').insert({
-        location_id: location.id, file_name: fileName ?? 'unknown.csv',
-        week_start: s.weekStart, week_end: s.weekEnd,
-        row_count: weeklyResult.rows.length, total_revenue: s.grossTotal,
-        net_revenue: s.netTotal, tax_total: s.taxTotal, tips: s.tips,
-        gross_food: s.grossFood, gross_drinks: s.grossDrinks,
-        inhouse_revenue: s.inhouseTotal, takeaway_revenue: s.takeawayTotal,
-        imported_by: user?.id ?? null,
-      }).select('id').single();
-      if (impErr) throw impErr;
-      for (let i = 0; i < weeklyResult.rows.length; i += 200) {
-        const chunk = weeklyResult.rows.slice(i, i+200).map(r => ({
-          import_id: imp.id, item_name: r.item_name, category: r.category,
-          quantity: r.quantity, unit_price: r.unit_price, total_price: r.total_price,
-          inhouse_revenue: r.inhouse_revenue, takeaway_revenue: r.takeaway_revenue,
-        }));
-        const { error } = await supabase.from('sales_import_lines').insert(chunk);
-        if (error) throw error;
+    const { data: { user } } = await supabase.auth.getUser();
+    for (const item of pending) {
+      setWeeklyBatch(prev => prev.map(i => i === item ? { ...i, status: 'saving' } : i));
+      try {
+        const s = item.result.summary!;
+        const { data: imp, error: impErr } = await supabase.from('sales_imports').insert({
+          location_id: location.id, file_name: item.fileName,
+          week_start: s.weekStart, week_end: s.weekEnd,
+          row_count: item.result.rows.length, total_revenue: s.grossTotal,
+          net_revenue: s.netTotal, tax_total: s.taxTotal, tips: s.tips,
+          gross_food: s.grossFood, gross_drinks: s.grossDrinks,
+          inhouse_revenue: s.inhouseTotal, takeaway_revenue: s.takeawayTotal,
+          imported_by: user?.id ?? null,
+        }).select('id').single();
+        if (impErr) throw impErr;
+        for (let i = 0; i < item.result.rows.length; i += 200) {
+          const chunk = item.result.rows.slice(i, i + 200).map(r => ({
+            import_id: imp.id, item_name: r.item_name, category: r.category,
+            quantity: r.quantity, unit_price: r.unit_price, total_price: r.total_price,
+            inhouse_revenue: r.inhouse_revenue, takeaway_revenue: r.takeaway_revenue,
+          }));
+          const { error } = await supabase.from('sales_import_lines').insert(chunk);
+          if (error) throw error;
+        }
+        setWeeklyBatch(prev => prev.map(i => i === item ? { ...i, status: 'saved' } : i));
+      } catch (e: any) {
+        setWeeklyBatch(prev => prev.map(i => i === item ? { ...i, status: 'error', errorMsg: e.message } : i));
       }
-      queryClient.invalidateQueries({ queryKey: ['sales-imports'] });
-      queryClient.invalidateQueries({ queryKey: ['weekly-sales'] });
-      resetUpload(); setActiveTab('daily');
-    } catch (e: any) { alert(`Import failed: ${e.message}`); }
-    finally { setImporting(false); }
-  }, [location, weeklyResult, fileName, queryClient, resetUpload]);
+    }
+    queryClient.invalidateQueries({ queryKey: ['sales-imports'] });
+    queryClient.invalidateQueries({ queryKey: ['weekly-sales'] });
+    setImporting(false);
+  }, [location, weeklyBatch, queryClient]);
 
   const handleImportShift = useCallback(async () => {
     const pending = shiftBatch.filter(i => i.status === 'pending' && !i.result.error);
@@ -1497,34 +1509,39 @@ export default function SalesReportsPage() {
                   onClick={() => fileInputRef.current?.click()}
                   className={`relative border-2 border-dashed rounded-xl p-8 text-center transition-colors cursor-pointer ${
                     isDragging ? 'border-[#1B5E20] bg-green-50' :
-                    (reportType === 'shift' ? shiftBatch.length > 0 : !!fileName) && !parseError ? 'border-green-400 bg-green-50' :
+                    (reportType === 'shift' ? shiftBatch.length > 0 : reportType === 'weekly' ? weeklyBatch.length > 0 : !!fileName) && !parseError ? 'border-green-400 bg-green-50' :
                     parseError ? 'border-red-300 bg-red-50' :
                     'border-gray-200 bg-white hover:border-gray-300'
                   }`}
                 >
-                  {(reportType === 'shift' ? shiftBatch.length > 0 : !!fileName) && !parseError
+                  {(reportType === 'shift' ? shiftBatch.length > 0 : reportType === 'weekly' ? weeklyBatch.length > 0 : !!fileName) && !parseError
                     ? <FileCheck className="mx-auto mb-2 text-green-600" size={32} />
                     : <Upload    className="mx-auto mb-2 text-gray-400"   size={32} />}
-                  <p className={`text-sm font-semibold mb-1 ${(reportType === 'shift' ? shiftBatch.length > 0 : !!fileName) && !parseError ? 'text-green-700' : 'text-gray-600'}`}>
+                  <p className={`text-sm font-semibold mb-1 ${(reportType === 'shift' ? shiftBatch.length > 0 : reportType === 'weekly' ? weeklyBatch.length > 0 : !!fileName) && !parseError ? 'text-green-700' : 'text-gray-600'}`}>
                     {reportType === 'shift'
                       ? (shiftBatch.length > 0 ? `${shiftBatch.length} file${shiftBatch.length > 1 ? 's' : ''} queued` : 'Drop CSV files here')
+                      : reportType === 'weekly'
+                      ? (weeklyBatch.length > 0 ? `${weeklyBatch.length} file${weeklyBatch.length > 1 ? 's' : ''} queued` : 'Drop CSV files here')
                       : (fileName ?? 'Drop CSV here')}
                   </p>
                   <p className="text-xs text-gray-400 mb-3">
-                    {weeklyResult  ? `${weeklyResult.rows.length} products parsed` :
-                     monthlyResult ? `Z ${monthlyResult.fromZ}–${monthlyResult.toZ} · ${MONTHS[monthlyResult.month-1]} ${monthlyResult.year}` :
+                    {monthlyResult ? `Z ${monthlyResult.fromZ}–${monthlyResult.toZ} · ${MONTHS[monthlyResult.month-1]} ${monthlyResult.year}` :
                      reportType === 'shift' && shiftBatch.length > 0
                        ? `${shiftBatch.filter(i => i.status === 'pending').length} pending · ${shiftBatch.filter(i => i.status === 'saved').length} saved`
+                       : reportType === 'weekly' && weeklyBatch.length > 0
+                       ? `${weeklyBatch.filter(i => i.status === 'pending').length} pending · ${weeklyBatch.filter(i => i.status === 'saved').length} saved`
                        : 'or click to browse'}
                   </p>
                   <input ref={fileInputRef} type="file" accept=".csv,text/csv,text/plain" className="hidden"
-                    multiple={reportType === 'shift'}
+                    multiple={reportType === 'shift' || reportType === 'weekly'}
                     onClick={(e) => e.stopPropagation()}
                     onChange={(e) => { Array.from(e.target.files ?? []).forEach(f => processFile(f)); e.target.value = ''; }}
                   />
                   <span className="px-4 py-1.5 bg-white border border-gray-200 rounded-lg text-xs font-semibold text-gray-600 hover:bg-gray-50 transition-colors inline-block">
                     {reportType === 'shift'
                       ? (shiftBatch.length > 0 ? 'Add more files' : 'Browse files')
+                      : reportType === 'weekly'
+                      ? (weeklyBatch.length > 0 ? 'Add more files' : 'Browse files')
                       : (fileName ? 'Replace file' : 'Browse files')}
                   </span>
                 </div>
@@ -1552,7 +1569,11 @@ export default function SalesReportsPage() {
                   {importing ? 'Saving…' :
                    !location ? 'Select a location first' :
                    reportType === 'weekly'
-                     ? (canImportWeekly  ? `Save weekly report · ${fmt(weeklyResult!.summary!.grossTotal)}`                                                     : 'Drop a CSV file above')
+                     ? (() => {
+                         const pending = weeklyBatch.filter(i => i.status === 'pending' && !i.result.error);
+                         if (!canImportWeekly) return weeklyBatch.length > 0 ? 'No pending reports to save' : 'Drop CSV files above';
+                         return `Save ${pending.length} weekly report${pending.length > 1 ? 's' : ''}`;
+                       })()
                      : reportType === 'monthly'
                      ? (canImportMonthly ? `Save monthly report · ${MONTHS[monthlyResult!.month-1]} ${monthlyResult!.year} · ${fmt(monthlyResult!.grossTotal)}` : 'Drop a CSV file above')
                      : (() => {
@@ -1568,27 +1589,38 @@ export default function SalesReportsPage() {
                 </button>
               </div>
 
-              {/* ── Weekly summary cards ── */}
-              {reportType === 'weekly' && weeklyResult?.summary && (
+              {/* ── Weekly batch list ── */}
+              {reportType === 'weekly' && weeklyBatch.length > 0 && (
                 <div>
-                  <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">
-                    {fmtDate(weeklyResult.summary.weekStart)} – {fmtDate(weeklyResult.summary.weekEnd)}
-                  </p>
-                  <div className="grid grid-cols-2 gap-2">
-                    {[
-                      { icon: Euro,       label:'Gross Revenue', value: fmt(weeklyResult.summary.grossTotal),  color:'text-[#1B5E20]' },
-                      { icon: Receipt,    label:'Net Revenue',   value: fmt(weeklyResult.summary.netTotal),    color:'text-blue-700'  },
-                      { icon: Percent,    label:'VAT',           value: fmt(weeklyResult.summary.taxTotal),    color:'text-amber-700' },
-                      { icon: TrendingUp, label:'Tips',          value: fmt(weeklyResult.summary.tips),        color:'text-purple-700'},
-                    ].map(s => (
-                      <div key={s.label} className="bg-white border border-gray-100 rounded-xl p-3 shadow-sm">
-                        <div className="flex items-center gap-1.5 mb-1">
-                          <s.icon size={12} className={s.color} />
-                          <p className="text-xs text-gray-400 font-semibold uppercase tracking-wide">{s.label}</p>
+                  <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Queued weeks</p>
+                  <div className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
+                    {weeklyBatch.map((item, idx) => {
+                      const s = item.result.summary;
+                      const statusIcon  = item.status === 'saved' ? '✓' : item.status === 'error' ? '✗' : item.status === 'saving' ? '…' : '○';
+                      const statusColor = item.status === 'saved' ? 'text-green-600' : item.status === 'error' ? 'text-red-500' : item.status === 'saving' ? 'text-blue-500' : 'text-gray-400';
+                      return (
+                        <div key={idx} className="bg-white border border-gray-100 rounded-lg px-3 py-2 flex items-center gap-2 shadow-sm">
+                          <span className={`text-sm font-bold flex-shrink-0 w-4 text-center ${statusColor}`}>{statusIcon}</span>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs font-semibold text-gray-800 truncate">
+                              {s ? `${fmtDate(s.weekStart)} – ${fmtDate(s.weekEnd)}` : item.fileName}
+                            </p>
+                            <p className="text-xs text-gray-400">
+                              {s ? `Gross ${fmt(s.grossTotal)} · Net ${fmt(s.netTotal)}` : item.result.error ?? ''}
+                            </p>
+                            {item.status === 'error' && item.errorMsg && (
+                              <p className="text-xs text-red-500 truncate">{item.errorMsg}</p>
+                            )}
+                          </div>
+                          {item.status === 'pending' && (
+                            <button
+                              onClick={() => setWeeklyBatch(prev => prev.filter((_, i) => i !== idx))}
+                              className="flex-shrink-0 text-gray-300 hover:text-red-400 text-xs font-bold transition-colors"
+                              title="Remove">✕</button>
+                          )}
                         </div>
-                        <p className={`text-sm font-bold ${s.color} leading-tight`}>{s.value}</p>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               )}
