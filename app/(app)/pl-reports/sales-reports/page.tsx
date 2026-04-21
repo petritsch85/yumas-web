@@ -1216,6 +1216,36 @@ export default function SalesReportsPage() {
     return { lunchForecastMap, dinnerForecastMap, totalForecastMap };
   }, [forecastSettings, closureSet, dailyCols]);
 
+  // Full-year forecast maps (all 52 weeks, not just the selected quarter)
+  // Used to populate the weekly table with forecast values for weeks without uploaded data
+  const { weekForecastNetMap, lunchWeekForecastMap, dinnerWeekForecastMap, totalWeekForecastMap } = useMemo(() => {
+    const wNet:   Record<number, number> = {};
+    const wLunch: Record<number, number> = {};
+    const wDinner:Record<number, number> = {};
+    const wTotal: Record<number, number> = {};
+    const lS = forecastSettings.find(s => s.shift_type === 'lunch');
+    const dS = forecastSettings.find(s => s.shift_type === 'dinner');
+    if (!lS && !dS) return { weekForecastNetMap: wNet, lunchWeekForecastMap: wLunch, dinnerWeekForecastMap: wDinner, totalWeekForecastMap: wTotal };
+    for (let m = 1; m <= 12; m++) {
+      for (let d = 1; d <= daysInMonth(year, m); d++) {
+        const dk = `${year}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+        const kw = isoWeek(dk);
+        const lOverride = overrideMap[`lunch:${dk}`];
+        const dOverride = overrideMap[`dinner:${dk}`];
+        const lv = lOverride?.net_revenue ?? (lS && !closureSet.has(`lunch:${dk}`)  ? computeDailyForecast(dk, lS) : 0);
+        const dv = dOverride?.net_revenue ?? (dS && !closureSet.has(`dinner:${dk}`) ? computeDailyForecast(dk, dS) : 0);
+        const tv = lv + dv;
+        // Only fill forecast for weeks without uploaded weekly Z-report data
+        if (!weekMap[kw] && tv > 0) wNet[kw] = (wNet[kw] ?? 0) + tv;
+        // Summary rows: fill forecast for weeks without uploaded shift data
+        if (!lunchWeekMap[kw] && lv > 0 && lS) wLunch[kw] = (wLunch[kw] ?? 0) + lv;
+        if (!dinnerWeekMap[kw] && dv > 0 && dS) wDinner[kw] = (wDinner[kw] ?? 0) + dv;
+        if (!totalWeekMap[kw] && tv > 0 && (lS || dS)) wTotal[kw] = (wTotal[kw] ?? 0) + tv;
+      }
+    }
+    return { weekForecastNetMap: wNet, lunchWeekForecastMap: wLunch, dinnerWeekForecastMap: wDinner, totalWeekForecastMap: wTotal };
+  }, [forecastSettings, overrideMap, closureSet, year, weekMap, lunchWeekMap, dinnerWeekMap, totalWeekMap]);
+
   const topCats = useMemo(() =>
     Object.entries(weeklyResult?.categoryRevenue ?? {}).sort((a,b) => b[1]-a[1]).slice(0, 12),
     [weeklyResult]
@@ -1630,7 +1660,25 @@ export default function SalesReportsPage() {
 
   const renderWeeklyCell = (row: WRow, kw: number) => {
     if (row.type === 'section') return null;
-    const w = weekMap[kw] ?? null, pw = weekMap[kw-1] ?? null;
+    const w  = weekMap[kw]   ?? null;
+    const pw = weekMap[kw-1] ?? null;
+    // If no uploaded weekly data, fall back to forecast for Net Revenue / Net growth rows
+    if (w === null) {
+      const fNet  = weekForecastNetMap[kw]   ?? null;
+      const pfNet = weekForecastNetMap[kw-1] ?? (weekMap[kw-1]?.net_revenue ?? null);
+      if (fNet !== null) {
+        if (row.label === 'Net Revenue') {
+          return <span className="text-indigo-400 italic">{fmtNum(fNet)}</span>;
+        }
+        if (row.label === 'Net growth (%)' && pfNet !== null && pfNet > 0) {
+          const g = ((fNet - pfNet) / Math.abs(pfNet)) * 100;
+          const s = g >= 0 ? '+' : '';
+          const cl = g >= 0 ? 'text-green-500 italic' : 'text-red-400 italic';
+          return <span className={cl}>{s}{g.toFixed(1)}%</span>;
+        }
+      }
+      return <span className="text-gray-300 select-none">—</span>;
+    }
     const val = row.getValue?.(w, pw) ?? null;
     if (val === null) return <span className="text-gray-300 select-none">—</span>;
     if (row.format === 'currency') return <span className={row.color === 'blue' ? 'text-blue-700' : 'text-gray-900'}>{fmtNum(val)}</span>;
@@ -1689,6 +1737,7 @@ export default function SalesReportsPage() {
         <div className="flex items-center gap-5 text-xs text-gray-500 pt-1">
           <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm bg-blue-600 inline-block" />Reported</span>
           <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm bg-gray-800 inline-block" />Calculated</span>
+          <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm bg-indigo-400 inline-block" /><em>Forecast</em></span>
         </div>
       </div>
 
@@ -3263,13 +3312,15 @@ export default function SalesReportsPage() {
                         METRIC / PERIOD · {year}
                       </th>
                       {Array.from({ length: TOTAL_WEEKS }, (_, i) => i+1).map(kw => {
-                        const hasWeek = !!weekMap[kw];
-                        const isCurWk = kw === cwk;
+                        const hasWeek    = !!weekMap[kw];
+                        const hasFcast   = !hasWeek && !!weekForecastNetMap[kw];
+                        const isCurWk   = kw === cwk;
                         return (
                           <th key={kw} className="py-3 text-right font-bold whitespace-nowrap tabular-nums"
                             style={{ minWidth:COL_W_WK, width:COL_W_WK, paddingLeft:4, paddingRight:10,
-                              color: isCurWk ? '#ffffff' : hasWeek ? '#93c5fd' : '#4b5563',
-                              borderBottom: isCurWk ? '2px solid #3b82f6' : 'none' }}>
+                              color: isCurWk ? '#ffffff' : hasWeek ? '#93c5fd' : hasFcast ? '#a5b4fc' : '#4b5563',
+                              borderBottom: isCurWk ? '2px solid #3b82f6' : hasFcast ? '1px solid rgba(165,180,252,0.3)' : 'none',
+                              fontStyle: hasFcast ? 'italic' : 'normal' }}>
                             KW{kw}
                           </th>
                         );
@@ -3290,9 +3341,9 @@ export default function SalesReportsPage() {
                       </td>
                     </tr>
                     {([
-                      { label: '☀️  Lunch · Net Revenue',  wMap: lunchWeekMap,  fy: lunchFYNet,  bold: false },
-                      { label: '🌙  Dinner · Net Revenue', wMap: dinnerWeekMap, fy: dinnerFYNet, bold: false },
-                      { label: '∑   Total · Net Revenue',  wMap: totalWeekMap,  fy: totalFYNet,  bold: true  },
+                      { label: '☀️  Lunch · Net Revenue',  wMap: lunchWeekMap,  fMap: lunchWeekForecastMap,  fy: lunchFYNet,  bold: false },
+                      { label: '🌙  Dinner · Net Revenue', wMap: dinnerWeekMap, fMap: dinnerWeekForecastMap, fy: dinnerFYNet, bold: false },
+                      { label: '∑   Total · Net Revenue',  wMap: totalWeekMap,  fMap: totalWeekForecastMap,  fy: totalFYNet,  bold: true  },
                     ]).map((row, i) => {
                       const bg = row.bold ? '#f0fdf4' : '#ffffff';
                       return (
@@ -3303,13 +3354,16 @@ export default function SalesReportsPage() {
                           </td>
                           {Array.from({ length: TOTAL_WEEKS }, (_, j) => j + 1).map(kw => {
                             const isCurWk = kw === cwk;
-                            const val = row.wMap[kw] ?? null;
+                            const val  = row.wMap[kw] ?? null;
+                            const fval = row.fMap[kw] ?? null;
                             return (
                               <td key={kw} className={`py-2 text-right tabular-nums ${row.bold ? 'font-bold' : ''}`}
                                 style={{ paddingLeft:4, paddingRight:10, backgroundColor: isCurWk ? 'rgba(59,130,246,0.04)' : undefined }}>
                                 {val !== null && val > 0
                                   ? <span className={row.bold ? 'text-[#1B5E20]' : 'text-blue-700'}>{fmtNum(val)}</span>
-                                  : <span className="text-gray-300">—</span>}
+                                  : fval !== null && fval > 0
+                                    ? <span className={`italic ${row.bold ? 'text-indigo-500' : 'text-indigo-400'}`}>{fmtNum(fval)}</span>
+                                    : <span className="text-gray-300">—</span>}
                               </td>
                             );
                           })}
