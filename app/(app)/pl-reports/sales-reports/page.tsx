@@ -885,7 +885,7 @@ export default function SalesReportsPage() {
   // Weekly imports
   const { data: weeklyImports = [] } = useQuery({
     queryKey: ['weekly-sales', location?.id, year],
-    enabled: !!location && activeTab === 'daily',
+    enabled: !!location,
     queryFn: async () => {
       const { data } = await supabase
         .from('sales_imports')
@@ -916,7 +916,7 @@ export default function SalesReportsPage() {
   // Shift reports for daily view — fetch the full quarter at once
   const { data: shiftRows = [] } = useQuery({
     queryKey: ['shift-reports', location?.id, year, quarter],
-    enabled: !!location && activeTab === 'daily',
+    enabled: !!location,
     queryFn: async () => {
       const [firstM, , lastM] = QUARTER_MONTHS[quarter - 1];
       const qStart = `${year}-${String(firstM).padStart(2,'0')}-01`;
@@ -964,7 +964,7 @@ export default function SalesReportsPage() {
   // Delivery reports for current quarter
   const { data: deliveryReports = [] } = useQuery({
     queryKey: ['delivery-reports', location?.id, year, quarter],
-    enabled: !!location && activeTab === 'daily',
+    enabled: !!location,
     queryFn: async () => {
       const [firstM, , lastM] = QUARTER_MONTHS[quarter - 1];
       const qStart = `${year}-${String(firstM).padStart(2,'0')}-01`;
@@ -1180,10 +1180,71 @@ export default function SalesReportsPage() {
     [weeklyResult]
   );
 
-  const canImportWeekly   = !!location && weeklyBatch.some(i => i.status === 'pending' && !i.result.error) && !importing;
-  const canImportShift    = !!location && shiftBatch.some(i => i.status === 'pending' && !i.result.error) && !importing;
+  // ── Duplicate / validation warnings ──────────────────────────────────────
+  // Returns { kind: 'batch' | 'db', msg } per batch index; undefined = clean
+
+  type WarnEntry = { kind: 'batch' | 'db'; msg: string };
+
+  const shiftWarnings = useMemo(() => {
+    const w: Record<number, WarnEntry> = {};
+    const seen = new Map<string, number>(); // dateKey:type → first index
+    shiftBatch.forEach((item, idx) => {
+      if (item.result.error) return;
+      const type = item.manualOverride ?? item.detectedType;
+      const key  = `${item.result.date}:${type}`;
+      if (seen.has(key)) {
+        w[idx] = { kind: 'batch', msg: 'Duplicate — same date & shift type already in this batch' };
+      } else {
+        seen.set(key, idx);
+        if (location && shiftRows.some(s => s.report_date === item.result.date && s.shift_type === type)) {
+          w[idx] = { kind: 'db', msg: 'Already in DB for this location — delete the existing record first if you want to replace it' };
+        }
+      }
+    });
+    return w;
+  }, [shiftBatch, shiftRows, location]);
+
+  const weeklyWarnings = useMemo(() => {
+    const w: Record<number, WarnEntry> = {};
+    const seen = new Set<string>();
+    weeklyBatch.forEach((item, idx) => {
+      if (item.result.error || !item.result.summary?.weekStart) return;
+      const key = item.result.summary.weekStart;
+      if (seen.has(key)) {
+        w[idx] = { kind: 'batch', msg: 'Duplicate — same week already in this batch' };
+      } else {
+        seen.add(key);
+        if (weeklyImports.some(wi => wi.week_start === key)) {
+          w[idx] = { kind: 'db', msg: 'This week is already imported — saving will overwrite the existing record' };
+        }
+      }
+    });
+    return w;
+  }, [weeklyBatch, weeklyImports]);
+
+  const deliveryWarnings = useMemo(() => {
+    const w: Record<number, WarnEntry> = {};
+    const seen = new Set<string>();
+    deliveryBatch.forEach((item, idx) => {
+      if (item.result.error || !item.result.date) return;
+      const key = item.result.date;
+      if (seen.has(key)) {
+        w[idx] = { kind: 'batch', msg: 'Duplicate — same date already in this batch' };
+      } else {
+        seen.add(key);
+        if (deliveryReports.some(dr => dr.report_date === key)) {
+          w[idx] = { kind: 'db', msg: 'This date is already imported — saving will overwrite the existing record' };
+        }
+      }
+    });
+    return w;
+  }, [deliveryBatch, deliveryReports]);
+
+  // batch duplicates are hard-blocked; DB duplicates are warnings only
+  const canImportWeekly   = !!location && weeklyBatch.some((i, idx)   => i.status === 'pending' && !i.result.error && weeklyWarnings[idx]?.kind   !== 'batch') && !importing;
+  const canImportShift    = !!location && shiftBatch.some((i, idx)    => i.status === 'pending' && !i.result.error && shiftWarnings[idx]?.kind    !== 'batch') && !importing;
   const canImportMonthly  = !!location && !!monthlyResult && !monthlyResult.error && monthlyResult.year > 0 && !importing;
-  const canImportDelivery = !!location && deliveryBatch.some(i => i.status === 'pending' && !i.result.error) && !importing;
+  const canImportDelivery = !!location && deliveryBatch.some((i, idx) => i.status === 'pending' && !i.result.error && deliveryWarnings[idx]?.kind !== 'batch') && !importing;
 
   // ── Handlers ───────────────────────────────────────────────────────────────
 
@@ -1234,7 +1295,7 @@ export default function SalesReportsPage() {
   }, [processFile]);
 
   const handleImportWeekly = useCallback(async () => {
-    const pending = weeklyBatch.filter(i => i.status === 'pending' && !i.result.error);
+    const pending = weeklyBatch.filter((i, idx) => i.status === 'pending' && !i.result.error && weeklyWarnings[idx]?.kind !== 'batch');
     if (!location || !pending.length) return;
     setImporting(true);
     const { data: { user } } = await supabase.auth.getUser();
@@ -1269,10 +1330,10 @@ export default function SalesReportsPage() {
     queryClient.invalidateQueries({ queryKey: ['sales-imports'] });
     queryClient.invalidateQueries({ queryKey: ['weekly-sales'] });
     setImporting(false);
-  }, [location, weeklyBatch, queryClient]);
+  }, [location, weeklyBatch, weeklyWarnings, queryClient]);
 
   const handleImportShift = useCallback(async () => {
-    const pending = shiftBatch.filter(i => i.status === 'pending' && !i.result.error);
+    const pending = shiftBatch.filter((i, idx) => i.status === 'pending' && !i.result.error && shiftWarnings[idx]?.kind !== 'batch');
     if (!location || !pending.length) return;
     setImporting(true);
     const { data: { user } } = await supabase.auth.getUser();
@@ -1322,7 +1383,7 @@ export default function SalesReportsPage() {
     if (shiftBatch.every(i => i.status === 'saved' || i.status === 'error')) {
       setActiveTab('daily');
     }
-  }, [location, shiftBatch, queryClient]);
+  }, [location, shiftBatch, shiftWarnings, queryClient]);
 
   const handleImportMonthly = useCallback(async () => {
     if (!location || !monthlyResult || monthlyResult.year === 0) return;
@@ -1355,7 +1416,7 @@ export default function SalesReportsPage() {
   }, [location, monthlyResult, queryClient, resetUpload]);
 
   const handleImportDelivery = useCallback(async () => {
-    const pending = deliveryBatch.filter(i => i.status === 'pending' && !i.result.error);
+    const pending = deliveryBatch.filter((i, idx) => i.status === 'pending' && !i.result.error && deliveryWarnings[idx]?.kind !== 'batch');
     if (!location || !pending.length) return;
     setImporting(true);
     const { data: { user } } = await supabase.auth.getUser();
@@ -1381,7 +1442,7 @@ export default function SalesReportsPage() {
     }
     queryClient.invalidateQueries({ queryKey: ['delivery-reports'] });
     setImporting(false);
-  }, [location, deliveryBatch, queryClient]);
+  }, [location, deliveryBatch, deliveryWarnings, queryClient]);
 
   const closeModal = useCallback(() => {
     setActiveDayKey(null);
@@ -1825,11 +1886,12 @@ export default function SalesReportsPage() {
                   <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Queued weeks</p>
                   <div className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
                     {weeklyBatch.map((item, idx) => {
-                      const s = item.result.summary;
-                      const statusIcon  = item.status === 'saved' ? '✓' : item.status === 'error' ? '✗' : item.status === 'saving' ? '…' : '○';
-                      const statusColor = item.status === 'saved' ? 'text-green-600' : item.status === 'error' ? 'text-red-500' : item.status === 'saving' ? 'text-blue-500' : 'text-gray-400';
+                      const s    = item.result.summary;
+                      const warn = weeklyWarnings[idx];
+                      const statusIcon  = item.status === 'saved' ? '✓' : item.status === 'error' ? '✗' : item.status === 'saving' ? '…' : warn ? '⚠' : '○';
+                      const statusColor = item.status === 'saved' ? 'text-green-600' : item.status === 'error' ? 'text-red-500' : item.status === 'saving' ? 'text-blue-500' : warn?.kind === 'batch' ? 'text-red-500' : warn?.kind === 'db' ? 'text-amber-500' : 'text-gray-400';
                       return (
-                        <div key={idx} className="bg-white border border-gray-100 rounded-lg px-3 py-2 flex items-center gap-2 shadow-sm">
+                        <div key={idx} className={`bg-white border rounded-lg px-3 py-2 flex items-center gap-2 shadow-sm ${warn?.kind === 'batch' ? 'border-red-200' : warn?.kind === 'db' ? 'border-amber-200' : 'border-gray-100'}`}>
                           <span className={`text-sm font-bold flex-shrink-0 w-4 text-center ${statusColor}`}>{statusIcon}</span>
                           <div className="flex-1 min-w-0">
                             <p className="text-xs font-semibold text-gray-800 truncate">
@@ -1838,6 +1900,7 @@ export default function SalesReportsPage() {
                             <p className="text-xs text-gray-400">
                               {s ? `Gross ${fmt(s.grossTotal)} · Net ${fmt(s.netTotal)}` : item.result.error ?? ''}
                             </p>
+                            {warn && <p className={`text-xs truncate ${warn.kind === 'batch' ? 'text-red-500' : 'text-amber-600'}`}>{warn.msg}</p>}
                             {item.status === 'error' && item.errorMsg && (
                               <p className="text-xs text-red-500 truncate">{item.errorMsg}</p>
                             )}
@@ -1866,25 +1929,30 @@ export default function SalesReportsPage() {
                       const effectiveType = item.manualOverride ?? item.detectedType;
                       const isLunch = effectiveType === 'lunch';
                       const isOverridden = !!item.manualOverride;
+                      const warn = shiftWarnings[idx];
                       const confDots =
                         item.confidence === 'high'   ? '●●●' :
                         item.confidence === 'medium' ? '●●○' : '●○○';
                       const statusIcon =
                         item.status === 'saved'  ? '✓' :
                         item.status === 'error'  ? '✗' :
-                        item.status === 'saving' ? '…' : '○';
+                        item.status === 'saving' ? '…' :
+                        warn                     ? '⚠' : '○';
                       const statusColor =
                         item.status === 'saved'  ? 'text-green-600' :
                         item.status === 'error'  ? 'text-red-500'   :
-                        item.status === 'saving' ? 'text-blue-500'  : 'text-gray-400';
+                        item.status === 'saving' ? 'text-blue-500'  :
+                        warn?.kind === 'batch'   ? 'text-red-500'   :
+                        warn?.kind === 'db'      ? 'text-amber-500' : 'text-gray-400';
                       return (
-                        <div key={idx} className="bg-white border border-gray-100 rounded-lg px-3 py-2 flex items-center gap-2 shadow-sm">
+                        <div key={idx} className={`bg-white border rounded-lg px-3 py-2 flex items-center gap-2 shadow-sm ${warn?.kind === 'batch' ? 'border-red-200' : warn?.kind === 'db' ? 'border-amber-200' : 'border-gray-100'}`}>
                           <span className={`text-sm font-bold flex-shrink-0 w-4 text-center ${statusColor}`}>{statusIcon}</span>
                           <div className="flex-1 min-w-0">
                             <p className="text-xs font-semibold text-gray-800 truncate">{fmtDate(item.result.date)}</p>
                             <p className="text-xs text-gray-400">
                               Z-{item.result.zReportNumber || '?'} · {fmt(item.result.grossTotal)}
                             </p>
+                            {warn && <p className={`text-xs truncate ${warn.kind === 'batch' ? 'text-red-500' : 'text-amber-600'}`}>{warn.msg}</p>}
                             {item.status === 'error' && item.errorMsg && (
                               <p className="text-xs text-red-500 truncate">{item.errorMsg}</p>
                             )}
@@ -1932,11 +2000,12 @@ export default function SalesReportsPage() {
                   <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Queued deliveries</p>
                   <div className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
                     {deliveryBatch.map((item, idx) => {
-                      const r = item.result;
-                      const statusIcon  = item.status === 'saved' ? '✓' : item.status === 'error' ? '✗' : item.status === 'saving' ? '…' : '○';
-                      const statusColor = item.status === 'saved' ? 'text-green-600' : item.status === 'error' ? 'text-red-500' : item.status === 'saving' ? 'text-blue-500' : 'text-gray-400';
+                      const r    = item.result;
+                      const warn = deliveryWarnings[idx];
+                      const statusIcon  = item.status === 'saved' ? '✓' : item.status === 'error' ? '✗' : item.status === 'saving' ? '…' : warn ? '⚠' : '○';
+                      const statusColor = item.status === 'saved' ? 'text-green-600' : item.status === 'error' ? 'text-red-500' : item.status === 'saving' ? 'text-blue-500' : warn?.kind === 'batch' ? 'text-red-500' : warn?.kind === 'db' ? 'text-amber-500' : 'text-gray-400';
                       return (
-                        <div key={idx} className="bg-white border border-gray-100 rounded-lg px-3 py-2 flex items-center gap-2 shadow-sm">
+                        <div key={idx} className={`bg-white border rounded-lg px-3 py-2 flex items-center gap-2 shadow-sm ${warn?.kind === 'batch' ? 'border-red-200' : warn?.kind === 'db' ? 'border-amber-200' : 'border-gray-100'}`}>
                           <span className={`text-sm font-bold flex-shrink-0 w-4 text-center ${statusColor}`}>{statusIcon}</span>
                           <div className="flex-1 min-w-0">
                             <p className="text-xs font-semibold text-gray-800 truncate">
@@ -1945,6 +2014,7 @@ export default function SalesReportsPage() {
                             <p className="text-xs text-gray-400">
                               {r.error ? r.error : `Net ${fmt(r.netRevenue)} · ${r.ordersCount} orders`}
                             </p>
+                            {warn && <p className={`text-xs truncate ${warn.kind === 'batch' ? 'text-red-500' : 'text-amber-600'}`}>{warn.msg}</p>}
                             {item.status === 'error' && item.errorMsg && (
                               <p className="text-xs text-red-500 truncate">{item.errorMsg}</p>
                             )}
@@ -2103,9 +2173,10 @@ export default function SalesReportsPage() {
                     </thead>
                     <tbody className="divide-y divide-gray-50">
                       {weeklyBatch.map((item, idx) => {
-                        const s = item.result.summary;
-                        const statusIcon  = item.status === 'saved' ? '✓' : item.status === 'error' ? '✗' : item.status === 'saving' ? '…' : '○';
-                        const statusColor = item.status === 'saved' ? 'text-green-600 font-bold' : item.status === 'error' ? 'text-red-500 font-bold' : item.status === 'saving' ? 'text-blue-500' : 'text-gray-400';
+                        const s    = item.result.summary;
+                        const warn = weeklyWarnings[idx];
+                        const statusIcon  = item.status === 'saved' ? '✓' : item.status === 'error' ? '✗' : item.status === 'saving' ? '…' : warn ? '⚠' : '○';
+                        const statusColor = item.status === 'saved' ? 'text-green-600 font-bold' : item.status === 'error' ? 'text-red-500 font-bold' : item.status === 'saving' ? 'text-blue-500' : warn?.kind === 'batch' ? 'text-red-500 font-bold' : warn?.kind === 'db' ? 'text-amber-500 font-bold' : 'text-gray-400';
                         const kw = s?.weekStart ? `KW${isoWeek(s.weekStart)}` : '—';
                         return (
                           <tr key={idx} className="hover:bg-gray-50/60">
@@ -2117,7 +2188,7 @@ export default function SalesReportsPage() {
                             <td className="px-3 py-2 text-right tabular-nums text-blue-700">{s ? fmtNum(s.netTotal) : '—'}</td>
                             <td className="px-3 py-2 text-right tabular-nums text-gray-500">{s ? fmtNum(s.taxTotal) : '—'}</td>
                             <td className="px-3 py-2 text-right tabular-nums text-purple-700">{s ? fmtNum(s.tips) : '—'}</td>
-                            <td className={`px-3 py-2 text-center ${statusColor}`} title={item.errorMsg}>{statusIcon}</td>
+                            <td className={`px-3 py-2 text-center ${statusColor}`} title={item.errorMsg ?? warn?.msg}>{statusIcon}</td>
                           </tr>
                         );
                       })}
@@ -2164,19 +2235,23 @@ export default function SalesReportsPage() {
                     <tbody className="divide-y divide-gray-50">
                       {shiftBatch.map((item, idx) => {
                         const effectiveType = item.manualOverride ?? item.detectedType;
-                        const isLunch = effectiveType === 'lunch';
+                        const isLunch      = effectiveType === 'lunch';
                         const isOverridden = !!item.manualOverride;
+                        const warn = shiftWarnings[idx];
                         const confDots =
                           item.confidence === 'high'   ? '●●●' :
                           item.confidence === 'medium' ? '●●○' : '●○○';
                         const statusIcon =
                           item.status === 'saved'  ? '✓' :
                           item.status === 'error'  ? '✗' :
-                          item.status === 'saving' ? '…' : '○';
+                          item.status === 'saving' ? '…' :
+                          warn                     ? '⚠' : '○';
                         const statusColor =
                           item.status === 'saved'  ? 'text-green-600 font-bold' :
                           item.status === 'error'  ? 'text-red-500 font-bold'   :
-                          item.status === 'saving' ? 'text-blue-500'            : 'text-gray-400';
+                          item.status === 'saving' ? 'text-blue-500'            :
+                          warn?.kind === 'batch'   ? 'text-red-500 font-bold'   :
+                          warn?.kind === 'db'      ? 'text-amber-500 font-bold' : 'text-gray-400';
                         return (
                           <tr key={idx} className="hover:bg-gray-50/60">
                             <td className="px-3 py-2 text-center">
@@ -2195,7 +2270,7 @@ export default function SalesReportsPage() {
                             <td className={`px-3 py-2 text-center text-[10px] tracking-tighter ${
                               item.confidence === 'high' ? 'text-green-500' : item.confidence === 'medium' ? 'text-amber-500' : 'text-red-400'
                             }`} title={`${item.confidence} confidence${isOverridden ? ' · manually overridden' : ''}`}>{confDots}</td>
-                            <td className={`px-3 py-2 text-center ${statusColor}`} title={item.errorMsg}>{statusIcon}</td>
+                            <td className={`px-3 py-2 text-center ${statusColor}`} title={item.errorMsg ?? warn?.msg}>{statusIcon}</td>
                           </tr>
                         );
                       })}
@@ -2290,9 +2365,10 @@ export default function SalesReportsPage() {
                     </thead>
                     <tbody className="divide-y divide-gray-50">
                       {deliveryBatch.map((item, idx) => {
-                        const r = item.result;
-                        const statusIcon  = item.status === 'saved' ? '✓' : item.status === 'error' ? '✗' : item.status === 'saving' ? '…' : '○';
-                        const statusColor = item.status === 'saved' ? 'text-green-600 font-bold' : item.status === 'error' ? 'text-red-500 font-bold' : item.status === 'saving' ? 'text-blue-500' : 'text-gray-400';
+                        const r    = item.result;
+                        const warn = deliveryWarnings[idx];
+                        const statusIcon  = item.status === 'saved' ? '✓' : item.status === 'error' ? '✗' : item.status === 'saving' ? '…' : warn ? '⚠' : '○';
+                        const statusColor = item.status === 'saved' ? 'text-green-600 font-bold' : item.status === 'error' ? 'text-red-500 font-bold' : item.status === 'saving' ? 'text-blue-500' : warn?.kind === 'batch' ? 'text-red-500 font-bold' : warn?.kind === 'db' ? 'text-amber-500 font-bold' : 'text-gray-400';
                         return (
                           <tr key={idx} className="hover:bg-gray-50/60">
                             <td className="px-3 py-2 text-gray-800 font-medium whitespace-nowrap">
@@ -2302,7 +2378,7 @@ export default function SalesReportsPage() {
                             <td className="px-3 py-2 text-right tabular-nums text-gray-600">{r.ordersCount > 0 ? r.ordersCount : '—'}</td>
                             <td className="px-3 py-2 text-right tabular-nums text-blue-700 font-semibold">{r.netRevenue > 0 ? fmtNum(r.netRevenue) : '—'}</td>
                             <td className="px-3 py-2 text-right tabular-nums text-[#1B5E20]">{r.grossRevenue > 0 ? fmtNum(r.grossRevenue) : '—'}</td>
-                            <td className={`px-3 py-2 text-center ${statusColor}`} title={item.errorMsg}>{statusIcon}</td>
+                            <td className={`px-3 py-2 text-center ${statusColor}`} title={item.errorMsg ?? warn?.msg}>{statusIcon}</td>
                           </tr>
                         );
                       })}
