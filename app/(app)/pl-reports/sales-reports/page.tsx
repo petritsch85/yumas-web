@@ -850,6 +850,22 @@ export default function SalesReportsPage() {
     },
   });
 
+  // Shift reports for full year — used in weekly summary (lunch/dinner split by KW)
+  const { data: yearShiftRows = [] } = useQuery({
+    queryKey: ['shift-reports-year', location?.id, year],
+    enabled: !!location && activeTab === 'daily' && subTab === 'weekly',
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('shift_reports')
+        .select('report_date,shift_type,net_total')
+        .eq('location_id', location!.id)
+        .gte('report_date', `${year}-01-01`)
+        .lte('report_date', `${year}-12-31`)
+        .order('report_date', { ascending: true });
+      return (data ?? []) as Pick<ShiftRow, 'report_date'|'shift_type'|'net_total'>[];
+    },
+  });
+
   // Forecast settings
   const { data: forecastSettings = [] } = useQuery({
     queryKey: ['forecast-settings', location?.id],
@@ -978,6 +994,25 @@ export default function SalesReportsPage() {
   const lunchQtrTotal  = useMemo(() => sumMap(lunchMap),  [lunchMap]);
   const dinnerQtrTotal = useMemo(() => sumMap(dinnerMap), [dinnerMap]);
   const totalQtrTotal  = useMemo(() => sumMap(totalMap),  [totalMap]);
+
+  // Weekly lunch/dinner breakdown from shift data (for weekly summary)
+  const { lunchWeekMap, dinnerWeekMap, totalWeekMap } = useMemo(() => {
+    const lunchWeekMap:  Record<number, number> = {};
+    const dinnerWeekMap: Record<number, number> = {};
+    const totalWeekMap:  Record<number, number> = {};
+    for (const sr of yearShiftRows) {
+      const kw  = isoWeek(sr.report_date);
+      const net = sr.net_total ?? 0;
+      if (sr.shift_type === 'lunch')  lunchWeekMap[kw]  = (lunchWeekMap[kw]  ?? 0) + net;
+      if (sr.shift_type === 'dinner') dinnerWeekMap[kw] = (dinnerWeekMap[kw] ?? 0) + net;
+      totalWeekMap[kw] = (totalWeekMap[kw] ?? 0) + net;
+    }
+    return { lunchWeekMap, dinnerWeekMap, totalWeekMap };
+  }, [yearShiftRows]);
+
+  const lunchFYNet  = useMemo(() => Object.values(lunchWeekMap).reduce((s, v) => s + v, 0),  [lunchWeekMap]);
+  const dinnerFYNet = useMemo(() => Object.values(dinnerWeekMap).reduce((s, v) => s + v, 0), [dinnerWeekMap]);
+  const totalFYNet  = useMemo(() => Object.values(totalWeekMap).reduce((s, v) => s + v, 0),  [totalWeekMap]);
 
   // Build day + week-summary column sequence covering the full quarter
   const dailyCols = useMemo<DailyCol[]>(() => {
@@ -2304,6 +2339,53 @@ export default function SalesReportsPage() {
                       </th>
                     </tr>
                   </thead>
+                  {/* ── Weekly summary (lunch / dinner / total net revenue) ── */}
+                  <tbody>
+                    <tr>
+                      <td colSpan={TOTAL_WEEKS + 2}
+                        className="sticky left-0 px-4 py-2 text-xs font-bold uppercase tracking-widest text-white"
+                        style={{ backgroundColor: '#0f172a' }}>
+                        Summary
+                      </td>
+                    </tr>
+                    {([
+                      { label: '☀️  Lunch · Net Revenue',  wMap: lunchWeekMap,  fy: lunchFYNet,  bold: false },
+                      { label: '🌙  Dinner · Net Revenue', wMap: dinnerWeekMap, fy: dinnerFYNet, bold: false },
+                      { label: '∑   Total · Net Revenue',  wMap: totalWeekMap,  fy: totalFYNet,  bold: true  },
+                    ]).map((row, i) => {
+                      const bg = row.bold ? '#f0fdf4' : '#ffffff';
+                      return (
+                        <tr key={i} className="border-b border-gray-100 hover:bg-gray-50/60 group" style={{ backgroundColor: bg }}>
+                          <td className={`sticky left-0 z-10 px-4 py-2 whitespace-nowrap border-r border-gray-100 group-hover:bg-gray-50/60 transition-colors ${row.bold ? 'font-bold text-gray-900' : 'text-gray-700'}`}
+                            style={{ backgroundColor: bg }}>
+                            {row.label}
+                          </td>
+                          {Array.from({ length: TOTAL_WEEKS }, (_, j) => j + 1).map(kw => {
+                            const isCurWk = kw === cwk;
+                            const val = row.wMap[kw] ?? null;
+                            return (
+                              <td key={kw} className={`py-2 text-right tabular-nums ${row.bold ? 'font-bold' : ''}`}
+                                style={{ paddingLeft:4, paddingRight:10, backgroundColor: isCurWk ? 'rgba(59,130,246,0.04)' : undefined }}>
+                                {val !== null && val > 0
+                                  ? <span className={row.bold ? 'text-[#1B5E20]' : 'text-blue-700'}>{fmtNum(val)}</span>
+                                  : <span className="text-gray-300">—</span>}
+                              </td>
+                            );
+                          })}
+                          <td className={`py-2 text-right tabular-nums border-l border-gray-200 ${row.bold ? 'font-bold' : ''}`}
+                            style={{ paddingLeft:4, paddingRight:10 }}>
+                            {row.fy > 0
+                              ? <span className={row.bold ? 'text-[#1B5E20]' : 'text-blue-700'}>{fmtNum(row.fy)}</span>
+                              : <span className="text-gray-300">—</span>}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+
+                  {/* Spacer */}
+                  <tbody><tr><td colSpan={TOTAL_WEEKS + 2} style={{ height: 12, backgroundColor:'#f9fafb' }} /></tr></tbody>
+
                   <tbody>
                     {WEEKLY_ROWS.map((row, i) => {
                       if (row.type === 'section') {
