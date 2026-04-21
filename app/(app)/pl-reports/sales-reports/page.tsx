@@ -332,10 +332,10 @@ function parseWeeklyCSV(raw: string): WeeklyParseResult {
 
   const split = (line: string) => line.split(';').map(v => v.replace(/^"|"$/g,'').trim());
 
-  // Weekly reports have Mon–Sun day columns before the grand total column.
-  // Scan from the RIGHT to find the first non-zero numeric value in a row.
+  // Weekly reports have Mon–Sun day columns then a grand-total column then a %-share column.
+  // Skip the last column (%-share, parses as 100) and scan right-to-left for the grand total.
   const lastNum = (cols: string[]): number => {
-    for (let i = cols.length - 1; i >= 1; i--) {
+    for (let i = cols.length - 2; i >= 1; i--) {
       const n = parseNum(cols[i]);
       if (n !== 0) return n;
     }
