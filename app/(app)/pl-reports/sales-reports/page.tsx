@@ -3341,9 +3341,9 @@ export default function SalesReportsPage() {
                       </td>
                     </tr>
                     {([
-                      { label: '☀️  Lunch · Net Revenue',  wMap: lunchWeekMap,  fMap: lunchWeekForecastMap,  fy: lunchFYNet,  bold: false },
-                      { label: '🌙  Dinner · Net Revenue', wMap: dinnerWeekMap, fMap: dinnerWeekForecastMap, fy: dinnerFYNet, bold: false },
-                      { label: '∑   Total · Net Revenue',  wMap: totalWeekMap,  fMap: totalWeekForecastMap,  fy: totalFYNet,  bold: true  },
+                      { label: '☀️  Lunch · Net Revenue',  wMap: lunchWeekMap,  fy: lunchFYNet,  bold: false },
+                      { label: '🌙  Dinner · Net Revenue', wMap: dinnerWeekMap, fy: dinnerFYNet, bold: false },
+                      { label: '∑   Total · Net Revenue',  wMap: totalWeekMap,  fy: totalFYNet,  bold: true  },
                     ]).map((row, i) => {
                       const bg = row.bold ? '#f0fdf4' : '#ffffff';
                       return (
@@ -3354,16 +3354,13 @@ export default function SalesReportsPage() {
                           </td>
                           {Array.from({ length: TOTAL_WEEKS }, (_, j) => j + 1).map(kw => {
                             const isCurWk = kw === cwk;
-                            const val  = row.wMap[kw] ?? null;
-                            const fval = row.fMap[kw] ?? null;
+                            const val = row.wMap[kw] ?? null;
                             return (
                               <td key={kw} className={`py-2 text-right tabular-nums ${row.bold ? 'font-bold' : ''}`}
                                 style={{ paddingLeft:4, paddingRight:10, backgroundColor: isCurWk ? 'rgba(59,130,246,0.04)' : undefined }}>
                                 {val !== null && val > 0
                                   ? <span className={row.bold ? 'text-[#1B5E20]' : 'text-blue-700'}>{fmtNum(val)}</span>
-                                  : fval !== null && fval > 0
-                                    ? <span className={`italic ${row.bold ? 'text-indigo-500' : 'text-indigo-400'}`}>{fmtNum(fval)}</span>
-                                    : <span className="text-gray-300">—</span>}
+                                  : <span className="text-gray-300">—</span>}
                               </td>
                             );
                           })}
