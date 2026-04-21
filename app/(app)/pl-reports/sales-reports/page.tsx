@@ -3375,9 +3375,9 @@ export default function SalesReportsPage() {
                               const cnt  = row.cntMap?.[kw]  ?? null;
                               const fcnt = row.fCntMap?.[kw] ?? null;
                               if (val !== null && val > 0 && cnt && cnt > 0)
-                                cell = <span className="text-blue-600 text-[11px]">{fmtNum(val / cnt)}</span>;
+                                cell = <span className="text-gray-900 text-[11px]">{fmtNum(val / cnt)}</span>;
                               else if (fval !== null && fval > 0 && fcnt && fcnt > 0)
-                                cell = <span className="italic text-indigo-400 text-[11px]">{fmtNum(fval / fcnt)}</span>;
+                                cell = <span className="italic text-gray-900 text-[11px]">{fmtNum(fval / fcnt)}</span>;
                               else
                                 cell = <span className="text-gray-300">—</span>;
                             } else {
