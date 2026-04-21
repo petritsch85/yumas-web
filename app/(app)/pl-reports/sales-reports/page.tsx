@@ -1235,16 +1235,17 @@ export default function SalesReportsPage() {
         const lv = lOverride?.net_revenue ?? (lS && !closureSet.has(`lunch:${dk}`)  ? computeDailyForecast(dk, lS) : 0);
         const dv = dOverride?.net_revenue ?? (dS && !closureSet.has(`dinner:${dk}`) ? computeDailyForecast(dk, dS) : 0);
         const tv = lv + dv;
-        // Only fill forecast for weeks without uploaded weekly Z-report data
-        if (!weekMap[kw] && tv > 0) wNet[kw] = (wNet[kw] ?? 0) + tv;
-        // Summary rows: fill forecast for weeks without uploaded shift data
-        if (!lunchWeekMap[kw] && lv > 0 && lS) wLunch[kw] = (wLunch[kw] ?? 0) + lv;
-        if (!dinnerWeekMap[kw] && dv > 0 && dS) wDinner[kw] = (wDinner[kw] ?? 0) + dv;
-        if (!totalWeekMap[kw] && tv > 0 && (lS || dS)) wTotal[kw] = (wTotal[kw] ?? 0) + tv;
+        // Only show forecast for current week onwards — past weeks without data stay blank
+        const isFutureOrCurrent = kw >= cwk;
+        if (!weekMap[kw] && tv > 0 && isFutureOrCurrent) wNet[kw] = (wNet[kw] ?? 0) + tv;
+        // Summary rows: forecast only from current week onwards, where no shift data exists
+        if (!lunchWeekMap[kw]  && lv > 0 && lS          && isFutureOrCurrent) wLunch[kw]  = (wLunch[kw]  ?? 0) + lv;
+        if (!dinnerWeekMap[kw] && dv > 0 && dS          && isFutureOrCurrent) wDinner[kw] = (wDinner[kw] ?? 0) + dv;
+        if (!totalWeekMap[kw]  && tv > 0 && (lS || dS)  && isFutureOrCurrent) wTotal[kw]  = (wTotal[kw]  ?? 0) + tv;
       }
     }
     return { weekForecastNetMap: wNet, lunchWeekForecastMap: wLunch, dinnerWeekForecastMap: wDinner, totalWeekForecastMap: wTotal };
-  }, [forecastSettings, overrideMap, closureSet, year, weekMap, lunchWeekMap, dinnerWeekMap, totalWeekMap]);
+  }, [forecastSettings, overrideMap, closureSet, year, weekMap, lunchWeekMap, dinnerWeekMap, totalWeekMap, cwk]);
 
   const topCats = useMemo(() =>
     Object.entries(weeklyResult?.categoryRevenue ?? {}).sort((a,b) => b[1]-a[1]).slice(0, 12),
