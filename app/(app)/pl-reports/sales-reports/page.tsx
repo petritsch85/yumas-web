@@ -332,14 +332,16 @@ function parseWeeklyCSV(raw: string): WeeklyParseResult {
 
   const split = (line: string) => line.split(';').map(v => v.replace(/^"|"$/g,'').trim());
 
-  // Weekly reports have Mon–Sun day columns then a grand-total column then a %-share column.
-  // Skip the last column (%-share, parses as 100) and scan right-to-left for the grand total.
+  // Weekly CSVs: [label, Mon, Tue, Wed, Thu, Fri, Sat, Sun, WeekTotal, %share, (trailing empties)]
+  // The grand total is always the largest value in the row (total = sum of days > any single day,
+  // and is always larger than the %-share column which maxes out at 100).
   const lastNum = (cols: string[]): number => {
-    for (let i = cols.length - 2; i >= 1; i--) {
+    let max = 0;
+    for (let i = 1; i < cols.length; i++) {
       const n = parseNum(cols[i]);
-      if (n !== 0) return n;
+      if (n > max) max = n;
     }
-    return 0;
+    return max;
   };
 
   let weekStart: string | null = null, weekEnd: string | null = null;
