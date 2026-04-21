@@ -325,6 +325,16 @@ function parseWeeklyCSV(raw: string): WeeklyParseResult {
 
   const split = (line: string) => line.split(';').map(v => v.replace(/^"|"$/g,'').trim());
 
+  // Weekly reports have Mon–Sun day columns before the grand total column.
+  // Scan from the RIGHT to find the first non-zero numeric value in a row.
+  const lastNum = (cols: string[]): number => {
+    for (let i = cols.length - 1; i >= 1; i--) {
+      const n = parseNum(cols[i]);
+      if (n !== 0) return n;
+    }
+    return 0;
+  };
+
   let weekStart: string | null = null, weekEnd: string | null = null;
   for (let i = 0; i < Math.min(10, lines.length); i++) {
     const cols = split(lines[i]);
@@ -351,30 +361,29 @@ function parseWeeklyCSV(raw: string): WeeklyParseResult {
 
     switch (section) {
       case 'turnover':
-        if (first === 'tip') tips = parseNum(cols[3]);
+        if (first === 'tip') tips = lastNum(cols);
         break;
       case 'gross turnover':
-        if      (first.startsWith('7.'))  grossFood   = parseNum(cols[3]);
-        else if (first.startsWith('19.')) grossDrinks = parseNum(cols[3]);
-        else if (first === 'total')       grossTotal  = parseNum(cols[3]);
+        if      (first.startsWith('7.'))  grossFood   = lastNum(cols);
+        else if (first.startsWith('19.')) grossDrinks = lastNum(cols);
+        else if (first === 'total')       grossTotal  = lastNum(cols);
         break;
       case 'net turnover':
-        if (first === 'total') netTotal = parseNum(cols[3]);
+        if (first === 'total') netTotal = lastNum(cols);
         break;
       case 'taxes':
-        if (first === 'total') taxTotal = parseNum(cols[3]);
+        if (first === 'total') taxTotal = lastNum(cols);
         break;
       case 'main categories':
-        if (cols[0]) { inhouseTotal += parseNum(cols[7]); takeawayTotal += parseNum(cols[10]); }
+        if (cols[0]) { inhouseTotal += lastNum(cols.slice(0, 9)); takeawayTotal += lastNum(cols.slice(9)); }
         break;
       case 'categories':
-        if (cols[0] && parseNum(cols[3]) > 0) categoryRevenue[cols[0]] = parseNum(cols[3]);
+        if (cols[0]) { const v = lastNum(cols); if (v > 0) categoryRevenue[cols[0]] = v; }
         break;
       case 'products': {
         if (!cols[0]) break;
-        const qty = parseNum(cols[2]), rev = parseNum(cols[3]);
-        const inh = parseNum(cols[7]), tak = parseNum(cols[10]);
-        if (rev > 0 || qty > 0) rows.push({ item_name:cols[0], category:null, quantity:qty, unit_price:qty>0?Math.round((rev/qty)*100)/100:0, total_price:rev, inhouse_revenue:inh, takeaway_revenue:tak });
+        const qty = parseNum(cols[2]), rev = lastNum(cols);
+        if (rev > 0 || qty > 0) rows.push({ item_name:cols[0], category:null, quantity:qty, unit_price:qty>0?Math.round((rev/qty)*100)/100:0, total_price:rev, inhouse_revenue:0, takeaway_revenue:0 });
         break;
       }
     }
@@ -383,11 +392,9 @@ function parseWeeklyCSV(raw: string): WeeklyParseResult {
   if (rows.length === 0 && grossTotal === 0)
     return { rows:[], summary:null, categoryRevenue:{}, error:'Could not parse this file as an Orderbird Z-report.' };
 
-  if (inhouseTotal === 0 && takeawayTotal === 0 && rows.length > 0) {
-    inhouseTotal  = rows.reduce((s,r) => s + r.inhouse_revenue,  0);
-    takeawayTotal = rows.reduce((s,r) => s + r.takeaway_revenue, 0);
-  }
   if (grossTotal === 0) grossTotal = grossFood + grossDrinks;
+  // Fallback: derive net from gross minus VAT if parser still missed it
+  if (netTotal === 0 && grossTotal > 0 && taxTotal > 0) netTotal = grossTotal - taxTotal;
 
   return { rows, summary:{ weekStart, weekEnd, grossTotal, grossFood, grossDrinks, netTotal, taxTotal, tips, inhouseTotal, takeawayTotal }, categoryRevenue };
 }
