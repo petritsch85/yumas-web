@@ -2255,7 +2255,7 @@ export default function SalesReportsPage() {
 
           return (
             <div className="border border-gray-200 rounded-xl overflow-hidden shadow-sm">
-              <div className="overflow-auto" style={{ maxHeight: 'calc(100vh - 260px)' }}>
+              <div className="overflow-auto" style={{ maxHeight: 'calc(100vh - 260px)', overflowX: 'scroll' }}>
                 <table className="text-xs border-collapse" style={{ minWidth: LABEL_W + (dailyCols.length + 1) * COL_W_D }}>
                   {/* Sticky column header */}
                   <thead className="sticky top-0 z-30">
