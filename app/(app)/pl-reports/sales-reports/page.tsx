@@ -31,6 +31,7 @@ type WeekData = {
 };
 
 type ShiftRow = {
+  id:                  string;
   report_date:         string;
   z_report_number:     string;
   shift_type:          'lunch' | 'dinner' | null;
@@ -849,6 +850,14 @@ export default function SalesReportsPage() {
   const [isDragging,    setIsDragging]    = useState(false);
   const [weeklyPage,    setWeeklyPage]    = useState(0);
 
+  // Day modal (edit / delete)
+  const [activeDayKey,       setActiveDayKey]       = useState<string | null>(null);
+  const [editingShiftId,     setEditingShiftId]     = useState<string | null>(null);
+  const [editDraft,          setEditDraft]          = useState<Record<string, string>>({});
+  const [savingEdit,         setSavingEdit]         = useState(false);
+  const [confirmDeleteId,    setConfirmDeleteId]    = useState<string | null>(null);
+  const [confirmDelDelivery, setConfirmDelDelivery] = useState(false);
+
   // Forecast
   const [showForecastPanel, setShowForecastPanel] = useState(false);
   const [lunchDraft,  setLunchDraft]  = useState<DraftSettings>(DEFAULT_DRAFT);
@@ -914,7 +923,7 @@ export default function SalesReportsPage() {
       const qEnd   = `${year}-${String(lastM).padStart(2,'0')}-${String(daysInMonth(year, lastM)).padStart(2,'0')}`;
       const { data } = await supabase
         .from('shift_reports')
-        .select('report_date,z_report_number,shift_type,gross_total,gross_food,gross_beverages,net_total,vat_total,tips,inhouse_total,takeaway_total,cancellations_count,cancellations_total')
+        .select('id,report_date,z_report_number,shift_type,gross_total,gross_food,gross_beverages,net_total,vat_total,tips,inhouse_total,takeaway_total,cancellations_count,cancellations_total')
         .eq('location_id', location!.id)
         .gte('report_date', qStart)
         .lte('report_date', qEnd)
@@ -962,11 +971,11 @@ export default function SalesReportsPage() {
       const qEnd   = `${year}-${String(lastM).padStart(2,'0')}-${String(daysInMonth(year, lastM)).padStart(2,'0')}`;
       const { data } = await supabase
         .from('delivery_reports')
-        .select('report_date,net_revenue')
+        .select('id,report_date,net_revenue,gross_revenue,orders_count,store_name')
         .eq('location_id', location!.id)
         .gte('report_date', qStart)
         .lte('report_date', qEnd);
-      return (data ?? []) as { report_date: string; net_revenue: number }[];
+      return (data ?? []) as { id: string; report_date: string; net_revenue: number; gross_revenue: number; orders_count: number; store_name: string }[];
     },
   });
 
@@ -1373,6 +1382,76 @@ export default function SalesReportsPage() {
     queryClient.invalidateQueries({ queryKey: ['delivery-reports'] });
     setImporting(false);
   }, [location, deliveryBatch, queryClient]);
+
+  const closeModal = useCallback(() => {
+    setActiveDayKey(null);
+    setEditingShiftId(null);
+    setEditDraft({});
+    setConfirmDeleteId(null);
+    setConfirmDelDelivery(false);
+  }, []);
+
+  const startEditShift = useCallback((shift: ShiftRow) => {
+    setEditingShiftId(shift.id);
+    setConfirmDeleteId(null);
+    setEditDraft({
+      shift_type:          shift.shift_type ?? 'dinner',
+      gross_total:         String(shift.gross_total         ?? 0),
+      gross_food:          String(shift.gross_food          ?? 0),
+      gross_beverages:     String(shift.gross_beverages     ?? 0),
+      net_total:           String(shift.net_total           ?? 0),
+      vat_total:           String(shift.vat_total           ?? 0),
+      tips:                String(shift.tips                ?? 0),
+      inhouse_total:       String(shift.inhouse_total       ?? 0),
+      takeaway_total:      String(shift.takeaway_total      ?? 0),
+      cancellations_count: String(shift.cancellations_count ?? 0),
+      cancellations_total: String(shift.cancellations_total ?? 0),
+    });
+  }, []);
+
+  const handleDeleteShift = useCallback(async (id: string) => {
+    try {
+      const { error } = await supabase.from('shift_reports').delete().eq('id', id);
+      if (error) throw error;
+      queryClient.invalidateQueries({ queryKey: ['shift-reports'] });
+      queryClient.invalidateQueries({ queryKey: ['shift-reports-year'] });
+      setConfirmDeleteId(null);
+    } catch (e: any) { alert(`Delete failed: ${e.message}`); }
+  }, [queryClient]);
+
+  const handleSaveEditShift = useCallback(async () => {
+    if (!editingShiftId) return;
+    setSavingEdit(true);
+    try {
+      const { error } = await supabase.from('shift_reports').update({
+        shift_type:          editDraft.shift_type as 'lunch' | 'dinner',
+        gross_total:         parseFloat(editDraft.gross_total)         || 0,
+        gross_food:          parseFloat(editDraft.gross_food)          || 0,
+        gross_beverages:     parseFloat(editDraft.gross_beverages)     || 0,
+        net_total:           parseFloat(editDraft.net_total)           || 0,
+        vat_total:           parseFloat(editDraft.vat_total)           || 0,
+        tips:                parseFloat(editDraft.tips)                || 0,
+        inhouse_total:       parseFloat(editDraft.inhouse_total)       || 0,
+        takeaway_total:      parseFloat(editDraft.takeaway_total)      || 0,
+        cancellations_count: parseInt(editDraft.cancellations_count)   || 0,
+        cancellations_total: parseFloat(editDraft.cancellations_total) || 0,
+      }).eq('id', editingShiftId);
+      if (error) throw error;
+      queryClient.invalidateQueries({ queryKey: ['shift-reports'] });
+      queryClient.invalidateQueries({ queryKey: ['shift-reports-year'] });
+      setEditingShiftId(null);
+    } catch (e: any) { alert(`Save failed: ${e.message}`); }
+    finally { setSavingEdit(false); }
+  }, [editingShiftId, editDraft, queryClient]);
+
+  const handleDeleteDelivery = useCallback(async (id: string) => {
+    try {
+      const { error } = await supabase.from('delivery_reports').delete().eq('id', id);
+      if (error) throw error;
+      queryClient.invalidateQueries({ queryKey: ['delivery-reports'] });
+      setConfirmDelDelivery(false);
+    } catch (e: any) { alert(`Delete failed: ${e.message}`); }
+  }, [queryClient]);
 
   const handleSaveForecast = useCallback(async () => {
     if (!location) return;
@@ -2519,10 +2598,13 @@ export default function SalesReportsPage() {
                           const isSun      = col.dow === 'Sun';
                           const isClosed   = closureSet.has(`lunch:${col.dateKey}`) && closureSet.has(`dinner:${col.dateKey}`);
                           return (
-                            <th key={ci} className="py-2 text-right font-bold whitespace-nowrap tabular-nums"
+                            <th key={ci}
+                              onClick={() => setActiveDayKey(col.dateKey)}
+                              className="py-2 text-right font-bold whitespace-nowrap tabular-nums cursor-pointer select-none"
+                              title={`Click to edit/delete data for ${col.dateKey}`}
                               style={{ minWidth:COL_W_D, width:COL_W_D, paddingLeft:4, paddingRight:8,
                                 color: isClosed ? '#f87171' : isCurDay ? '#ffffff' : hasData ? '#93c5fd' : '#4b5563',
-                                backgroundColor: isClosed ? 'rgba(239,68,68,0.12)' : undefined,
+                                backgroundColor: activeDayKey === col.dateKey ? 'rgba(99,102,241,0.25)' : isClosed ? 'rgba(239,68,68,0.12)' : undefined,
                                 borderBottom: isCurDay ? '2px solid #3b82f6' : isSun ? '2px solid #7c3aed' : isClosed ? '2px solid #ef4444' : 'none',
                                 borderLeft: col.day === 1 && col.month !== QUARTER_MONTHS[quarter-1][0] ? '2px solid #4b5563' : undefined,
                                 borderRight: isSun ? '1px solid #374151' : undefined }}>
@@ -2699,6 +2781,196 @@ export default function SalesReportsPage() {
         })()}
         </div>
         )}
+
+        {/* ── Day edit/delete modal ── */}
+        {activeDayKey && (() => {
+          const dayShifts   = shiftRows.filter(s => s.report_date === activeDayKey);
+          const dayDelivery = deliveryReports.find(r => r.report_date === activeDayKey) ?? null;
+          const dowLabel    = new Date(activeDayKey + 'T12:00:00Z').toLocaleDateString('en-GB', { weekday:'long' });
+          const numFields: { key: string; label: string; isInt?: boolean }[] = [
+            { key:'gross_total',         label:'Gross Total'         },
+            { key:'gross_food',          label:'Food (7% VAT)'       },
+            { key:'gross_beverages',     label:'Drinks (19% VAT)'    },
+            { key:'net_total',           label:'Net Revenue'         },
+            { key:'vat_total',           label:'VAT'                 },
+            { key:'tips',                label:'Tips'                },
+            { key:'inhouse_total',       label:'In-house'            },
+            { key:'takeaway_total',      label:'Takeaway'            },
+            { key:'cancellations_count', label:'Cancels (count)', isInt:true },
+            { key:'cancellations_total', label:'Cancels (value)'     },
+          ];
+          return (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+              onClick={closeModal}>
+              <div className="bg-white rounded-2xl shadow-2xl w-[560px] max-h-[85vh] overflow-y-auto"
+                onClick={e => e.stopPropagation()}>
+
+                {/* Modal header */}
+                <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between sticky top-0 bg-white z-10">
+                  <div>
+                    <p className="font-bold text-gray-900 text-base">{fmtDate(activeDayKey)}</p>
+                    <p className="text-xs text-gray-400">{dowLabel}</p>
+                  </div>
+                  <button onClick={closeModal} className="text-gray-400 hover:text-gray-600 text-xl font-bold leading-none">✕</button>
+                </div>
+
+                <div className="p-6 space-y-4">
+                  {dayShifts.length === 0 && !dayDelivery && (
+                    <p className="text-sm text-gray-400 text-center py-6">No data stored for this day.</p>
+                  )}
+
+                  {/* ── Shift cards ── */}
+                  {dayShifts.map(shift => {
+                    const isLunch    = (editingShiftId === shift.id ? editDraft.shift_type : shift.shift_type) === 'lunch';
+                    const isEditing  = editingShiftId === shift.id;
+                    const isDeleting = confirmDeleteId === shift.id;
+                    return (
+                      <div key={shift.id} className="border border-gray-200 rounded-xl overflow-hidden">
+                        {/* Card header */}
+                        <div className={`px-4 py-3 flex items-center justify-between ${isLunch ? 'bg-amber-50 border-b border-amber-100' : 'bg-blue-50 border-b border-blue-100'}`}>
+                          <div className="flex items-center gap-3">
+                            {isEditing ? (
+                              <div className="flex items-center gap-1">
+                                <button onClick={() => setEditDraft(d => ({ ...d, shift_type: 'lunch' }))}
+                                  className={`px-2 py-0.5 rounded-full text-xs font-bold border transition-colors ${editDraft.shift_type === 'lunch' ? 'bg-amber-400 text-white border-amber-400' : 'bg-white text-amber-600 border-amber-300 hover:bg-amber-50'}`}>
+                                  ☀️ Lunch
+                                </button>
+                                <button onClick={() => setEditDraft(d => ({ ...d, shift_type: 'dinner' }))}
+                                  className={`px-2 py-0.5 rounded-full text-xs font-bold border transition-colors ${editDraft.shift_type === 'dinner' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-blue-700 border-blue-300 hover:bg-blue-50'}`}>
+                                  🌙 Dinner
+                                </button>
+                              </div>
+                            ) : (
+                              <span className="text-sm font-bold">{isLunch ? '☀️ Lunch' : '🌙 Dinner'}</span>
+                            )}
+                            <span className="text-xs text-gray-400">Z-{shift.z_report_number || '?'}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {!isEditing && !isDeleting && (
+                              <button onClick={() => startEditShift(shift)}
+                                className="text-xs px-2.5 py-1 rounded-lg border border-gray-200 text-gray-500 hover:border-indigo-400 hover:text-indigo-600 transition-colors font-semibold">
+                                ✏️ Edit
+                              </button>
+                            )}
+                            {!isEditing && (
+                              isDeleting ? (
+                                <span className="flex items-center gap-1.5">
+                                  <span className="text-xs text-red-600 font-semibold">Delete?</span>
+                                  <button onClick={() => handleDeleteShift(shift.id)}
+                                    className="text-xs px-2.5 py-1 bg-red-600 text-white rounded-lg font-bold hover:bg-red-700 transition-colors">Yes</button>
+                                  <button onClick={() => setConfirmDeleteId(null)}
+                                    className="text-xs px-2.5 py-1 border border-gray-200 rounded-lg text-gray-500 hover:bg-gray-50 transition-colors">No</button>
+                                </span>
+                              ) : (
+                                <button onClick={() => { setConfirmDeleteId(shift.id); setEditingShiftId(null); }}
+                                  className="text-xs px-2.5 py-1 rounded-lg border border-red-200 text-red-500 hover:bg-red-50 transition-colors font-semibold">
+                                  🗑 Delete
+                                </button>
+                              )
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Card body — edit form or read-only */}
+                        {isEditing ? (
+                          <div className="px-4 py-4 space-y-3">
+                            <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+                              {numFields.map(({ key, label, isInt }) => (
+                                <div key={key} className="flex items-center gap-2">
+                                  <label className="text-xs text-gray-400 w-32 flex-shrink-0">{label}</label>
+                                  <input
+                                    type="number" step={isInt ? '1' : '0.01'} min="0"
+                                    value={editDraft[key] ?? '0'}
+                                    onChange={e => setEditDraft(d => ({ ...d, [key]: e.target.value }))}
+                                    className="flex-1 text-right text-xs font-semibold border border-gray-200 rounded-lg px-2 py-1.5 tabular-nums focus:outline-none focus:border-indigo-400"
+                                  />
+                                </div>
+                              ))}
+                            </div>
+                            <div className="flex items-center justify-end gap-2 pt-1 border-t border-gray-100">
+                              <button onClick={() => setEditingShiftId(null)}
+                                className="px-4 py-1.5 text-xs font-semibold border border-gray-200 rounded-lg text-gray-500 hover:bg-gray-50 transition-colors">
+                                Cancel
+                              </button>
+                              <button onClick={handleSaveEditShift} disabled={savingEdit}
+                                className="px-4 py-1.5 text-xs font-bold bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50 flex items-center gap-1.5">
+                                {savingEdit ? <Loader2 size={12} className="animate-spin" /> : <DatabaseZap size={12} />}
+                                {savingEdit ? 'Saving…' : 'Save changes'}
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="px-4 py-3">
+                            <div className="grid grid-cols-3 gap-x-3 gap-y-1.5 text-xs">
+                              {[
+                                { label:'Gross',    val: shift.gross_total,         bold:true  },
+                                { label:'Net',      val: shift.net_total,            bold:true  },
+                                { label:'VAT',      val: shift.vat_total,            bold:false },
+                                { label:'Food',     val: shift.gross_food,           bold:false },
+                                { label:'Drinks',   val: shift.gross_beverages,      bold:false },
+                                { label:'Tips',     val: shift.tips,                 bold:false },
+                                { label:'In-house', val: shift.inhouse_total,        bold:false },
+                                { label:'Takeaway', val: shift.takeaway_total,       bold:false },
+                                { label:'Cancels',  val: shift.cancellations_total,  bold:false },
+                              ].map(({ label, val, bold }) => (
+                                <div key={label} className="flex items-center justify-between gap-1">
+                                  <span className="text-gray-400">{label}</span>
+                                  <span className={`tabular-nums ${bold ? 'font-bold text-gray-900' : 'text-gray-600'}`}>
+                                    {fmt(val ?? 0)}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+
+                  {/* ── Delivery card ── */}
+                  {dayDelivery && (
+                    <div className="border border-orange-200 rounded-xl overflow-hidden">
+                      <div className="px-4 py-3 bg-orange-50 border-b border-orange-100 flex items-center justify-between">
+                        <span className="text-sm font-bold text-orange-700">🛵 Simply Delivery</span>
+                        <div className="flex items-center gap-2">
+                          {confirmDelDelivery ? (
+                            <span className="flex items-center gap-1.5">
+                              <span className="text-xs text-red-600 font-semibold">Delete?</span>
+                              <button onClick={() => handleDeleteDelivery(dayDelivery.id)}
+                                className="text-xs px-2.5 py-1 bg-red-600 text-white rounded-lg font-bold hover:bg-red-700 transition-colors">Yes</button>
+                              <button onClick={() => setConfirmDelDelivery(false)}
+                                className="text-xs px-2.5 py-1 border border-gray-200 rounded-lg text-gray-500 hover:bg-gray-50 transition-colors">No</button>
+                            </span>
+                          ) : (
+                            <button onClick={() => setConfirmDelDelivery(true)}
+                              className="text-xs px-2.5 py-1 rounded-lg border border-red-200 text-red-500 hover:bg-red-50 transition-colors font-semibold">
+                              🗑 Delete
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      <div className="px-4 py-3">
+                        <div className="grid grid-cols-3 gap-x-3 gap-y-1.5 text-xs">
+                          {[
+                            { label:'Store',   val: dayDelivery.store_name,   isText: true },
+                            { label:'Orders',  val: String(dayDelivery.orders_count), isText: true },
+                            { label:'Net',     val: fmt(dayDelivery.net_revenue),   isText: true },
+                            { label:'Gross',   val: fmt(dayDelivery.gross_revenue), isText: true },
+                          ].map(({ label, val }) => (
+                            <div key={label} className="flex items-center justify-between gap-1">
+                              <span className="text-gray-400">{label}</span>
+                              <span className="tabular-nums text-gray-700 font-semibold">{val}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })()}
 
         {/* ── Weekly P&L ───────────────────────────────────────────────── */}
         {subTab === 'weekly' && (!location ? (
