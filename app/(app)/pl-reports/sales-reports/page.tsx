@@ -3,6 +3,7 @@
 import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
+import * as XLSX from 'xlsx';
 import {
   Upload, FileCheck, AlertCircle, DatabaseZap,
   MapPin, CalendarDays, BarChart3, TableProperties,
@@ -136,6 +137,22 @@ type ShiftParseResult = {
 type WeeklyBatchItem = {
   fileName: string;
   result:   WeeklyParseResult;
+  status:   'pending' | 'saving' | 'saved' | 'error';
+  errorMsg?: string;
+};
+
+type DeliveryParseResult = {
+  date:         string;
+  storeName:    string;
+  ordersCount:  number;
+  netRevenue:   number;
+  grossRevenue: number;
+  error?:       string;
+};
+
+type DeliveryBatchItem = {
+  fileName: string;
+  result:   DeliveryParseResult;
   status:   'pending' | 'saving' | 'saved' | 'error';
   errorMsg?: string;
 };
@@ -643,6 +660,44 @@ function draftToPayload(d: DraftSettings, type: 'lunch'|'dinner', locationId: st
   };
 }
 
+function parseDeliveryXLSX(buffer: ArrayBuffer): DeliveryParseResult {
+  const empty: DeliveryParseResult = { date: '', storeName: '', ordersCount: 0, netRevenue: 0, grossRevenue: 0 };
+  try {
+    const wb   = XLSX.read(buffer, { type: 'array' });
+    const ws   = wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json<any[]>(ws, { header: 1, defval: '' });
+
+    // Date: row index 1, col 1 ("Datum von: DD.MM.YYYY")
+    let date = '';
+    const dateRow = rows[1];
+    if (dateRow) {
+      const raw = String(dateRow[1] ?? dateRow[3] ?? '').trim();
+      const m   = raw.match(/(\d{1,2})\.(\d{1,2})\.(\d{4})/);
+      if (m) date = `${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`;
+    }
+
+    // Store name: row index 3, col 1
+    const storeName = String(rows[3]?.[1] ?? '').trim();
+
+    // Totals: "Summe:" row
+    let ordersCount = 0, netRevenue = 0, grossRevenue = 0;
+    for (const row of rows) {
+      if (String(row[0]).toLowerCase().startsWith('summe')) {
+        ordersCount  = Number(row[1]) || 0;
+        netRevenue   = Number(row[2]) || 0;
+        grossRevenue = Number(row[3]) || 0;
+        break;
+      }
+    }
+
+    if (!date) return { ...empty, error: 'Could not find date in Simplydelivery report.' };
+    if (netRevenue === 0 && grossRevenue === 0) return { ...empty, error: 'Could not find revenue totals (Summe: row missing).' };
+    return { date, storeName, ordersCount, netRevenue, grossRevenue };
+  } catch (e: any) {
+    return { ...empty, error: `Failed to parse file: ${e.message}` };
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // ROW DEFINITIONS
 // ─────────────────────────────────────────────────────────────────────────────
@@ -775,7 +830,7 @@ export default function SalesReportsPage() {
   // Tab / sub-tab
   const [activeTab,   setActiveTab]   = useState<'upload'|'daily'>('daily');
   const [subTab,      setSubTab]      = useState<'daily'|'weekly'|'monthly'>('daily');
-  const [reportType,  setReportType]  = useState<'weekly'|'shift'|'monthly'>('shift');
+  const [reportType,  setReportType]  = useState<'weekly'|'shift'|'monthly'|'delivery'>('shift');
 
   // Shared controls
   const [location, setLocation] = useState<Location | null>(null);
@@ -788,6 +843,7 @@ export default function SalesReportsPage() {
   const [weeklyBatch,    setWeeklyBatch]    = useState<WeeklyBatchItem[]>([]);
   const [shiftBatch,     setShiftBatch]     = useState<ShiftBatchItem[]>([]);
   const [monthlyResult,  setMonthlyResult]  = useState<MonthlyParseResult | null>(null);
+  const [deliveryBatch,  setDeliveryBatch]  = useState<DeliveryBatchItem[]>([]);
   const [parseError,     setParseError]     = useState<string | null>(null);
   const [importing,     setImporting]     = useState(false);
   const [isDragging,    setIsDragging]    = useState(false);
@@ -893,6 +949,24 @@ export default function SalesReportsPage() {
         .select('shift_type,week_base_net,growth_rate,weight_mon,weight_tue,weight_wed,weight_thu,weight_fri,weight_sat,weight_sun')
         .eq('location_id', location!.id);
       return (data ?? []) as ForecastSettings[];
+    },
+  });
+
+  // Delivery reports for current quarter
+  const { data: deliveryReports = [] } = useQuery({
+    queryKey: ['delivery-reports', location?.id, year, quarter],
+    enabled: !!location && activeTab === 'daily',
+    queryFn: async () => {
+      const [firstM, , lastM] = QUARTER_MONTHS[quarter - 1];
+      const qStart = `${year}-${String(firstM).padStart(2,'0')}-01`;
+      const qEnd   = `${year}-${String(lastM).padStart(2,'0')}-${String(daysInMonth(year, lastM)).padStart(2,'0')}`;
+      const { data } = await supabase
+        .from('delivery_reports')
+        .select('report_date,net_revenue')
+        .eq('location_id', location!.id)
+        .gte('report_date', qStart)
+        .lte('report_date', qEnd);
+      return (data ?? []) as { report_date: string; net_revenue: number }[];
     },
   });
 
@@ -1056,6 +1130,13 @@ export default function SalesReportsPage() {
     return result;
   }, [quarter, year]);
 
+  // Delivery revenue map: dateKey → net_revenue
+  const deliveryMap = useMemo<Record<string, number>>(() => {
+    const m: Record<string, number> = {};
+    for (const r of deliveryReports) m[r.report_date] = r.net_revenue ?? 0;
+    return m;
+  }, [deliveryReports]);
+
   // O(1) lookup set for closed shifts: "lunch:2026-05-01", "dinner:2026-05-01"
   const closureSet = useMemo(() => {
     const s = new Set<string>();
@@ -1090,18 +1171,30 @@ export default function SalesReportsPage() {
     [weeklyResult]
   );
 
-  const canImportWeekly  = !!location && weeklyBatch.some(i => i.status === 'pending' && !i.result.error) && !importing;
-  const canImportShift   = !!location && shiftBatch.some(i => i.status === 'pending' && !i.result.error) && !importing;
-  const canImportMonthly = !!location && !!monthlyResult && !monthlyResult.error && monthlyResult.year > 0 && !importing;
+  const canImportWeekly   = !!location && weeklyBatch.some(i => i.status === 'pending' && !i.result.error) && !importing;
+  const canImportShift    = !!location && shiftBatch.some(i => i.status === 'pending' && !i.result.error) && !importing;
+  const canImportMonthly  = !!location && !!monthlyResult && !monthlyResult.error && monthlyResult.year > 0 && !importing;
+  const canImportDelivery = !!location && deliveryBatch.some(i => i.status === 'pending' && !i.result.error) && !importing;
 
   // ── Handlers ───────────────────────────────────────────────────────────────
 
   const resetUpload = useCallback(() => {
     setFileName(null); setWeeklyResult(null); setWeeklyBatch([]); setShiftBatch([]);
-    setMonthlyResult(null); setParseError(null); setWeeklyPage(0);
+    setMonthlyResult(null); setDeliveryBatch([]); setParseError(null); setWeeklyPage(0);
   }, []);
 
   const processFile = useCallback((file: File) => {
+    if (reportType === 'delivery') {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const buffer = e.target?.result as ArrayBuffer;
+        const r = parseDeliveryXLSX(buffer);
+        setParseError(null);
+        setDeliveryBatch(prev => [...prev, { fileName: file.name, result: r, status: 'pending' }]);
+      };
+      reader.readAsArrayBuffer(file);
+      return;
+    }
     const reader = new FileReader();
     reader.onload = (e) => {
       const content = e.target?.result as string;
@@ -1251,6 +1344,35 @@ export default function SalesReportsPage() {
     } catch (e: any) { alert(`Import failed: ${e.message}`); }
     finally { setImporting(false); }
   }, [location, monthlyResult, queryClient, resetUpload]);
+
+  const handleImportDelivery = useCallback(async () => {
+    const pending = deliveryBatch.filter(i => i.status === 'pending' && !i.result.error);
+    if (!location || !pending.length) return;
+    setImporting(true);
+    const { data: { user } } = await supabase.auth.getUser();
+    for (const item of pending) {
+      setDeliveryBatch(prev => prev.map(i => i === item ? { ...i, status: 'saving' } : i));
+      try {
+        const r = item.result;
+        const { error } = await supabase.from('delivery_reports').upsert({
+          location_id:   location.id,
+          report_date:   r.date,
+          store_name:    r.storeName,
+          orders_count:  r.ordersCount,
+          net_revenue:   r.netRevenue,
+          gross_revenue: r.grossRevenue,
+          file_name:     item.fileName,
+          imported_by:   user?.id ?? null,
+        }, { onConflict: 'location_id,report_date' });
+        if (error) throw error;
+        setDeliveryBatch(prev => prev.map(i => i === item ? { ...i, status: 'saved' } : i));
+      } catch (e: any) {
+        setDeliveryBatch(prev => prev.map(i => i === item ? { ...i, status: 'error', errorMsg: e.message } : i));
+      }
+    }
+    queryClient.invalidateQueries({ queryKey: ['delivery-reports'] });
+    setImporting(false);
+  }, [location, deliveryBatch, queryClient]);
 
   const handleSaveForecast = useCallback(async () => {
     if (!location) return;
@@ -1465,9 +1587,10 @@ export default function SalesReportsPage() {
           {/* Report type toggle */}
           <div className="flex gap-3 mb-5">
             {([
-              ['shift',   '⏱',  'Shift Report',   'Single shift Z-report (lunch or dinner)'],
-              ['monthly', '📅', 'Monthly Report', 'Full-month Z-report aggregate'],
-              ['weekly',  '📋', 'Weekly Report',  'KW report covering a full week'],
+              ['shift',    '⏱',  'Shift Report',    'Single shift Z-report (lunch or dinner)'],
+              ['monthly',  '📅', 'Monthly Report',  'Full-month Z-report aggregate'],
+              ['weekly',   '📋', 'Weekly Report',   'KW report covering a full week'],
+              ['delivery', '🛵', 'Delivery Report', 'Simplydelivery daily XLSX (one file per day)'],
             ] as const).map(([t, emoji, label, desc]) => (
               <button key={t} onClick={() => { setReportType(t); resetUpload(); }}
                 className={`flex-1 py-3 px-4 rounded-xl border-2 text-left transition-colors ${
@@ -1502,7 +1625,9 @@ export default function SalesReportsPage() {
               {/* Drop zone */}
               <div>
                 <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">
-                  Orderbird Z-Report CSV — {reportType === 'shift' ? 'Shift' : reportType === 'monthly' ? 'Monthly' : 'Weekly'}
+                  {reportType === 'delivery'
+                    ? 'Simplydelivery XLSX — Daily Report'
+                    : `Orderbird Z-Report CSV — ${reportType === 'shift' ? 'Shift' : reportType === 'monthly' ? 'Monthly' : 'Weekly'}`}
                 </label>
                 <div
                   onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
@@ -1511,19 +1636,21 @@ export default function SalesReportsPage() {
                   onClick={() => fileInputRef.current?.click()}
                   className={`relative border-2 border-dashed rounded-xl p-8 text-center transition-colors cursor-pointer ${
                     isDragging ? 'border-[#1B5E20] bg-green-50' :
-                    (reportType === 'shift' ? shiftBatch.length > 0 : reportType === 'weekly' ? weeklyBatch.length > 0 : !!fileName) && !parseError ? 'border-green-400 bg-green-50' :
+                    (reportType === 'shift' ? shiftBatch.length > 0 : reportType === 'weekly' ? weeklyBatch.length > 0 : reportType === 'delivery' ? deliveryBatch.length > 0 : !!fileName) && !parseError ? 'border-green-400 bg-green-50' :
                     parseError ? 'border-red-300 bg-red-50' :
                     'border-gray-200 bg-white hover:border-gray-300'
                   }`}
                 >
-                  {(reportType === 'shift' ? shiftBatch.length > 0 : reportType === 'weekly' ? weeklyBatch.length > 0 : !!fileName) && !parseError
+                  {(reportType === 'shift' ? shiftBatch.length > 0 : reportType === 'weekly' ? weeklyBatch.length > 0 : reportType === 'delivery' ? deliveryBatch.length > 0 : !!fileName) && !parseError
                     ? <FileCheck className="mx-auto mb-2 text-green-600" size={32} />
                     : <Upload    className="mx-auto mb-2 text-gray-400"   size={32} />}
-                  <p className={`text-sm font-semibold mb-1 ${(reportType === 'shift' ? shiftBatch.length > 0 : reportType === 'weekly' ? weeklyBatch.length > 0 : !!fileName) && !parseError ? 'text-green-700' : 'text-gray-600'}`}>
+                  <p className={`text-sm font-semibold mb-1 ${(reportType === 'shift' ? shiftBatch.length > 0 : reportType === 'weekly' ? weeklyBatch.length > 0 : reportType === 'delivery' ? deliveryBatch.length > 0 : !!fileName) && !parseError ? 'text-green-700' : 'text-gray-600'}`}>
                     {reportType === 'shift'
                       ? (shiftBatch.length > 0 ? `${shiftBatch.length} file${shiftBatch.length > 1 ? 's' : ''} queued` : 'Drop CSV files here')
                       : reportType === 'weekly'
                       ? (weeklyBatch.length > 0 ? `${weeklyBatch.length} file${weeklyBatch.length > 1 ? 's' : ''} queued` : 'Drop CSV files here')
+                      : reportType === 'delivery'
+                      ? (deliveryBatch.length > 0 ? `${deliveryBatch.length} file${deliveryBatch.length > 1 ? 's' : ''} queued` : 'Drop XLSX files here')
                       : (fileName ?? 'Drop CSV here')}
                   </p>
                   <p className="text-xs text-gray-400 mb-3">
@@ -1532,10 +1659,14 @@ export default function SalesReportsPage() {
                        ? `${shiftBatch.filter(i => i.status === 'pending').length} pending · ${shiftBatch.filter(i => i.status === 'saved').length} saved`
                        : reportType === 'weekly' && weeklyBatch.length > 0
                        ? `${weeklyBatch.filter(i => i.status === 'pending').length} pending · ${weeklyBatch.filter(i => i.status === 'saved').length} saved`
+                       : reportType === 'delivery' && deliveryBatch.length > 0
+                       ? `${deliveryBatch.filter(i => i.status === 'pending').length} pending · ${deliveryBatch.filter(i => i.status === 'saved').length} saved`
                        : 'or click to browse'}
                   </p>
-                  <input ref={fileInputRef} type="file" accept=".csv,text/csv,text/plain" className="hidden"
-                    multiple={reportType === 'shift' || reportType === 'weekly'}
+                  <input ref={fileInputRef} type="file"
+                    accept={reportType === 'delivery' ? '.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' : '.csv,text/csv,text/plain'}
+                    className="hidden"
+                    multiple={reportType === 'shift' || reportType === 'weekly' || reportType === 'delivery'}
                     onClick={(e) => e.stopPropagation()}
                     onChange={(e) => { Array.from(e.target.files ?? []).forEach(f => processFile(f)); e.target.value = ''; }}
                   />
@@ -1544,6 +1675,8 @@ export default function SalesReportsPage() {
                       ? (shiftBatch.length > 0 ? 'Add more files' : 'Browse files')
                       : reportType === 'weekly'
                       ? (weeklyBatch.length > 0 ? 'Add more files' : 'Browse files')
+                      : reportType === 'delivery'
+                      ? (deliveryBatch.length > 0 ? 'Add more files' : 'Browse files')
                       : (fileName ? 'Replace file' : 'Browse files')}
                   </span>
                 </div>
@@ -1557,10 +1690,20 @@ export default function SalesReportsPage() {
 
                 {/* Save button */}
                 <button
-                  onClick={reportType === 'weekly' ? handleImportWeekly : reportType === 'monthly' ? handleImportMonthly : handleImportShift}
-                  disabled={reportType === 'weekly' ? !canImportWeekly : reportType === 'monthly' ? !canImportMonthly : !canImportShift}
+                  onClick={
+                    reportType === 'weekly'   ? handleImportWeekly   :
+                    reportType === 'monthly'  ? handleImportMonthly  :
+                    reportType === 'delivery' ? handleImportDelivery :
+                    handleImportShift
+                  }
+                  disabled={
+                    reportType === 'weekly'   ? !canImportWeekly   :
+                    reportType === 'monthly'  ? !canImportMonthly  :
+                    reportType === 'delivery' ? !canImportDelivery :
+                    !canImportShift
+                  }
                   className={`mt-3 w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-bold transition-colors ${
-                    (reportType === 'weekly' ? canImportWeekly : reportType === 'monthly' ? canImportMonthly : canImportShift)
+                    (reportType === 'weekly' ? canImportWeekly : reportType === 'monthly' ? canImportMonthly : reportType === 'delivery' ? canImportDelivery : canImportShift)
                       ? 'bg-[#1B5E20] text-white hover:bg-[#2E7D32]'
                       : 'bg-gray-100 text-gray-400 cursor-not-allowed'
                   }`}
@@ -1578,6 +1721,12 @@ export default function SalesReportsPage() {
                        })()
                      : reportType === 'monthly'
                      ? (canImportMonthly ? `Save monthly report · ${MONTHS[monthlyResult!.month-1]} ${monthlyResult!.year} · ${fmt(monthlyResult!.grossTotal)}` : 'Drop a CSV file above')
+                     : reportType === 'delivery'
+                     ? (() => {
+                         const pending = deliveryBatch.filter(i => i.status === 'pending' && !i.result.error);
+                         if (!canImportDelivery) return deliveryBatch.length > 0 ? 'No pending reports to save' : 'Drop XLSX files above';
+                         return `Save ${pending.length} delivery report${pending.length > 1 ? 's' : ''}`;
+                       })()
                      : (() => {
                          const pending = shiftBatch.filter(i => i.status === 'pending' && !i.result.error);
                          if (!canImportShift) return shiftBatch.length > 0 ? 'No pending reports to save' : 'Drop a CSV file above';
@@ -1698,8 +1847,46 @@ export default function SalesReportsPage() {
                 </div>
               )}
 
+              {/* ── Delivery batch list ── */}
+              {reportType === 'delivery' && deliveryBatch.length > 0 && (
+                <div>
+                  <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Queued deliveries</p>
+                  <div className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
+                    {deliveryBatch.map((item, idx) => {
+                      const r = item.result;
+                      const statusIcon  = item.status === 'saved' ? '✓' : item.status === 'error' ? '✗' : item.status === 'saving' ? '…' : '○';
+                      const statusColor = item.status === 'saved' ? 'text-green-600' : item.status === 'error' ? 'text-red-500' : item.status === 'saving' ? 'text-blue-500' : 'text-gray-400';
+                      return (
+                        <div key={idx} className="bg-white border border-gray-100 rounded-lg px-3 py-2 flex items-center gap-2 shadow-sm">
+                          <span className={`text-sm font-bold flex-shrink-0 w-4 text-center ${statusColor}`}>{statusIcon}</span>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs font-semibold text-gray-800 truncate">
+                              {r.date ? fmtDate(r.date) : item.fileName}
+                            </p>
+                            <p className="text-xs text-gray-400">
+                              {r.error ? r.error : `Net ${fmt(r.netRevenue)} · ${r.ordersCount} orders`}
+                            </p>
+                            {item.status === 'error' && item.errorMsg && (
+                              <p className="text-xs text-red-500 truncate">{item.errorMsg}</p>
+                            )}
+                          </div>
+                          {item.status === 'pending' && (
+                            <button
+                              onClick={() => setDeliveryBatch(prev => prev.filter((_, i) => i !== idx))}
+                              className="flex-shrink-0 text-gray-300 hover:text-red-400 text-xs font-bold transition-colors"
+                              title="Remove">✕</button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
               <p className="text-xs text-gray-400 text-center leading-relaxed">
-                Export from MY orderbird → Reports → Z-Report → Export CSV
+                {reportType === 'delivery'
+                  ? 'Export from Simplydelivery → Statistics → Export XLSX'
+                  : 'Export from MY orderbird → Reports → Z-Report → Export CSV'}
               </p>
             </div>
 
@@ -2000,14 +2187,74 @@ export default function SalesReportsPage() {
                 </div>
               )}
 
+              {/* Delivery: batch summary table */}
+              {reportType === 'delivery' && deliveryBatch.length > 0 && (
+                <div className="bg-white border border-gray-100 rounded-xl overflow-hidden shadow-sm">
+                  <div className="px-4 py-3 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
+                    <p className="text-xs font-bold text-gray-500 uppercase tracking-wider">
+                      🛵 {deliveryBatch.length} file{deliveryBatch.length > 1 ? 's' : ''} queued
+                    </p>
+                    <p className="text-xs text-gray-400">
+                      {deliveryBatch.filter(i => i.status === 'saved').length} saved ·{' '}
+                      {deliveryBatch.filter(i => i.status === 'pending').length} pending
+                    </p>
+                  </div>
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="border-b border-gray-100">
+                        {['Date','Store','Orders','Net','Gross','Status'].map(h => (
+                          <th key={h} className={`px-3 py-2 font-semibold text-gray-400 uppercase tracking-wide ${
+                            h === 'Date' || h === 'Store' ? 'text-left' : h === 'Status' ? 'text-center' : 'text-right'
+                          }`}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-50">
+                      {deliveryBatch.map((item, idx) => {
+                        const r = item.result;
+                        const statusIcon  = item.status === 'saved' ? '✓' : item.status === 'error' ? '✗' : item.status === 'saving' ? '…' : '○';
+                        const statusColor = item.status === 'saved' ? 'text-green-600 font-bold' : item.status === 'error' ? 'text-red-500 font-bold' : item.status === 'saving' ? 'text-blue-500' : 'text-gray-400';
+                        return (
+                          <tr key={idx} className="hover:bg-gray-50/60">
+                            <td className="px-3 py-2 text-gray-800 font-medium whitespace-nowrap">
+                              {r.error ? <span className="text-red-400">{r.error}</span> : fmtDate(r.date)}
+                            </td>
+                            <td className="px-3 py-2 text-gray-500 max-w-[140px] truncate">{r.storeName || '—'}</td>
+                            <td className="px-3 py-2 text-right tabular-nums text-gray-600">{r.ordersCount > 0 ? r.ordersCount : '—'}</td>
+                            <td className="px-3 py-2 text-right tabular-nums text-blue-700 font-semibold">{r.netRevenue > 0 ? fmtNum(r.netRevenue) : '—'}</td>
+                            <td className="px-3 py-2 text-right tabular-nums text-[#1B5E20]">{r.grossRevenue > 0 ? fmtNum(r.grossRevenue) : '—'}</td>
+                            <td className={`px-3 py-2 text-center ${statusColor}`} title={item.errorMsg}>{statusIcon}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                    {deliveryBatch.length > 1 && (() => {
+                      const valid = deliveryBatch.filter(i => !i.result.error);
+                      return (
+                        <tfoot>
+                          <tr className="border-t-2 border-gray-200 bg-gray-50 font-bold">
+                            <td className="px-3 py-2 text-gray-600" colSpan={2}>Total ({valid.length} day{valid.length !== 1 ? 's' : ''})</td>
+                            <td className="px-3 py-2 text-right tabular-nums text-gray-600">{valid.reduce((s, i) => s + i.result.ordersCount, 0)}</td>
+                            <td className="px-3 py-2 text-right tabular-nums text-blue-700">{fmtNum(valid.reduce((s, i) => s + i.result.netRevenue, 0))}</td>
+                            <td className="px-3 py-2 text-right tabular-nums text-[#1B5E20]">{fmtNum(valid.reduce((s, i) => s + i.result.grossRevenue, 0))}</td>
+                            <td />
+                          </tr>
+                        </tfoot>
+                      );
+                    })()}
+                  </table>
+                </div>
+              )}
+
               {/* Empty state */}
-              {!weeklyResult && shiftBatch.length === 0 && !monthlyResult && !parseError && (
+              {!weeklyResult && shiftBatch.length === 0 && !monthlyResult && deliveryBatch.length === 0 && !parseError && (
                 <div className="flex flex-col items-center justify-center h-64 border-2 border-dashed border-gray-200 rounded-xl gap-3">
                   <Upload size={40} className="text-gray-200" />
                   <p className="text-sm text-gray-400">
-                    {reportType === 'shift'   ? 'Drop a shift Z-report CSV to preview data'   :
-                     reportType === 'monthly' ? 'Drop a monthly Z-report CSV to preview data' :
-                                               'Drop a weekly Z-report CSV to preview data'}
+                    {reportType === 'shift'    ? 'Drop a shift Z-report CSV to preview data'        :
+                     reportType === 'monthly'  ? 'Drop a monthly Z-report CSV to preview data'      :
+                     reportType === 'delivery' ? 'Drop a Simplydelivery XLSX to preview data'       :
+                                                 'Drop a weekly Z-report CSV to preview data'}
                   </p>
                 </div>
               )}
@@ -2382,6 +2629,51 @@ export default function SalesReportsPage() {
                         </tr>
                       );
                     })}
+                    {/* Simply delivery row */}
+                    {(() => {
+                      const todayKey  = `${todayYear}-${String(todayMonth).padStart(2,'0')}-${String(todayDay).padStart(2,'0')}`;
+                      const qDelivery = Object.entries(deliveryMap)
+                        .filter(([k]) => dailyCols.some(c => c.type === 'day' && c.dateKey === k))
+                        .reduce((s, [, v]) => s + v, 0);
+                      return (
+                        <tr className="border-b border-gray-100 hover:bg-gray-50/60 group" style={{ backgroundColor: '#fff7ed' }}>
+                          <td className="sticky left-0 z-10 px-4 py-2 whitespace-nowrap border-r border-gray-100 group-hover:bg-gray-50/60 transition-colors text-orange-700"
+                            style={{ backgroundColor: '#fff7ed' }}>
+                            🛵 Simply · Net Revenue
+                          </td>
+                          {dailyCols.map((col, ci) => {
+                            if (col.type === 'day') {
+                              const isCurDay = col.dateKey === todayKey;
+                              const val = deliveryMap[col.dateKey] ?? 0;
+                              return (
+                                <td key={ci} className="py-2 text-right tabular-nums"
+                                  style={{ paddingLeft:4, paddingRight:8, backgroundColor: isCurDay ? 'rgba(59,130,246,0.04)' : undefined }}>
+                                  {val > 0
+                                    ? <span className="text-orange-600">{fmtNum(val)}</span>
+                                    : <span className="text-gray-300">—</span>}
+                                </td>
+                              );
+                            } else {
+                              const wTotal = col.wDateKeys.reduce((s, k) => s + (deliveryMap[k] ?? 0), 0);
+                              return (
+                                <td key={ci} className="py-2 text-right tabular-nums"
+                                  style={{ paddingLeft:4, paddingRight:6, backgroundColor:'#fffbeb', borderLeft:'1px solid #fde68a', borderRight:'1px solid #fde68a' }}>
+                                  {wTotal > 0
+                                    ? <span className="text-orange-600">{fmtNum(wTotal)}</span>
+                                    : <span className="text-gray-300">—</span>}
+                                </td>
+                              );
+                            }
+                          })}
+                          <td className="py-2 text-right tabular-nums border-l border-gray-200"
+                            style={{ paddingLeft:4, paddingRight:8 }}>
+                            {qDelivery > 0
+                              ? <span className="text-orange-600 font-bold">{fmtNum(qDelivery)}</span>
+                              : <span className="text-gray-300">—</span>}
+                          </td>
+                        </tr>
+                      );
+                    })()}
                   </tbody>
 
                   <tbody><tr><td colSpan={totalCols} style={{ height: 12, backgroundColor:'#f9fafb' }} /></tr></tbody>
