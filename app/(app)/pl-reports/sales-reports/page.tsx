@@ -192,6 +192,14 @@ type ClosureDay = {
   reason:       string | null;
 };
 
+type ForecastOverride = {
+  id:            string;
+  forecast_date: string;
+  shift_type:    'lunch' | 'dinner';
+  net_revenue:   number;
+  note:          string | null;
+};
+
 const DEFAULT_DRAFT: DraftSettings = {
   weekBaseNet:'0', growthRate:'0',
   mon:'14.3', tue:'14.3', wed:'14.3', thu:'14.3', fri:'14.3', sat:'14.3',
@@ -856,7 +864,11 @@ export default function SalesReportsPage() {
   const [editDraft,          setEditDraft]          = useState<Record<string, string>>({});
   const [savingEdit,         setSavingEdit]         = useState(false);
   const [confirmDeleteId,    setConfirmDeleteId]    = useState<string | null>(null);
-  const [confirmDelDelivery, setConfirmDelDelivery] = useState(false);
+  const [confirmDelDelivery,    setConfirmDelDelivery]    = useState(false);
+  const [editingForecastKey,    setEditingForecastKey]    = useState<string | null>(null); // "lunch:dateKey" | "dinner:dateKey"
+  const [forecastDraft,         setForecastDraft]         = useState<{ netRevenue: string; note: string }>({ netRevenue: '', note: '' });
+  const [savingForecastOverride,setSavingForecastOverride]= useState(false);
+  const [confirmDelOverrideKey, setConfirmDelOverrideKey] = useState<string | null>(null);
 
   // Forecast
   const [showForecastPanel, setShowForecastPanel] = useState(false);
@@ -990,6 +1002,24 @@ export default function SalesReportsPage() {
         .eq('location_id', location!.id)
         .order('closure_date', { ascending: true });
       return (data ?? []) as ClosureDay[];
+    },
+  });
+
+  // Forecast overrides — per-day overrides that replace computed forecast values
+  const { data: forecastOverrides = [], refetch: refetchOverrides } = useQuery({
+    queryKey: ['forecast-overrides', location?.id, year, quarter],
+    enabled:  !!location,
+    queryFn: async () => {
+      const [firstM, , lastM] = QUARTER_MONTHS[quarter - 1];
+      const qStart = `${year}-${String(firstM).padStart(2,'0')}-01`;
+      const qEnd   = `${year}-${String(lastM).padStart(2,'0')}-${String(daysInMonth(year, lastM)).padStart(2,'0')}`;
+      const { data } = await supabase
+        .from('forecast_overrides')
+        .select('id,forecast_date,shift_type,net_revenue,note')
+        .eq('location_id', location!.id)
+        .gte('forecast_date', qStart)
+        .lte('forecast_date', qEnd);
+      return (data ?? []) as ForecastOverride[];
     },
   });
 
@@ -1156,7 +1186,14 @@ export default function SalesReportsPage() {
     return s;
   }, [closureDays]);
 
-  // Forecast net revenue per day — keyed by dateKey; 0 for closure days
+  // Override map: "lunch:2026-04-25" → ForecastOverride
+  const overrideMap = useMemo(() => {
+    const m: Record<string, ForecastOverride> = {};
+    for (const o of forecastOverrides) m[`${o.shift_type}:${o.forecast_date}`] = o;
+    return m;
+  }, [forecastOverrides]);
+
+  // Forecast net revenue per day — keyed by dateKey; overrides take precedence over computed
   const { lunchForecastMap, dinnerForecastMap, totalForecastMap } = useMemo(() => {
     const lS = forecastSettings.find(s => s.shift_type === 'lunch');
     const dS = forecastSettings.find(s => s.shift_type === 'dinner');
@@ -1166,11 +1203,15 @@ export default function SalesReportsPage() {
     for (const col of dailyCols) {
       if (col.type !== 'day') continue;
       const dk = col.dateKey;
-      const lv = lS && !closureSet.has(`lunch:${dk}`)  ? computeDailyForecast(dk, lS) : 0;
-      const dv = dS && !closureSet.has(`dinner:${dk}`) ? computeDailyForecast(dk, dS) : 0;
-      if (lS) lunchForecastMap[dk]  = lv;
-      if (dS) dinnerForecastMap[dk] = dv;
-      if (lS || dS) totalForecastMap[dk] = lv + dv;
+      const lOverride = overrideMap[`lunch:${dk}`];
+      const dOverride = overrideMap[`dinner:${dk}`];
+      const lv = lOverride?.net_revenue
+        ?? (lS && !closureSet.has(`lunch:${dk}`)  ? computeDailyForecast(dk, lS) : 0);
+      const dv = dOverride?.net_revenue
+        ?? (dS && !closureSet.has(`dinner:${dk}`) ? computeDailyForecast(dk, dS) : 0);
+      if (lS || lOverride) lunchForecastMap[dk]  = lv;
+      if (dS || dOverride) dinnerForecastMap[dk] = dv;
+      if (lS || dS || lOverride || dOverride) totalForecastMap[dk] = lv + dv;
     }
     return { lunchForecastMap, dinnerForecastMap, totalForecastMap };
   }, [forecastSettings, closureSet, dailyCols]);
@@ -1450,6 +1491,9 @@ export default function SalesReportsPage() {
     setEditDraft({});
     setConfirmDeleteId(null);
     setConfirmDelDelivery(false);
+    setEditingForecastKey(null);
+    setForecastDraft({ netRevenue: '', note: '' });
+    setConfirmDelOverrideKey(null);
   }, []);
 
   const startEditShift = useCallback((shift: ShiftRow) => {
@@ -1511,6 +1555,34 @@ export default function SalesReportsPage() {
       if (error) throw error;
       queryClient.invalidateQueries({ queryKey: ['delivery-reports'] });
       setConfirmDelDelivery(false);
+    } catch (e: any) { alert(`Delete failed: ${e.message}`); }
+  }, [queryClient]);
+
+  const handleSaveForecastOverride = useCallback(async () => {
+    if (!location || !activeDayKey || !editingForecastKey) return;
+    const shiftType = editingForecastKey.split(':')[0] as 'lunch' | 'dinner';
+    setSavingForecastOverride(true);
+    try {
+      const { error } = await supabase.from('forecast_overrides').upsert({
+        location_id:   location.id,
+        forecast_date: activeDayKey,
+        shift_type:    shiftType,
+        net_revenue:   parseFloat(forecastDraft.netRevenue) || 0,
+        note:          forecastDraft.note.trim() || null,
+      }, { onConflict: 'location_id,forecast_date,shift_type' });
+      if (error) throw error;
+      queryClient.invalidateQueries({ queryKey: ['forecast-overrides'] });
+      setEditingForecastKey(null);
+    } catch (e: any) { alert(`Save failed: ${e.message}`); }
+    finally { setSavingForecastOverride(false); }
+  }, [location, activeDayKey, editingForecastKey, forecastDraft, queryClient]);
+
+  const handleDeleteForecastOverride = useCallback(async (id: string) => {
+    try {
+      const { error } = await supabase.from('forecast_overrides').delete().eq('id', id);
+      if (error) throw error;
+      queryClient.invalidateQueries({ queryKey: ['forecast-overrides'] });
+      setConfirmDelOverrideKey(null);
     } catch (e: any) { alert(`Delete failed: ${e.message}`); }
   }, [queryClient]);
 
@@ -3002,6 +3074,132 @@ export default function SalesReportsPage() {
                       </div>
                     );
                   })}
+
+                  {/* ── Forecast section ── */}
+                  {(forecastSettings.length > 0 || Object.keys(overrideMap).some(k => k.endsWith(activeDayKey))) && (() => {
+                    const lS = forecastSettings.find(s => s.shift_type === 'lunch');
+                    const dS = forecastSettings.find(s => s.shift_type === 'dinner');
+                    const forecastRows: { key: string; label: string; emoji: string; computed: number; override: ForecastOverride | undefined }[] = [
+                      { key: `lunch:${activeDayKey}`,  label: 'Lunch',  emoji: '☀️',
+                        computed: lS && !closureSet.has(`lunch:${activeDayKey}`)  ? computeDailyForecast(activeDayKey, lS) : 0,
+                        override: overrideMap[`lunch:${activeDayKey}`] },
+                      { key: `dinner:${activeDayKey}`, label: 'Dinner', emoji: '🌙',
+                        computed: dS && !closureSet.has(`dinner:${activeDayKey}`) ? computeDailyForecast(activeDayKey, dS) : 0,
+                        override: overrideMap[`dinner:${activeDayKey}`] },
+                    ].filter(r => r.computed > 0 || r.override);
+                    if (forecastRows.length === 0) return null;
+                    return (
+                      <div className="border border-indigo-200 rounded-xl overflow-hidden">
+                        <div className="px-4 py-3 bg-indigo-50 border-b border-indigo-100">
+                          <span className="text-sm font-bold text-indigo-700">📈 Forecast</span>
+                          <span className="text-xs text-indigo-400 ml-2">Click ✏️ to override for this specific day</span>
+                        </div>
+                        <div className="divide-y divide-indigo-50">
+                          {forecastRows.map(({ key, label, emoji, computed, override }) => {
+                            const isEditing  = editingForecastKey === key;
+                            const isDeleting = confirmDelOverrideKey === key;
+                            const displayVal = override?.net_revenue ?? computed;
+                            return (
+                              <div key={key} className="px-4 py-3">
+                                {/* Row header */}
+                                <div className="flex items-center justify-between mb-2">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-sm font-semibold text-gray-700">{emoji} {label}</span>
+                                    {override
+                                      ? <span className="text-xs px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 font-semibold">Override</span>
+                                      : <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">Computed</span>}
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    {!isEditing && !isDeleting && (
+                                      <button
+                                        onClick={() => {
+                                          setEditingForecastKey(key);
+                                          setConfirmDelOverrideKey(null);
+                                          setForecastDraft({
+                                            netRevenue: String(override?.net_revenue ?? Math.round(computed)),
+                                            note:       override?.note ?? '',
+                                          });
+                                        }}
+                                        className="text-xs px-2.5 py-1 rounded-lg border border-gray-200 text-gray-500 hover:border-indigo-400 hover:text-indigo-600 transition-colors font-semibold">
+                                        ✏️ {override ? 'Edit override' : 'Set override'}
+                                      </button>
+                                    )}
+                                    {override && !isEditing && (
+                                      isDeleting ? (
+                                        <span className="flex items-center gap-1.5">
+                                          <span className="text-xs text-red-600 font-semibold">Remove?</span>
+                                          <button onClick={() => handleDeleteForecastOverride(override.id)}
+                                            className="text-xs px-2.5 py-1 bg-red-600 text-white rounded-lg font-bold hover:bg-red-700 transition-colors">Yes</button>
+                                          <button onClick={() => setConfirmDelOverrideKey(null)}
+                                            className="text-xs px-2.5 py-1 border border-gray-200 rounded-lg text-gray-500 hover:bg-gray-50 transition-colors">No</button>
+                                        </span>
+                                      ) : (
+                                        <button onClick={() => { setConfirmDelOverrideKey(key); setEditingForecastKey(null); }}
+                                          className="text-xs px-2.5 py-1 rounded-lg border border-red-200 text-red-500 hover:bg-red-50 transition-colors font-semibold">
+                                          🗑 Reset
+                                        </button>
+                                      )
+                                    )}
+                                  </div>
+                                </div>
+
+                                {/* Value display or edit form */}
+                                {isEditing ? (
+                                  <div className="space-y-2">
+                                    <div className="grid grid-cols-2 gap-3">
+                                      <div>
+                                        <p className="text-xs text-gray-400 mb-1">Net Revenue (€)</p>
+                                        <input type="number" step="0.01" min="0"
+                                          value={forecastDraft.netRevenue}
+                                          onChange={e => setForecastDraft(d => ({ ...d, netRevenue: e.target.value }))}
+                                          className="w-full text-right text-sm font-semibold border border-indigo-300 rounded-lg px-3 py-2 tabular-nums focus:outline-none focus:border-indigo-500"
+                                          autoFocus
+                                        />
+                                      </div>
+                                      <div>
+                                        <p className="text-xs text-gray-400 mb-1">Note (optional)</p>
+                                        <input type="text" placeholder="e.g. Large group booking"
+                                          value={forecastDraft.note}
+                                          onChange={e => setForecastDraft(d => ({ ...d, note: e.target.value }))}
+                                          className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-400"
+                                        />
+                                      </div>
+                                    </div>
+                                    <div className="flex items-center justify-between text-xs text-gray-400 pt-0.5">
+                                      <span>Computed value: {fmt(computed)}</span>
+                                      <div className="flex gap-2">
+                                        <button onClick={() => setEditingForecastKey(null)}
+                                          className="px-3 py-1.5 border border-gray-200 rounded-lg text-gray-500 hover:bg-gray-50 font-semibold transition-colors">
+                                          Cancel
+                                        </button>
+                                        <button onClick={handleSaveForecastOverride} disabled={savingForecastOverride}
+                                          className="px-3 py-1.5 bg-indigo-600 text-white rounded-lg font-bold hover:bg-indigo-700 transition-colors disabled:opacity-50 flex items-center gap-1.5">
+                                          {savingForecastOverride ? <Loader2 size={12} className="animate-spin" /> : <DatabaseZap size={12} />}
+                                          {savingForecastOverride ? 'Saving…' : 'Save override'}
+                                        </button>
+                                      </div>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <div className="flex items-baseline gap-3">
+                                    <span className={`text-lg font-bold tabular-nums ${override ? 'text-indigo-700' : 'text-amber-600'}`}>
+                                      {fmt(displayVal)}
+                                    </span>
+                                    {override && computed > 0 && (
+                                      <span className="text-xs text-gray-400">computed: {fmt(computed)}</span>
+                                    )}
+                                    {override?.note && (
+                                      <span className="text-xs text-indigo-500 italic">"{override.note}"</span>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })()}
 
                   {/* ── Delivery card ── */}
                   {dayDelivery && (
