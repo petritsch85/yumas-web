@@ -1126,18 +1126,26 @@ export default function SalesReportsPage() {
   const totalQtrTotal  = useMemo(() => sumMap(totalMap),  [totalMap]);
 
   // Weekly lunch/dinner breakdown from shift data (for weekly summary)
-  const { lunchWeekMap, dinnerWeekMap, totalWeekMap } = useMemo(() => {
-    const lunchWeekMap:  Record<number, number> = {};
-    const dinnerWeekMap: Record<number, number> = {};
-    const totalWeekMap:  Record<number, number> = {};
+  const { lunchWeekMap, dinnerWeekMap, totalWeekMap, lunchWeekCountMap, dinnerWeekCountMap } = useMemo(() => {
+    const lunchWeekMap:      Record<number, number> = {};
+    const dinnerWeekMap:     Record<number, number> = {};
+    const totalWeekMap:      Record<number, number> = {};
+    const lunchWeekCountMap: Record<number, number> = {};
+    const dinnerWeekCountMap:Record<number, number> = {};
     for (const sr of yearShiftRows) {
       const kw  = isoWeek(sr.report_date);
       const net = sr.net_total ?? 0;
-      if (sr.shift_type === 'lunch')  lunchWeekMap[kw]  = (lunchWeekMap[kw]  ?? 0) + net;
-      if (sr.shift_type === 'dinner') dinnerWeekMap[kw] = (dinnerWeekMap[kw] ?? 0) + net;
+      if (sr.shift_type === 'lunch') {
+        lunchWeekMap[kw]       = (lunchWeekMap[kw]       ?? 0) + net;
+        lunchWeekCountMap[kw]  = (lunchWeekCountMap[kw]  ?? 0) + 1;
+      }
+      if (sr.shift_type === 'dinner') {
+        dinnerWeekMap[kw]      = (dinnerWeekMap[kw]      ?? 0) + net;
+        dinnerWeekCountMap[kw] = (dinnerWeekCountMap[kw] ?? 0) + 1;
+      }
       totalWeekMap[kw] = (totalWeekMap[kw] ?? 0) + net;
     }
-    return { lunchWeekMap, dinnerWeekMap, totalWeekMap };
+    return { lunchWeekMap, dinnerWeekMap, totalWeekMap, lunchWeekCountMap, dinnerWeekCountMap };
   }, [yearShiftRows]);
 
   const lunchFYNet  = useMemo(() => Object.values(lunchWeekMap).reduce((s, v) => s + v, 0),  [lunchWeekMap]);
@@ -1218,14 +1226,17 @@ export default function SalesReportsPage() {
 
   // Full-year forecast maps (all 52 weeks, not just the selected quarter)
   // Used to populate the weekly table with forecast values for weeks without uploaded data
-  const { weekForecastNetMap, lunchWeekForecastMap, dinnerWeekForecastMap, totalWeekForecastMap } = useMemo(() => {
-    const wNet:   Record<number, number> = {};
-    const wLunch: Record<number, number> = {};
-    const wDinner:Record<number, number> = {};
-    const wTotal: Record<number, number> = {};
+  const { weekForecastNetMap, lunchWeekForecastMap, dinnerWeekForecastMap, totalWeekForecastMap,
+          lunchWeekForecastCountMap, dinnerWeekForecastCountMap } = useMemo(() => {
+    const wNet:    Record<number, number> = {};
+    const wLunch:  Record<number, number> = {};
+    const wDinner: Record<number, number> = {};
+    const wTotal:  Record<number, number> = {};
+    const wLunchCnt:  Record<number, number> = {};
+    const wDinnerCnt: Record<number, number> = {};
     const lS = forecastSettings.find(s => s.shift_type === 'lunch');
     const dS = forecastSettings.find(s => s.shift_type === 'dinner');
-    if (!lS && !dS) return { weekForecastNetMap: wNet, lunchWeekForecastMap: wLunch, dinnerWeekForecastMap: wDinner, totalWeekForecastMap: wTotal };
+    if (!lS && !dS) return { weekForecastNetMap: wNet, lunchWeekForecastMap: wLunch, dinnerWeekForecastMap: wDinner, totalWeekForecastMap: wTotal, lunchWeekForecastCountMap: wLunchCnt, dinnerWeekForecastCountMap: wDinnerCnt };
     for (let m = 1; m <= 12; m++) {
       for (let d = 1; d <= daysInMonth(year, m); d++) {
         const dk = `${year}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
@@ -1239,12 +1250,12 @@ export default function SalesReportsPage() {
         const isFutureOrCurrent = kw >= cwk;
         if (!weekMap[kw] && tv > 0 && isFutureOrCurrent) wNet[kw] = (wNet[kw] ?? 0) + tv;
         // Summary rows: forecast only from current week onwards, where no shift data exists
-        if (!lunchWeekMap[kw]  && lv > 0 && lS          && isFutureOrCurrent) wLunch[kw]  = (wLunch[kw]  ?? 0) + lv;
-        if (!dinnerWeekMap[kw] && dv > 0 && dS          && isFutureOrCurrent) wDinner[kw] = (wDinner[kw] ?? 0) + dv;
-        if (!totalWeekMap[kw]  && tv > 0 && (lS || dS)  && isFutureOrCurrent) wTotal[kw]  = (wTotal[kw]  ?? 0) + tv;
+        if (!lunchWeekMap[kw]  && lv > 0 && lS         && isFutureOrCurrent) { wLunch[kw]  = (wLunch[kw]  ?? 0) + lv; wLunchCnt[kw]  = (wLunchCnt[kw]  ?? 0) + 1; }
+        if (!dinnerWeekMap[kw] && dv > 0 && dS         && isFutureOrCurrent) { wDinner[kw] = (wDinner[kw] ?? 0) + dv; wDinnerCnt[kw] = (wDinnerCnt[kw] ?? 0) + 1; }
+        if (!totalWeekMap[kw]  && tv > 0 && (lS || dS) && isFutureOrCurrent)   wTotal[kw]  = (wTotal[kw]  ?? 0) + tv;
       }
     }
-    return { weekForecastNetMap: wNet, lunchWeekForecastMap: wLunch, dinnerWeekForecastMap: wDinner, totalWeekForecastMap: wTotal };
+    return { weekForecastNetMap: wNet, lunchWeekForecastMap: wLunch, dinnerWeekForecastMap: wDinner, totalWeekForecastMap: wTotal, lunchWeekForecastCountMap: wLunchCnt, dinnerWeekForecastCountMap: wDinnerCnt };
   }, [forecastSettings, overrideMap, closureSet, year, weekMap, lunchWeekMap, dinnerWeekMap, totalWeekMap, cwk]);
 
   const topCats = useMemo(() =>
@@ -3342,14 +3353,16 @@ export default function SalesReportsPage() {
                       </td>
                     </tr>
                     {([
-                      { label: '☀️  Lunch · Net Revenue',  wMap: lunchWeekMap,  fMap: lunchWeekForecastMap,  fy: lunchFYNet,  bold: false },
-                      { label: '🌙  Dinner · Net Revenue', wMap: dinnerWeekMap, fMap: dinnerWeekForecastMap, fy: dinnerFYNet, bold: false },
-                      { label: '∑   Total · Net Revenue',  wMap: totalWeekMap,  fMap: totalWeekForecastMap,  fy: totalFYNet,  bold: true  },
-                    ]).map((row, i) => {
+                      { label: '☀️  Lunch · Net Revenue',  wMap: lunchWeekMap,  fMap: lunchWeekForecastMap,  fy: lunchFYNet,  bold: false, cntMap: null,               fCntMap: null },
+                      { label: '     Revenue / Day',        wMap: lunchWeekMap,  fMap: lunchWeekForecastMap,  fy: 0,           bold: false, cntMap: lunchWeekCountMap,  fCntMap: lunchWeekForecastCountMap,  perDay: true },
+                      { label: '🌙  Dinner · Net Revenue', wMap: dinnerWeekMap, fMap: dinnerWeekForecastMap, fy: dinnerFYNet, bold: false, cntMap: null,               fCntMap: null },
+                      { label: '     Revenue / Day',        wMap: dinnerWeekMap, fMap: dinnerWeekForecastMap, fy: 0,           bold: false, cntMap: dinnerWeekCountMap, fCntMap: dinnerWeekForecastCountMap, perDay: true },
+                      { label: '∑   Total · Net Revenue',  wMap: totalWeekMap,  fMap: totalWeekForecastMap,  fy: totalFYNet,  bold: true,  cntMap: null,               fCntMap: null },
+                    ] as { label: string; wMap: Record<number,number>; fMap: Record<number,number>; fy: number; bold: boolean; perDay?: boolean; cntMap: Record<number,number>|null; fCntMap: Record<number,number>|null }[]).map((row, i) => {
                       const bg = row.bold ? '#f0fdf4' : '#ffffff';
                       return (
                         <tr key={i} className="border-b border-gray-100 hover:bg-gray-50/60 group" style={{ backgroundColor: bg }}>
-                          <td className={`sticky left-0 z-10 px-4 py-2 whitespace-nowrap border-r border-gray-100 group-hover:bg-gray-50/60 transition-colors ${row.bold ? 'font-bold text-gray-900' : 'text-gray-700'}`}
+                          <td className={`sticky left-0 z-10 px-4 py-2 whitespace-nowrap border-r border-gray-100 group-hover:bg-gray-50/60 transition-colors ${row.bold ? 'font-bold text-gray-900' : row.perDay ? 'pl-8 text-gray-400 italic text-[11px]' : 'text-gray-700'}`}
                             style={{ backgroundColor: bg }}>
                             {row.label}
                           </td>
@@ -3357,14 +3370,28 @@ export default function SalesReportsPage() {
                             const isCurWk = kw === cwk;
                             const val  = row.wMap[kw] ?? null;
                             const fval = row.fMap[kw] ?? null;
+                            let cell: React.ReactNode;
+                            if (row.perDay) {
+                              const cnt  = row.cntMap?.[kw]  ?? null;
+                              const fcnt = row.fCntMap?.[kw] ?? null;
+                              if (val !== null && val > 0 && cnt && cnt > 0)
+                                cell = <span className="text-blue-600 text-[11px]">{fmtNum(val / cnt)}</span>;
+                              else if (fval !== null && fval > 0 && fcnt && fcnt > 0)
+                                cell = <span className="italic text-indigo-400 text-[11px]">{fmtNum(fval / fcnt)}</span>;
+                              else
+                                cell = <span className="text-gray-300">—</span>;
+                            } else {
+                              if (val !== null && val > 0)
+                                cell = <span className={row.bold ? 'text-[#1B5E20]' : 'text-blue-700'}>{fmtNum(val)}</span>;
+                              else if (fval !== null && fval > 0)
+                                cell = <span className={`italic ${row.bold ? 'text-indigo-500' : 'text-indigo-400'}`}>{fmtNum(fval)}</span>;
+                              else
+                                cell = <span className="text-gray-300">—</span>;
+                            }
                             return (
                               <td key={kw} className={`py-2 text-right tabular-nums ${row.bold ? 'font-bold' : ''}`}
                                 style={{ paddingLeft:4, paddingRight:10, backgroundColor: isCurWk ? 'rgba(59,130,246,0.04)' : undefined }}>
-                                {val !== null && val > 0
-                                  ? <span className={row.bold ? 'text-[#1B5E20]' : 'text-blue-700'}>{fmtNum(val)}</span>
-                                  : fval !== null && fval > 0
-                                    ? <span className={`italic ${row.bold ? 'text-indigo-500' : 'text-indigo-400'}`}>{fmtNum(fval)}</span>
-                                    : <span className="text-gray-300">—</span>}
+                                {cell}
                               </td>
                             );
                           })}
