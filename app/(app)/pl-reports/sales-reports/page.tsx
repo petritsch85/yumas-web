@@ -1,13 +1,13 @@
 'use client';
 
-import { useState, useMemo, useCallback, useRef } from 'react';
+import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
 import {
   Upload, FileCheck, AlertCircle, DatabaseZap,
   MapPin, CalendarDays, BarChart3, TableProperties,
   ChevronLeft, ChevronRight, TrendingUp, Receipt, Percent, Euro,
-  Loader2,
+  Loader2, SlidersHorizontal,
 } from 'lucide-react';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -143,6 +143,26 @@ type ShiftBatchItem = {
   manualOverride?:   'lunch' | 'dinner';
   status:            'pending' | 'saving' | 'saved' | 'error';
   errorMsg?:         string;
+};
+
+type ForecastSettings = {
+  shift_type:    'lunch' | 'dinner';
+  week_base_net: number;
+  growth_rate:   number;
+  weight_mon:    number; weight_tue: number; weight_wed: number; weight_thu: number;
+  weight_fri:    number; weight_sat: number; weight_sun: number;
+};
+
+// Draft: weights stored as pct strings (Mon–Sat only; Sun auto-computed)
+type DraftSettings = {
+  weekBaseNet: string;
+  growthRate:  string;
+  mon: string; tue: string; wed: string; thu: string; fri: string; sat: string;
+};
+
+const DEFAULT_DRAFT: DraftSettings = {
+  weekBaseNet:'0', growthRate:'0',
+  mon:'14.3', tue:'14.3', wed:'14.3', thu:'14.3', fri:'14.3', sat:'14.3',
 };
 
 type RowType   = 'section' | 'bold' | 'normal' | 'pct';
@@ -546,6 +566,61 @@ function classifyShiftType(r: ShiftParseResult): { type: 'lunch' | 'dinner'; con
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// FORECAST ENGINE
+// ─────────────────────────────────────────────────────────────────────────────
+
+// DOW_KEYS indexed by JS getUTCDay() (0=Sun … 6=Sat)
+const DOW_WEIGHT_KEYS = [
+  'weight_sun','weight_mon','weight_tue','weight_wed',
+  'weight_thu','weight_fri','weight_sat',
+] as const;
+
+function computeDailyForecast(dateKey: string, s: ForecastSettings): number {
+  if (!s.week_base_net) return 0;
+  const d       = new Date(dateKey + 'T12:00:00Z');
+  const today   = new Date();
+  const refMs   = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
+  const weeksAhead = Math.round((d.getTime() - refMs) / (7 * 24 * 3600 * 1000));
+  const growth  = (1 + s.growth_rate / 100) ** Math.max(0, weeksAhead);
+  const weight  = s[DOW_WEIGHT_KEYS[d.getUTCDay()]] as number;
+  return s.week_base_net * weight * growth;
+}
+
+function settingsToDraft(s: ForecastSettings): DraftSettings {
+  return {
+    weekBaseNet: s.week_base_net.toString(),
+    growthRate:  s.growth_rate.toString(),
+    mon: (s.weight_mon * 100).toFixed(1),
+    tue: (s.weight_tue * 100).toFixed(1),
+    wed: (s.weight_wed * 100).toFixed(1),
+    thu: (s.weight_thu * 100).toFixed(1),
+    fri: (s.weight_fri * 100).toFixed(1),
+    sat: (s.weight_sat * 100).toFixed(1),
+  };
+}
+
+function draftToPayload(d: DraftSettings, type: 'lunch'|'dinner', locationId: string) {
+  const mon = Math.max(0, parseFloat(d.mon) || 0);
+  const tue = Math.max(0, parseFloat(d.tue) || 0);
+  const wed = Math.max(0, parseFloat(d.wed) || 0);
+  const thu = Math.max(0, parseFloat(d.thu) || 0);
+  const fri = Math.max(0, parseFloat(d.fri) || 0);
+  const sat = Math.max(0, parseFloat(d.sat) || 0);
+  const sun = Math.max(0, 100 - mon - tue - wed - thu - fri - sat);
+  const total = mon + tue + wed + thu + fri + sat + sun || 100;
+  return {
+    location_id:   locationId,
+    shift_type:    type,
+    week_base_net: parseFloat(d.weekBaseNet) || 0,
+    growth_rate:   parseFloat(d.growthRate)  || 0,
+    weight_mon: mon/total, weight_tue: tue/total, weight_wed: wed/total,
+    weight_thu: thu/total, weight_fri: fri/total, weight_sat: sat/total,
+    weight_sun: sun/total,
+    updated_at: new Date().toISOString(),
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // ROW DEFINITIONS
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -694,6 +769,12 @@ export default function SalesReportsPage() {
   const [isDragging,    setIsDragging]    = useState(false);
   const [weeklyPage,    setWeeklyPage]    = useState(0);
 
+  // Forecast
+  const [showForecastPanel, setShowForecastPanel] = useState(false);
+  const [lunchDraft,  setLunchDraft]  = useState<DraftSettings>(DEFAULT_DRAFT);
+  const [dinnerDraft, setDinnerDraft] = useState<DraftSettings>(DEFAULT_DRAFT);
+  const [savingForecast, setSavingForecast] = useState(false);
+
   // ── Queries ────────────────────────────────────────────────────────────────
 
   const { data: locations = [] } = useQuery({
@@ -755,6 +836,27 @@ export default function SalesReportsPage() {
       return (data ?? []) as ShiftRow[];
     },
   });
+
+  // Forecast settings
+  const { data: forecastSettings = [] } = useQuery({
+    queryKey: ['forecast-settings', location?.id],
+    enabled:  !!location,
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('forecast_settings')
+        .select('shift_type,week_base_net,growth_rate,weight_mon,weight_tue,weight_wed,weight_thu,weight_fri,weight_sat,weight_sun')
+        .eq('location_id', location!.id);
+      return (data ?? []) as ForecastSettings[];
+    },
+  });
+
+  // Sync fetched settings → draft whenever they load or location changes
+  useEffect(() => {
+    const ls = forecastSettings.find(s => s.shift_type === 'lunch');
+    const ds = forecastSettings.find(s => s.shift_type === 'dinner');
+    setLunchDraft(ls  ? settingsToDraft(ls)  : DEFAULT_DRAFT);
+    setDinnerDraft(ds ? settingsToDraft(ds) : DEFAULT_DRAFT);
+  }, [forecastSettings]);
 
   // ── Derived data ───────────────────────────────────────────────────────────
 
@@ -874,6 +976,24 @@ export default function SalesReportsPage() {
     }
     return result;
   }, [quarter, year]);
+
+  // Forecast net revenue per day — keyed by dateKey
+  const { lunchForecastMap, dinnerForecastMap, totalForecastMap } = useMemo(() => {
+    const lS = forecastSettings.find(s => s.shift_type === 'lunch');
+    const dS = forecastSettings.find(s => s.shift_type === 'dinner');
+    const lunchForecastMap:  Record<string, number> = {};
+    const dinnerForecastMap: Record<string, number> = {};
+    const totalForecastMap:  Record<string, number> = {};
+    for (const col of dailyCols) {
+      if (col.type !== 'day') continue;
+      const lv = lS ? computeDailyForecast(col.dateKey, lS) : 0;
+      const dv = dS ? computeDailyForecast(col.dateKey, dS) : 0;
+      if (lS) lunchForecastMap[col.dateKey]  = lv;
+      if (dS) dinnerForecastMap[col.dateKey] = dv;
+      if (lS || dS) totalForecastMap[col.dateKey] = lv + dv;
+    }
+    return { lunchForecastMap, dinnerForecastMap, totalForecastMap };
+  }, [forecastSettings, dailyCols]);
 
   const topCats = useMemo(() =>
     Object.entries(weeklyResult?.categoryRevenue ?? {}).sort((a,b) => b[1]-a[1]).slice(0, 12),
@@ -1038,6 +1158,21 @@ export default function SalesReportsPage() {
     finally { setImporting(false); }
   }, [location, monthlyResult, queryClient, resetUpload]);
 
+  const handleSaveForecast = useCallback(async () => {
+    if (!location) return;
+    setSavingForecast(true);
+    try {
+      const { error } = await supabase.from('forecast_settings').upsert([
+        draftToPayload(lunchDraft,  'lunch',  location.id),
+        draftToPayload(dinnerDraft, 'dinner', location.id),
+      ], { onConflict: 'location_id,shift_type' });
+      if (error) throw error;
+      queryClient.invalidateQueries({ queryKey: ['forecast-settings'] });
+      setShowForecastPanel(false);
+    } catch (e: any) { alert(`Save failed: ${e.message}`); }
+    finally { setSavingForecast(false); }
+  }, [location, lunchDraft, dinnerDraft, queryClient]);
+
   // ── Cell renderers ─────────────────────────────────────────────────────────
 
   const renderWeeklyCell = (row: WRow, kw: number) => {
@@ -1170,6 +1305,20 @@ export default function SalesReportsPage() {
                   >{qLabel}</button>
                 ))}
               </div>
+            )}
+            {subTab === 'daily' && (
+              <button onClick={() => setShowForecastPanel(p => !p)}
+                className={`ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors ${
+                  showForecastPanel
+                    ? 'bg-[#1B5E20] text-white border-[#1B5E20]'
+                    : forecastSettings.length > 0
+                      ? 'bg-green-50 text-[#1B5E20] border-green-200 hover:bg-green-100'
+                      : 'bg-white text-gray-500 border-gray-200 hover:border-gray-400'
+                }`}
+              >
+                <SlidersHorizontal size={12} />
+                Forecast{forecastSettings.length > 0 ? ' ✓' : ''}
+              </button>
             )}
           </div>
         </div>
@@ -1657,7 +1806,84 @@ export default function SalesReportsPage() {
       ══════════════════════════════════════════════════════════════════ */}
       {activeTab === 'daily' && (
         <>
-        {subTab === 'daily' && (!location ? (
+        {subTab === 'daily' && (
+        <>
+          {/* ── Forecast settings panel ── */}
+          {showForecastPanel && (
+            <div className="mb-4 border border-gray-200 rounded-xl bg-white shadow-sm overflow-hidden">
+              <div className="bg-gray-50 border-b border-gray-200 px-4 py-3 flex items-center justify-between">
+                <span className="text-xs font-bold text-gray-600 uppercase tracking-wider flex items-center gap-2">
+                  <SlidersHorizontal size={13} /> Forecast Settings{location ? ` — ${location.name}` : ''}
+                </span>
+                <button onClick={() => setShowForecastPanel(false)} className="text-gray-400 hover:text-gray-600 text-sm font-bold">✕</button>
+              </div>
+              <div className="grid grid-cols-2 divide-x divide-gray-100">
+                {([
+                  { label:'☀️  Lunch',  draft: lunchDraft,  setDraft: setLunchDraft  },
+                  { label:'🌙  Dinner', draft: dinnerDraft, setDraft: setDinnerDraft },
+                ] as const).map(({ label, draft, setDraft }) => {
+                  const mon = parseFloat(draft.mon)||0, tue = parseFloat(draft.tue)||0,
+                        wed = parseFloat(draft.wed)||0, thu = parseFloat(draft.thu)||0,
+                        fri = parseFloat(draft.fri)||0, sat = parseFloat(draft.sat)||0;
+                  const sun = Math.max(0, 100 - mon - tue - wed - thu - fri - sat);
+                  const total = mon+tue+wed+thu+fri+sat+sun;
+                  return (
+                    <div key={label} className="p-5 space-y-4">
+                      <p className="text-xs font-bold text-gray-700 uppercase tracking-wider">{label}</p>
+                      <div className="space-y-2.5">
+                        <div className="flex items-center gap-3">
+                          <label className="text-xs text-gray-500 w-40">Weekly base net (€)</label>
+                          <input type="number" min="0" value={draft.weekBaseNet}
+                            onChange={e => setDraft(d => ({...d, weekBaseNet: e.target.value}))}
+                            className="w-28 text-right text-sm font-semibold border border-gray-200 rounded-lg px-2 py-1.5 tabular-nums focus:outline-none focus:border-[#1B5E20]" />
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <label className="text-xs text-gray-500 w-40">Growth / week (%)</label>
+                          <input type="number" step="0.1" value={draft.growthRate}
+                            onChange={e => setDraft(d => ({...d, growthRate: e.target.value}))}
+                            className="w-28 text-right text-sm border border-gray-200 rounded-lg px-2 py-1.5 tabular-nums focus:outline-none focus:border-[#1B5E20]" />
+                        </div>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-400 uppercase tracking-wider mb-2">Day-of-week split (%)</p>
+                        <div className="grid grid-cols-7 gap-1 text-center">
+                          {(['mon','tue','wed','thu','fri','sat'] as const).map(day => (
+                            <div key={day}>
+                              <p className="text-xs text-gray-400 mb-1">{day.charAt(0).toUpperCase()+day.slice(1)}</p>
+                              <input type="number" step="0.1" min="0" max="100"
+                                value={draft[day]}
+                                onChange={e => setDraft(d => ({...d, [day]: e.target.value}))}
+                                className="w-full text-center text-xs border border-gray-200 rounded px-0.5 py-1 tabular-nums focus:outline-none focus:border-[#1B5E20]" />
+                            </div>
+                          ))}
+                          <div>
+                            <p className="text-xs text-gray-400 mb-1">Sun</p>
+                            <div className="w-full text-center text-xs bg-gray-50 border border-gray-100 rounded px-0.5 py-1 text-gray-400 tabular-nums">
+                              {sun.toFixed(1)}
+                            </div>
+                          </div>
+                        </div>
+                        <p className={`text-xs mt-1.5 text-right ${Math.abs(total - 100) < 0.2 ? 'text-green-600' : 'text-amber-600'}`}>
+                          Total: {total.toFixed(1)}% {Math.abs(total - 100) < 0.2 ? '✓' : '⚠ Sun adjusted to balance'}
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="border-t border-gray-100 px-5 py-3 flex items-center justify-between bg-gray-50">
+                <p className="text-xs text-gray-400">Sun weight auto-computed · weights normalise to 100% on save</p>
+                <button onClick={handleSaveForecast} disabled={savingForecast || !location}
+                  className="flex items-center gap-2 px-5 py-2 bg-[#1B5E20] text-white text-sm font-bold rounded-lg hover:bg-[#2E7D32] transition-colors disabled:opacity-50">
+                  {savingForecast ? <Loader2 size={14} className="animate-spin" /> : <DatabaseZap size={14} />}
+                  {savingForecast ? 'Saving…' : 'Save forecast settings'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* ── Daily P&L table ── */}
+          {!location ? (
           <div className="flex flex-col items-center justify-center h-64 text-gray-400 gap-2 border border-dashed border-gray-200 rounded-xl">
             <MapPin size={36} className="text-gray-200" />
             <p className="text-sm">Select a location to view the daily P&amp;L</p>
@@ -1797,13 +2023,22 @@ export default function SalesReportsPage() {
                         Summary
                       </td>
                     </tr>
-                    {([
-                      { label:'☀️  Lunch · Net Revenue',  map: lunchMap,  qTotal: lunchQtrTotal,  field:'netTotal' as const, bold:false },
-                      { label:'🌙  Dinner · Net Revenue', map: dinnerMap, qTotal: dinnerQtrTotal, field:'netTotal' as const, bold:false },
-                      { label:'∑   Total · Net Revenue',  map: totalMap,  qTotal: totalQtrTotal,  field:'netTotal' as const, bold:true  },
-                    ] as const).map((row, i) => {
-                      const todayKey = `${todayYear}-${String(todayMonth).padStart(2,'0')}-${String(todayDay).padStart(2,'0')}`;
+                    {[
+                      { label:'☀️  Lunch · Net Revenue',  map: lunchMap,  qTotal: lunchQtrTotal,  fcastMap: lunchForecastMap,  field:'netTotal' as const, bold:false },
+                      { label:'🌙  Dinner · Net Revenue', map: dinnerMap, qTotal: dinnerQtrTotal, fcastMap: dinnerForecastMap, field:'netTotal' as const, bold:false },
+                      { label:'∑   Total · Net Revenue',  map: totalMap,  qTotal: totalQtrTotal,  fcastMap: totalForecastMap,  field:'netTotal' as const, bold:true  },
+                    ].map((row, i) => {
+                      const todayKey   = `${todayYear}-${String(todayMonth).padStart(2,'0')}-${String(todayDay).padStart(2,'0')}`;
+                      const hasFcast   = Object.keys(row.fcastMap).length > 0;
                       const bg = row.bold ? '#f0fdf4' : '#ffffff';
+                      // Quarter total: actuals to date + forecast for remaining days
+                      const qActualSum = row.qTotal?.[row.field] ?? 0;
+                      const qFcastRem  = hasFcast
+                        ? dailyCols.filter((c): c is DayCol => c.type === 'day' && c.dateKey > todayKey && !row.map[c.dateKey])
+                            .reduce((s, c) => s + (row.fcastMap[c.dateKey] ?? 0), 0)
+                        : 0;
+                      const qDisplayVal = qActualSum + qFcastRem;
+                      const qHasMix     = qActualSum > 0 && qFcastRem > 0;
                       return (
                         <tr key={i} className="border-b border-gray-100 hover:bg-gray-50/60 group" style={{ backgroundColor: bg }}>
                           <td className={`sticky left-0 z-10 px-4 py-2 whitespace-nowrap border-r border-gray-100 group-hover:bg-gray-50/60 transition-colors ${row.bold ? 'font-bold text-gray-900' : 'text-gray-700'}`}
@@ -1812,26 +2047,36 @@ export default function SalesReportsPage() {
                           </td>
                           {dailyCols.map((col, ci) => {
                             if (col.type === 'day') {
-                              const isCurDay = col.dateKey === todayKey;
-                              const val = row.map[col.dateKey]?.[row.field] ?? null;
+                              const isCurDay  = col.dateKey === todayKey;
+                              const isFuture  = col.dateKey > todayKey;
+                              const actual    = (row.map[col.dateKey]?.[row.field] ?? 0);
+                              const fcast     = row.fcastMap[col.dateKey] ?? null;
+                              const hasActual = actual > 0;
+                              const showFcast = !hasActual && isFuture && fcast !== null && fcast > 0;
                               return (
                                 <td key={ci} className={`py-2 text-right tabular-nums ${row.bold ? 'font-bold' : ''}`}
                                   style={{ paddingLeft:4, paddingRight:8, backgroundColor: isCurDay ? 'rgba(59,130,246,0.04)' : undefined }}>
-                                  {val !== null && val > 0
-                                    ? <span className={row.bold ? 'text-[#1B5E20]' : 'text-blue-700'}>{fmtNum(val)}</span>
-                                    : <span className="text-gray-300">—</span>}
+                                  {hasActual
+                                    ? <span className={row.bold ? 'text-[#1B5E20]' : 'text-blue-700'}>{fmtNum(actual)}</span>
+                                    : showFcast
+                                      ? <span className="text-amber-500 italic text-[10px]">{fmtNum(fcast!)}</span>
+                                      : <span className="text-gray-300">—</span>}
                                 </td>
                               );
                             } else {
-                              const present = col.wDateKeys.filter(k => row.map[k]);
-                              const wVal = present.length > 0
-                                ? present.reduce((s, k) => s + (row.map[k][row.field] ?? 0), 0)
-                                : null;
+                              const present = col.wDateKeys.filter(k => (row.map[k]?.[row.field] ?? 0) > 0);
+                              const wActual = present.length > 0
+                                ? present.reduce((s, k) => s + (row.map[k][row.field] ?? 0), 0) : 0;
+                              const wFcast  = hasFcast
+                                ? col.wDateKeys.filter(k => !row.map[k] && k > todayKey)
+                                    .reduce((s, k) => s + (row.fcastMap[k] ?? 0), 0) : 0;
+                              const wTotal  = wActual + wFcast;
+                              const wMix    = wActual > 0 && wFcast > 0;
                               return (
                                 <td key={ci} className={`py-2 text-right tabular-nums ${row.bold ? 'font-bold' : ''}`}
                                   style={{ paddingLeft:4, paddingRight:6, backgroundColor:'#fffbeb', borderLeft:'1px solid #fde68a', borderRight:'1px solid #fde68a' }}>
-                                  {wVal !== null
-                                    ? <span className={row.bold ? 'text-gray-900' : 'text-blue-700'}>{fmtNum(wVal)}</span>
+                                  {wTotal > 0
+                                    ? <span className={wMix ? 'text-amber-600' : row.bold ? 'text-gray-900' : 'text-blue-700'}>{fmtNum(wTotal)}</span>
                                     : <span className="text-gray-300">—</span>}
                                 </td>
                               );
@@ -1839,8 +2084,8 @@ export default function SalesReportsPage() {
                           })}
                           <td className={`py-2 text-right tabular-nums border-l border-gray-200 ${row.bold ? 'font-bold' : ''}`}
                             style={{ paddingLeft:4, paddingRight:8 }}>
-                            {row.qTotal
-                              ? <span className={row.bold ? 'text-[#1B5E20]' : 'text-blue-700'}>{fmtNum(row.qTotal[row.field])}</span>
+                            {qDisplayVal > 0
+                              ? <span className={qHasMix ? 'text-amber-600' : row.bold ? 'text-[#1B5E20]' : 'text-blue-700'}>{fmtNum(qDisplayVal)}</span>
                               : <span className="text-gray-300">—</span>}
                           </td>
                         </tr>
@@ -1868,7 +2113,9 @@ export default function SalesReportsPage() {
               </div>
             </div>
           );
-        })())}
+        })()}
+        </>
+        )}
 
         {/* ── Weekly P&L ───────────────────────────────────────────────── */}
         {subTab === 'weekly' && (!location ? (
