@@ -2325,7 +2325,7 @@ export default function SalesReportsPage() {
                       // Quarter total: actuals to date + forecast for remaining days
                       const qActualSum = row.qTotal?.[row.field] ?? 0;
                       const qFcastRem  = hasFcast
-                        ? dailyCols.filter((c): c is DayCol => c.type === 'day' && c.dateKey > todayKey && !row.map[c.dateKey])
+                        ? dailyCols.filter((c): c is DayCol => c.type === 'day' && c.dateKey >= todayKey && !row.map[c.dateKey])
                             .reduce((s, c) => s + (row.fcastMap[c.dateKey] ?? 0), 0)
                         : 0;
                       const qDisplayVal = qActualSum + qFcastRem;
@@ -2339,7 +2339,7 @@ export default function SalesReportsPage() {
                           {dailyCols.map((col, ci) => {
                             if (col.type === 'day') {
                               const isCurDay  = col.dateKey === todayKey;
-                              const isFuture  = col.dateKey > todayKey;
+                              const isFuture  = col.dateKey >= todayKey;
                               const actual    = (row.map[col.dateKey]?.[row.field] ?? 0);
                               const fcast     = row.fcastMap[col.dateKey] ?? null;
                               const hasActual = actual > 0;
@@ -2359,7 +2359,7 @@ export default function SalesReportsPage() {
                               const wActual = present.length > 0
                                 ? present.reduce((s, k) => s + (row.map[k][row.field] ?? 0), 0) : 0;
                               const wFcast  = hasFcast
-                                ? col.wDateKeys.filter(k => !row.map[k] && k > todayKey)
+                                ? col.wDateKeys.filter(k => !row.map[k] && k >= todayKey)
                                     .reduce((s, k) => s + (row.fcastMap[k] ?? 0), 0) : 0;
                               const wTotal  = wActual + wFcast;
                               const wMix    = wActual > 0 && wFcast > 0;
