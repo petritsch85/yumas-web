@@ -2874,15 +2874,15 @@ export default function SalesReportsPage() {
                         {/* Card body — edit form or read-only */}
                         {isEditing ? (
                           <div className="px-4 py-4 space-y-3">
-                            <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+                            <div className="grid grid-cols-2 gap-3">
                               {numFields.map(({ key, label, isInt }) => (
-                                <div key={key} className="flex items-center gap-2">
-                                  <label className="text-xs text-gray-400 w-32 flex-shrink-0">{label}</label>
+                                <div key={key}>
+                                  <p className="text-xs text-gray-400 mb-1">{label}</p>
                                   <input
                                     type="number" step={isInt ? '1' : '0.01'} min="0"
                                     value={editDraft[key] ?? '0'}
                                     onChange={e => setEditDraft(d => ({ ...d, [key]: e.target.value }))}
-                                    className="flex-1 text-right text-xs font-semibold border border-gray-200 rounded-lg px-2 py-1.5 tabular-nums focus:outline-none focus:border-indigo-400"
+                                    className="w-full text-right text-sm font-semibold border border-gray-200 rounded-lg px-3 py-2 tabular-nums focus:outline-none focus:border-indigo-400"
                                   />
                                 </div>
                               ))}
