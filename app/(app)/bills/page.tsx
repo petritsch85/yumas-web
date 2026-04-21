@@ -6,10 +6,12 @@ import { supabase } from '@/lib/supabase-browser';
 import {
   Upload, FileCheck, AlertCircle, Loader2,
   CheckCircle2, Clock, Banknote, Trash2,
-  ChevronDown, Eye, X, FilePlus, Save,
+  ChevronDown, Eye, X, FilePlus, Save, MapPin, Calendar,
 } from 'lucide-react';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
+type Location = { id: string; name: string };
+
 type ExtractedLine = {
   description: string;
   quantity:    number;
@@ -33,32 +35,43 @@ type Extracted = {
   lines:              ExtractedLine[];
 };
 
-// One item in the bulk queue
+type PeriodType = 'single_date' | 'month' | 'year' | 'custom';
+
 type QueueItem = {
-  id:        string;          // random key
-  fileName:  string;
-  base64:    string;
-  status:    'waiting' | 'extracting' | 'done' | 'error';
-  data?:     Extracted;       // filled after extraction
-  error?:    string;
-  saved?:    boolean;
+  id:             string;
+  fileName:       string;
+  base64:         string;
+  status:         'waiting' | 'extracting' | 'done' | 'error';
+  data?:          Extracted;
+  error?:         string;
+  saved?:         boolean;
+  locationId?:    string | null;
+  locationLabel?: string;
+  periodType?:    PeriodType;
+  periodStart?:   string | null;
+  periodEnd?:     string | null;
 };
 
 type Bill = {
-  id:            string;
-  created_at:    string;
-  supplier_name: string;
-  invoice_number:string | null;
-  invoice_date:  string | null;
-  due_date:      string | null;
-  gross_amount:  number;
-  net_amount:    number;
-  vat_amount:    number;
-  category:      string | null;
-  status:        'pending' | 'approved' | 'paid';
-  file_path:     string | null;
+  id:             string;
+  created_at:     string;
+  supplier_name:  string;
+  invoice_number: string | null;
+  invoice_date:   string | null;
+  due_date:       string | null;
+  gross_amount:   number;
+  net_amount:     number;
+  vat_amount:     number;
+  category:       string | null;
+  location_label: string | null;
+  period_type:    string | null;
+  period_start:   string | null;
+  period_end:     string | null;
+  status:         'pending' | 'approved' | 'paid';
+  file_path:      string | null;
 };
 
+// ── Constants ─────────────────────────────────────────────────────────────────
 const CATEGORIES = [
   'Food Cost', 'Drinks Cost', 'Packaging',
   'Software & Technology', 'Delivery Platform Fees',
@@ -66,17 +79,43 @@ const CATEGORIES = [
   'Utilities', 'Rent', 'Labour', 'Marketing', 'Other',
 ];
 
+const PERIOD_LABELS: Record<PeriodType, string> = {
+  single_date: 'Single Date',
+  month:       'Monthly (1 month)',
+  year:        'Annual (12 months)',
+  custom:      'Custom Range',
+};
+
 const STATUS_STYLES: Record<string, string> = {
   pending:  'bg-amber-50 text-amber-700 border-amber-200',
   approved: 'bg-blue-50 text-blue-700 border-blue-200',
   paid:     'bg-green-50 text-green-700 border-green-200',
 };
 
+const SPECIAL_LOCATIONS = [
+  { id: 'corporate', name: 'Corporate' },
+  { id: 'other',     name: 'Other' },
+];
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
 const fmt = (n: number) =>
   new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(n);
 
 const fmtDate = (d: string | null) =>
   d ? new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
+
+function fmtPeriod(bill: Bill): string {
+  const start = bill.period_start;
+  if (!start) return fmtDate(bill.invoice_date);
+  if (bill.period_type === 'single_date') return fmtDate(start);
+  if (bill.period_type === 'month') {
+    const d = new Date(start + 'T00:00:00');
+    return d.toLocaleDateString('en-GB', { month: 'short', year: 'numeric' });
+  }
+  if (bill.period_type === 'year')
+    return new Date(start + 'T00:00:00').getFullYear().toString();
+  return `${fmtDate(start)} – ${fmtDate(bill.period_end)}`;
+}
 
 function uid() { return Math.random().toString(36).slice(2); }
 
@@ -90,6 +129,28 @@ async function saveBillToDB(item: QueueItem, userId: string | null): Promise<voi
   const path  = `bills/${Date.now()}_${item.fileName}`;
   const { error: upErr } = await supabase.storage.from('bills').upload(path, blob);
   if (!upErr) file_path = path;
+
+  const isSpecial    = item.locationId === 'corporate' || item.locationId === 'other';
+  const dbLocationId = isSpecial ? null : (item.locationId ?? null);
+  const pType        = item.periodType ?? 'single_date';
+
+  // Compute normalised period_start / period_end
+  let periodStart = item.periodStart ?? d.invoice_date ?? null;
+  let periodEnd   = item.periodEnd   ?? null;
+
+  if (pType === 'month' && periodStart) {
+    const dt = new Date(periodStart + 'T00:00:00');
+    const y  = dt.getFullYear(), mo = dt.getMonth() + 1;
+    const lastDay = new Date(y, mo, 0).getDate();
+    periodStart = `${y}-${String(mo).padStart(2,'0')}-01`;
+    periodEnd   = `${y}-${String(mo).padStart(2,'0')}-${String(lastDay).padStart(2,'0')}`;
+  } else if (pType === 'year' && periodStart) {
+    const yr = new Date(periodStart + 'T00:00:00').getFullYear();
+    periodStart = `${yr}-01-01`;
+    periodEnd   = `${yr}-12-31`;
+  } else if (pType === 'single_date') {
+    periodEnd = periodStart;
+  }
 
   const { data: bill, error: billErr } = await supabase
     .from('bills')
@@ -107,6 +168,11 @@ async function saveBillToDB(item: QueueItem, userId: string | null): Promise<voi
       status:         'pending',
       file_path,
       uploaded_by:    userId,
+      location_id:    dbLocationId,
+      location_label: item.locationLabel ?? null,
+      period_type:    pType,
+      period_start:   periodStart,
+      period_end:     periodEnd,
     })
     .select('id').single();
   if (billErr) throw billErr;
@@ -129,34 +195,47 @@ async function saveBillToDB(item: QueueItem, userId: string | null): Promise<voi
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default function BillsPage() {
-  const queryClient = useQueryClient();
+  const queryClient  = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const [tab, setTab]             = useState<'upload' | 'bills'>('bills');
+  const [tab, setTab]               = useState<'upload' | 'bills'>('bills');
   const [isDragging, setIsDragging] = useState(false);
-  const [queue, setQueue]         = useState<QueueItem[]>([]);
+  const [queue, setQueue]           = useState<QueueItem[]>([]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [savingAll, setSavingAll] = useState(false);
+  const [savingAll, setSavingAll]   = useState(false);
 
-  // Filters
-  const [filterStatus,   setFilterStatus]   = useState<string>('all');
-  const [filterCategory, setFilterCategory] = useState<string>('all');
+  const [filterStatus,   setFilterStatus]   = useState('all');
+  const [filterCategory, setFilterCategory] = useState('all');
+  const [filterLocation, setFilterLocation] = useState('all');
 
-  // ── Queries ──
+  // ── Queries ──────────────────────────────────────────────────────────────────
+  const { data: locations = [] } = useQuery<Location[]>({
+    queryKey: ['locations'],
+    queryFn: async () => {
+      const { data } = await supabase.from('locations').select('id, name').order('name');
+      return (data ?? []) as Location[];
+    },
+  });
+
+  const allLocationOptions = [...locations, ...SPECIAL_LOCATIONS];
+
   const { data: bills = [], isLoading } = useQuery({
     queryKey: ['bills'],
     queryFn: async () => {
       const { data } = await supabase
         .from('bills')
-        .select('id, created_at, supplier_name, invoice_number, invoice_date, due_date, gross_amount, net_amount, vat_amount, category, status, file_path')
-        .order('invoice_date', { ascending: false });
+        .select('id, created_at, supplier_name, invoice_number, invoice_date, due_date, gross_amount, net_amount, vat_amount, category, location_label, period_type, period_start, period_end, status, file_path')
+        .order('period_start', { ascending: false });
       return (data ?? []) as Bill[];
     },
   });
 
+  const uniqueLocations = Array.from(new Set(bills.map((b) => b.location_label).filter(Boolean))) as string[];
+
   const filtered = bills.filter((b) => {
-    if (filterStatus   !== 'all' && b.status   !== filterStatus)   return false;
-    if (filterCategory !== 'all' && b.category !== filterCategory) return false;
+    if (filterStatus   !== 'all' && b.status         !== filterStatus)   return false;
+    if (filterCategory !== 'all' && b.category        !== filterCategory) return false;
+    if (filterLocation !== 'all' && b.location_label  !== filterLocation) return false;
     return true;
   });
 
@@ -166,7 +245,7 @@ export default function BillsPage() {
     vat:   filtered.reduce((s, b) => s + b.vat_amount,   0),
   };
 
-  // ── Extract one item via Claude ──
+  // ── Extract via Claude ────────────────────────────────────────────────────────
   const extractItem = useCallback(async (item: QueueItem) => {
     setQueue((q) => q.map((i) => i.id === item.id ? { ...i, status: 'extracting' } : i));
     try {
@@ -177,65 +256,47 @@ export default function BillsPage() {
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? 'Extraction failed');
+      const invoiceDate = json.data?.invoice_date ?? null;
       setQueue((q) => q.map((i) => i.id === item.id
-        ? { ...i, status: 'done', data: json.data }
+        ? { ...i, status: 'done', data: json.data, periodType: 'single_date', periodStart: invoiceDate, periodEnd: invoiceDate }
         : i
       ));
     } catch (err: any) {
-      setQueue((q) => q.map((i) => i.id === item.id
-        ? { ...i, status: 'error', error: err.message }
-        : i
-      ));
+      setQueue((q) => q.map((i) => i.id === item.id ? { ...i, status: 'error', error: err.message } : i));
     }
   }, []);
 
-  // ── Add files → queue → extract sequentially ──
   const processFiles = useCallback(async (files: File[]) => {
     const pdfs = files.filter((f) => f.name.toLowerCase().endsWith('.pdf'));
     if (!pdfs.length) return;
-
-    // Read all files as base64 first
     const newItems: QueueItem[] = await Promise.all(
       pdfs.map((file) => new Promise<QueueItem>((resolve) => {
         const reader = new FileReader();
         reader.onload = (e) => {
           const dataUrl = e.target?.result as string;
-          resolve({
-            id:       uid(),
-            fileName: file.name,
-            base64:   dataUrl.split(',')[1],
-            status:   'waiting',
-          });
+          resolve({ id: uid(), fileName: file.name, base64: dataUrl.split(',')[1], status: 'waiting' });
         };
         reader.readAsDataURL(file);
       }))
     );
-
     setQueue((q) => [...q, ...newItems]);
     setTab('upload');
-
-    // Extract sequentially (one at a time to respect rate limits)
-    for (const item of newItems) {
-      await extractItem(item);
-    }
+    for (const item of newItems) await extractItem(item);
   }, [extractItem]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
-    const files = Array.from(e.dataTransfer.files);
-    processFiles(files);
+    processFiles(Array.from(e.dataTransfer.files));
   }, [processFiles]);
 
-  // ── Update a field in a queue item's data ──
-  const updateField = (id: string, field: keyof Extracted, value: any) => {
-    setQueue((q) => q.map((i) => i.id === id
-      ? { ...i, data: { ...i.data!, [field]: value } }
-      : i
-    ));
-  };
+  const updateField = (id: string, field: keyof Extracted, value: any) =>
+    setQueue((q) => q.map((i) => i.id === id ? { ...i, data: { ...i.data!, [field]: value } } : i));
 
-  // ── Save all done items ──
+  const updateMeta = (id: string, patch: Partial<Pick<QueueItem, 'locationId' | 'locationLabel' | 'periodType' | 'periodStart' | 'periodEnd'>>) =>
+    setQueue((q) => q.map((i) => i.id === id ? { ...i, ...patch } : i));
+
+  // ── Save all ──────────────────────────────────────────────────────────────────
   const saveAll = useCallback(async () => {
     const toSave = queue.filter((i) => i.status === 'done' && !i.saved);
     if (!toSave.length) return;
@@ -254,16 +315,13 @@ export default function BillsPage() {
     }
   }, [queue, queryClient]);
 
-  // ── Remove from queue ──
   const removeFromQueue = (id: string) => setQueue((q) => q.filter((i) => i.id !== id));
 
-  // ── Status update ──
   const updateStatus = async (id: string, status: string) => {
     await supabase.from('bills').update({ status }).eq('id', id);
     queryClient.invalidateQueries({ queryKey: ['bills'] });
   };
 
-  // ── Delete ──
   const deleteBill = async (id: string) => {
     if (!confirm('Delete this bill permanently?')) return;
     await supabase.from('bills').delete().eq('id', id);
@@ -274,6 +332,7 @@ export default function BillsPage() {
   const savedCount  = queue.filter((i) => i.saved).length;
   const activeCount = queue.filter((i) => !i.saved).length;
 
+  // ── Render ────────────────────────────────────────────────────────────────────
   return (
     <div>
       {/* Header */}
@@ -295,26 +354,18 @@ export default function BillsPage() {
       <div className="border-b border-gray-200 mb-6">
         <nav className="flex gap-6">
           {([['bills', 'All Bills'], ['upload', 'Upload']] as const).map(([t, label]) => (
-            <button
-              key={t}
-              onClick={() => setTab(t)}
+            <button key={t} onClick={() => setTab(t)}
               className={`flex items-center gap-2 pb-3 text-sm font-semibold border-b-2 transition-colors ${
-                tab === t
-                  ? 'border-[#1B5E20] text-[#1B5E20]'
-                  : 'border-transparent text-gray-500 hover:text-gray-700'
+                tab === t ? 'border-[#1B5E20] text-[#1B5E20]' : 'border-transparent text-gray-500 hover:text-gray-700'
               }`}
             >
               {t === 'upload' ? <Upload size={14} /> : <Banknote size={14} />}
               {label}
               {t === 'bills' && bills.length > 0 && (
-                <span className="bg-gray-100 text-gray-600 text-xs font-bold px-1.5 py-0.5 rounded-full">
-                  {bills.length}
-                </span>
+                <span className="bg-gray-100 text-gray-600 text-xs font-bold px-1.5 py-0.5 rounded-full">{bills.length}</span>
               )}
               {t === 'upload' && activeCount > 0 && (
-                <span className="bg-[#1B5E20] text-white text-xs font-bold px-1.5 py-0.5 rounded-full">
-                  {activeCount}
-                </span>
+                <span className="bg-[#1B5E20] text-white text-xs font-bold px-1.5 py-0.5 rounded-full">{activeCount}</span>
               )}
             </button>
           ))}
@@ -324,7 +375,6 @@ export default function BillsPage() {
       {/* ═══════ UPLOAD TAB ═══════ */}
       {tab === 'upload' && (
         <div className="space-y-5">
-
           {/* Drop zone */}
           <div
             onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
@@ -336,15 +386,9 @@ export default function BillsPage() {
             }`}
           >
             <Upload className={`mx-auto mb-3 ${isDragging ? 'text-[#1B5E20]' : 'text-gray-300'}`} size={36} />
-            <p className="text-sm font-semibold text-gray-600 mb-1">
-              Drop multiple PDF invoices here
-            </p>
-            <p className="text-xs text-gray-400 mb-4">
-              or click to browse — you can select several files at once
-            </p>
-            <span className="px-5 py-2 bg-[#1B5E20] text-white rounded-lg text-xs font-bold inline-block">
-              Browse Files
-            </span>
+            <p className="text-sm font-semibold text-gray-600 mb-1">Drop multiple PDF invoices here</p>
+            <p className="text-xs text-gray-400 mb-4">or click to browse — you can select several files at once</p>
+            <span className="px-5 py-2 bg-[#1B5E20] text-white rounded-lg text-xs font-bold inline-block">Browse Files</span>
             <input
               ref={fileInputRef}
               type="file"
@@ -363,66 +407,49 @@ export default function BillsPage() {
           {/* Queue */}
           {queue.length > 0 && (
             <div className="space-y-3">
-              {/* Bulk save bar */}
               {doneCount > 0 && (
                 <div className="flex items-center justify-between bg-green-50 border border-green-200 rounded-xl px-4 py-3">
                   <p className="text-sm font-semibold text-green-800">
                     {doneCount} bill{doneCount !== 1 ? 's' : ''} ready to save
                     {savedCount > 0 && <span className="text-green-600 font-normal"> · {savedCount} already saved</span>}
                   </p>
-                  <button
-                    onClick={saveAll}
-                    disabled={savingAll}
-                    className="flex items-center gap-2 px-4 py-2 bg-[#1B5E20] text-white text-sm font-bold rounded-lg hover:bg-[#2E7D32] disabled:opacity-50 transition-colors"
-                  >
+                  <button onClick={saveAll} disabled={savingAll}
+                    className="flex items-center gap-2 px-4 py-2 bg-[#1B5E20] text-white text-sm font-bold rounded-lg hover:bg-[#2E7D32] disabled:opacity-50 transition-colors">
                     {savingAll ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
                     {savingAll ? 'Saving…' : `Save All ${doneCount} Bills`}
                   </button>
                 </div>
               )}
 
-              {/* Queue items */}
               {queue.map((item) => (
-                <div
-                  key={item.id}
-                  className={`bg-white border rounded-xl overflow-hidden shadow-sm ${
-                    item.saved ? 'border-green-200 opacity-60' : 'border-gray-200'
-                  }`}
-                >
-                  {/* Item header row */}
+                <div key={item.id}
+                  className={`bg-white border rounded-xl overflow-hidden shadow-sm ${item.saved ? 'border-green-200 opacity-60' : 'border-gray-200'}`}>
+                  {/* Header */}
                   <div className="flex items-center gap-3 px-4 py-3">
-                    {/* Status icon */}
                     <div className="flex-shrink-0">
-                      {item.status === 'waiting'    && <Clock size={18} className="text-gray-300" />}
-                      {item.status === 'extracting' && <Loader2 size={18} className="text-blue-500 animate-spin" />}
-                      {item.status === 'done' && !item.saved && <FileCheck size={18} className="text-green-500" />}
-                      {item.status === 'done' && item.saved  && <CheckCircle2 size={18} className="text-green-400" />}
+                      {item.status === 'waiting'    && <Clock       size={18} className="text-gray-300" />}
+                      {item.status === 'extracting' && <Loader2     size={18} className="text-blue-500 animate-spin" />}
+                      {item.status === 'done' && !item.saved && <FileCheck   size={18} className="text-green-500" />}
+                      {item.status === 'done' &&  item.saved && <CheckCircle2 size={18} className="text-green-400" />}
                       {item.status === 'error'      && <AlertCircle size={18} className="text-red-400" />}
                     </div>
-
-                    {/* File name + extracted summary */}
                     <div className="flex-1 min-w-0">
                       <p className="text-xs text-gray-400 truncate">{item.fileName}</p>
-                      {item.status === 'extracting' && (
-                        <p className="text-sm font-semibold text-blue-600">Claude is reading…</p>
-                      )}
-                      {item.status === 'waiting' && (
-                        <p className="text-sm text-gray-400">Waiting…</p>
-                      )}
+                      {item.status === 'extracting' && <p className="text-sm font-semibold text-blue-600">Claude is reading…</p>}
+                      {item.status === 'waiting'    && <p className="text-sm text-gray-400">Waiting…</p>}
                       {item.status === 'done' && item.data && (
                         <p className="text-sm font-semibold text-gray-900">
                           {item.data.supplier_name}
                           <span className="ml-2 text-[#1B5E20] font-bold">{fmt(item.data.gross_amount)}</span>
                           <span className="ml-2 text-xs font-normal text-gray-400">{item.data.suggested_category}</span>
+                          {item.locationLabel && (
+                            <span className="ml-2 text-xs font-normal text-indigo-500">· {item.locationLabel}</span>
+                          )}
                           {item.saved && <span className="ml-2 text-xs text-green-500">✓ Saved</span>}
                         </p>
                       )}
-                      {item.status === 'error' && (
-                        <p className="text-sm text-red-500">{item.error}</p>
-                      )}
+                      {item.status === 'error' && <p className="text-sm text-red-500">{item.error}</p>}
                     </div>
-
-                    {/* Actions */}
                     <div className="flex items-center gap-2 flex-shrink-0">
                       {item.status === 'done' && !item.saved && (
                         <button
@@ -433,54 +460,137 @@ export default function BillsPage() {
                           <ChevronDown size={12} className={`transition-transform ${expandedId === item.id ? 'rotate-180' : ''}`} />
                         </button>
                       )}
-                      <button
-                        onClick={() => removeFromQueue(item.id)}
-                        className="text-gray-300 hover:text-red-400 transition-colors"
-                      >
+                      <button onClick={() => removeFromQueue(item.id)} className="text-gray-300 hover:text-red-400 transition-colors">
                         <X size={16} />
                       </button>
                     </div>
                   </div>
 
-                  {/* Expandable review form */}
+                  {/* Review form */}
                   {expandedId === item.id && item.data && (
                     <div className="border-t border-gray-100 px-4 py-4 bg-gray-50 space-y-4">
-                      <div className="grid grid-cols-3 gap-3">
-                        {[
+
+                      {/* Row 1: Supplier + dates */}
+                      <div className="grid grid-cols-4 gap-3">
+                        {([
                           { label: 'Supplier',       field: 'supplier_name'  as keyof Extracted, type: 'text' },
                           { label: 'Invoice Number', field: 'invoice_number' as keyof Extracted, type: 'text' },
                           { label: 'Invoice Date',   field: 'invoice_date'   as keyof Extracted, type: 'date' },
                           { label: 'Due Date',       field: 'due_date'       as keyof Extracted, type: 'date' },
-                          { label: 'Net (€)',        field: 'net_amount'     as keyof Extracted, type: 'number' },
-                          { label: 'VAT (€)',        field: 'vat_amount'     as keyof Extracted, type: 'number' },
-                          { label: 'Gross (€)',      field: 'gross_amount'   as keyof Extracted, type: 'number' },
-                        ].map(({ label, field, type }) => (
+                        ]).map(({ label, field, type }) => (
                           <div key={field}>
                             <label className="block text-xs font-semibold text-gray-500 mb-1">{label}</label>
-                            <input
-                              type={type}
-                              step={type === 'number' ? '0.01' : undefined}
-                              value={(item.data as any)[field] ?? ''}
-                              onChange={(e) => updateField(item.id, field, type === 'number' ? parseFloat(e.target.value) || 0 : e.target.value || null)}
-                              className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30"
-                            />
+                            <input type={type} value={(item.data as any)[field] ?? ''}
+                              onChange={(e) => updateField(item.id, field, e.target.value || null)}
+                              className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30" />
                           </div>
                         ))}
+                      </div>
 
-                        {/* Category dropdown */}
+                      {/* Row 2: Amounts + category */}
+                      <div className="grid grid-cols-4 gap-3">
+                        {([
+                          { label: 'Net (€)',   field: 'net_amount'   as keyof Extracted },
+                          { label: 'VAT (€)',   field: 'vat_amount'   as keyof Extracted },
+                          { label: 'Gross (€)', field: 'gross_amount' as keyof Extracted },
+                        ]).map(({ label, field }) => (
+                          <div key={field}>
+                            <label className="block text-xs font-semibold text-gray-500 mb-1">{label}</label>
+                            <input type="number" step="0.01" value={(item.data as any)[field] ?? ''}
+                              onChange={(e) => updateField(item.id, field, parseFloat(e.target.value) || 0)}
+                              className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30" />
+                          </div>
+                        ))}
                         <div>
                           <label className="block text-xs font-semibold text-gray-500 mb-1">Category</label>
                           <div className="relative">
-                            <select
-                              value={item.data.suggested_category}
+                            <select value={item.data.suggested_category}
                               onChange={(e) => updateField(item.id, 'suggested_category', e.target.value)}
-                              className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 appearance-none pr-6"
-                            >
+                              className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 appearance-none pr-6">
                               {CATEGORIES.map((c) => <option key={c}>{c}</option>)}
                             </select>
                             <ChevronDown size={12} className="absolute right-2 top-2 text-gray-400 pointer-events-none" />
                           </div>
                         </div>
+                      </div>
+
+                      {/* Row 3: Location + period */}
+                      <div className="grid grid-cols-4 gap-3 pt-2 border-t border-gray-200">
+                        {/* Location */}
+                        <div>
+                          <label className="flex items-center gap-1 text-xs font-semibold text-gray-500 mb-1">
+                            <MapPin size={10} />Location
+                          </label>
+                          <div className="relative">
+                            <select value={item.locationId ?? ''}
+                              onChange={(e) => {
+                                const opt = allLocationOptions.find((l) => l.id === e.target.value);
+                                updateMeta(item.id, { locationId: e.target.value || null, locationLabel: opt?.name ?? '' });
+                              }}
+                              className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 appearance-none pr-6">
+                              <option value="">— Select location —</option>
+                              {locations.length > 0 && (
+                                <optgroup label="Restaurants / Sites">
+                                  {locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+                                </optgroup>
+                              )}
+                              <optgroup label="Other">
+                                {SPECIAL_LOCATIONS.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+                              </optgroup>
+                            </select>
+                            <ChevronDown size={12} className="absolute right-2 top-2 text-gray-400 pointer-events-none" />
+                          </div>
+                        </div>
+
+                        {/* Period type */}
+                        <div>
+                          <label className="flex items-center gap-1 text-xs font-semibold text-gray-500 mb-1">
+                            <Calendar size={10} />Period Type
+                          </label>
+                          <div className="relative">
+                            <select value={item.periodType ?? 'single_date'}
+                              onChange={(e) => {
+                                const pt = e.target.value as PeriodType;
+                                updateMeta(item.id, { periodType: pt, periodStart: item.data?.invoice_date ?? null, periodEnd: null });
+                              }}
+                              className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 appearance-none pr-6">
+                              {(Object.entries(PERIOD_LABELS) as [PeriodType, string][]).map(([v, l]) => (
+                                <option key={v} value={v}>{l}</option>
+                              ))}
+                            </select>
+                            <ChevronDown size={12} className="absolute right-2 top-2 text-gray-400 pointer-events-none" />
+                          </div>
+                        </div>
+
+                        {/* Period start */}
+                        <div>
+                          <label className="block text-xs font-semibold text-gray-500 mb-1">
+                            {item.periodType === 'single_date' ? 'Date' :
+                             item.periodType === 'month'       ? 'Month (pick any day)' :
+                             item.periodType === 'year'        ? 'Year (pick any day)' : 'Start Date'}
+                          </label>
+                          <input type="date" value={item.periodStart ?? ''}
+                            onChange={(e) => updateMeta(item.id, { periodStart: e.target.value || null })}
+                            className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30" />
+                        </div>
+
+                        {/* Period end (custom only) */}
+                        {item.periodType === 'custom' ? (
+                          <div>
+                            <label className="block text-xs font-semibold text-gray-500 mb-1">End Date</label>
+                            <input type="date" value={item.periodEnd ?? ''}
+                              onChange={(e) => updateMeta(item.id, { periodEnd: e.target.value || null })}
+                              className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30" />
+                          </div>
+                        ) : (
+                          <div className="flex items-end pb-1">
+                            <p className="text-xs text-gray-400 italic">
+                              {item.periodType === 'month' && 'Cost spread over 1 month'}
+                              {item.periodType === 'year'  && 'Cost spread over 12 months (÷12/month)'}
+                              {item.periodType === 'single_date' && 'Full cost in invoice month'}
+                            </p>
+                          </div>
+                        )}
                       </div>
 
                       {/* Line items */}
@@ -497,8 +607,8 @@ export default function BillsPage() {
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-50">
-                              {item.data.lines.map((line, i) => (
-                                <tr key={i} className={line.is_deposit ? 'text-gray-400 italic' : ''}>
+                              {item.data.lines.map((line, li) => (
+                                <tr key={li} className={line.is_deposit ? 'text-gray-400 italic' : ''}>
                                   <td className="px-3 py-1.5">{line.description}{line.is_deposit && ' (deposit)'}</td>
                                   <td className="px-3 py-1.5 text-right tabular-nums">{line.quantity}</td>
                                   <td className="px-3 py-1.5 text-right tabular-nums">{line.unit_price.toFixed(2)}</td>
@@ -542,23 +652,22 @@ export default function BillsPage() {
 
           {/* Filters */}
           <div className="flex items-center gap-3 mb-4 flex-wrap">
-            <select
-              value={filterStatus}
-              onChange={(e) => setFilterStatus(e.target.value)}
-              className="border border-gray-200 rounded-lg px-3 py-1.5 text-xs font-semibold text-gray-600 focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30"
-            >
+            <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}
+              className="border border-gray-200 rounded-lg px-3 py-1.5 text-xs font-semibold text-gray-600 focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30">
               <option value="all">All statuses</option>
               <option value="pending">Pending</option>
               <option value="approved">Approved</option>
               <option value="paid">Paid</option>
             </select>
-            <select
-              value={filterCategory}
-              onChange={(e) => setFilterCategory(e.target.value)}
-              className="border border-gray-200 rounded-lg px-3 py-1.5 text-xs font-semibold text-gray-600 focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30"
-            >
+            <select value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)}
+              className="border border-gray-200 rounded-lg px-3 py-1.5 text-xs font-semibold text-gray-600 focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30">
               <option value="all">All categories</option>
               {CATEGORIES.map((c) => <option key={c}>{c}</option>)}
+            </select>
+            <select value={filterLocation} onChange={(e) => setFilterLocation(e.target.value)}
+              className="border border-gray-200 rounded-lg px-3 py-1.5 text-xs font-semibold text-gray-600 focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30">
+              <option value="all">All locations</option>
+              {uniqueLocations.map((l) => <option key={l}>{l}</option>)}
             </select>
             <span className="text-xs text-gray-400 ml-auto">{filtered.length} bill{filtered.length !== 1 ? 's' : ''}</span>
           </div>
@@ -572,10 +681,8 @@ export default function BillsPage() {
             <div className="flex flex-col items-center justify-center h-48 border border-dashed border-gray-200 rounded-xl gap-3">
               <Banknote size={36} className="text-gray-200" />
               <p className="text-sm text-gray-400">No bills yet — upload your first invoices</p>
-              <button
-                onClick={() => setTab('upload')}
-                className="px-4 py-2 bg-[#1B5E20] text-white text-xs font-bold rounded-lg hover:bg-[#2E7D32] transition-colors"
-              >
+              <button onClick={() => setTab('upload')}
+                className="px-4 py-2 bg-[#1B5E20] text-white text-xs font-bold rounded-lg hover:bg-[#2E7D32] transition-colors">
                 Upload Bills
               </button>
             </div>
@@ -586,71 +693,79 @@ export default function BillsPage() {
                   <tr className="bg-gray-50 border-b border-gray-200">
                     <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Supplier</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Invoice #</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Date</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Due</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Period</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Location</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Category</th>
-                    <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Net</th>
+                    <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Net / Mo</th>
                     <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Gross</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Status</th>
                     <th className="px-4 py-3 w-16"></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                  {filtered.map((bill) => (
-                    <tr key={bill.id} className="hover:bg-gray-50 transition-colors">
-                      <td className="px-4 py-3 font-semibold text-gray-900">{bill.supplier_name}</td>
-                      <td className="px-4 py-3 text-gray-500 font-mono text-xs">{bill.invoice_number ?? '—'}</td>
-                      <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{fmtDate(bill.invoice_date)}</td>
-                      <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{fmtDate(bill.due_date)}</td>
-                      <td className="px-4 py-3">
-                        {bill.category && (
-                          <span className="inline-block px-2 py-0.5 bg-gray-100 text-gray-600 text-xs rounded-full">
-                            {bill.category}
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-right text-gray-600 tabular-nums">{fmt(bill.net_amount)}</td>
-                      <td className="px-4 py-3 text-right font-bold text-gray-900 tabular-nums">{fmt(bill.gross_amount)}</td>
-                      <td className="px-4 py-3">
-                        <select
-                          value={bill.status}
-                          onChange={(e) => updateStatus(bill.id, e.target.value)}
-                          className={`text-xs font-semibold px-2 py-1 rounded-full border cursor-pointer focus:outline-none ${STATUS_STYLES[bill.status]}`}
-                        >
-                          <option value="pending">Pending</option>
-                          <option value="approved">Approved</option>
-                          <option value="paid">Paid</option>
-                        </select>
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
-                          {bill.file_path && (
-                            <a
-                              href={`${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/bills/${bill.file_path}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-gray-300 hover:text-blue-500 transition-colors"
-                              title="View PDF"
-                            >
-                              <Eye size={14} />
-                            </a>
+                  {filtered.map((bill) => {
+                    // Compute monthly amount for display
+                    let monthlyNet = bill.net_amount;
+                    if (bill.period_start && bill.period_end && bill.period_type !== 'single_date') {
+                      const s  = new Date(bill.period_start + 'T00:00:00');
+                      const e2 = new Date(bill.period_end   + 'T00:00:00');
+                      const months = (e2.getFullYear() - s.getFullYear()) * 12 + (e2.getMonth() - s.getMonth()) + 1;
+                      if (months > 1) monthlyNet = bill.net_amount / months;
+                    }
+                    const isSpread = bill.period_type === 'year' || bill.period_type === 'custom';
+                    return (
+                      <tr key={bill.id} className="hover:bg-gray-50 transition-colors">
+                        <td className="px-4 py-3 font-semibold text-gray-900">{bill.supplier_name}</td>
+                        <td className="px-4 py-3 text-gray-500 font-mono text-xs">{bill.invoice_number ?? '—'}</td>
+                        <td className="px-4 py-3 text-gray-600 whitespace-nowrap text-xs">{fmtPeriod(bill)}</td>
+                        <td className="px-4 py-3">
+                          {bill.location_label && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-indigo-50 text-indigo-700 text-xs rounded-full">
+                              <MapPin size={9} />{bill.location_label}
+                            </span>
                           )}
-                          <button
-                            onClick={() => deleteBill(bill.id)}
-                            className="text-gray-300 hover:text-red-500 transition-colors"
-                          >
-                            <Trash2 size={14} />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                        </td>
+                        <td className="px-4 py-3">
+                          {bill.category && (
+                            <span className="inline-block px-2 py-0.5 bg-gray-100 text-gray-600 text-xs rounded-full">
+                              {bill.category}
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-right tabular-nums">
+                          <span className="text-gray-900">{fmt(monthlyNet)}</span>
+                          {isSpread && <span className="block text-[10px] text-gray-400">÷ month</span>}
+                        </td>
+                        <td className="px-4 py-3 text-right font-bold text-gray-900 tabular-nums">{fmt(bill.gross_amount)}</td>
+                        <td className="px-4 py-3">
+                          <select value={bill.status} onChange={(e) => updateStatus(bill.id, e.target.value)}
+                            className={`text-xs font-semibold px-2 py-1 rounded-full border cursor-pointer focus:outline-none ${STATUS_STYLES[bill.status]}`}>
+                            <option value="pending">Pending</option>
+                            <option value="approved">Approved</option>
+                            <option value="paid">Paid</option>
+                          </select>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2">
+                            {bill.file_path && (
+                              <a href={`${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/bills/${bill.file_path}`}
+                                target="_blank" rel="noopener noreferrer"
+                                className="text-gray-300 hover:text-blue-500 transition-colors" title="View PDF">
+                                <Eye size={14} />
+                              </a>
+                            )}
+                            <button onClick={() => deleteBill(bill.id)} className="text-gray-300 hover:text-red-500 transition-colors">
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
                 <tfoot>
                   <tr className="bg-gray-50 border-t-2 border-gray-200">
-                    <td colSpan={5} className="px-4 py-3 text-xs font-semibold text-gray-500">
-                      {filtered.length} bills
-                    </td>
+                    <td colSpan={5} className="px-4 py-3 text-xs font-semibold text-gray-500">{filtered.length} bills</td>
                     <td className="px-4 py-3 text-right font-bold text-gray-700 tabular-nums">{fmt(totals.net)}</td>
                     <td className="px-4 py-3 text-right font-bold text-[#1B5E20] tabular-nums">{fmt(totals.gross)}</td>
                     <td colSpan={2} />

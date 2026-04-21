@@ -925,6 +925,24 @@ export default function SalesReportsPage() {
     },
   });
 
+  // Bills for the selected location — used to populate cost rows in monthly P&L
+  type BillRecord = {
+    id: string; net_amount: number; category: string | null;
+    location_label: string | null; period_type: string | null;
+    period_start: string | null; period_end: string | null;
+  };
+  const { data: locationBills = [] } = useQuery<BillRecord[]>({
+    queryKey: ['bills-monthly', location?.name, year],
+    enabled: !!location && activeTab === 'daily',
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('bills')
+        .select('id,net_amount,category,location_label,period_type,period_start,period_end')
+        .eq('location_label', location!.name);
+      return (data ?? []) as BillRecord[];
+    },
+  });
+
   // Shift reports for daily view — fetch the full quarter at once
   const { data: shiftRows = [] } = useQuery({
     queryKey: ['shift-reports', location?.id, year, quarter],
@@ -1056,6 +1074,38 @@ export default function SalesReportsPage() {
       cancellations_total: (acc.cancellations_total ?? 0) + (m.cancellations_total ?? 0),
     }), { report_month:0, report_year:year, gross_total:0, gross_food:0, gross_beverages:0, net_total:0, vat_total:0, tips:0, inhouse_total:0, takeaway_total:0, cancellations_count:0, cancellations_total:0 });
   }, [monthMap, year]);
+
+  // Bills → monthly allocation map: month (1-12) → category → net_amount
+  // Each bill's cost is spread equally across the months it covers
+  const billMonthMap = useMemo<Record<number, Record<string, number>>>(() => {
+    const result: Record<number, Record<string, number>> = {};
+    for (const bill of locationBills) {
+      if (!bill.period_start || !bill.net_amount) continue;
+      const cat = bill.category ?? 'Other';
+      const pStart = new Date(bill.period_start + 'T00:00:00');
+      const pEnd   = bill.period_end ? new Date(bill.period_end + 'T00:00:00') : pStart;
+      const startY = pStart.getFullYear(), startM = pStart.getMonth();
+      const endY   = pEnd.getFullYear(),   endM   = pEnd.getMonth();
+      const totalMonths = Math.max(1, (endY - startY) * 12 + (endM - startM) + 1);
+      const monthlyAmt  = bill.net_amount / totalMonths;
+      for (let mo = 1; mo <= 12; mo++) {
+        const moIdx = mo - 1; // 0-based
+        const thisY = year, thisMStart = new Date(thisY, moIdx, 1);
+        const inRange = thisMStart >= new Date(startY, startM, 1) && thisMStart <= new Date(endY, endM, 1);
+        if (!inRange) continue;
+        if (!result[mo]) result[mo] = {};
+        result[mo][cat] = (result[mo][cat] ?? 0) + monthlyAmt;
+      }
+    }
+    return result;
+  }, [locationBills, year]);
+
+  // Sorted list of bill categories present in this year (for dynamic rows)
+  const billCategories = useMemo(() => {
+    const cats = new Set<string>();
+    for (const mo of Object.values(billMonthMap)) for (const cat of Object.keys(mo)) cats.add(cat);
+    return Array.from(cats).sort();
+  }, [billMonthMap]);
 
   const weekMap = useMemo<Record<number, WeekData>>(() => {
     const m: Record<number, WeekData> = {};
@@ -3555,6 +3605,142 @@ export default function SalesReportsPage() {
                         );
                       })}
                     </tbody>
+
+                    {/* ── Operating costs from bills ── */}
+                    {billCategories.length > 0 && (() => {
+                      const fmtCost = (v: number | undefined) =>
+                        v && v > 0 ? <span className="text-gray-900">{fmtNum(v)}</span> : <span className="text-gray-300">—</span>;
+                      // FY totals per category
+                      const fyTotals: Record<string, number> = {};
+                      for (const mo of Object.values(billMonthMap)) for (const [c, v] of Object.entries(mo)) fyTotals[c] = (fyTotals[c] ?? 0) + v;
+                      const fyTotal = Object.values(fyTotals).reduce((s, v) => s + v, 0);
+                      // Gross profit = net revenue - total bill costs
+                      const netByMonth: Record<number, number> = {};
+                      for (let mo = 1; mo <= 12; mo++) netByMonth[mo] = monthMap[mo]?.net_total ?? 0;
+                      return (
+                        <>
+                          <tbody>
+                            <tr>
+                              <td colSpan={14} className="sticky left-0 px-4 py-2 text-xs font-bold uppercase tracking-widest text-white"
+                                style={{ backgroundColor: '#0f172a' }}>
+                                Operating Costs · {location?.name}
+                              </td>
+                            </tr>
+                            {billCategories.map((cat) => {
+                              const fyVal = fyTotals[cat] ?? 0;
+                              return (
+                                <tr key={cat} className="border-b border-gray-100 hover:bg-gray-50/60 group" style={{ backgroundColor:'#ffffff' }}>
+                                  <td className="sticky left-0 z-10 px-4 py-2 whitespace-nowrap border-r border-gray-100 text-gray-700 group-hover:bg-gray-50/60 transition-colors"
+                                    style={{ backgroundColor:'#ffffff' }}>
+                                    {cat}
+                                  </td>
+                                  {MONTHS.map((_, mi) => {
+                                    const mo = mi + 1;
+                                    const isCurMon = year === todayYear && mo === todayMonth;
+                                    const val = billMonthMap[mo]?.[cat];
+                                    return (
+                                      <td key={mi} className="py-2 text-right tabular-nums"
+                                        style={{ paddingLeft:4, paddingRight:10, backgroundColor: isCurMon ? 'rgba(59,130,246,0.04)' : undefined }}>
+                                        {fmtCost(val)}
+                                      </td>
+                                    );
+                                  })}
+                                  <td className="py-2 text-right tabular-nums border-l border-gray-200"
+                                    style={{ paddingLeft:4, paddingRight:10 }}>
+                                    {fyVal > 0 ? <span className="text-gray-900">{fmtNum(fyVal)}</span> : <span className="text-gray-300">—</span>}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                            {/* Total operating costs */}
+                            <tr className="border-b border-gray-200" style={{ backgroundColor:'#f8fafc' }}>
+                              <td className="sticky left-0 z-10 px-4 py-2 font-bold text-gray-900 whitespace-nowrap border-r border-gray-200"
+                                style={{ backgroundColor:'#f8fafc' }}>
+                                Total Operating Costs
+                              </td>
+                              {MONTHS.map((_, mi) => {
+                                const mo = mi + 1;
+                                const isCurMon = year === todayYear && mo === todayMonth;
+                                const total = Object.values(billMonthMap[mo] ?? {}).reduce((s, v) => s + v, 0);
+                                return (
+                                  <td key={mi} className="py-2 text-right font-bold tabular-nums"
+                                    style={{ paddingLeft:4, paddingRight:10, backgroundColor: isCurMon ? 'rgba(59,130,246,0.04)' : undefined }}>
+                                    {total > 0 ? <span className="text-gray-900">{fmtNum(total)}</span> : <span className="text-gray-300">—</span>}
+                                  </td>
+                                );
+                              })}
+                              <td className="py-2 text-right font-bold tabular-nums border-l border-gray-200"
+                                style={{ paddingLeft:4, paddingRight:10 }}>
+                                {fyTotal > 0 ? <span className="text-gray-900">{fmtNum(fyTotal)}</span> : <span className="text-gray-300">—</span>}
+                              </td>
+                            </tr>
+                          </tbody>
+                          {/* Gross profit (net revenue - operating costs) */}
+                          <tbody>
+                            <tr style={{ backgroundColor:'#f0fdf4' }} className="border-b border-gray-100">
+                              <td className="sticky left-0 z-10 px-4 py-2 font-bold text-gray-900 whitespace-nowrap border-r border-gray-100"
+                                style={{ backgroundColor:'#f0fdf4' }}>
+                                Gross Profit
+                              </td>
+                              {MONTHS.map((_, mi) => {
+                                const mo = mi + 1;
+                                const isCurMon = year === todayYear && mo === todayMonth;
+                                const net  = netByMonth[mo];
+                                const cost = Object.values(billMonthMap[mo] ?? {}).reduce((s, v) => s + v, 0);
+                                const gp   = net - cost;
+                                return (
+                                  <td key={mi} className="py-2 text-right font-bold tabular-nums"
+                                    style={{ paddingLeft:4, paddingRight:10, backgroundColor: isCurMon ? 'rgba(59,130,246,0.04)' : undefined }}>
+                                    {net > 0
+                                      ? <span className={gp >= 0 ? 'text-[#1B5E20]' : 'text-red-600'}>{fmtNum(gp)}</span>
+                                      : <span className="text-gray-300">—</span>}
+                                  </td>
+                                );
+                              })}
+                              <td className="py-2 text-right font-bold tabular-nums border-l border-gray-200"
+                                style={{ paddingLeft:4, paddingRight:10 }}>
+                                {(() => {
+                                  const netFY  = Object.values(netByMonth).reduce((s, v) => s + v, 0);
+                                  const gp     = netFY - fyTotal;
+                                  return netFY > 0
+                                    ? <span className={gp >= 0 ? 'text-[#1B5E20]' : 'text-red-600'}>{fmtNum(gp)}</span>
+                                    : <span className="text-gray-300">—</span>;
+                                })()}
+                              </td>
+                            </tr>
+                            <tr className="border-b border-gray-100" style={{ backgroundColor:'#f0fdf4' }}>
+                              <td className="sticky left-0 z-10 pl-8 pr-4 py-2 text-gray-400 italic whitespace-nowrap border-r border-gray-100"
+                                style={{ backgroundColor:'#f0fdf4', fontSize:'11px' }}>
+                                Gross margin (%)
+                              </td>
+                              {MONTHS.map((_, mi) => {
+                                const mo   = mi + 1;
+                                const isCurMon = year === todayYear && mo === todayMonth;
+                                const net  = netByMonth[mo];
+                                const cost = Object.values(billMonthMap[mo] ?? {}).reduce((s, v) => s + v, 0);
+                                const gp   = net - cost;
+                                const pct  = net > 0 ? (gp / net) * 100 : null;
+                                return (
+                                  <td key={mi} className="py-2 text-right tabular-nums"
+                                    style={{ paddingLeft:4, paddingRight:10, fontSize:'11px', backgroundColor: isCurMon ? 'rgba(59,130,246,0.04)' : undefined }}>
+                                    {pct !== null ? <span className="text-gray-500">{pct.toFixed(1)}%</span> : <span className="text-gray-300">—</span>}
+                                  </td>
+                                );
+                              })}
+                              <td className="py-2 text-right tabular-nums border-l border-gray-200"
+                                style={{ paddingLeft:4, paddingRight:10, fontSize:'11px' }}>
+                                {(() => {
+                                  const netFY = Object.values(netByMonth).reduce((s, v) => s + v, 0);
+                                  const gpFY  = netFY - fyTotal;
+                                  const pct   = netFY > 0 ? (gpFY / netFY) * 100 : null;
+                                  return pct !== null ? <span className="text-gray-500">{pct.toFixed(1)}%</span> : <span className="text-gray-300">—</span>;
+                                })()}
+                              </td>
+                            </tr>
+                          </tbody>
+                        </>
+                      );
+                    })()}
                   </table>
                 </div>
                 <div className="px-4 py-2.5 bg-gray-50 border-t border-gray-100 flex items-center justify-between">
