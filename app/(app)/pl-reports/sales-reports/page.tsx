@@ -7,7 +7,7 @@ import {
   Upload, FileCheck, AlertCircle, DatabaseZap,
   MapPin, CalendarDays, BarChart3, TableProperties,
   ChevronLeft, ChevronRight, TrendingUp, Receipt, Percent, Euro,
-  Loader2, SlidersHorizontal,
+  Loader2, SlidersHorizontal, Ban,
 } from 'lucide-react';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -158,6 +158,13 @@ type DraftSettings = {
   weekBaseNet: string;
   growthRate:  string;
   mon: string; tue: string; wed: string; thu: string; fri: string; sat: string;
+};
+
+type ClosureDay = {
+  id:           string;
+  closure_date: string;
+  shift_type:   'lunch' | 'dinner' | 'all';
+  reason:       string | null;
 };
 
 const DEFAULT_DRAFT: DraftSettings = {
@@ -775,6 +782,12 @@ export default function SalesReportsPage() {
   const [dinnerDraft, setDinnerDraft] = useState<DraftSettings>(DEFAULT_DRAFT);
   const [savingForecast, setSavingForecast] = useState(false);
 
+  // Closures
+  const [showClosuresPanel, setShowClosuresPanel] = useState(false);
+  const [closureForm, setClosureForm] = useState<{ date: string; shiftType: 'lunch'|'dinner'|'all'; reason: string }>
+    ({ date: '', shiftType: 'all', reason: '' });
+  const [addingClosure, setAddingClosure] = useState(false);
+
   // ── Queries ────────────────────────────────────────────────────────────────
 
   const { data: locations = [] } = useQuery({
@@ -847,6 +860,20 @@ export default function SalesReportsPage() {
         .select('shift_type,week_base_net,growth_rate,weight_mon,weight_tue,weight_wed,weight_thu,weight_fri,weight_sat,weight_sun')
         .eq('location_id', location!.id);
       return (data ?? []) as ForecastSettings[];
+    },
+  });
+
+  // Closure days — fetch all for this location (across all years)
+  const { data: closureDays = [], refetch: refetchClosures } = useQuery({
+    queryKey: ['closure-days', location?.id],
+    enabled:  !!location,
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('closure_days')
+        .select('id,closure_date,shift_type,reason')
+        .eq('location_id', location!.id)
+        .order('closure_date', { ascending: true });
+      return (data ?? []) as ClosureDay[];
     },
   });
 
@@ -977,7 +1004,17 @@ export default function SalesReportsPage() {
     return result;
   }, [quarter, year]);
 
-  // Forecast net revenue per day — keyed by dateKey
+  // O(1) lookup set for closed shifts: "lunch:2026-05-01", "dinner:2026-05-01"
+  const closureSet = useMemo(() => {
+    const s = new Set<string>();
+    for (const c of closureDays) {
+      if (c.shift_type === 'lunch'  || c.shift_type === 'all') s.add(`lunch:${c.closure_date}`);
+      if (c.shift_type === 'dinner' || c.shift_type === 'all') s.add(`dinner:${c.closure_date}`);
+    }
+    return s;
+  }, [closureDays]);
+
+  // Forecast net revenue per day — keyed by dateKey; 0 for closure days
   const { lunchForecastMap, dinnerForecastMap, totalForecastMap } = useMemo(() => {
     const lS = forecastSettings.find(s => s.shift_type === 'lunch');
     const dS = forecastSettings.find(s => s.shift_type === 'dinner');
@@ -986,14 +1023,15 @@ export default function SalesReportsPage() {
     const totalForecastMap:  Record<string, number> = {};
     for (const col of dailyCols) {
       if (col.type !== 'day') continue;
-      const lv = lS ? computeDailyForecast(col.dateKey, lS) : 0;
-      const dv = dS ? computeDailyForecast(col.dateKey, dS) : 0;
-      if (lS) lunchForecastMap[col.dateKey]  = lv;
-      if (dS) dinnerForecastMap[col.dateKey] = dv;
-      if (lS || dS) totalForecastMap[col.dateKey] = lv + dv;
+      const dk = col.dateKey;
+      const lv = lS && !closureSet.has(`lunch:${dk}`)  ? computeDailyForecast(dk, lS) : 0;
+      const dv = dS && !closureSet.has(`dinner:${dk}`) ? computeDailyForecast(dk, dS) : 0;
+      if (lS) lunchForecastMap[dk]  = lv;
+      if (dS) dinnerForecastMap[dk] = dv;
+      if (lS || dS) totalForecastMap[dk] = lv + dv;
     }
     return { lunchForecastMap, dinnerForecastMap, totalForecastMap };
-  }, [forecastSettings, dailyCols]);
+  }, [forecastSettings, closureSet, dailyCols]);
 
   const topCats = useMemo(() =>
     Object.entries(weeklyResult?.categoryRevenue ?? {}).sort((a,b) => b[1]-a[1]).slice(0, 12),
@@ -1173,6 +1211,31 @@ export default function SalesReportsPage() {
     finally { setSavingForecast(false); }
   }, [location, lunchDraft, dinnerDraft, queryClient]);
 
+  const handleAddClosure = useCallback(async () => {
+    if (!location || !closureForm.date) return;
+    setAddingClosure(true);
+    try {
+      const { error } = await supabase.from('closure_days').insert({
+        location_id:  location.id,
+        closure_date: closureForm.date,
+        shift_type:   closureForm.shiftType,
+        reason:       closureForm.reason || null,
+      });
+      if (error) throw error;
+      await refetchClosures();
+      setClosureForm({ date: '', shiftType: 'all', reason: '' });
+    } catch (e: any) { alert(`Could not add closure: ${e.message}`); }
+    finally { setAddingClosure(false); }
+  }, [location, closureForm, refetchClosures]);
+
+  const handleDeleteClosure = useCallback(async (id: string) => {
+    try {
+      const { error } = await supabase.from('closure_days').delete().eq('id', id);
+      if (error) throw error;
+      await refetchClosures();
+    } catch (e: any) { alert(`Could not delete closure: ${e.message}`); }
+  }, [refetchClosures]);
+
   // ── Cell renderers ─────────────────────────────────────────────────────────
 
   const renderWeeklyCell = (row: WRow, kw: number) => {
@@ -1307,18 +1370,32 @@ export default function SalesReportsPage() {
               </div>
             )}
             {subTab === 'daily' && (
-              <button onClick={() => setShowForecastPanel(p => !p)}
-                className={`ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors ${
-                  showForecastPanel
-                    ? 'bg-[#1B5E20] text-white border-[#1B5E20]'
-                    : forecastSettings.length > 0
-                      ? 'bg-green-50 text-[#1B5E20] border-green-200 hover:bg-green-100'
-                      : 'bg-white text-gray-500 border-gray-200 hover:border-gray-400'
-                }`}
-              >
-                <SlidersHorizontal size={12} />
-                Forecast{forecastSettings.length > 0 ? ' ✓' : ''}
-              </button>
+              <div className="ml-auto flex items-center gap-2">
+                <button onClick={() => { setShowClosuresPanel(p => !p); setShowForecastPanel(false); }}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors ${
+                    showClosuresPanel
+                      ? 'bg-red-700 text-white border-red-700'
+                      : closureDays.length > 0
+                        ? 'bg-red-50 text-red-700 border-red-200 hover:bg-red-100'
+                        : 'bg-white text-gray-500 border-gray-200 hover:border-gray-400'
+                  }`}
+                >
+                  <Ban size={12} />
+                  Closures{closureDays.length > 0 ? ` (${closureDays.length})` : ''}
+                </button>
+                <button onClick={() => { setShowForecastPanel(p => !p); setShowClosuresPanel(false); }}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors ${
+                    showForecastPanel
+                      ? 'bg-[#1B5E20] text-white border-[#1B5E20]'
+                      : forecastSettings.length > 0
+                        ? 'bg-green-50 text-[#1B5E20] border-green-200 hover:bg-green-100'
+                        : 'bg-white text-gray-500 border-gray-200 hover:border-gray-400'
+                  }`}
+                >
+                  <SlidersHorizontal size={12} />
+                  Forecast{forecastSettings.length > 0 ? ' ✓' : ''}
+                </button>
+              </div>
             )}
           </div>
         </div>
@@ -1808,6 +1885,80 @@ export default function SalesReportsPage() {
         <>
         {subTab === 'daily' && (
         <>
+          {/* ── Closures panel ── */}
+          {showClosuresPanel && (
+            <div className="mb-4 border border-red-200 rounded-xl bg-white shadow-sm overflow-hidden">
+              <div className="bg-red-50 border-b border-red-200 px-4 py-3 flex items-center justify-between">
+                <span className="text-xs font-bold text-red-700 uppercase tracking-wider flex items-center gap-2">
+                  <Ban size={13} /> Closure Days{location ? ` — ${location.name}` : ''}
+                </span>
+                <button onClick={() => setShowClosuresPanel(false)} className="text-red-400 hover:text-red-600 text-sm font-bold">✕</button>
+              </div>
+              <div className="divide-y divide-red-50">
+                {/* Add form */}
+                <div className="px-5 py-4 bg-white">
+                  <p className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">Add closure</p>
+                  <div className="flex items-end gap-3 flex-wrap">
+                    <div>
+                      <label className="block text-xs text-gray-400 mb-1">Date</label>
+                      <input type="date" value={closureForm.date}
+                        onChange={e => setClosureForm(f => ({ ...f, date: e.target.value }))}
+                        className="border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:border-red-400" />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-400 mb-1">Shift</label>
+                      <select value={closureForm.shiftType}
+                        onChange={e => setClosureForm(f => ({ ...f, shiftType: e.target.value as 'lunch'|'dinner'|'all' }))}
+                        className="border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:border-red-400 bg-white">
+                        <option value="all">All day</option>
+                        <option value="lunch">☀️ Lunch only</option>
+                        <option value="dinner">🌙 Dinner only</option>
+                      </select>
+                    </div>
+                    <div className="flex-1 min-w-[160px]">
+                      <label className="block text-xs text-gray-400 mb-1">Reason (optional)</label>
+                      <input type="text" placeholder="e.g. Public holiday" value={closureForm.reason}
+                        onChange={e => setClosureForm(f => ({ ...f, reason: e.target.value }))}
+                        className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:border-red-400" />
+                    </div>
+                    <button onClick={handleAddClosure} disabled={addingClosure || !location || !closureForm.date}
+                      className="flex items-center gap-2 px-4 py-1.5 bg-red-700 text-white text-sm font-bold rounded-lg hover:bg-red-800 transition-colors disabled:opacity-50">
+                      {addingClosure ? <Loader2 size={13} className="animate-spin" /> : <Ban size={13} />}
+                      Add
+                    </button>
+                  </div>
+                </div>
+                {/* Existing closures list */}
+                <div className="px-5 py-3">
+                  {closureDays.length === 0 ? (
+                    <p className="text-xs text-gray-400 italic py-2">No closure days set for this location.</p>
+                  ) : (
+                    <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                      {closureDays.map(c => (
+                        <div key={c.id} className="flex items-center justify-between gap-3 py-1.5 px-3 rounded-lg bg-red-50 hover:bg-red-100 transition-colors">
+                          <span className="text-sm font-semibold text-red-900 tabular-nums">
+                            {new Date(c.closure_date + 'T00:00:00').toLocaleDateString('en-GB', { weekday:'short', day:'numeric', month:'short', year:'numeric' })}
+                          </span>
+                          <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+                            c.shift_type === 'all'    ? 'bg-red-200 text-red-800' :
+                            c.shift_type === 'lunch'  ? 'bg-amber-100 text-amber-800' :
+                                                        'bg-blue-100 text-blue-800'
+                          }`}>
+                            {c.shift_type === 'all' ? '🚫 All day' : c.shift_type === 'lunch' ? '☀️ Lunch' : '🌙 Dinner'}
+                          </span>
+                          {c.reason && <span className="text-xs text-red-600 flex-1 truncate">{c.reason}</span>}
+                          <button onClick={() => handleDeleteClosure(c.id)}
+                            className="text-red-400 hover:text-red-700 font-bold text-sm leading-none flex-shrink-0 transition-colors"
+                            title="Remove closure">✕</button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* ── Forecast settings panel ── */}
           {showForecastPanel && (
             <div className="mb-4 border border-gray-200 rounded-xl bg-white shadow-sm overflow-hidden">
@@ -1977,19 +2128,21 @@ export default function SalesReportsPage() {
                       </th>
                       {dailyCols.map((col, ci) => {
                         if (col.type === 'day') {
-                          const todayKey = `${todayYear}-${String(todayMonth).padStart(2,'0')}-${String(todayDay).padStart(2,'0')}`;
-                          const hasData  = !!totalMap[col.dateKey];
-                          const isCurDay = col.dateKey === todayKey;
-                          const isSun    = col.dow === 'Sun';
+                          const todayKey   = `${todayYear}-${String(todayMonth).padStart(2,'0')}-${String(todayDay).padStart(2,'0')}`;
+                          const hasData    = !!totalMap[col.dateKey];
+                          const isCurDay   = col.dateKey === todayKey;
+                          const isSun      = col.dow === 'Sun';
+                          const isClosed   = closureSet.has(`lunch:${col.dateKey}`) && closureSet.has(`dinner:${col.dateKey}`);
                           return (
                             <th key={ci} className="py-2 text-right font-bold whitespace-nowrap tabular-nums"
                               style={{ minWidth:COL_W_D, width:COL_W_D, paddingLeft:4, paddingRight:8,
-                                color: isCurDay ? '#ffffff' : hasData ? '#93c5fd' : '#4b5563',
-                                borderBottom: isCurDay ? '2px solid #3b82f6' : isSun ? '2px solid #7c3aed' : 'none',
+                                color: isClosed ? '#f87171' : isCurDay ? '#ffffff' : hasData ? '#93c5fd' : '#4b5563',
+                                backgroundColor: isClosed ? 'rgba(239,68,68,0.12)' : undefined,
+                                borderBottom: isCurDay ? '2px solid #3b82f6' : isSun ? '2px solid #7c3aed' : isClosed ? '2px solid #ef4444' : 'none',
                                 borderLeft: col.day === 1 && col.month !== QUARTER_MONTHS[quarter-1][0] ? '2px solid #4b5563' : undefined,
                                 borderRight: isSun ? '1px solid #374151' : undefined }}>
                               <div style={{ fontSize:9, fontWeight:400, opacity:0.55, marginBottom:1 }}>
-                                {col.day === 1 ? MONTHS[col.month-1] : col.dow}
+                                {isClosed ? '🚫' : col.day === 1 ? MONTHS[col.month-1] : col.dow}
                               </div>
                               <div>{col.day}</div>
                             </th>
