@@ -1345,7 +1345,7 @@ export default function SalesReportsPage() {
   // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
-    <div>
+    <div className="h-full flex flex-col">
       {/* ── Page header ── */}
       <div className="flex items-start justify-between mb-5">
         <div>
@@ -2020,9 +2020,9 @@ export default function SalesReportsPage() {
           DAILY P&L TAB
       ══════════════════════════════════════════════════════════════════ */}
       {activeTab === 'daily' && (
-        <>
+        <div className="flex-1 min-h-0 flex flex-col">
         {subTab === 'daily' && (
-        <>
+        <div className="flex-1 min-h-0 flex flex-col">
           {/* ── Closures panel ── */}
           {showClosuresPanel && (
             <div className="mb-4 border border-red-200 rounded-xl bg-white shadow-sm overflow-hidden">
@@ -2254,8 +2254,8 @@ export default function SalesReportsPage() {
           );
 
           return (
-            <div className="border border-gray-200 rounded-xl overflow-hidden shadow-sm">
-              <div style={{ height: 'calc(100vh - 260px)', overflowX: 'scroll', overflowY: 'auto' }}>
+            <div className="flex-1 min-h-0 flex flex-col border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+              <div className="flex-1 min-h-0 overflow-x-scroll overflow-y-auto">
                 <table className="text-xs border-collapse" style={{ minWidth: LABEL_W + (dailyCols.length + 1) * COL_W_D }}>
                   {/* Sticky column header */}
                   <thead className="sticky top-0 z-30">
@@ -2405,7 +2405,7 @@ export default function SalesReportsPage() {
             </div>
           );
         })()}
-        </>
+        </div>
         )}
 
         {/* ── Weekly P&L ───────────────────────────────────────────────── */}
@@ -2647,7 +2647,7 @@ export default function SalesReportsPage() {
                 </div>
               </div>
         ))}
-        </>
+        </div>
       )}
     </div>
   );
