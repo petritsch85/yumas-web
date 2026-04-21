@@ -3315,7 +3315,7 @@ export default function SalesReportsPage() {
           </div>
         ) : (
           <div className="border border-gray-200 rounded-xl overflow-hidden shadow-sm">
-              <div className="overflow-auto" style={{ maxHeight: 'calc(100vh - 260px)' }}>
+              <div className="overflow-x-scroll overflow-y-auto" style={{ maxHeight: 'calc(100vh - 260px)' }}>
                 <table className="text-xs border-collapse" style={{ minWidth: LABEL_W + (TOTAL_WEEKS + 1) * COL_W_WK }}>
                   <thead className="sticky top-0 z-30">
                     <tr style={{ backgroundColor:'#111827' }}>
