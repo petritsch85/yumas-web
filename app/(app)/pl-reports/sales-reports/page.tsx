@@ -2794,9 +2794,9 @@ export default function SalesReportsPage() {
                         .filter(([k]) => dailyCols.some(c => c.type === 'day' && c.dateKey === k))
                         .reduce((s, [, v]) => s + v, 0);
                       return (
-                        <tr className="border-b border-gray-100 hover:bg-gray-50/60 group" style={{ backgroundColor: '#fff7ed' }}>
-                          <td className="sticky left-0 z-10 px-4 py-2 whitespace-nowrap border-r border-gray-100 group-hover:bg-gray-50/60 transition-colors text-orange-700"
-                            style={{ backgroundColor: '#fff7ed' }}>
+                        <tr className="border-b border-gray-100 hover:bg-gray-50/60 group" style={{ backgroundColor: '#eff6ff' }}>
+                          <td className="sticky left-0 z-10 px-4 py-2 whitespace-nowrap border-r border-gray-100 group-hover:bg-gray-50/60 transition-colors text-blue-800"
+                            style={{ backgroundColor: '#eff6ff' }}>
                             🛵 Simply · Net Revenue
                           </td>
                           {dailyCols.map((col, ci) => {
@@ -2807,7 +2807,7 @@ export default function SalesReportsPage() {
                                 <td key={ci} className="py-2 text-right tabular-nums"
                                   style={{ paddingLeft:4, paddingRight:8, backgroundColor: isCurDay ? 'rgba(59,130,246,0.04)' : undefined }}>
                                   {val > 0
-                                    ? <span className="text-orange-600">{fmtNum(val)}</span>
+                                    ? <span className="text-blue-700">{fmtNum(val)}</span>
                                     : <span className="text-gray-300">—</span>}
                                 </td>
                               );
@@ -2817,7 +2817,7 @@ export default function SalesReportsPage() {
                                 <td key={ci} className="py-2 text-right tabular-nums"
                                   style={{ paddingLeft:4, paddingRight:6, backgroundColor:'#fffbeb', borderLeft:'1px solid #fde68a', borderRight:'1px solid #fde68a' }}>
                                   {wTotal > 0
-                                    ? <span className="text-orange-600">{fmtNum(wTotal)}</span>
+                                    ? <span className="text-blue-700">{fmtNum(wTotal)}</span>
                                     : <span className="text-gray-300">—</span>}
                                 </td>
                               );
@@ -2826,7 +2826,7 @@ export default function SalesReportsPage() {
                           <td className="py-2 text-right tabular-nums border-l border-gray-200"
                             style={{ paddingLeft:4, paddingRight:8 }}>
                             {qDelivery > 0
-                              ? <span className="text-orange-600 font-bold">{fmtNum(qDelivery)}</span>
+                              ? <span className="text-blue-700 font-bold">{fmtNum(qDelivery)}</span>
                               : <span className="text-gray-300">—</span>}
                           </td>
                         </tr>
