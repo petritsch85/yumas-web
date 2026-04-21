@@ -1811,6 +1811,68 @@ export default function SalesReportsPage() {
                 </>
               )}
 
+              {/* Weekly: batch summary table */}
+              {reportType === 'weekly' && weeklyBatch.length > 0 && (
+                <div className="bg-white border border-gray-100 rounded-xl overflow-hidden shadow-sm">
+                  <div className="px-4 py-3 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
+                    <p className="text-xs font-bold text-gray-500 uppercase tracking-wider">
+                      {weeklyBatch.length} file{weeklyBatch.length > 1 ? 's' : ''} queued
+                    </p>
+                    <p className="text-xs text-gray-400">
+                      {weeklyBatch.filter(i => i.status === 'saved').length} saved ·{' '}
+                      {weeklyBatch.filter(i => i.status === 'pending').length} pending
+                    </p>
+                  </div>
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="border-b border-gray-100">
+                        {['Week','Date Range','Gross','Net','VAT','Tips','Status'].map(h => (
+                          <th key={h} className={`px-3 py-2 font-semibold text-gray-400 uppercase tracking-wide ${
+                            h === 'Week' || h === 'Date Range' ? 'text-left' : h === 'Status' ? 'text-center' : 'text-right'
+                          }`}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-50">
+                      {weeklyBatch.map((item, idx) => {
+                        const s = item.result.summary;
+                        const statusIcon  = item.status === 'saved' ? '✓' : item.status === 'error' ? '✗' : item.status === 'saving' ? '…' : '○';
+                        const statusColor = item.status === 'saved' ? 'text-green-600 font-bold' : item.status === 'error' ? 'text-red-500 font-bold' : item.status === 'saving' ? 'text-blue-500' : 'text-gray-400';
+                        const kw = s?.weekStart ? `KW${isoWeek(s.weekStart)}` : '—';
+                        return (
+                          <tr key={idx} className="hover:bg-gray-50/60">
+                            <td className="px-3 py-2 text-gray-500 font-semibold">{kw}</td>
+                            <td className="px-3 py-2 text-gray-800 font-medium whitespace-nowrap">
+                              {s ? `${fmtDate(s.weekStart)} – ${fmtDate(s.weekEnd)}` : <span className="text-red-400">{item.result.error ?? 'Parse error'}</span>}
+                            </td>
+                            <td className="px-3 py-2 text-right tabular-nums text-[#1B5E20] font-semibold">{s ? fmtNum(s.grossTotal) : '—'}</td>
+                            <td className="px-3 py-2 text-right tabular-nums text-blue-700">{s ? fmtNum(s.netTotal) : '—'}</td>
+                            <td className="px-3 py-2 text-right tabular-nums text-gray-500">{s ? fmtNum(s.taxTotal) : '—'}</td>
+                            <td className="px-3 py-2 text-right tabular-nums text-purple-700">{s ? fmtNum(s.tips) : '—'}</td>
+                            <td className={`px-3 py-2 text-center ${statusColor}`} title={item.errorMsg}>{statusIcon}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                    {weeklyBatch.length > 1 && (() => {
+                      const valid = weeklyBatch.filter(i => i.result.summary);
+                      return (
+                        <tfoot>
+                          <tr className="border-t-2 border-gray-200 bg-gray-50 font-bold">
+                            <td className="px-3 py-2 text-gray-600" colSpan={2}>Total ({valid.length} week{valid.length !== 1 ? 's' : ''})</td>
+                            <td className="px-3 py-2 text-right tabular-nums text-[#1B5E20]">{fmtNum(valid.reduce((s, i) => s + (i.result.summary?.grossTotal ?? 0), 0))}</td>
+                            <td className="px-3 py-2 text-right tabular-nums text-blue-700">{fmtNum(valid.reduce((s, i) => s + (i.result.summary?.netTotal  ?? 0), 0))}</td>
+                            <td className="px-3 py-2 text-right tabular-nums text-gray-500">{fmtNum(valid.reduce((s, i) => s + (i.result.summary?.taxTotal  ?? 0), 0))}</td>
+                            <td className="px-3 py-2 text-right tabular-nums text-purple-700">{fmtNum(valid.reduce((s, i) => s + (i.result.summary?.tips     ?? 0), 0))}</td>
+                            <td />
+                          </tr>
+                        </tfoot>
+                      );
+                    })()}
+                  </table>
+                </div>
+              )}
+
               {/* Shift: batch summary table */}
               {reportType === 'shift' && shiftBatch.length > 0 && (
                 <div className="bg-white border border-gray-100 rounded-xl overflow-hidden shadow-sm">
