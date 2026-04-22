@@ -70,7 +70,7 @@ const navGroups: NavGroup[] = [
       { label: 'Locations',  href: '/locations',  icon: MapPin },
       { label: 'Menus',      href: '/products/menus', icon: UtensilsCrossed },
       { label: 'Machines',   href: '/coming-soon/machines',   icon: Wrench },
-      { label: 'Employees',  href: '/coming-soon/employees',  icon: Users },
+      { label: 'Team',        href: '/settings/users',          icon: Users },
     ],
   },
   {

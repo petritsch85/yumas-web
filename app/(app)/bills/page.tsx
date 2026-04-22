@@ -1,12 +1,12 @@
 'use client';
 
-import { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
 import {
   Upload, FileCheck, AlertCircle, Loader2,
   CheckCircle2, Clock, Banknote, Trash2,
-  ChevronDown, Eye, X, FilePlus, Save, MapPin, Calendar,
+  ChevronDown, Eye, X, FilePlus, Save, MapPin, Calendar, Pencil,
 } from 'lucide-react';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -123,12 +123,12 @@ function uid() { return Math.random().toString(36).slice(2); }
 async function saveBillToDB(item: QueueItem, userId: string | null): Promise<void> {
   const d = item.data!;
 
-  let file_path: string | null = null;
   const bytes = Uint8Array.from(atob(item.base64), (c) => c.charCodeAt(0));
   const blob  = new Blob([bytes], { type: 'application/pdf' });
   const path  = `bills/${Date.now()}_${item.fileName}`;
   const { error: upErr } = await supabase.storage.from('bills').upload(path, blob);
-  if (!upErr) file_path = path;
+  if (upErr) throw new Error(`PDF upload failed: ${upErr.message}`);
+  const file_path = path;
 
   const isSpecial    = item.locationId === 'corporate' || item.locationId === 'other';
   const dbLocationId = isSpecial ? null : (item.locationId ?? null);
@@ -207,6 +207,20 @@ export default function BillsPage() {
   const [filterStatus,   setFilterStatus]   = useState('all');
   const [filterCategory, setFilterCategory] = useState('all');
   const [filterLocation, setFilterLocation] = useState('all');
+  const [filterMonth,    setFilterMonth]    = useState('all');
+
+  // Inline edit state for saved bills
+  type EditDraft = {
+    locationId:    string;
+    locationLabel: string;
+    category:      string;
+    periodType:    PeriodType;
+    periodStart:   string;
+    periodEnd:     string;
+  };
+  const [editingBillId, setEditingBillId] = useState<string | null>(null);
+  const [editDraft,     setEditDraft]     = useState<EditDraft | null>(null);
+  const [savingEdit,    setSavingEdit]    = useState(false);
 
   // ── Queries ──────────────────────────────────────────────────────────────────
   const { data: locations = [] } = useQuery<Location[]>({
@@ -232,10 +246,31 @@ export default function BillsPage() {
 
   const uniqueLocations = Array.from(new Set(bills.map((b) => b.location_label).filter(Boolean))) as string[];
 
+  // Build sorted list of months that have at least one bill (keyed as "YYYY-MM")
+  const uniqueMonths: { value: string; label: string }[] = Array.from(
+    new Set(
+      bills
+        .map((b) => b.invoice_date ?? b.period_start)
+        .filter(Boolean)
+        .map((d) => d!.slice(0, 7)) // "YYYY-MM"
+    )
+  )
+    .sort((a, b) => b.localeCompare(a)) // newest first
+    .map((ym) => {
+      const [y, m] = ym.split('-');
+      const label = new Date(Number(y), Number(m) - 1, 1)
+        .toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+      return { value: ym, label };
+    });
+
   const filtered = bills.filter((b) => {
     if (filterStatus   !== 'all' && b.status         !== filterStatus)   return false;
     if (filterCategory !== 'all' && b.category        !== filterCategory) return false;
     if (filterLocation !== 'all' && b.location_label  !== filterLocation) return false;
+    if (filterMonth !== 'all') {
+      const dateStr = b.invoice_date ?? b.period_start ?? '';
+      if (!dateStr.startsWith(filterMonth)) return false;
+    }
     return true;
   });
 
@@ -324,8 +359,71 @@ export default function BillsPage() {
 
   const deleteBill = async (id: string) => {
     if (!confirm('Delete this bill permanently?')) return;
+    // Remove the stored PDF first
+    const bill = bills.find((b) => b.id === id);
+    if (bill?.file_path) {
+      await supabase.storage.from('bills').remove([bill.file_path]);
+    }
     await supabase.from('bills').delete().eq('id', id);
     queryClient.invalidateQueries({ queryKey: ['bills'] });
+  };
+
+  const startEdit = (bill: Bill) => {
+    const isSpecial = !locations.some((l) => l.name === bill.location_label);
+    const matchedLoc = locations.find((l) => l.name === bill.location_label);
+    setEditDraft({
+      locationId:    matchedLoc?.id ?? (bill.location_label === 'Corporate' ? 'corporate' : bill.location_label === 'Other' ? 'other' : ''),
+      locationLabel: bill.location_label ?? '',
+      category:      bill.category      ?? CATEGORIES[0],
+      periodType:    (bill.period_type   as PeriodType) ?? 'single_date',
+      periodStart:   bill.period_start   ?? '',
+      periodEnd:     bill.period_end     ?? '',
+    });
+    setEditingBillId(bill.id);
+  };
+
+  const saveEdit = async () => {
+    if (!editingBillId || !editDraft) return;
+    setSavingEdit(true);
+    try {
+      const pType = editDraft.periodType;
+      let periodStart = editDraft.periodStart || null;
+      let periodEnd   = editDraft.periodEnd   || null;
+
+      if (pType === 'month' && periodStart) {
+        const dt = new Date(periodStart + 'T00:00:00');
+        const y = dt.getFullYear(), mo = dt.getMonth() + 1;
+        const lastDay = new Date(y, mo, 0).getDate();
+        periodStart = `${y}-${String(mo).padStart(2,'0')}-01`;
+        periodEnd   = `${y}-${String(mo).padStart(2,'0')}-${String(lastDay).padStart(2,'0')}`;
+      } else if (pType === 'year' && periodStart) {
+        const yr = new Date(periodStart + 'T00:00:00').getFullYear();
+        periodStart = `${yr}-01-01`;
+        periodEnd   = `${yr}-12-31`;
+      } else if (pType === 'single_date') {
+        periodEnd = periodStart;
+      }
+
+      const isSpecial    = editDraft.locationId === 'corporate' || editDraft.locationId === 'other';
+      const dbLocationId = isSpecial ? null : (editDraft.locationId || null);
+
+      await supabase.from('bills').update({
+        category:       editDraft.category,
+        location_id:    dbLocationId,
+        location_label: editDraft.locationLabel || null,
+        period_type:    pType,
+        period_start:   periodStart,
+        period_end:     periodEnd,
+      }).eq('id', editingBillId);
+
+      queryClient.invalidateQueries({ queryKey: ['bills'] });
+      setEditingBillId(null);
+      setEditDraft(null);
+    } catch (err: any) {
+      alert(`Save failed: ${err.message}`);
+    } finally {
+      setSavingEdit(false);
+    }
   };
 
   const doneCount   = queue.filter((i) => i.status === 'done' && !i.saved).length;
@@ -669,6 +767,13 @@ export default function BillsPage() {
               <option value="all">All locations</option>
               {uniqueLocations.map((l) => <option key={l}>{l}</option>)}
             </select>
+            <select value={filterMonth} onChange={(e) => setFilterMonth(e.target.value)}
+              className="border border-gray-200 rounded-lg px-3 py-1.5 text-xs font-semibold text-gray-600 focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30">
+              <option value="all">All dates</option>
+              {uniqueMonths.map(({ value, label }) => (
+                <option key={value} value={value}>{label}</option>
+              ))}
+            </select>
             <span className="text-xs text-gray-400 ml-auto">{filtered.length} bill{filtered.length !== 1 ? 's' : ''}</span>
           </div>
 
@@ -693,7 +798,7 @@ export default function BillsPage() {
                   <tr className="bg-gray-50 border-b border-gray-200">
                     <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Supplier</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Invoice #</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Period</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Issue Date</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Location</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Category</th>
                     <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Net / Mo</th>
@@ -714,7 +819,8 @@ export default function BillsPage() {
                     }
                     const isSpread = bill.period_type === 'year' || bill.period_type === 'custom';
                     return (
-                      <tr key={bill.id} className="hover:bg-gray-50 transition-colors">
+                      <React.Fragment key={bill.id}>
+                      <tr className="hover:bg-gray-50 transition-colors">
                         <td className="px-4 py-3 font-semibold text-gray-900">{bill.supplier_name}</td>
                         <td className="px-4 py-3 text-gray-500 font-mono text-xs">{bill.invoice_number ?? '—'}</td>
                         <td className="px-4 py-3 text-gray-600 whitespace-nowrap text-xs">{fmtPeriod(bill)}</td>
@@ -754,12 +860,138 @@ export default function BillsPage() {
                                 <Eye size={14} />
                               </a>
                             )}
+                            <button
+                              onClick={() => editingBillId === bill.id ? setEditingBillId(null) : startEdit(bill)}
+                              className={`transition-colors ${editingBillId === bill.id ? 'text-indigo-500' : 'text-gray-300 hover:text-indigo-500'}`}
+                              title="Edit"
+                            >
+                              <Pencil size={14} />
+                            </button>
                             <button onClick={() => deleteBill(bill.id)} className="text-gray-300 hover:text-red-500 transition-colors">
                               <Trash2 size={14} />
                             </button>
                           </div>
                         </td>
                       </tr>
+                      {/* Inline edit row */}
+                      {editingBillId === bill.id && editDraft && (
+                        <tr className="bg-indigo-50/60">
+                          <td colSpan={9} className="px-4 py-4">
+                            <div className="grid grid-cols-5 gap-3 items-end">
+                              {/* Location */}
+                              <div>
+                                <label className="flex items-center gap-1 text-xs font-semibold text-gray-500 mb-1">
+                                  <MapPin size={10} />Location
+                                </label>
+                                <div className="relative">
+                                  <select
+                                    value={editDraft.locationId}
+                                    onChange={(e) => {
+                                      const opt = allLocationOptions.find((l) => l.id === e.target.value);
+                                      setEditDraft((d) => d ? { ...d, locationId: e.target.value, locationLabel: opt?.name ?? '' } : d);
+                                    }}
+                                    className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300 appearance-none pr-6"
+                                  >
+                                    <option value="">— Select location —</option>
+                                    {locations.length > 0 && (
+                                      <optgroup label="Restaurants / Sites">
+                                        {locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+                                      </optgroup>
+                                    )}
+                                    <optgroup label="Other">
+                                      {SPECIAL_LOCATIONS.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+                                    </optgroup>
+                                  </select>
+                                  <ChevronDown size={12} className="absolute right-2 top-2 text-gray-400 pointer-events-none" />
+                                </div>
+                              </div>
+
+                              {/* Category */}
+                              <div>
+                                <label className="block text-xs font-semibold text-gray-500 mb-1">Category</label>
+                                <div className="relative">
+                                  <select
+                                    value={editDraft.category}
+                                    onChange={(e) => setEditDraft((d) => d ? { ...d, category: e.target.value } : d)}
+                                    className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300 appearance-none pr-6"
+                                  >
+                                    {CATEGORIES.map((c) => <option key={c}>{c}</option>)}
+                                  </select>
+                                  <ChevronDown size={12} className="absolute right-2 top-2 text-gray-400 pointer-events-none" />
+                                </div>
+                              </div>
+
+                              {/* Period type */}
+                              <div>
+                                <label className="flex items-center gap-1 text-xs font-semibold text-gray-500 mb-1">
+                                  <Calendar size={10} />Period Type
+                                </label>
+                                <div className="relative">
+                                  <select
+                                    value={editDraft.periodType}
+                                    onChange={(e) => setEditDraft((d) => d ? { ...d, periodType: e.target.value as PeriodType } : d)}
+                                    className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300 appearance-none pr-6"
+                                  >
+                                    {(Object.entries(PERIOD_LABELS) as [PeriodType, string][]).map(([v, l]) => (
+                                      <option key={v} value={v}>{l}</option>
+                                    ))}
+                                  </select>
+                                  <ChevronDown size={12} className="absolute right-2 top-2 text-gray-400 pointer-events-none" />
+                                </div>
+                              </div>
+
+                              {/* Period start */}
+                              <div>
+                                <label className="block text-xs font-semibold text-gray-500 mb-1">
+                                  {editDraft.periodType === 'single_date' ? 'Date' :
+                                   editDraft.periodType === 'month'       ? 'Month (any day)' :
+                                   editDraft.periodType === 'year'        ? 'Year (any day)' : 'Start Date'}
+                                </label>
+                                <input
+                                  type="date"
+                                  value={editDraft.periodStart}
+                                  onChange={(e) => setEditDraft((d) => d ? { ...d, periodStart: e.target.value } : d)}
+                                  className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                                />
+                              </div>
+
+                              {/* End date (custom only) or save/cancel */}
+                              {editDraft.periodType === 'custom' ? (
+                                <div>
+                                  <label className="block text-xs font-semibold text-gray-500 mb-1">End Date</label>
+                                  <input
+                                    type="date"
+                                    value={editDraft.periodEnd}
+                                    onChange={(e) => setEditDraft((d) => d ? { ...d, periodEnd: e.target.value } : d)}
+                                    className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                                  />
+                                </div>
+                              ) : (
+                                <div />
+                              )}
+                            </div>
+
+                            {/* Save / Cancel buttons */}
+                            <div className="flex items-center gap-2 mt-3">
+                              <button
+                                onClick={saveEdit}
+                                disabled={savingEdit}
+                                className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white text-xs font-bold rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+                              >
+                                {savingEdit ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+                                {savingEdit ? 'Saving…' : 'Save Changes'}
+                              </button>
+                              <button
+                                onClick={() => { setEditingBillId(null); setEditDraft(null); }}
+                                className="px-3 py-1.5 text-xs font-semibold text-gray-500 hover:text-gray-700 border border-gray-200 rounded-lg bg-white transition-colors"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                      </React.Fragment>
                     );
                   })}
                 </tbody>

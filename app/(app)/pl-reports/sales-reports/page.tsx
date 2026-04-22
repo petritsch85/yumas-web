@@ -969,12 +969,12 @@ export default function SalesReportsPage() {
     queryFn: async () => {
       const { data } = await supabase
         .from('shift_reports')
-        .select('report_date,shift_type,net_total')
+        .select('report_date,shift_type,net_total,z_report_number')
         .eq('location_id', location!.id)
         .gte('report_date', `${year}-01-01`)
         .lte('report_date', `${year}-12-31`)
         .order('report_date', { ascending: true });
-      return (data ?? []) as Pick<ShiftRow, 'report_date'|'shift_type'|'net_total'>[];
+      return (data ?? []) as Pick<ShiftRow, 'report_date'|'shift_type'|'net_total'|'z_report_number'>[];
     },
   });
 
@@ -1274,39 +1274,126 @@ export default function SalesReportsPage() {
     return { lunchForecastMap, dinnerForecastMap, totalForecastMap };
   }, [forecastSettings, closureSet, dailyCols]);
 
-  // Full-year forecast maps (all 52 weeks, not just the selected quarter)
-  // Used to populate the weekly table with forecast values for weeks without uploaded data
-  const { weekForecastNetMap, lunchWeekForecastMap, dinnerWeekForecastMap, totalWeekForecastMap,
-          lunchWeekForecastCountMap, dinnerWeekForecastCountMap } = useMemo(() => {
-    const wNet:    Record<number, number> = {};
-    const wLunch:  Record<number, number> = {};
-    const wDinner: Record<number, number> = {};
-    const wTotal:  Record<number, number> = {};
-    const wLunchCnt:  Record<number, number> = {};
-    const wDinnerCnt: Record<number, number> = {};
+  // Full-year combined maps: per day, use actual shift data if uploaded; otherwise use forecast.
+  // This makes the weekly Summary rows = exact sum of every daily cell shown in the daily sheet.
+  const {
+    weekForecastNetMap,         // for the weekly P&L section (no uploaded weekly report)
+    lunchWeekCombinedMap, dinnerWeekCombinedMap, totalWeekCombinedMap,
+    lunchWeekCombinedCountMap, dinnerWeekCombinedCountMap,
+    lunchWeekIsForecastMap, dinnerWeekIsForecastMap, totalWeekIsForecastMap,
+  } = useMemo(() => {
+    const wNet:         Record<number, number>  = {};
+    const wLunch:       Record<number, number>  = {};
+    const wDinner:      Record<number, number>  = {};
+    const wTotal:       Record<number, number>  = {};
+    const wLunchCnt:    Record<number, number>  = {};
+    const wDinnerCnt:   Record<number, number>  = {};
+    const wLunchFcast:  Record<number, boolean> = {};
+    const wDinnerFcast: Record<number, boolean> = {};
+    const wTotalFcast:  Record<number, boolean> = {};
+
     const lS = forecastSettings.find(s => s.shift_type === 'lunch');
     const dS = forecastSettings.find(s => s.shift_type === 'dinner');
-    if (!lS && !dS) return { weekForecastNetMap: wNet, lunchWeekForecastMap: wLunch, dinnerWeekForecastMap: wDinner, totalWeekForecastMap: wTotal, lunchWeekForecastCountMap: wLunchCnt, dinnerWeekForecastCountMap: wDinnerCnt };
+
+    // Build actual lunch/dinner lookup using the same logic as the daily sheet:
+    // explicit shift_type if set, otherwise legacy fallback (lower Z-report number = lunch)
+    const byDate: Record<string, typeof yearShiftRows> = {};
+    for (const sr of yearShiftRows) {
+      if (!byDate[sr.report_date]) byDate[sr.report_date] = [];
+      byDate[sr.report_date].push(sr);
+    }
+    const actualLunch:  Record<string, number> = {};
+    const actualDinner: Record<string, number> = {};
+    for (const [dk, shifts] of Object.entries(byDate)) {
+      const allTagged = shifts.every(s => s.shift_type === 'lunch' || s.shift_type === 'dinner');
+      if (allTagged) {
+        for (const s of shifts) {
+          if (s.shift_type === 'lunch')
+            actualLunch[dk]  = (actualLunch[dk]  ?? 0) + (s.net_total ?? 0);
+          else
+            actualDinner[dk] = (actualDinner[dk] ?? 0) + (s.net_total ?? 0);
+        }
+      } else {
+        // Legacy fallback: sort ascending by Z-report number; first = lunch, second = dinner
+        const sorted = [...shifts].sort(
+          (a, b) => parseInt(a.z_report_number || '0', 10) - parseInt(b.z_report_number || '0', 10)
+        );
+        if (sorted[0]) actualLunch[dk]  = (actualLunch[dk]  ?? 0) + (sorted[0].net_total ?? 0);
+        if (sorted[1]) actualDinner[dk] = (actualDinner[dk] ?? 0) + (sorted[1].net_total ?? 0);
+      }
+    }
+
+    // "today" key — used to match the daily sheet's rule: forecast only for today or future days
+    const _now = new Date();
+    const todayKey = `${_now.getFullYear()}-${String(_now.getMonth()+1).padStart(2,'0')}-${String(_now.getDate()).padStart(2,'0')}`;
+
     for (let m = 1; m <= 12; m++) {
       for (let d = 1; d <= daysInMonth(year, m); d++) {
         const dk = `${year}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
         const kw = isoWeek(dk);
-        const lOverride = overrideMap[`lunch:${dk}`];
-        const dOverride = overrideMap[`dinner:${dk}`];
-        const lv = lOverride?.net_revenue ?? (lS && !closureSet.has(`lunch:${dk}`)  ? computeDailyForecast(dk, lS) : 0);
-        const dv = dOverride?.net_revenue ?? (dS && !closureSet.has(`dinner:${dk}`) ? computeDailyForecast(dk, dS) : 0);
+        // Match the daily sheet exactly: forecast only for today or future dates
+        const isTodayOrFuture = dk >= todayKey;
+        // For the weekly P&L forecast map, use week-level gate (full future/current weeks)
+        const isFutureOrCurrentWk = kw >= cwk;
+
+        // ── Lunch: actual if uploaded, else forecast for today-or-future days ──
+        let lv = 0, lFcast = false;
+        if (actualLunch[dk] !== undefined) {
+          lv = actualLunch[dk];
+          if (lv > 0) wLunchCnt[kw] = (wLunchCnt[kw] ?? 0) + 1;
+        } else if (lS && isTodayOrFuture && !closureSet.has(`lunch:${dk}`)) {
+          lv = overrideMap[`lunch:${dk}`]?.net_revenue ?? computeDailyForecast(dk, lS);
+          if (lv > 0) { lFcast = true; wLunchCnt[kw] = (wLunchCnt[kw] ?? 0) + 1; }
+        }
+        if (lv !== 0) {
+          wLunch[kw] = (wLunch[kw] ?? 0) + lv;
+          if (lFcast) wLunchFcast[kw] = true;
+        }
+
+        // ── Dinner: actual if uploaded, else forecast for today-or-future days ──
+        let dv = 0, dFcast = false;
+        if (actualDinner[dk] !== undefined) {
+          dv = actualDinner[dk];
+          if (dv > 0) wDinnerCnt[kw] = (wDinnerCnt[kw] ?? 0) + 1;
+        } else if (dS && isTodayOrFuture && !closureSet.has(`dinner:${dk}`)) {
+          dv = overrideMap[`dinner:${dk}`]?.net_revenue ?? computeDailyForecast(dk, dS);
+          if (dv > 0) { dFcast = true; wDinnerCnt[kw] = (wDinnerCnt[kw] ?? 0) + 1; }
+        }
+        if (dv !== 0) {
+          wDinner[kw] = (wDinner[kw] ?? 0) + dv;
+          if (dFcast) wDinnerFcast[kw] = true;
+        }
+
+        // ── Total ──
         const tv = lv + dv;
-        // Only show forecast for current week onwards — past weeks without data stay blank
-        const isFutureOrCurrent = kw >= cwk;
-        if (!weekMap[kw] && tv > 0 && isFutureOrCurrent) wNet[kw] = (wNet[kw] ?? 0) + tv;
-        // Summary rows: forecast only from current week onwards, where no shift data exists
-        if (!lunchWeekMap[kw]  && lv > 0 && lS         && isFutureOrCurrent) { wLunch[kw]  = (wLunch[kw]  ?? 0) + lv; wLunchCnt[kw]  = (wLunchCnt[kw]  ?? 0) + 1; }
-        if (!dinnerWeekMap[kw] && dv > 0 && dS         && isFutureOrCurrent) { wDinner[kw] = (wDinner[kw] ?? 0) + dv; wDinnerCnt[kw] = (wDinnerCnt[kw] ?? 0) + 1; }
-        if (!totalWeekMap[kw]  && tv > 0 && (lS || dS) && isFutureOrCurrent)   wTotal[kw]  = (wTotal[kw]  ?? 0) + tv;
+        if (tv !== 0) {
+          wTotal[kw] = (wTotal[kw] ?? 0) + tv;
+          if (lFcast || dFcast) wTotalFcast[kw] = true;
+        }
+
+        // ── weekForecastNetMap: for the weekly P&L section (no uploaded weekly report) ──
+        if (!weekMap[kw] && isFutureOrCurrentWk) {
+          const lfNet = lS && !closureSet.has(`lunch:${dk}`)
+            ? (overrideMap[`lunch:${dk}`]?.net_revenue ?? computeDailyForecast(dk, lS)) : 0;
+          const dfNet = dS && !closureSet.has(`dinner:${dk}`)
+            ? (overrideMap[`dinner:${dk}`]?.net_revenue ?? computeDailyForecast(dk, dS)) : 0;
+          if (lfNet + dfNet > 0) wNet[kw] = (wNet[kw] ?? 0) + lfNet + dfNet;
+        }
       }
     }
-    return { weekForecastNetMap: wNet, lunchWeekForecastMap: wLunch, dinnerWeekForecastMap: wDinner, totalWeekForecastMap: wTotal, lunchWeekForecastCountMap: wLunchCnt, dinnerWeekForecastCountMap: wDinnerCnt };
-  }, [forecastSettings, overrideMap, closureSet, year, weekMap, lunchWeekMap, dinnerWeekMap, totalWeekMap, cwk]);
+
+    return {
+      weekForecastNetMap:         wNet,
+      lunchWeekCombinedMap:       wLunch,
+      dinnerWeekCombinedMap:      wDinner,
+      totalWeekCombinedMap:       wTotal,
+      lunchWeekCombinedCountMap:  wLunchCnt,
+      dinnerWeekCombinedCountMap: wDinnerCnt,
+      lunchWeekIsForecastMap:     wLunchFcast,
+      dinnerWeekIsForecastMap:    wDinnerFcast,
+      totalWeekIsForecastMap:     wTotalFcast,
+    };
+  }, [forecastSettings, overrideMap, closureSet, year, weekMap, yearShiftRows, cwk]);
 
   const topCats = useMemo(() =>
     Object.entries(weeklyResult?.categoryRevenue ?? {}).sort((a,b) => b[1]-a[1]).slice(0, 12),
@@ -1824,30 +1911,43 @@ export default function SalesReportsPage() {
       {/* ── Shared controls ── */}
       {activeTab !== 'upload' && (
         <div className="mb-5 space-y-3">
-          {/* Row 1: Location + Year */}
-          <div className="flex items-center gap-6 flex-wrap">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Location</span>
-              {locations.map(l => (
-                <button key={l.id} onClick={() => setLocation(l)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
-                    location?.id === l.id ? 'bg-[#1B5E20] text-white border-[#1B5E20]' : 'bg-white text-gray-600 border-gray-200 hover:border-[#1B5E20] hover:text-[#1B5E20]'
-                  }`}
-                ><MapPin size={11} />{l.name}</button>
-              ))}
+          {/* Row 1: Location + Year + Quarter dropdowns */}
+          <div className="flex items-center gap-3 flex-wrap">
+            {/* Location */}
+            <div className="flex items-center gap-1.5">
+              <MapPin size={13} className="text-gray-400" />
+              <select
+                value={location?.id ?? ''}
+                onChange={e => { const l = locations.find(l => l.id === e.target.value); if (l) setLocation(l); }}
+                className="border border-gray-200 rounded-lg px-3 py-1.5 text-xs font-semibold text-gray-700 bg-white focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 cursor-pointer"
+              >
+                <option value="" disabled>Select location</option>
+                {locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+              </select>
             </div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Year</span>
-              {[2025, 2026, 2027].map(y => (
-                <button key={y} onClick={() => setYear(y)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors ${
-                    year === y ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'
-                  }`}
-                >{y}</button>
-              ))}
-            </div>
+            {/* Year */}
+            <select
+              value={year}
+              onChange={e => setYear(Number(e.target.value))}
+              className="border border-gray-200 rounded-lg px-3 py-1.5 text-xs font-semibold text-gray-700 bg-white focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 cursor-pointer"
+            >
+              {[2024, 2025, 2026, 2027, 2028].map(y => <option key={y} value={y}>{y}</option>)}
+            </select>
+            {/* Quarter (only when on daily sub-tab) */}
+            {subTab === 'daily' && (
+              <select
+                value={quarter}
+                onChange={e => setQuarter(Number(e.target.value))}
+                className="border border-gray-200 rounded-lg px-3 py-1.5 text-xs font-semibold text-gray-700 bg-white focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 cursor-pointer"
+              >
+                <option value={1}>Q1 — Jan · Feb · Mar</option>
+                <option value={2}>Q2 — Apr · May · Jun</option>
+                <option value={3}>Q3 — Jul · Aug · Sep</option>
+                <option value={4}>Q4 — Oct · Nov · Dec</option>
+              </select>
+            )}
           </div>
-          {/* Row 2: Daily / Weekly / Monthly sub-tabs + Quarter picker */}
+          {/* Row 2: Daily / Weekly / Monthly sub-tabs */}
           <div className="flex items-center gap-6 flex-wrap">
             <div className="flex items-center gap-1.5">
               {(['daily','weekly','monthly'] as const).map(st => (
@@ -1858,18 +1958,7 @@ export default function SalesReportsPage() {
                 >{st.charAt(0).toUpperCase() + st.slice(1)}</button>
               ))}
             </div>
-            {subTab === 'daily' && (
-              <div className="flex items-center gap-1.5">
-                <span className="text-xs font-bold text-gray-400 uppercase tracking-wider mr-1">Quarter</span>
-                {(['Q1','Q2','Q3','Q4'] as const).map((qLabel, i) => (
-                  <button key={qLabel} onClick={() => setQuarter(i+1)}
-                    className={`px-2.5 py-1.5 rounded-lg text-xs font-bold border transition-colors ${
-                      quarter === i+1 ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'
-                    }`}
-                  >{qLabel}</button>
-                ))}
-              </div>
-            )}
+            {subTab === 'daily' && (<div />)}
             {subTab === 'daily' && (
               <div className="ml-auto flex items-center gap-2">
                 <button onClick={() => { setShowClosuresPanel(p => !p); setShowForecastPanel(false); }}
@@ -1934,14 +2023,16 @@ export default function SalesReportsPage() {
               {/* Location */}
               <div>
                 <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Location</label>
-                <div className="flex flex-wrap gap-2">
-                  {locations.map(l => (
-                    <button key={l.id} onClick={() => setLocation(l)}
-                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium border transition-colors ${
-                        location?.id === l.id ? 'bg-[#1B5E20] text-white border-[#1B5E20]' : 'bg-white text-gray-600 border-gray-200 hover:border-[#1B5E20] hover:text-[#1B5E20]'
-                      }`}
-                    ><MapPin size={12} />{l.name}</button>
-                  ))}
+                <div className="flex items-center gap-1.5">
+                  <MapPin size={13} className="text-gray-400" />
+                  <select
+                    value={location?.id ?? ''}
+                    onChange={e => { const l = locations.find(l => l.id === e.target.value); if (l) setLocation(l); }}
+                    className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm font-medium text-gray-700 bg-white focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 cursor-pointer"
+                  >
+                    <option value="" disabled>Select location</option>
+                    {locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+                  </select>
                 </div>
               </div>
 
@@ -3403,12 +3494,12 @@ export default function SalesReportsPage() {
                       </td>
                     </tr>
                     {([
-                      { label: '☀️  Lunch · Net Revenue',  wMap: lunchWeekMap,  fMap: lunchWeekForecastMap,  fy: lunchFYNet,  bold: false, cntMap: null,               fCntMap: null },
-                      { label: '     Revenue / Day',        wMap: lunchWeekMap,  fMap: lunchWeekForecastMap,  fy: 0,           bold: false, cntMap: lunchWeekCountMap,  fCntMap: lunchWeekForecastCountMap,  perDay: true },
-                      { label: '🌙  Dinner · Net Revenue', wMap: dinnerWeekMap, fMap: dinnerWeekForecastMap, fy: dinnerFYNet, bold: false, cntMap: null,               fCntMap: null },
-                      { label: '     Revenue / Day',        wMap: dinnerWeekMap, fMap: dinnerWeekForecastMap, fy: 0,           bold: false, cntMap: dinnerWeekCountMap, fCntMap: dinnerWeekForecastCountMap, perDay: true },
-                      { label: '∑   Total · Net Revenue',  wMap: totalWeekMap,  fMap: totalWeekForecastMap,  fy: totalFYNet,  bold: true,  cntMap: null,               fCntMap: null },
-                    ] as { label: string; wMap: Record<number,number>; fMap: Record<number,number>; fy: number; bold: boolean; perDay?: boolean; cntMap: Record<number,number>|null; fCntMap: Record<number,number>|null }[]).map((row, i) => {
+                      { label: '☀️  Lunch · Net Revenue',  wMap: lunchWeekCombinedMap,  fMap: lunchWeekIsForecastMap,  fy: lunchFYNet,  bold: false, cntMap: lunchWeekCombinedCountMap },
+                      { label: '     Revenue / Day',        wMap: lunchWeekCombinedMap,  fMap: lunchWeekIsForecastMap,  fy: 0,           bold: false, cntMap: lunchWeekCombinedCountMap,  perDay: true },
+                      { label: '🌙  Dinner · Net Revenue', wMap: dinnerWeekCombinedMap, fMap: dinnerWeekIsForecastMap, fy: dinnerFYNet, bold: false, cntMap: dinnerWeekCombinedCountMap },
+                      { label: '     Revenue / Day',        wMap: dinnerWeekCombinedMap, fMap: dinnerWeekIsForecastMap, fy: 0,           bold: false, cntMap: dinnerWeekCombinedCountMap, perDay: true },
+                      { label: '∑   Total · Net Revenue',  wMap: totalWeekCombinedMap,  fMap: totalWeekIsForecastMap,  fy: totalFYNet,  bold: true,  cntMap: null },
+                    ] as { label: string; wMap: Record<number,number>; fMap: Record<number,boolean>; fy: number; bold: boolean; perDay?: boolean; cntMap: Record<number,number>|null }[]).map((row, i) => {
                       const bg = row.bold ? '#f0fdf4' : '#ffffff';
                       return (
                         <tr key={i} className="border-b border-gray-100 hover:bg-gray-50/60 group" style={{ backgroundColor: bg }}>
@@ -3418,23 +3509,20 @@ export default function SalesReportsPage() {
                           </td>
                           {Array.from({ length: TOTAL_WEEKS }, (_, j) => j + 1).map(kw => {
                             const isCurWk = kw === cwk;
-                            const val  = row.wMap[kw] ?? null;
-                            const fval = row.fMap[kw] ?? null;
+                            const val        = row.wMap[kw] ?? null;
+                            const isForecast = (row.fMap as Record<number,boolean>)[kw] ?? false;
                             let cell: React.ReactNode;
                             if (row.perDay) {
-                              const cnt  = row.cntMap?.[kw]  ?? null;
-                              const fcnt = row.fCntMap?.[kw] ?? null;
+                              const cnt = row.cntMap?.[kw] ?? null;
                               if (val !== null && val > 0 && cnt && cnt > 0)
-                                cell = <span className="text-gray-900 text-[11px]">{fmtNum(val / cnt)}</span>;
-                              else if (fval !== null && fval > 0 && fcnt && fcnt > 0)
-                                cell = <span className="italic text-gray-900 text-[11px]">{fmtNum(fval / fcnt)}</span>;
+                                cell = <span className={`text-[11px] ${isForecast ? 'italic text-gray-900' : 'text-gray-900'}`}>{fmtNum(val / cnt)}</span>;
                               else
                                 cell = <span className="text-gray-300">—</span>;
                             } else {
                               if (val !== null && val > 0)
-                                cell = <span className={row.bold ? 'text-[#1B5E20]' : 'text-blue-700'}>{fmtNum(val)}</span>;
-                              else if (fval !== null && fval > 0)
-                                cell = <span className={`italic ${row.bold ? 'text-indigo-500' : 'text-indigo-400'}`}>{fmtNum(fval)}</span>;
+                                cell = isForecast
+                                  ? <span className={`italic ${row.bold ? 'text-indigo-500' : 'text-indigo-400'}`}>{fmtNum(val)}</span>
+                                  : <span className={row.bold ? 'text-[#1B5E20]' : 'text-blue-700'}>{fmtNum(val)}</span>;
                               else
                                 cell = <span className="text-gray-300">—</span>;
                             }
