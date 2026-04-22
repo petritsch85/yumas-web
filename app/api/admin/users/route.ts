@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabase-admin';
+import { getSupabaseAdmin } from '@/lib/supabase-admin';
 
 export async function POST(request: Request) {
   try {
@@ -12,8 +12,10 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Password must be at least 6 characters' }, { status: 400 });
     }
 
+    const admin = getSupabaseAdmin();
+
     // Create the Supabase auth user (auto-confirmed — no email verification needed)
-    const { data, error: authError } = await supabaseAdmin.auth.admin.createUser({
+    const { data, error: authError } = await admin.auth.admin.createUser({
       email,
       password,
       email_confirm: true,
@@ -25,7 +27,7 @@ export async function POST(request: Request) {
     }
 
     // Upsert the profile row (a trigger may have already created one)
-    const { error: profileError } = await supabaseAdmin
+    const { error: profileError } = await admin
       .from('profiles')
       .upsert(
         {
@@ -40,7 +42,7 @@ export async function POST(request: Request) {
 
     if (profileError) {
       // Roll back the auth user if profile fails
-      await supabaseAdmin.auth.admin.deleteUser(data.user.id);
+      await admin.auth.admin.deleteUser(data.user.id);
       return NextResponse.json({ error: profileError.message }, { status: 400 });
     }
 
