@@ -3,9 +3,10 @@ import { supabaseAdmin } from '@/lib/supabase-admin';
 
 export async function PATCH(
   request: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params;
     const { role, locationId, isActive } = await request.json();
 
     const { error } = await supabaseAdmin
@@ -15,7 +16,7 @@ export async function PATCH(
         location_id: locationId || null,
         is_active: isActive,
       })
-      .eq('id', params.id);
+      .eq('id', id);
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 400 });
