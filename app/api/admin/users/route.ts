@@ -1,6 +1,15 @@
 import { NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase-admin';
 
+// Temporary diagnostic — remove after confirming env var is live
+export async function GET() {
+  return NextResponse.json({
+    hasServiceKey: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
+    keyLength: process.env.SUPABASE_SERVICE_ROLE_KEY?.length ?? 0,
+    hasUrl: !!process.env.NEXT_PUBLIC_SUPABASE_URL,
+  });
+}
+
 export async function POST(request: Request) {
   try {
     const { fullName, email, password, role, locationId } = await request.json();
