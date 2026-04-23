@@ -17,6 +17,7 @@ type TargetRow = {
   tue_target: number;
   wed_target: number;
   fri_target: number;
+  scales_with_demand: boolean;
 };
 
 type DayKey = 'mon_target' | 'tue_target' | 'wed_target' | 'fri_target';
@@ -43,6 +44,36 @@ const DAY_COLS: { key: DayKey; label: string }[] = [
   { key: 'wed_target', label: 'Wed' },
   { key: 'fri_target', label: 'Fri' },
 ];
+
+/* ─── Toggle switch ──────────────────────────────────────────────────────── */
+function ToggleSwitch({
+  checked,
+  onChange,
+  disabled,
+}: {
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      disabled={disabled}
+      onClick={() => !disabled && onChange(!checked)}
+      className={`relative inline-flex h-5 w-9 flex-shrink-0 rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 ${
+        checked ? 'bg-[#1B5E20]' : 'bg-gray-200'
+      } ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+    >
+      <span
+        className={`inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ${
+          checked ? 'translate-x-4' : 'translate-x-0'
+        }`}
+      />
+    </button>
+  );
+}
 
 /* ─── Inline editable cell ───────────────────────────────────────────────── */
 function EditableCell({
@@ -95,11 +126,17 @@ function EditableCell({
 function SectionGroup({
   section,
   rows,
+  activeDay,
   onUpdate,
+  onToggleScale,
+  pendingScaleIds,
 }: {
   section: string;
   rows: TargetRow[];
+  activeDay: DayKey;
   onUpdate: (id: string, key: DayKey, value: number) => void;
+  onToggleScale: (id: string, value: boolean) => void;
+  pendingScaleIds: Set<string>;
 }) {
   const [collapsed, setCollapsed] = useState(false);
 
@@ -110,7 +147,7 @@ function SectionGroup({
         className="bg-gray-50 cursor-pointer select-none"
         onClick={() => setCollapsed(c => !c)}
       >
-        <td colSpan={6} className="px-4 py-2">
+        <td colSpan={8} className="px-4 py-2">
           <div className="flex items-center gap-2">
             {collapsed
               ? <ChevronRight size={13} className="text-gray-400" />
@@ -130,6 +167,22 @@ function SectionGroup({
         <tr key={row.id} className="border-t border-gray-50 hover:bg-gray-50/50 transition-colors">
           <td className="px-4 py-2 text-sm text-gray-800">{row.item_name}</td>
           <td className="px-4 py-2 text-xs text-gray-500">{row.unit}</td>
+
+          {/* Base Qty (read-only, current active day) */}
+          <td className="px-2 py-2 text-center">
+            <span className="text-sm text-gray-500">
+              {row[activeDay] === 0 ? <span className="text-gray-300">—</span> : row[activeDay]}
+            </span>
+          </td>
+
+          {/* At 100% forecast (same as base, read-only) */}
+          <td className="px-2 py-2 text-center">
+            <span className="text-sm text-gray-400">
+              {row[activeDay] === 0 ? <span className="text-gray-200">—</span> : row[activeDay]}
+            </span>
+          </td>
+
+          {/* Editable targets */}
           {DAY_COLS.map(({ key }) => (
             <td key={key} className="px-2 py-2 text-center">
               <EditableCell
@@ -138,6 +191,15 @@ function SectionGroup({
               />
             </td>
           ))}
+
+          {/* Scales toggle */}
+          <td className="px-4 py-2 text-center">
+            <ToggleSwitch
+              checked={row.scales_with_demand}
+              onChange={v => onToggleScale(row.id, v)}
+              disabled={pendingScaleIds.has(row.id)}
+            />
+          </td>
         </tr>
       ))}
     </>
@@ -150,8 +212,10 @@ export default function DeliveryTargetsPage() {
   const fileRef = useRef<HTMLInputElement>(null);
 
   const [activeStore, setActiveStore] = useState<Store>('Eschborn');
+  const [activeDay, setActiveDay] = useState<DayKey>('mon_target');
   const [uploading, setUploading] = useState(false);
   const [uploadMsg, setUploadMsg] = useState('');
+  const [pendingScaleIds, setPendingScaleIds] = useState<Set<string>>(new Set());
 
   /* ─ Query ─ */
   const { data: targets = [], isLoading } = useQuery({
@@ -178,6 +242,28 @@ export default function DeliveryTargetsPage() {
       if (error) throw error;
     },
     onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['delivery-targets', activeStore] });
+    },
+  });
+
+  /* ─ Toggle scales_with_demand ─ */
+  const toggleScale = useMutation({
+    mutationFn: async ({ id, value }: { id: string; value: boolean }) => {
+      const { error } = await supabase
+        .from('delivery_targets')
+        .update({ scales_with_demand: value })
+        .eq('id', id);
+      if (error) throw error;
+    },
+    onMutate: ({ id }) => {
+      setPendingScaleIds(prev => new Set([...prev, id]));
+    },
+    onSettled: (_, __, { id }) => {
+      setPendingScaleIds(prev => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
       qc.invalidateQueries({ queryKey: ['delivery-targets', activeStore] });
     },
   });
@@ -226,7 +312,6 @@ export default function DeliveryTargetsPage() {
       const parsed: ParsedItem[] = [];
       let currentSection = 'Uncategorised';
 
-      // Skip rows 0 and 1 (headers), start from row 2
       for (let i = 2; i < raw.length; i++) {
         const row = raw[i];
         const colA = String(row[0] ?? '').trim();
@@ -236,18 +321,16 @@ export default function DeliveryTargetsPage() {
         const colF = row[5];
         const colG = row[6];
 
-        if (!colA) continue; // completely empty row
+        if (!colA) continue;
 
         const hasUnit = colC !== '';
         const hasNumbers = [colD, colE, colF, colG].some(v => v !== '' && !isNaN(Number(v)));
 
         if (!hasUnit && !hasNumbers) {
-          // Section header row
           currentSection = colA;
           continue;
         }
 
-        // Data item
         parsed.push({
           section: currentSection,
           item_name: colA,
@@ -268,7 +351,6 @@ export default function DeliveryTargetsPage() {
       setUploadMsg(`Parse error: ${err.message}`);
     } finally {
       setUploading(false);
-      // Reset file input so same file can be re-uploaded
       if (fileRef.current) fileRef.current.value = '';
     }
   };
@@ -278,11 +360,12 @@ export default function DeliveryTargetsPage() {
     acc[sec] = targets.filter(t => t.section === sec);
     return acc;
   }, {});
-  // Also collect any unknown sections
   const knownSections = new Set(SECTIONS);
   const otherSections = [...new Set(targets.map(t => t.section).filter(s => !knownSections.has(s)))];
 
   const totalItems = targets.length;
+
+  const dayLabel = DAY_COLS.find(d => d.key === activeDay)?.label ?? '';
 
   return (
     <div>
@@ -326,8 +409,14 @@ export default function DeliveryTargetsPage() {
         </div>
       </div>
 
+      {/* Legend */}
+      <div className="mb-4 flex items-start gap-2 text-xs text-gray-500 bg-blue-50 border border-blue-100 rounded-lg px-4 py-2.5">
+        <span className="font-semibold text-blue-700 flex-shrink-0">Scales toggle:</span>
+        <span>When off, the item is always delivered at base quantity regardless of the sales forecast.</span>
+      </div>
+
       {/* Store tabs */}
-      <div className="flex gap-1 mb-5 bg-gray-100 rounded-xl p-1 w-fit">
+      <div className="flex gap-1 mb-4 bg-gray-100 rounded-xl p-1 w-fit">
         {STORES.map(store => (
           <button
             key={store}
@@ -341,6 +430,26 @@ export default function DeliveryTargetsPage() {
             {store}
           </button>
         ))}
+      </div>
+
+      {/* Day selector (for Base Qty column) */}
+      <div className="flex items-center gap-2 mb-5">
+        <span className="text-xs text-gray-400 font-medium">Viewing base qty for:</span>
+        <div className="flex gap-1 bg-gray-100 rounded-lg p-0.5">
+          {DAY_COLS.map(({ key, label }) => (
+            <button
+              key={key}
+              onClick={() => setActiveDay(key)}
+              className={`px-3 py-1 rounded-md text-xs font-semibold transition-colors ${
+                activeDay === key
+                  ? 'bg-white text-[#1B5E20] shadow-sm'
+                  : 'text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Table card */}
@@ -362,17 +471,26 @@ export default function DeliveryTargetsPage() {
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b border-gray-100">
                 <tr>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide w-[40%]">
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide w-[30%]">
                     Item Name
                   </th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">
                     Unit
+                  </th>
+                  <th className="px-2 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wide w-20" title={`Base target for ${dayLabel}`}>
+                    Base Qty ({dayLabel})
+                  </th>
+                  <th className="px-2 py-3 text-center text-xs font-semibold text-gray-400 uppercase tracking-wide w-24" title="Delivery qty when forecast = standard (100%)">
+                    At 100%
                   </th>
                   {DAY_COLS.map(({ key, label }) => (
                     <th key={key} className="px-2 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wide w-20">
                       {label}
                     </th>
                   ))}
+                  <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wide w-20">
+                    Scales
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -384,9 +502,14 @@ export default function DeliveryTargetsPage() {
                       key={section}
                       section={section}
                       rows={rows}
+                      activeDay={activeDay}
                       onUpdate={(id, key, value) =>
                         updateTarget.mutate({ id, key, value })
                       }
+                      onToggleScale={(id, value) =>
+                        toggleScale.mutate({ id, value })
+                      }
+                      pendingScaleIds={pendingScaleIds}
                     />
                   );
                 })}
@@ -397,9 +520,14 @@ export default function DeliveryTargetsPage() {
                       key={section}
                       section={section}
                       rows={rows}
+                      activeDay={activeDay}
                       onUpdate={(id, key, value) =>
                         updateTarget.mutate({ id, key, value })
                       }
+                      onToggleScale={(id, value) =>
+                        toggleScale.mutate({ id, value })
+                      }
+                      pendingScaleIds={pendingScaleIds}
                     />
                   );
                 })}

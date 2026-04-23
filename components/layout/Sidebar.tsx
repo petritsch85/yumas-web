@@ -114,8 +114,9 @@ const navGroups: NavGroup[] = [
   {
     label: 'DELIVERY',
     items: [
-      { label: 'Delivery Run',  href: '/delivery',         icon: Truck },
-      { label: 'Target Levels', href: '/delivery/targets', icon: Target },
+      { label: 'Delivery Run',   href: '/delivery',          icon: Truck },
+      { label: 'Target Levels',  href: '/delivery/targets',  icon: Target },
+      { label: 'Sales Forecast', href: '/delivery/forecast', icon: TrendingUp },
     ],
   },
   {
