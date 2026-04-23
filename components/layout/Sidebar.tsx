@@ -33,6 +33,7 @@ import {
   FileUp,
   LineChart,
   TableProperties,
+  PartyPopper,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase-browser';
 import { useEffect, useState } from 'react';
@@ -101,6 +102,12 @@ const navGroups: NavGroup[] = [
       { label: 'Controlling',        href: '/coming-soon/controlling', icon: TrendingUp },
       { label: 'Waste Log',          href: '/waste',                   icon: Trash2 },
       { label: 'Delivery Schedule',  href: '/calendar',                icon: CalendarDays },
+    ],
+  },
+  {
+    label: 'EVENTS',
+    items: [
+      { label: 'Events', href: '/events', icon: PartyPopper },
     ],
   },
   {
