@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
 import {
   Plus, X, Pencil, FileText, CalendarDays, Users, Phone, Mail,
-  MapPin, Euro, ChevronDown, ChevronUp, CheckCircle2, Clock, XCircle,
+  MapPin, Euro, ChevronDown, ChevronUp, CheckCircle2, Clock, XCircle, Star,
 } from 'lucide-react';
 
 /* ─── Types ─────────────────────────────────────────────────────────────── */
@@ -15,8 +15,9 @@ type EventRow = {
   id: string;
   name: string;
   location: string;
-  event_date: string;   // ISO date string
-  event_time: string | null;
+  event_date: string;
+  event_time_from: string | null;
+  event_time_until: string | null;
   num_guests: number;
   contact_name: string;
   contact_email: string | null;
@@ -26,6 +27,7 @@ type EventRow = {
   deposit_paid: number | null;
   notes: string | null;
   status: EventStatus;
+  confidence: number | null;   // 1–3, only used when tentative
   created_at: string;
 };
 
@@ -39,7 +41,8 @@ const EMPTY_DRAFT: EventDraft = {
   name: '',
   location: 'Eschborn',
   event_date: '',
-  event_time: '',
+  event_time_from: '',
+  event_time_until: '',
   num_guests: 0,
   contact_name: '',
   contact_email: '',
@@ -49,32 +52,84 @@ const EMPTY_DRAFT: EventDraft = {
   deposit_paid: null,
   notes: '',
   status: 'tentative',
+  confidence: 2,
 };
 
-const statusConfig: Record<EventStatus, { label: string; color: string; Icon: React.ComponentType<{ size?: number }> }> = {
-  tentative:  { label: 'Tentative',  color: 'bg-yellow-100 text-yellow-700', Icon: Clock },
-  confirmed:  { label: 'Confirmed',  color: 'bg-green-100 text-green-700',   Icon: CheckCircle2 },
-  cancelled:  { label: 'Cancelled',  color: 'bg-red-100 text-red-600',       Icon: XCircle },
+const statusConfig: Record<EventStatus, {
+  label: string;
+  badgeColor: string;
+  cardBg: string;
+  cardBorder: string;
+  dateBg: string;
+  dateText: string;
+  Icon: React.ComponentType<{ size?: number }>;
+}> = {
+  tentative: {
+    label: 'Tentative',
+    badgeColor: 'bg-yellow-500 text-white',
+    cardBg: 'bg-yellow-50',
+    cardBorder: 'border-yellow-200',
+    dateBg: 'bg-yellow-100',
+    dateText: 'text-yellow-800',
+    Icon: Clock,
+  },
+  confirmed: {
+    label: 'Confirmed',
+    badgeColor: 'bg-green-600 text-white',
+    cardBg: 'bg-green-50',
+    cardBorder: 'border-green-200',
+    dateBg: 'bg-green-100',
+    dateText: 'text-green-800',
+    Icon: CheckCircle2,
+  },
+  cancelled: {
+    label: 'Cancelled',
+    badgeColor: 'bg-red-500 text-white',
+    cardBg: 'bg-red-50',
+    cardBorder: 'border-red-200',
+    dateBg: 'bg-red-100',
+    dateText: 'text-red-800',
+    Icon: XCircle,
+  },
 };
 
 /* ─── Helpers ────────────────────────────────────────────────────────────── */
-function formatDate(iso: string) {
-  return new Date(iso).toLocaleDateString('de-DE', { day: '2-digit', month: 'short', year: 'numeric' });
-}
-
 function isUpcoming(event: EventRow) {
   return new Date(event.event_date) >= new Date(new Date().toDateString());
 }
 
+function fmtTime(t: string | null) {
+  return t ? t.slice(0, 5) : null;
+}
+
+function fmtMoney(n: number) {
+  return '€' + n.toLocaleString('de-DE', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+}
+
+/* ─── Star Rating ────────────────────────────────────────────────────────── */
+function StarRating({ value, onChange }: { value: number; onChange?: (v: number) => void }) {
+  return (
+    <div className="flex items-center gap-0.5">
+      {[1, 2, 3].map(n => (
+        <button
+          key={n}
+          type="button"
+          onClick={() => onChange?.(n)}
+          className={onChange ? 'cursor-pointer' : 'cursor-default'}
+        >
+          <Star
+            size={14}
+            className={n <= value ? 'text-yellow-400 fill-yellow-400' : 'text-gray-300'}
+          />
+        </button>
+      ))}
+    </div>
+  );
+}
+
 /* ─── Add / Edit Form ────────────────────────────────────────────────────── */
 function EventForm({
-  draft,
-  onChange,
-  onSubmit,
-  onCancel,
-  isPending,
-  error,
-  isEdit,
+  draft, onChange, onSubmit, onCancel, isPending, error, isEdit,
 }: {
   draft: EventDraft;
   onChange: (d: EventDraft) => void;
@@ -98,9 +153,7 @@ function EventForm({
         <h2 className="text-sm font-semibold text-gray-900">
           {isEdit ? 'Edit Event' : 'New Event'}
         </h2>
-        <button onClick={onCancel} className="text-gray-400 hover:text-gray-600">
-          <X size={16} />
-        </button>
+        <button onClick={onCancel} className="text-gray-400 hover:text-gray-600"><X size={16} /></button>
       </div>
 
       <div className="grid grid-cols-3 gap-4">
@@ -125,9 +178,7 @@ function EventForm({
             className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30"
           >
             {STATUSES.map(s => (
-              <option key={s} value={s}>
-                {statusConfig[s].label}
-              </option>
+              <option key={s} value={s}>{statusConfig[s].label}</option>
             ))}
           </select>
         </div>
@@ -155,17 +206,6 @@ function EventForm({
           />
         </div>
 
-        {/* Time */}
-        <div>
-          <label className="block text-xs font-medium text-gray-500 mb-1">Time</label>
-          <input
-            type="time"
-            value={draft.event_time ?? ''}
-            onChange={e => set('event_time', e.target.value)}
-            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30"
-          />
-        </div>
-
         {/* Guests */}
         <div>
           <label className="block text-xs font-medium text-gray-500 mb-1">Number of Guests *</label>
@@ -178,6 +218,44 @@ function EventForm({
             className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30"
           />
         </div>
+
+        {/* Time From */}
+        <div>
+          <label className="block text-xs font-medium text-gray-500 mb-1">Time From</label>
+          <input
+            type="time"
+            value={draft.event_time_from ?? ''}
+            onChange={e => set('event_time_from', e.target.value)}
+            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30"
+          />
+        </div>
+
+        {/* Time Until */}
+        <div>
+          <label className="block text-xs font-medium text-gray-500 mb-1">Time Until</label>
+          <input
+            type="time"
+            value={draft.event_time_until ?? ''}
+            onChange={e => set('event_time_until', e.target.value)}
+            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30"
+          />
+        </div>
+
+        {/* Confidence (only for tentative) */}
+        {draft.status === 'tentative' && (
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Confidence Level</label>
+            <div className="flex items-center gap-2 h-9">
+              <StarRating
+                value={draft.confidence ?? 2}
+                onChange={v => set('confidence', v)}
+              />
+              <span className="text-xs text-gray-400">
+                {draft.confidence === 1 ? 'Low' : draft.confidence === 2 ? 'Medium' : 'High'}
+              </span>
+            </div>
+          </div>
+        )}
 
         {/* Contact name */}
         <div>
@@ -236,7 +314,7 @@ function EventForm({
             step={0.01}
             value={draft.budget ?? ''}
             onChange={e => set('budget', e.target.value ? parseFloat(e.target.value) : null)}
-            placeholder="e.g. 2400.00"
+            placeholder="e.g. 2400"
             className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30"
           />
         </div>
@@ -250,7 +328,7 @@ function EventForm({
             step={0.01}
             value={draft.deposit_paid ?? ''}
             onChange={e => set('deposit_paid', e.target.value ? parseFloat(e.target.value) : null)}
-            placeholder="e.g. 500.00"
+            placeholder="e.g. 500"
             className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30"
           />
         </div>
@@ -271,10 +349,7 @@ function EventForm({
       {error && <p className="text-red-500 text-xs mt-3 font-medium">{error}</p>}
 
       <div className="flex justify-end gap-2 mt-5">
-        <button
-          onClick={onCancel}
-          className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900"
-        >
+        <button onClick={onCancel} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900">
           Cancel
         </button>
         <button
@@ -290,89 +365,115 @@ function EventForm({
 }
 
 /* ─── Event Card ─────────────────────────────────────────────────────────── */
-function EventCard({
-  event,
-  onEdit,
-}: {
-  event: EventRow;
-  onEdit: (e: EventRow) => void;
-}) {
+function EventCard({ event, onEdit }: { event: EventRow; onEdit: (e: EventRow) => void }) {
   const [expanded, setExpanded] = useState(false);
   const cfg = statusConfig[event.status];
   const StatusIcon = cfg.Icon;
 
+  const timeStr = (() => {
+    const from = fmtTime(event.event_time_from);
+    const until = fmtTime(event.event_time_until);
+    if (from && until) return `${from} – ${until}`;
+    if (from) return `from ${from}`;
+    return null;
+  })();
+
   return (
-    <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+    <div className={`rounded-xl border shadow-sm overflow-hidden ${cfg.cardBg} ${cfg.cardBorder}`}>
       {/* Main row */}
       <div className="px-5 py-4 flex items-start gap-4">
+
         {/* Date block */}
-        <div className="flex-shrink-0 w-14 text-center">
-          <div className="text-lg font-bold text-[#1B5E20] leading-none">
+        <div className={`flex-shrink-0 w-14 rounded-lg py-2 text-center ${cfg.dateBg}`}>
+          <div className={`text-xl font-bold leading-none ${cfg.dateText}`}>
             {new Date(event.event_date).getDate().toString().padStart(2, '0')}
           </div>
-          <div className="text-xs text-gray-500 uppercase tracking-wide">
+          <div className={`text-xs uppercase tracking-wide mt-0.5 ${cfg.dateText} opacity-70`}>
             {new Date(event.event_date).toLocaleDateString('en-GB', { month: 'short' })}
           </div>
-          <div className="text-xs text-gray-400">
+          <div className={`text-xs mt-0.5 ${cfg.dateText} opacity-50`}>
             {new Date(event.event_date).getFullYear()}
           </div>
         </div>
 
         {/* Info */}
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-1">
-            <h3 className="text-sm font-semibold text-gray-900 truncate">{event.name}</h3>
-            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium flex-shrink-0 ${cfg.color}`}>
-              <StatusIcon size={10} />
+          {/* Name + status badge */}
+          <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+            <h3 className="text-sm font-semibold text-gray-900">{event.name}</h3>
+            <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold ${cfg.badgeColor}`}>
+              <StatusIcon size={12} />
               {cfg.label}
             </span>
-          </div>
-          <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500">
-            <span className="flex items-center gap-1"><MapPin size={11} />{event.location}</span>
-            {event.event_time && <span className="flex items-center gap-1"><Clock size={11} />{event.event_time.slice(0, 5)}</span>}
-            <span className="flex items-center gap-1"><Users size={11} />{event.num_guests} guests</span>
-            <span className="flex items-center gap-1"><Phone size={11} />{event.contact_name}</span>
-            {event.budget && (
-              <span className="flex items-center gap-1"><Euro size={11} />
-                {event.budget.toLocaleString('de-DE', { minimumFractionDigits: 0 })}
-                {event.deposit_paid ? ` (dep. ${event.deposit_paid.toLocaleString('de-DE', { minimumFractionDigits: 0 })})` : ''}
+            {/* Confidence stars — only for tentative */}
+            {event.status === 'tentative' && event.confidence && (
+              <span className="flex items-center gap-0.5" title={`Confidence: ${event.confidence}/3`}>
+                <StarRating value={event.confidence} />
               </span>
             )}
           </div>
+
+          {/* Meta row 1 */}
+          <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-600">
+            <span className="flex items-center gap-1"><MapPin size={11} />{event.location}</span>
+            {timeStr && <span className="flex items-center gap-1"><Clock size={11} />{timeStr}</span>}
+            <span className="flex items-center gap-1"><Users size={11} />{event.num_guests} guests</span>
+            <span className="flex items-center gap-1"><Phone size={11} />{event.contact_name}</span>
+          </div>
+
+          {/* Meta row 2 — financials always visible */}
+          {(event.budget || event.deposit_paid) && (
+            <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-600 mt-1">
+              {event.budget && (
+                <span className="flex items-center gap-1 font-medium">
+                  <Euro size={11} />Budget: {fmtMoney(event.budget)}
+                </span>
+              )}
+              {event.deposit_paid && (
+                <span className="flex items-center gap-1">
+                  Deposit paid: {fmtMoney(event.deposit_paid)}
+                </span>
+              )}
+              {event.budget && event.deposit_paid && (
+                <span className="flex items-center gap-1 text-gray-400">
+                  Outstanding: {fmtMoney(event.budget - event.deposit_paid)}
+                </span>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Actions */}
         <div className="flex items-center gap-2 flex-shrink-0">
           <button
-            title="Generate Offer PDF"
             onClick={() => alert('PDF generation coming soon — details to be configured')}
-            className="flex items-center gap-1.5 text-xs text-[#1B5E20] border border-[#1B5E20]/30 hover:bg-[#1B5E20]/5 px-2.5 py-1.5 rounded-lg font-medium transition-colors"
+            className="flex items-center gap-1.5 text-xs text-[#1B5E20] bg-white border border-[#1B5E20]/30 hover:bg-[#1B5E20]/5 px-3 py-1.5 rounded-lg font-medium transition-colors shadow-sm"
           >
             <FileText size={13} />
             Generate Offer
           </button>
           <button
             onClick={() => onEdit(event)}
-            className="text-gray-300 hover:text-indigo-500 transition-colors"
+            className="text-gray-400 hover:text-indigo-500 transition-colors p-1"
             title="Edit"
           >
-            <Pencil size={14} />
+            <Pencil size={15} />
           </button>
           <button
             onClick={() => setExpanded(p => !p)}
-            className="text-gray-300 hover:text-gray-600 transition-colors"
-            title={expanded ? 'Collapse' : 'Expand'}
+            className="text-gray-400 hover:text-gray-700 transition-colors p-1"
+            title={expanded ? 'Collapse' : 'Show notes & contact'}
           >
-            {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+            {expanded ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
           </button>
         </div>
       </div>
 
-      {/* Expanded details */}
+      {/* Expanded details — contact + notes */}
       {expanded && (
-        <div className="border-t border-gray-100 px-5 py-4 bg-gray-50 grid grid-cols-2 gap-4 text-xs">
+        <div className="border-t border-black/5 px-5 py-4 grid grid-cols-2 gap-4 text-xs bg-white/60">
           <div>
-            <p className="text-gray-400 font-medium mb-1">CONTACT</p>
+            <p className="text-gray-400 font-semibold uppercase tracking-wide mb-1">Contact</p>
             <p className="text-gray-700 font-medium">{event.contact_name}</p>
             {event.contact_email && (
               <p className="flex items-center gap-1 text-gray-500 mt-0.5"><Mail size={10} />{event.contact_email}</p>
@@ -382,18 +483,15 @@ function EventCard({
             )}
           </div>
           <div>
-            <p className="text-gray-400 font-medium mb-1">PACKAGE & FINANCIALS</p>
-            {event.menu_package && <p className="text-gray-700">{event.menu_package}</p>}
-            {event.budget && (
-              <p className="text-gray-500 mt-0.5">Budget: €{event.budget.toLocaleString('de-DE', { minimumFractionDigits: 2 })}</p>
-            )}
-            {event.deposit_paid && (
-              <p className="text-gray-500 mt-0.5">Deposit: €{event.deposit_paid.toLocaleString('de-DE', { minimumFractionDigits: 2 })}</p>
-            )}
+            <p className="text-gray-400 font-semibold uppercase tracking-wide mb-1">Package</p>
+            {event.menu_package
+              ? <p className="text-gray-700">{event.menu_package}</p>
+              : <p className="text-gray-400 italic">Not specified</p>
+            }
           </div>
           {event.notes && (
             <div className="col-span-2">
-              <p className="text-gray-400 font-medium mb-1">NOTES</p>
+              <p className="text-gray-400 font-semibold uppercase tracking-wide mb-1">Notes</p>
               <p className="text-gray-600 whitespace-pre-line">{event.notes}</p>
             </div>
           )}
@@ -415,7 +513,6 @@ export default function EventsPage() {
   const [editDraft, setEditDraft] = useState<EventDraft>(EMPTY_DRAFT);
   const [editError, setEditError] = useState('');
 
-  /* Fetch events */
   const { data: events = [], isLoading } = useQuery({
     queryKey: ['events'],
     queryFn: async () => {
@@ -431,17 +528,20 @@ export default function EventsPage() {
   const upcoming = events.filter(isUpcoming).filter(e => e.status !== 'cancelled');
   const past = events.filter(e => !isUpcoming(e) || e.status === 'cancelled');
 
-  /* Create */
+  const cleanDraft = (draft: EventDraft) => ({
+    ...draft,
+    event_time_from: draft.event_time_from || null,
+    event_time_until: draft.event_time_until || null,
+    contact_email: draft.contact_email || null,
+    contact_phone: draft.contact_phone || null,
+    menu_package: draft.menu_package || null,
+    notes: draft.notes || null,
+    confidence: draft.status === 'tentative' ? (draft.confidence ?? 2) : null,
+  });
+
   const createEvent = useMutation({
     mutationFn: async (draft: EventDraft) => {
-      const { error } = await supabase.from('events').insert([{
-        ...draft,
-        event_time: draft.event_time || null,
-        contact_email: draft.contact_email || null,
-        contact_phone: draft.contact_phone || null,
-        menu_package: draft.menu_package || null,
-        notes: draft.notes || null,
-      }]);
+      const { error } = await supabase.from('events').insert([cleanDraft(draft)]);
       if (error) throw error;
     },
     onSuccess: () => {
@@ -453,17 +553,9 @@ export default function EventsPage() {
     onError: (e: any) => setAddError(e.message),
   });
 
-  /* Update */
   const updateEvent = useMutation({
     mutationFn: async ({ id, draft }: { id: string; draft: EventDraft }) => {
-      const { error } = await supabase.from('events').update({
-        ...draft,
-        event_time: draft.event_time || null,
-        contact_email: draft.contact_email || null,
-        contact_phone: draft.contact_phone || null,
-        menu_package: draft.menu_package || null,
-        notes: draft.notes || null,
-      }).eq('id', id);
+      const { error } = await supabase.from('events').update(cleanDraft(draft)).eq('id', id);
       if (error) throw error;
     },
     onSuccess: () => {
@@ -480,7 +572,8 @@ export default function EventsPage() {
       name: event.name,
       location: event.location,
       event_date: event.event_date,
-      event_time: event.event_time ?? '',
+      event_time_from: event.event_time_from ?? '',
+      event_time_until: event.event_time_until ?? '',
       num_guests: event.num_guests,
       contact_name: event.contact_name,
       contact_email: event.contact_email ?? '',
@@ -490,6 +583,7 @@ export default function EventsPage() {
       deposit_paid: event.deposit_paid,
       notes: event.notes ?? '',
       status: event.status,
+      confidence: event.confidence ?? 2,
     });
   };
 
@@ -510,7 +604,6 @@ export default function EventsPage() {
         </button>
       </div>
 
-      {/* ── Add New Event ────────────────────────────────────────────────── */}
       {showAdd && (
         <EventForm
           draft={addDraft}
@@ -522,7 +615,6 @@ export default function EventsPage() {
         />
       )}
 
-      {/* ── Edit form (shown inline above the lists) ─────────────────────── */}
       {editingEvent && (
         <EventForm
           draft={editDraft}
@@ -543,18 +635,15 @@ export default function EventsPage() {
         </div>
       ) : (
         <>
-          {/* ── Current Events ─────────────────────────────────────────── */}
+          {/* Current Events */}
           <section className="mb-8">
             <div className="flex items-center gap-2 mb-3">
               <CalendarDays size={16} className="text-[#1B5E20]" />
-              <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">
-                Current Events
-              </h2>
+              <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">Current Events</h2>
               <span className="ml-1 bg-[#1B5E20]/10 text-[#1B5E20] text-xs font-semibold px-2 py-0.5 rounded-full">
                 {upcoming.length}
               </span>
             </div>
-
             {upcoming.length === 0 ? (
               <div className="bg-white rounded-xl border border-gray-100 p-8 text-center">
                 <CalendarDays size={32} className="mx-auto text-gray-200 mb-2" />
@@ -562,34 +651,27 @@ export default function EventsPage() {
               </div>
             ) : (
               <div className="space-y-3">
-                {upcoming.map(e => (
-                  <EventCard key={e.id} event={e} onEdit={startEdit} />
-                ))}
+                {upcoming.map(e => <EventCard key={e.id} event={e} onEdit={startEdit} />)}
               </div>
             )}
           </section>
 
-          {/* ── Past Events ────────────────────────────────────────────── */}
+          {/* Past Events */}
           <section>
             <div className="flex items-center gap-2 mb-3">
               <Clock size={16} className="text-gray-400" />
-              <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide">
-                Past Events
-              </h2>
+              <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide">Past Events</h2>
               <span className="ml-1 bg-gray-100 text-gray-500 text-xs font-semibold px-2 py-0.5 rounded-full">
                 {past.length}
               </span>
             </div>
-
             {past.length === 0 ? (
               <div className="bg-white rounded-xl border border-gray-100 p-8 text-center">
                 <p className="text-sm text-gray-400">No past events yet.</p>
               </div>
             ) : (
               <div className="space-y-3 opacity-80">
-                {[...past].reverse().map(e => (
-                  <EventCard key={e.id} event={e} onEdit={startEdit} />
-                ))}
+                {[...past].reverse().map(e => <EventCard key={e.id} event={e} onEdit={startEdit} />)}
               </div>
             )}
           </section>
