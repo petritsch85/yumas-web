@@ -28,6 +28,7 @@ import {
   FolderOpen,
   LogOut,
   Truck,
+  Target,
   ChevronDown,
   ChevronRight,
   FileUp,
@@ -108,6 +109,13 @@ const navGroups: NavGroup[] = [
     label: 'EVENTS',
     items: [
       { label: 'Events', href: '/events', icon: PartyPopper },
+    ],
+  },
+  {
+    label: 'DELIVERY',
+    items: [
+      { label: 'Delivery Run',  href: '/delivery',         icon: Truck },
+      { label: 'Target Levels', href: '/delivery/targets', icon: Target },
     ],
   },
   {
