@@ -1,9 +1,9 @@
 'use client';
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
-import { Upload, Target, ChevronDown, ChevronRight } from 'lucide-react';
+import { Upload, Target } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
 /* ─── Types ─────────────────────────────────────────────────────────────── */
@@ -20,8 +20,6 @@ type TargetRow = {
   scales_with_demand: boolean;
 };
 
-type DayKey = 'mon_target' | 'tue_target' | 'wed_target' | 'fri_target';
-
 type ParsedItem = {
   section: string;
   item_name: string;
@@ -32,18 +30,122 @@ type ParsedItem = {
   fri_target: number;
 };
 
+type SalesForecast = {
+  location_name: string;
+  forecast_date: string;
+  forecasted_sales_eur: number;
+};
+
+type DayStandard = {
+  location_name: string;
+  day_of_week: string;
+  standard_sales_eur: number;
+};
+
+type InventorySubmission = {
+  id: string;
+  location_name: string;
+  submitted_at: string;
+  data: Array<{ section: string; name: string; unit: string; quantity: number }>;
+};
+
 /* ─── Constants ──────────────────────────────────────────────────────────── */
 const STORES = ['Eschborn', 'Taunus', 'Westend'] as const;
 type Store = typeof STORES[number];
 
 const SECTIONS = ['Kühlhaus', 'Tiefkühler', 'Trockenware', 'Regale', 'Lager'];
 
-const DAY_COLS: { key: DayKey; label: string }[] = [
-  { key: 'mon_target', label: 'Mon' },
-  { key: 'tue_target', label: 'Tue' },
-  { key: 'wed_target', label: 'Wed' },
-  { key: 'fri_target', label: 'Fri' },
-];
+const DAY_KEYS = ['mon', 'tue', 'wed', 'fri'] as const;
+type DayKey = typeof DAY_KEYS[number];
+const DAY_LABELS = ['MON', 'TUE', 'WED', 'FRI'];
+const BASE_TARGET_COLS = ['mon_target', 'tue_target', 'wed_target', 'fri_target'] as const;
+
+/* ─── Week helpers ───────────────────────────────────────────────────────── */
+function getISOWeek(date: Date): number {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const dayNum = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  return Math.ceil((((d.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+}
+
+function getISOWeekYear(date: Date): number {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const dayNum = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+  return d.getUTCFullYear();
+}
+
+function getMondayOfISOWeek(week: number, year: number): Date {
+  const jan4 = new Date(year, 0, 4);
+  const jan4Day = (jan4.getDay() + 6) % 7;
+  const monday = new Date(jan4);
+  monday.setDate(jan4.getDate() - jan4Day + (week - 1) * 7);
+  return monday;
+}
+
+function getDeliveryDays(monday: Date): Date[] {
+  return [0, 1, 2, 4].map(offset => {
+    const d = new Date(monday);
+    d.setDate(monday.getDate() + offset);
+    return d;
+  });
+}
+
+function fmtDayMonth(d: Date): string {
+  return `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function fmtDateISO(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function fmtWeekLabel(week: number, year: number): string {
+  const monday = getMondayOfISOWeek(week, year);
+  const friday = new Date(monday);
+  friday.setDate(monday.getDate() + 4);
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  return `KW${week} — ${monday.getDate()}. ${months[monday.getMonth()]} – ${friday.getDate()}. ${months[friday.getMonth()]} ${year}`;
+}
+
+type WeekOption = { week: number; year: number; key: string; label: string };
+
+function buildWeekOptions(): WeekOption[] {
+  const today = new Date();
+  const currentWeek = getISOWeek(today);
+  const currentYear = getISOWeekYear(today);
+
+  const options: WeekOption[] = [];
+  // 4 weeks back, current, 8 weeks forward = 13 total
+  for (let offset = -4; offset <= 8; offset++) {
+    let w = currentWeek + offset;
+    let y = currentYear;
+    // Handle year boundaries (simplified: max weeks ~52–53)
+    while (w < 1) {
+      y -= 1;
+      // Approximate: use 52 weeks per year
+      w += 52;
+    }
+    while (w > 52) {
+      // Check if week 53 exists for this year (simplified: just roll over)
+      const dec28 = new Date(y, 11, 28);
+      const maxWeek = getISOWeek(dec28);
+      if (w > maxWeek) {
+        w -= maxWeek;
+        y += 1;
+      } else {
+        break;
+      }
+    }
+    options.push({
+      week: w,
+      year: y,
+      key: `${y}-W${String(w).padStart(2, '0')}`,
+      label: fmtWeekLabel(w, y),
+    });
+  }
+  return options;
+}
 
 /* ─── Toggle switch ──────────────────────────────────────────────────────── */
 function ToggleSwitch({
@@ -75,134 +177,60 @@ function ToggleSwitch({
   );
 }
 
-/* ─── Inline editable cell ───────────────────────────────────────────────── */
-function EditableCell({
-  value,
-  onSave,
-}: {
-  value: number;
-  onSave: (v: number) => void;
-}) {
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(String(value));
-
-  const commit = () => {
-    const parsed = parseFloat(draft);
-    if (!isNaN(parsed) && parsed !== value) {
-      onSave(parsed);
-    }
-    setEditing(false);
-  };
-
-  if (editing) {
-    return (
-      <input
-        autoFocus
-        type="number"
-        value={draft}
-        onChange={e => setDraft(e.target.value)}
-        onBlur={commit}
-        onKeyDown={e => {
-          if (e.key === 'Enter') commit();
-          if (e.key === 'Escape') setEditing(false);
-        }}
-        className="w-16 border border-[#1B5E20]/40 rounded px-1.5 py-0.5 text-sm text-center focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30"
-      />
-    );
+/* ─── Stock cell ─────────────────────────────────────────────────────────── */
+function StockCell({ qty, submittedAt }: { qty: number | null; submittedAt: string | null }) {
+  if (qty === null) {
+    return <span className="text-gray-300 text-sm">—</span>;
   }
-
+  const asOf = submittedAt
+    ? (() => {
+        const d = new Date(submittedAt);
+        const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+        return `${dayNames[d.getDay()]} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+      })()
+    : null;
   return (
-    <button
-      onClick={() => { setDraft(String(value)); setEditing(true); }}
-      className="w-16 text-sm text-center text-gray-700 hover:bg-[#1B5E20]/5 rounded px-1.5 py-0.5 transition-colors cursor-pointer"
-      title="Click to edit"
-    >
-      {value === 0 ? <span className="text-gray-300">—</span> : value}
-    </button>
+    <div className="flex flex-col items-center leading-tight">
+      <span className="text-sm text-gray-800">{qty}</span>
+      {asOf && <span className="text-[10px] text-gray-400 mt-0.5">{asOf}</span>}
+    </div>
   );
 }
 
-/* ─── Section group ──────────────────────────────────────────────────────── */
-function SectionGroup({
-  section,
-  rows,
-  activeDay,
-  onUpdate,
-  onToggleScale,
-  pendingScaleIds,
-}: {
-  section: string;
-  rows: TargetRow[];
-  activeDay: DayKey;
-  onUpdate: (id: string, key: DayKey, value: number) => void;
-  onToggleScale: (id: string, value: boolean) => void;
-  pendingScaleIds: Set<string>;
+/* ─── Target cell ────────────────────────────────────────────────────────── */
+function TargetCell({ baseTarget, effectiveTarget, scale, hasForecast }: {
+  baseTarget: number;
+  effectiveTarget: number;
+  scale: number;
+  hasForecast: boolean;
 }) {
-  const [collapsed, setCollapsed] = useState(false);
-
+  const scaleDiff = Math.abs(scale - 1.0) > 0.01;
   return (
-    <>
-      {/* Section header */}
-      <tr
-        className="bg-gray-50 cursor-pointer select-none"
-        onClick={() => setCollapsed(c => !c)}
-      >
-        <td colSpan={8} className="px-4 py-2">
-          <div className="flex items-center gap-2">
-            {collapsed
-              ? <ChevronRight size={13} className="text-gray-400" />
-              : <ChevronDown size={13} className="text-gray-400" />
-            }
-            <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
-              {section}
-            </span>
-            <span className="ml-1 text-xs text-gray-400 font-normal">
-              {rows.length} item{rows.length !== 1 ? 's' : ''}
-            </span>
-          </div>
-        </td>
-      </tr>
+    <div className="flex flex-col items-center leading-tight gap-0.5">
+      <span className="text-sm text-gray-700">{effectiveTarget}</span>
+      {!hasForecast && (
+        <span className="text-[10px] text-gray-400 bg-gray-100 rounded px-1">std</span>
+      )}
+      {hasForecast && scaleDiff && (
+        <span className={`text-[10px] font-medium rounded px-1 ${
+          scale >= 1 ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'
+        }`}>
+          ×{scale.toFixed(1)}
+        </span>
+      )}
+    </div>
+  );
+}
 
-      {!collapsed && rows.map(row => (
-        <tr key={row.id} className="border-t border-gray-50 hover:bg-gray-50/50 transition-colors">
-          <td className="px-4 py-2 text-sm text-gray-800">{row.item_name}</td>
-          <td className="px-4 py-2 text-xs text-gray-500">{row.unit}</td>
-
-          {/* Base Qty (read-only, current active day) */}
-          <td className="px-2 py-2 text-center">
-            <span className="text-sm text-gray-500">
-              {row[activeDay] === 0 ? <span className="text-gray-300">—</span> : row[activeDay]}
-            </span>
-          </td>
-
-          {/* At 100% forecast (same as base, read-only) */}
-          <td className="px-2 py-2 text-center">
-            <span className="text-sm text-gray-400">
-              {row[activeDay] === 0 ? <span className="text-gray-200">—</span> : row[activeDay]}
-            </span>
-          </td>
-
-          {/* Editable targets */}
-          {DAY_COLS.map(({ key }) => (
-            <td key={key} className="px-2 py-2 text-center">
-              <EditableCell
-                value={row[key]}
-                onSave={v => onUpdate(row.id, key, v)}
-              />
-            </td>
-          ))}
-
-          {/* Scales toggle */}
-          <td className="px-4 py-2 text-center">
-            <ToggleSwitch
-              checked={row.scales_with_demand}
-              onChange={v => onToggleScale(row.id, v)}
-              disabled={pendingScaleIds.has(row.id)}
-            />
-          </td>
-        </tr>
-      ))}
-    </>
+/* ─── Deliver cell ───────────────────────────────────────────────────────── */
+function DeliverCell({ qty }: { qty: number }) {
+  if (qty === 0) {
+    return <span className="text-sm text-gray-300">0</span>;
+  }
+  return (
+    <span className="text-sm font-semibold text-green-800 bg-green-50 rounded px-2 py-0.5">
+      {qty}
+    </span>
   );
 }
 
@@ -211,39 +239,111 @@ export default function DeliveryTargetsPage() {
   const qc = useQueryClient();
   const fileRef = useRef<HTMLInputElement>(null);
 
+  const weekOptions = useMemo(() => buildWeekOptions(), []);
+  // Default to current week (index 4 = offset 0)
+  const [selectedWeekKey, setSelectedWeekKey] = useState<string>(weekOptions[4].key);
   const [activeStore, setActiveStore] = useState<Store>('Eschborn');
-  const [activeDay, setActiveDay] = useState<DayKey>('mon_target');
   const [uploading, setUploading] = useState(false);
   const [uploadMsg, setUploadMsg] = useState('');
   const [pendingScaleIds, setPendingScaleIds] = useState<Set<string>>(new Set());
 
-  /* ─ Query ─ */
-  const { data: targets = [], isLoading } = useQuery({
-    queryKey: ['delivery-targets', activeStore],
+  const selectedWeek = weekOptions.find(w => w.key === selectedWeekKey) ?? weekOptions[4];
+  const monday = useMemo(
+    () => getMondayOfISOWeek(selectedWeek.week, selectedWeek.year),
+    [selectedWeek.week, selectedWeek.year]
+  );
+  const deliveryDays = useMemo(() => getDeliveryDays(monday), [monday]);
+  const friday = deliveryDays[3];
+
+  /* ─ Main query ─ */
+  const { data: weekData, isLoading } = useQuery({
+    queryKey: ['targets-weekly', activeStore, selectedWeekKey],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('delivery_targets')
-        .select('*')
-        .eq('location_name', activeStore)
-        .order('section')
-        .order('item_name');
-      if (error) throw error;
-      return data as TargetRow[];
+      // Window for inventory: monday - 2 days to friday + 1 day
+      const windowStart = new Date(monday);
+      windowStart.setDate(monday.getDate() - 2);
+      const windowEnd = new Date(friday);
+      windowEnd.setDate(friday.getDate() + 1);
+
+      const deliveryDateStrs = deliveryDays.map(fmtDateISO);
+
+      const [targetsRes, standardsRes, forecastsRes, inventoryRes] = await Promise.all([
+        supabase
+          .from('delivery_targets')
+          .select('*')
+          .eq('location_name', activeStore)
+          .order('section')
+          .order('item_name'),
+        supabase
+          .from('store_day_standards')
+          .select('*')
+          .eq('location_name', activeStore),
+        supabase
+          .from('weekly_sales_forecasts')
+          .select('*')
+          .eq('location_name', activeStore)
+          .in('forecast_date', deliveryDateStrs),
+        supabase
+          .from('inventory_submissions')
+          .select('*')
+          .eq('location_name', activeStore)
+          .gte('submitted_at', windowStart.toISOString())
+          .lt('submitted_at', windowEnd.toISOString()),
+      ]);
+
+      if (targetsRes.error) throw targetsRes.error;
+      if (standardsRes.error) throw standardsRes.error;
+      if (forecastsRes.error) throw forecastsRes.error;
+      if (inventoryRes.error) throw inventoryRes.error;
+
+      return {
+        targets: (targetsRes.data ?? []) as TargetRow[],
+        standards: (standardsRes.data ?? []) as DayStandard[],
+        forecasts: (forecastsRes.data ?? []) as SalesForecast[],
+        submissions: (inventoryRes.data ?? []) as InventorySubmission[],
+      };
     },
   });
 
-  /* ─ Update single cell ─ */
-  const updateTarget = useMutation({
-    mutationFn: async ({ id, key, value }: { id: string; key: DayKey; value: number }) => {
-      const { error } = await supabase
-        .from('delivery_targets')
-        .update({ [key]: value })
-        .eq('id', id);
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['delivery-targets', activeStore] });
-    },
+  const targets = weekData?.targets ?? [];
+  const standards = weekData?.standards ?? [];
+  const forecasts = weekData?.forecasts ?? [];
+  const submissions = weekData?.submissions ?? [];
+
+  /* ─ Compute per-day scaling factors ─ */
+  const dayScales: { scale: number; hasForecast: boolean }[] = DAY_KEYS.map((dayKey, idx) => {
+    const deliveryDate = fmtDateISO(deliveryDays[idx]);
+    const standard = standards.find(s => s.day_of_week === dayKey);
+    const forecast = forecasts.find(f => f.forecast_date === deliveryDate);
+    if (!forecast || !standard || standard.standard_sales_eur === 0) {
+      return { scale: 1.0, hasForecast: false };
+    }
+    return {
+      scale: forecast.forecasted_sales_eur / standard.standard_sales_eur,
+      hasForecast: true,
+    };
+  });
+
+  /* ─ Compute per-day inventory lookup ─ */
+  // For each delivery day, find latest submission within 48h before that date
+  const dayStockMaps: Map<string, { qty: number; submittedAt: string }>[] = deliveryDays.map(deliveryDay => {
+    const deliveryTs = deliveryDay.getTime();
+    const windowStartTs = deliveryTs - 2 * 24 * 60 * 60 * 1000;
+    // Filter submissions within the window
+    const relevant = submissions.filter(sub => {
+      const ts = new Date(sub.submitted_at).getTime();
+      return ts >= windowStartTs && ts < deliveryTs;
+    });
+    // Find the latest one
+    relevant.sort((a, b) => new Date(b.submitted_at).getTime() - new Date(a.submitted_at).getTime());
+    const latest = relevant[0] ?? null;
+    const map = new Map<string, { qty: number; submittedAt: string }>();
+    if (latest) {
+      for (const item of latest.data) {
+        map.set(item.name, { qty: item.quantity, submittedAt: latest.submitted_at });
+      }
+    }
+    return map;
   });
 
   /* ─ Toggle scales_with_demand ─ */
@@ -264,7 +364,7 @@ export default function DeliveryTargetsPage() {
         next.delete(id);
         return next;
       });
-      qc.invalidateQueries({ queryKey: ['delivery-targets', activeStore] });
+      qc.invalidateQueries({ queryKey: ['targets-weekly', activeStore, selectedWeekKey] });
     },
   });
 
@@ -287,11 +387,11 @@ export default function DeliveryTargetsPage() {
       if (error) throw error;
     },
     onSuccess: (_, rows) => {
-      qc.invalidateQueries({ queryKey: ['delivery-targets', activeStore] });
+      qc.invalidateQueries({ queryKey: ['targets-weekly', activeStore, selectedWeekKey] });
       setUploadMsg(`Imported ${rows.length} items successfully.`);
       setTimeout(() => setUploadMsg(''), 4000);
     },
-    onError: (e: any) => {
+    onError: (e: Error) => {
       setUploadMsg(`Error: ${e.message}`);
     },
   });
@@ -307,13 +407,13 @@ export default function DeliveryTargetsPage() {
       const buffer = await file.arrayBuffer();
       const wb = XLSX.read(buffer, { type: 'array' });
       const ws = wb.Sheets[wb.SheetNames[0]];
-      const raw: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+      const raw: unknown[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
 
       const parsed: ParsedItem[] = [];
       let currentSection = 'Uncategorised';
 
       for (let i = 2; i < raw.length; i++) {
-        const row = raw[i];
+        const row = raw[i] as unknown[];
         const colA = String(row[0] ?? '').trim();
         const colC = String(row[2] ?? '').trim();
         const colD = row[3];
@@ -347,8 +447,8 @@ export default function DeliveryTargetsPage() {
       } else {
         upsertTargets.mutate(parsed);
       }
-    } catch (err: any) {
-      setUploadMsg(`Parse error: ${err.message}`);
+    } catch (err: unknown) {
+      setUploadMsg(`Parse error: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setUploading(false);
       if (fileRef.current) fileRef.current.value = '';
@@ -362,10 +462,15 @@ export default function DeliveryTargetsPage() {
   }, {});
   const knownSections = new Set(SECTIONS);
   const otherSections = [...new Set(targets.map(t => t.section).filter(s => !knownSections.has(s)))];
+  const allSections = [...SECTIONS, ...otherSections];
 
   const totalItems = targets.length;
 
-  const dayLabel = DAY_COLS.find(d => d.key === activeDay)?.label ?? '';
+  // Today's date string for highlighting
+  const todayStr = fmtDateISO(new Date());
+
+  /* ─ Total columns: Item + Unit + 4×3 data cols + Scales = 15 ─ */
+  const totalCols = 2 + 4 * 3 + 1; // 15
 
   return (
     <div>
@@ -376,9 +481,21 @@ export default function DeliveryTargetsPage() {
             <Target size={20} className="text-[#1B5E20]" />
             <h1 className="text-2xl font-bold text-gray-900">Target Levels</h1>
           </div>
-          <p className="text-sm text-gray-500">
-            Set daily delivery targets per store — click any number to edit inline
-          </p>
+          {/* Week selector */}
+          <div className="flex items-center gap-2 mt-2">
+            <label className="text-xs text-gray-500 font-medium">Week:</label>
+            <select
+              value={selectedWeekKey}
+              onChange={e => setSelectedWeekKey(e.target.value)}
+              className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 text-gray-700 bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30"
+            >
+              {weekOptions.map(opt => (
+                <option key={opt.key} value={opt.key}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
 
         <div className="flex items-center gap-3">
@@ -409,14 +526,8 @@ export default function DeliveryTargetsPage() {
         </div>
       </div>
 
-      {/* Legend */}
-      <div className="mb-4 flex items-start gap-2 text-xs text-gray-500 bg-blue-50 border border-blue-100 rounded-lg px-4 py-2.5">
-        <span className="font-semibold text-blue-700 flex-shrink-0">Scales toggle:</span>
-        <span>When off, the item is always delivered at base quantity regardless of the sales forecast.</span>
-      </div>
-
       {/* Store tabs */}
-      <div className="flex gap-1 mb-4 bg-gray-100 rounded-xl p-1 w-fit">
+      <div className="flex gap-1 mb-5 bg-gray-100 rounded-xl p-1 w-fit">
         {STORES.map(store => (
           <button
             key={store}
@@ -432,101 +543,106 @@ export default function DeliveryTargetsPage() {
         ))}
       </div>
 
-      {/* Day selector (for Base Qty column) */}
-      <div className="flex items-center gap-2 mb-5">
-        <span className="text-xs text-gray-400 font-medium">Viewing base qty for:</span>
-        <div className="flex gap-1 bg-gray-100 rounded-lg p-0.5">
-          {DAY_COLS.map(({ key, label }) => (
-            <button
-              key={key}
-              onClick={() => setActiveDay(key)}
-              className={`px-3 py-1 rounded-md text-xs font-semibold transition-colors ${
-                activeDay === key
-                  ? 'bg-white text-[#1B5E20] shadow-sm'
-                  : 'text-gray-500 hover:text-gray-700'
-              }`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-      </div>
-
       {/* Table card */}
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
         {isLoading ? (
           <div className="p-6 space-y-3">
             {[...Array(8)].map((_, i) => (
-              <div key={i} className="h-4 bg-gray-100 rounded animate-pulse" style={{ width: `${60 + (i % 3) * 15}%` }} />
+              <div
+                key={i}
+                className="h-4 bg-gray-100 rounded animate-pulse"
+                style={{ width: `${60 + (i % 3) * 15}%` }}
+              />
             ))}
           </div>
         ) : totalItems === 0 ? (
           <div className="p-12 text-center">
             <Target size={36} className="mx-auto text-gray-200 mb-3" />
-            <p className="text-sm font-medium text-gray-400 mb-1">No targets set for {activeStore}</p>
-            <p className="text-xs text-gray-300">Upload an Excel file or add items to get started</p>
+            <p className="text-sm font-medium text-gray-400 mb-1">
+              No targets uploaded yet. Use the Upload Excel button to import targets for {activeStore}.
+            </p>
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50 border-b border-gray-100">
-                <tr>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide w-[30%]">
-                    Item Name
+            <table className="w-full text-sm border-collapse">
+              <thead>
+                {/* Day header row */}
+                <tr className="bg-gray-50 border-b border-gray-100">
+                  {/* Item + Unit sticky headers */}
+                  <th
+                    className="sticky left-0 z-10 bg-gray-50 px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide border-r border-gray-100 min-w-[160px]"
+                    rowSpan={2}
+                  >
+                    Item
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                  <th
+                    className="sticky left-[160px] z-10 bg-gray-50 px-3 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide border-r border-gray-200 min-w-[60px]"
+                    rowSpan={2}
+                  >
                     Unit
                   </th>
-                  <th className="px-2 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wide w-20" title={`Base target for ${dayLabel}`}>
-                    Base Qty ({dayLabel})
-                  </th>
-                  <th className="px-2 py-3 text-center text-xs font-semibold text-gray-400 uppercase tracking-wide w-24" title="Delivery qty when forecast = standard (100%)">
-                    At 100%
-                  </th>
-                  {DAY_COLS.map(({ key, label }) => (
-                    <th key={key} className="px-2 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wide w-20">
-                      {label}
-                    </th>
-                  ))}
-                  <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wide w-20">
+
+                  {/* Day span headers */}
+                  {DAY_KEYS.map((dayKey, idx) => {
+                    const deliveryDay = deliveryDays[idx];
+                    const dateStr = fmtDateISO(deliveryDay);
+                    const isToday = dateStr === todayStr;
+                    const isPast = deliveryDay < new Date(todayStr);
+                    return (
+                      <th
+                        key={dayKey}
+                        colSpan={3}
+                        className={`px-2 py-2 text-center text-xs font-bold uppercase tracking-wide border-l border-gray-100 ${
+                          isPast ? 'text-gray-300 opacity-60' : isToday ? 'text-[#1B5E20]' : 'text-gray-600'
+                        }`}
+                        style={isToday ? { borderLeft: '3px solid #1B5E20' } : {}}
+                      >
+                        {DAY_LABELS[idx]}&nbsp;&nbsp;{fmtDayMonth(deliveryDay)}
+                      </th>
+                    );
+                  })}
+
+                  {/* Scales header */}
+                  <th
+                    className="px-3 py-2.5 text-center text-xs font-semibold text-gray-500 uppercase tracking-wide border-l border-gray-200"
+                    rowSpan={2}
+                  >
                     Scales
                   </th>
                 </tr>
+
+                {/* Sub-header row: Stock | Target | Deliver */}
+                <tr className="bg-gray-50 border-b border-gray-200">
+                  {DAY_KEYS.map(dayKey => (
+                    <React.Fragment key={dayKey}>
+                      <th className="px-2 py-1.5 text-center text-[11px] font-medium text-gray-400 border-l border-gray-100 w-16">
+                        Stock
+                      </th>
+                      <th className="px-2 py-1.5 text-center text-[11px] font-medium text-gray-400 w-16">
+                        Target
+                      </th>
+                      <th className="px-2 py-1.5 text-center text-[11px] font-medium text-gray-400 w-16">
+                        Deliver
+                      </th>
+                    </React.Fragment>
+                  ))}
+                </tr>
               </thead>
+
               <tbody>
-                {SECTIONS.map(section => {
-                  const rows = grouped[section] ?? [];
+                {allSections.map(section => {
+                  const rows = grouped[section] ?? targets.filter(t => t.section === section);
                   if (rows.length === 0) return null;
                   return (
-                    <SectionGroup
+                    <SectionRows
                       key={section}
                       section={section}
                       rows={rows}
-                      activeDay={activeDay}
-                      onUpdate={(id, key, value) =>
-                        updateTarget.mutate({ id, key, value })
-                      }
-                      onToggleScale={(id, value) =>
-                        toggleScale.mutate({ id, value })
-                      }
-                      pendingScaleIds={pendingScaleIds}
-                    />
-                  );
-                })}
-                {otherSections.map(section => {
-                  const rows = targets.filter(t => t.section === section);
-                  return (
-                    <SectionGroup
-                      key={section}
-                      section={section}
-                      rows={rows}
-                      activeDay={activeDay}
-                      onUpdate={(id, key, value) =>
-                        updateTarget.mutate({ id, key, value })
-                      }
-                      onToggleScale={(id, value) =>
-                        toggleScale.mutate({ id, value })
-                      }
+                      deliveryDays={deliveryDays}
+                      dayScales={dayScales}
+                      dayStockMaps={dayStockMaps}
+                      totalCols={totalCols}
+                      onToggleScale={(id, value) => toggleScale.mutate({ id, value })}
                       pendingScaleIds={pendingScaleIds}
                     />
                   );
@@ -536,15 +652,123 @@ export default function DeliveryTargetsPage() {
           </div>
         )}
 
-        {/* Footer count */}
+        {/* Footer */}
         {totalItems > 0 && (
           <div className="border-t border-gray-50 px-4 py-2 bg-gray-50/50">
             <p className="text-xs text-gray-400">
-              {totalItems} item{totalItems !== 1 ? 's' : ''} · {activeStore}
+              {totalItems} item{totalItems !== 1 ? 's' : ''} · {activeStore} · {selectedWeek.label}
             </p>
           </div>
         )}
       </div>
     </div>
+  );
+}
+
+/* ─── Section rows ───────────────────────────────────────────────────────── */
+function SectionRows({
+  section,
+  rows,
+  deliveryDays,
+  dayScales,
+  dayStockMaps,
+  totalCols,
+  onToggleScale,
+  pendingScaleIds,
+}: {
+  section: string;
+  rows: TargetRow[];
+  deliveryDays: Date[];
+  dayScales: { scale: number; hasForecast: boolean }[];
+  dayStockMaps: Map<string, { qty: number; submittedAt: string }>[];
+  totalCols: number;
+  onToggleScale: (id: string, value: boolean) => void;
+  pendingScaleIds: Set<string>;
+}) {
+  const [collapsed, setCollapsed] = useState(false);
+
+  return (
+    <>
+      {/* Section header */}
+      <tr
+        className="bg-gray-100 cursor-pointer select-none"
+        onClick={() => setCollapsed(c => !c)}
+      >
+        <td
+          colSpan={totalCols}
+          className="sticky left-0 px-4 py-2"
+        >
+          <span className="text-xs font-bold text-gray-600 uppercase tracking-wider">
+            {section}
+          </span>
+          <span className="ml-2 text-xs text-gray-400 font-normal normal-case">
+            ({rows.length} item{rows.length !== 1 ? 's' : ''})
+          </span>
+        </td>
+      </tr>
+
+      {!collapsed && rows.map(row => (
+        <tr key={row.id} className="border-t border-gray-50 hover:bg-gray-50/40 transition-colors">
+          {/* Item name — sticky */}
+          <td className="sticky left-0 z-10 bg-white px-4 py-2 text-sm text-gray-800 border-r border-gray-100 min-w-[160px] hover:bg-gray-50/40">
+            {row.item_name}
+          </td>
+          {/* Unit — sticky */}
+          <td className="sticky left-[160px] z-10 bg-white px-3 py-2 text-xs text-gray-500 border-r border-gray-200 min-w-[60px] hover:bg-gray-50/40">
+            {row.unit}
+          </td>
+
+          {/* Day columns */}
+          {DAY_KEYS.map((dayKey, idx) => {
+            const baseTargetKey = BASE_TARGET_COLS[idx];
+            const baseTarget: number = row[baseTargetKey] as number;
+            const { scale, hasForecast } = dayScales[idx];
+            const effectiveTarget = row.scales_with_demand
+              ? Math.round(baseTarget * scale)
+              : baseTarget;
+
+            const stockEntry = dayStockMaps[idx].get(row.item_name) ?? null;
+            const stockQty = stockEntry ? stockEntry.qty : null;
+            const submittedAt = stockEntry ? stockEntry.submittedAt : null;
+
+            const deliverQty =
+              stockQty === null
+                ? effectiveTarget
+                : Math.max(0, effectiveTarget - stockQty);
+
+            return (
+              <React.Fragment key={dayKey}>
+                {/* Stock */}
+                <td className="px-2 py-2 text-center border-l border-gray-100">
+                  <StockCell qty={stockQty} submittedAt={submittedAt} />
+                </td>
+                {/* Target */}
+                <td className="px-2 py-2 text-center">
+                  <TargetCell
+                    baseTarget={baseTarget}
+                    effectiveTarget={effectiveTarget}
+                    scale={scale}
+                    hasForecast={hasForecast}
+                  />
+                </td>
+                {/* Deliver */}
+                <td className={`px-2 py-2 text-center ${deliverQty > 0 ? 'bg-green-50' : ''}`}>
+                  <DeliverCell qty={deliverQty} />
+                </td>
+              </React.Fragment>
+            );
+          })}
+
+          {/* Scales toggle */}
+          <td className="px-3 py-2 text-center border-l border-gray-200">
+            <ToggleSwitch
+              checked={row.scales_with_demand}
+              onChange={v => onToggleScale(row.id, v)}
+              disabled={pendingScaleIds.has(row.id)}
+            />
+          </td>
+        </tr>
+      ))}
+    </>
   );
 }
