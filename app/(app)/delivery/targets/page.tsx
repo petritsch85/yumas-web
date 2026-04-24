@@ -570,13 +570,13 @@ export default function DeliveryTargetsPage() {
                 <tr className="bg-gray-50 border-b border-gray-100">
                   {/* Item + Unit sticky headers */}
                   <th
-                    className="sticky left-0 z-10 bg-gray-50 px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide border-r border-gray-100 min-w-[160px]"
+                    className="sticky left-0 z-10 bg-gray-700 px-4 py-2.5 text-left text-xs font-semibold text-white uppercase tracking-wide border-r border-gray-600 min-w-[160px]"
                     rowSpan={2}
                   >
                     Item
                   </th>
                   <th
-                    className="sticky left-[160px] z-10 bg-gray-50 px-3 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide border-r border-gray-200 min-w-[60px]"
+                    className="sticky left-[160px] z-10 bg-gray-700 px-3 py-2.5 text-left text-xs font-semibold text-white uppercase tracking-wide border-r border-gray-500 min-w-[60px]"
                     rowSpan={2}
                   >
                     Unit
@@ -592,10 +592,13 @@ export default function DeliveryTargetsPage() {
                       <th
                         key={dayKey}
                         colSpan={3}
-                        className={`px-2 py-2 text-center text-xs font-bold uppercase tracking-wide border-l border-gray-100 ${
-                          isPast ? 'text-gray-300 opacity-60' : isToday ? 'text-[#1B5E20]' : 'text-gray-600'
+                        className={`px-2 py-2.5 text-center text-xs font-bold uppercase tracking-wider border-l-2 border-white ${
+                          isPast
+                            ? 'bg-gray-200 text-gray-500'
+                            : isToday
+                            ? 'bg-[#1B5E20] text-white'
+                            : 'bg-gray-600 text-white'
                         }`}
-                        style={isToday ? { borderLeft: '3px solid #1B5E20' } : {}}
                       >
                         {DAY_LABELS[idx]}&nbsp;&nbsp;{fmtDayMonth(deliveryDay)}
                       </th>
@@ -604,7 +607,7 @@ export default function DeliveryTargetsPage() {
 
                   {/* Scales header */}
                   <th
-                    className="px-3 py-2.5 text-center text-xs font-semibold text-gray-500 uppercase tracking-wide border-l border-gray-200"
+                    className="px-3 py-2.5 text-center text-xs font-semibold text-white uppercase tracking-wide border-l border-gray-600 bg-gray-700"
                     rowSpan={2}
                   >
                     Scales
@@ -612,20 +615,27 @@ export default function DeliveryTargetsPage() {
                 </tr>
 
                 {/* Sub-header row: Stock | Target | Deliver */}
-                <tr className="bg-gray-50 border-b border-gray-200">
-                  {DAY_KEYS.map(dayKey => (
-                    <React.Fragment key={dayKey}>
-                      <th className="px-2 py-1.5 text-center text-[11px] font-medium text-gray-400 border-l border-gray-100 w-16">
-                        Stock
-                      </th>
-                      <th className="px-2 py-1.5 text-center text-[11px] font-medium text-gray-400 w-16">
-                        Target
-                      </th>
-                      <th className="px-2 py-1.5 text-center text-[11px] font-medium text-gray-400 w-16">
-                        Deliver
-                      </th>
-                    </React.Fragment>
-                  ))}
+                <tr className="border-b-2 border-gray-300">
+                  {DAY_KEYS.map((dayKey, idx) => {
+                    const deliveryDay = deliveryDays[idx];
+                    const dateStr = fmtDateISO(deliveryDay);
+                    const isToday = dateStr === todayStr;
+                    const isPast = deliveryDay < new Date(todayStr);
+                    const bg = isPast ? 'bg-gray-100' : isToday ? 'bg-green-50' : 'bg-gray-50';
+                    return (
+                      <React.Fragment key={dayKey}>
+                        <th className={`px-2 py-1.5 text-center text-[11px] font-semibold text-gray-600 border-l-2 border-white w-16 ${bg}`}>
+                          Stock
+                        </th>
+                        <th className={`px-2 py-1.5 text-center text-[11px] font-semibold text-gray-600 w-16 ${bg}`}>
+                          Target
+                        </th>
+                        <th className={`px-2 py-1.5 text-center text-[11px] font-semibold text-gray-600 w-16 ${bg} border-r border-gray-200`}>
+                          Deliver
+                        </th>
+                      </React.Fragment>
+                    );
+                  })}
                 </tr>
               </thead>
 
