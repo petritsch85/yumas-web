@@ -48,6 +48,7 @@ type EditDraft = {
   locationId: string;
   isActive: boolean;
   permissions: AppPermissions;
+  newPassword: string;
 };
 
 const ROLES = ['staff', 'manager', 'admin'];
@@ -192,7 +193,7 @@ export default function TeamPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<EditDraft>({
     role: 'staff', locationId: '', isActive: true,
-    permissions: { ...DEFAULT_PERMISSIONS },
+    permissions: { ...DEFAULT_PERMISSIONS }, newPassword: '',
   });
 
   const { data: users, isLoading } = useQuery({
@@ -203,6 +204,16 @@ export default function TeamPage() {
         .select('*, location:locations(name)')
         .order('full_name');
       return (data ?? []) as UserRow[];
+    },
+  });
+
+  // Fetch email addresses from Supabase Auth (admin API)
+  const { data: emailMap } = useQuery({
+    queryKey: ['team-emails'],
+    queryFn: async () => {
+      const res = await fetch('/api/admin/users');
+      if (!res.ok) return {} as Record<string, string>;
+      return res.json() as Promise<Record<string, string>>;
     },
   });
 
@@ -257,6 +268,10 @@ export default function TeamPage() {
       if (draft.role === 'staff') {
         body.permissions = draft.permissions;
       }
+      // Only send password if filled in
+      if (draft.newPassword.trim()) {
+        body.newPassword = draft.newPassword.trim();
+      }
       const res = await fetch(`/api/admin/users/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -278,6 +293,7 @@ export default function TeamPage() {
       locationId: user.location_id ?? '',
       isActive: user.is_active,
       permissions: mergePermissions(user.permissions),
+      newPassword: '',
     });
   };
 
@@ -441,6 +457,7 @@ export default function TeamPage() {
               <thead className="bg-gray-50">
                 <tr>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">Name</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">Email</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">Role</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">Location</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">Status</th>
@@ -453,6 +470,9 @@ export default function TeamPage() {
                     {/* Main row */}
                     <tr className="border-t border-gray-100 hover:bg-gray-50 transition-colors">
                       <td className="px-4 py-3 font-medium text-gray-900">{user.full_name}</td>
+                      <td className="px-4 py-3 text-gray-500 text-xs font-mono">
+                        {emailMap?.[user.id] ?? <span className="text-gray-300">—</span>}
+                      </td>
                       <td className="px-4 py-3">
                         <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium capitalize ${roleColor[user.role] ?? 'bg-gray-100 text-gray-600'}`}>
                           {user.role}
@@ -480,9 +500,9 @@ export default function TeamPage() {
                     {/* Inline edit row */}
                     {editingId === user.id && (
                       <tr className="border-t border-indigo-100 bg-indigo-50/30">
-                        <td colSpan={5} className="px-4 py-4">
+                        <td colSpan={6} className="px-4 py-4">
                           {/* Basic fields row */}
-                          <div className="grid grid-cols-4 gap-3 items-end">
+                          <div className="grid grid-cols-5 gap-3 items-end">
                             <div>
                               <label className="block text-xs font-medium text-gray-500 mb-1">Role</label>
                               <select
@@ -518,6 +538,18 @@ export default function TeamPage() {
                                 <option value="active">Active</option>
                                 <option value="inactive">Inactive</option>
                               </select>
+                            </div>
+                            <div>
+                              <label className="block text-xs font-medium text-gray-500 mb-1">
+                                New password <span className="text-gray-400 font-normal">(leave blank to keep)</span>
+                              </label>
+                              <input
+                                type="text"
+                                value={editDraft.newPassword}
+                                onChange={e => setEditDraft(d => ({ ...d, newPassword: e.target.value }))}
+                                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300 font-mono"
+                                placeholder="min 6 chars"
+                              />
                             </div>
                             <div className="flex gap-2">
                               <button

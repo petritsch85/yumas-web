@@ -1,13 +1,19 @@
 import { NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase-admin';
 
-// Temporary diagnostic — remove after confirming env var is live
+// Returns a map of { [userId]: email } for all auth users
 export async function GET() {
-  return NextResponse.json({
-    hasServiceKey: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
-    keyLength: process.env.SUPABASE_SERVICE_ROLE_KEY?.length ?? 0,
-    hasUrl: !!process.env.NEXT_PUBLIC_SUPABASE_URL,
-  });
+  try {
+    const { data, error } = await getSupabaseAdmin().auth.admin.listUsers({ perPage: 1000 });
+    if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+    const emailMap: Record<string, string> = {};
+    for (const user of data.users) {
+      if (user.email) emailMap[user.id] = user.email;
+    }
+    return NextResponse.json(emailMap);
+  } catch (e: any) {
+    return NextResponse.json({ error: e?.message ?? 'Unexpected error' }, { status: 500 });
+  }
 }
 
 export async function POST(request: Request) {
