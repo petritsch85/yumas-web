@@ -7,12 +7,31 @@ import { Plus, Pencil, X, Eye, EyeOff } from 'lucide-react';
 
 type Location = { id: string; name: string };
 
+type AppPermissions = {
+  inventory_report: string[];   // location names
+  view_inventory:   string[];   // location names
+  waste_log:        boolean;
+  delivery_confirm: boolean;
+  production:       boolean;
+  staff_videos:     boolean;
+};
+
+const DEFAULT_PERMISSIONS: AppPermissions = {
+  inventory_report: [],
+  view_inventory:   [],
+  waste_log:        false,
+  delivery_confirm: false,
+  production:       false,
+  staff_videos:     false,
+};
+
 type UserRow = {
   id: string;
   full_name: string;
   role: string;
   location_id: string | null;
   is_active: boolean;
+  permissions?: Partial<AppPermissions>;
   location?: { name: string } | null;
 };
 
@@ -28,14 +47,15 @@ type EditDraft = {
   role: string;
   locationId: string;
   isActive: boolean;
+  permissions: AppPermissions;
 };
 
 const ROLES = ['staff', 'manager', 'admin'];
 
 const roleColor: Record<string, string> = {
-  admin: 'bg-purple-100 text-purple-700',
+  admin:   'bg-purple-100 text-purple-700',
   manager: 'bg-blue-100 text-blue-700',
-  staff: 'bg-gray-100 text-gray-600',
+  staff:   'bg-gray-100 text-gray-600',
 };
 
 const roleHint: Record<string, string> = {
@@ -44,10 +64,124 @@ const roleHint: Record<string, string> = {
   admin:   'Full access, all locations',
 };
 
+// Features that have per-location selection
+const LOCATION_FEATURES: { key: keyof AppPermissions; label: string }[] = [
+  { key: 'inventory_report', label: 'Add Inventory' },
+  { key: 'view_inventory',   label: 'View Inventory' },
+];
+
+// Boolean features (no location)
+const BOOL_FEATURES: { key: keyof AppPermissions; label: string }[] = [
+  { key: 'waste_log',        label: 'Waste Log' },
+  { key: 'delivery_confirm', label: 'Delivery Confirm' },
+  { key: 'production',       label: 'Production' },
+  { key: 'staff_videos',     label: 'Staff Videos' },
+];
+
+function mergePermissions(raw?: Partial<AppPermissions>): AppPermissions {
+  return {
+    ...DEFAULT_PERMISSIONS,
+    ...(raw ?? {}),
+    inventory_report: raw?.inventory_report ?? [],
+    view_inventory:   raw?.view_inventory ?? [],
+  };
+}
+
+// ── Permissions editor sub-component ────────────────────────────────────────
+function PermissionsEditor({
+  perms,
+  locationNames,
+  onChange,
+}: {
+  perms: AppPermissions;
+  locationNames: string[];
+  onChange: (p: AppPermissions) => void;
+}) {
+  const toggleLocation = (feature: 'inventory_report' | 'view_inventory', loc: string) => {
+    const current = perms[feature] as string[];
+    const next = current.includes(loc)
+      ? current.filter(l => l !== loc)
+      : [...current, loc];
+    onChange({ ...perms, [feature]: next });
+  };
+
+  const toggleBool = (feature: keyof AppPermissions) => {
+    onChange({ ...perms, [feature]: !perms[feature] });
+  };
+
+  return (
+    <div className="mt-4 pt-4 border-t border-indigo-100">
+      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
+        App Permissions
+      </p>
+
+      <div className="space-y-4">
+        {/* Location-based features */}
+        {LOCATION_FEATURES.map(({ key, label }) => (
+          <div key={key}>
+            <p className="text-xs font-medium text-gray-700 mb-1.5">{label}</p>
+            <div className="flex flex-wrap gap-2">
+              {locationNames.map(loc => {
+                const checked = (perms[key] as string[]).includes(loc);
+                return (
+                  <label
+                    key={loc}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs cursor-pointer transition-colors select-none ${
+                      checked
+                        ? 'bg-indigo-600 border-indigo-600 text-white'
+                        : 'bg-white border-gray-200 text-gray-600 hover:border-indigo-300'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      className="sr-only"
+                      checked={checked}
+                      onChange={() => toggleLocation(key as 'inventory_report' | 'view_inventory', loc)}
+                    />
+                    {loc}
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+
+        {/* Boolean features */}
+        <div>
+          <p className="text-xs font-medium text-gray-700 mb-1.5">Other Features</p>
+          <div className="flex flex-wrap gap-2">
+            {BOOL_FEATURES.map(({ key, label }) => {
+              const checked = !!perms[key];
+              return (
+                <label
+                  key={key}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs cursor-pointer transition-colors select-none ${
+                    checked
+                      ? 'bg-indigo-600 border-indigo-600 text-white'
+                      : 'bg-white border-gray-200 text-gray-600 hover:border-indigo-300'
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    className="sr-only"
+                    checked={checked}
+                    onChange={() => toggleBool(key)}
+                  />
+                  {label}
+                </label>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Main page ────────────────────────────────────────────────────────────────
 export default function TeamPage() {
   const qc = useQueryClient();
 
-  // Add form state
   const [showAdd, setShowAdd] = useState(false);
   const [addDraft, setAddDraft] = useState<AddDraft>({
     fullName: '', email: '', password: '', role: 'staff', locationId: '',
@@ -55,13 +189,12 @@ export default function TeamPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [addError, setAddError] = useState('');
 
-  // Edit state
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<EditDraft>({
     role: 'staff', locationId: '', isActive: true,
+    permissions: { ...DEFAULT_PERMISSIONS },
   });
 
-  // Queries
   const { data: users, isLoading } = useQuery({
     queryKey: ['team-users'],
     queryFn: async () => {
@@ -85,7 +218,8 @@ export default function TeamPage() {
     },
   });
 
-  // Create mutation
+  const locationNames = (locations ?? []).map(l => l.name);
+
   const createUser = useMutation({
     mutationFn: async (draft: AddDraft) => {
       const res = await fetch('/api/admin/users', {
@@ -112,17 +246,21 @@ export default function TeamPage() {
     onError: (e: any) => setAddError(e.message),
   });
 
-  // Update mutation
   const updateUser = useMutation({
     mutationFn: async ({ id, draft }: { id: string; draft: EditDraft }) => {
+      const body: Record<string, any> = {
+        role: draft.role,
+        locationId: draft.locationId || null,
+        isActive: draft.isActive,
+      };
+      // Only send permissions for staff
+      if (draft.role === 'staff') {
+        body.permissions = draft.permissions;
+      }
       const res = await fetch(`/api/admin/users/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          role: draft.role,
-          locationId: draft.locationId || null,
-          isActive: draft.isActive,
-        }),
+        body: JSON.stringify(body),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? 'Failed to update');
@@ -139,6 +277,7 @@ export default function TeamPage() {
       role: user.role,
       locationId: user.location_id ?? '',
       isActive: user.is_active,
+      permissions: mergePermissions(user.permissions),
     });
   };
 
@@ -190,7 +329,6 @@ export default function TeamPage() {
           </div>
 
           <div className="grid grid-cols-2 gap-4">
-            {/* Full name */}
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-1">Full name *</label>
               <input
@@ -202,7 +340,6 @@ export default function TeamPage() {
               />
             </div>
 
-            {/* Email */}
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-1">Email *</label>
               <input
@@ -214,7 +351,6 @@ export default function TeamPage() {
               />
             </div>
 
-            {/* Password */}
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-1">Password * (min 6 chars)</label>
               <div className="relative">
@@ -235,7 +371,6 @@ export default function TeamPage() {
               </div>
             </div>
 
-            {/* Role */}
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-1">Role *</label>
               <select
@@ -251,7 +386,6 @@ export default function TeamPage() {
               </select>
             </div>
 
-            {/* Location */}
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-1">Location</label>
               <select
@@ -347,6 +481,7 @@ export default function TeamPage() {
                     {editingId === user.id && (
                       <tr className="border-t border-indigo-100 bg-indigo-50/30">
                         <td colSpan={5} className="px-4 py-4">
+                          {/* Basic fields row */}
                           <div className="grid grid-cols-4 gap-3 items-end">
                             <div>
                               <label className="block text-xs font-medium text-gray-500 mb-1">Role</label>
@@ -400,6 +535,15 @@ export default function TeamPage() {
                               </button>
                             </div>
                           </div>
+
+                          {/* Permissions editor — staff only */}
+                          {editDraft.role === 'staff' && (
+                            <PermissionsEditor
+                              perms={editDraft.permissions}
+                              locationNames={locationNames}
+                              onChange={p => setEditDraft(d => ({ ...d, permissions: p }))}
+                            />
+                          )}
                         </td>
                       </tr>
                     )}

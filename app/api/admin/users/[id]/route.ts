@@ -7,15 +7,20 @@ export async function PATCH(
 ) {
   try {
     const { id } = await params;
-    const { role, locationId, isActive } = await request.json();
+    const { role, locationId, isActive, permissions } = await request.json();
+
+    const updatePayload: Record<string, any> = {
+      role,
+      location_id: locationId || null,
+      is_active: isActive,
+    };
+    if (permissions !== undefined) {
+      updatePayload.permissions = permissions;
+    }
 
     const { error } = await getSupabaseAdmin()
       .from('profiles')
-      .update({
-        role,
-        location_id: locationId || null,
-        is_active: isActive,
-      })
+      .update(updatePayload)
       .eq('id', id);
 
     if (error) {
