@@ -23,6 +23,14 @@ function groupBySection(data: SubmissionRow['data']) {
   return map;
 }
 
+function formatDuration(seconds: number | null | undefined): string | null {
+  if (seconds == null) return null;
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  if (m === 0) return `${s}s`;
+  return `${m}m ${String(s).padStart(2, '0')}s`;
+}
+
 function formatDate(iso: string) {
   return new Date(iso).toLocaleString('de-DE', {
     day: '2-digit', month: '2-digit', year: 'numeric',
@@ -47,7 +55,7 @@ export default function CurrentInventoryPage() {
     queryFn: async () => {
       let q = supabase
         .from('inventory_submissions')
-        .select('id, location_name, submitted_at, submitted_by, data')
+        .select('id, location_name, submitted_at, submitted_by, duration_seconds, data')
         .order('submitted_at', { ascending: false });
       if (locationFilter !== 'all') q = q.eq('location_name', locationFilter);
       const { data, error } = await q;
@@ -137,7 +145,14 @@ export default function CurrentInventoryPage() {
                     </div>
                     <div className="text-xs text-gray-400 mt-0.5">{formatDate(sub.submitted_at)}</div>
                   </div>
-                  <span className="text-xs text-gray-500 flex-shrink-0">{totalFilled}/{totalItems} filled</span>
+                  <div className="flex items-center gap-3 flex-shrink-0">
+                    <span className="text-xs text-gray-500">{totalFilled}/{totalItems} filled</span>
+                    {formatDuration((sub as any).duration_seconds) && (
+                      <span className="text-xs font-semibold text-[#2E7D32] bg-green-50 px-2 py-0.5 rounded-full">
+                        ⏱ {formatDuration((sub as any).duration_seconds)}
+                      </span>
+                    )}
+                  </div>
                   {isExpanded
                     ? <ChevronDown size={16} className="text-gray-400 flex-shrink-0" />
                     : <ChevronRight size={16} className="text-gray-400 flex-shrink-0" />
