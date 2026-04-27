@@ -3,7 +3,7 @@
 import React, { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
-import { TrendingDown, Calendar, CalendarDays } from 'lucide-react';
+import { TrendingDown, Calendar, CalendarDays, ChevronUp, ChevronDown as ChevronDownIcon } from 'lucide-react';
 
 /* ─── Types ──────────────────────────────────────────────────────────────── */
 type BillLine = {
@@ -115,8 +115,19 @@ function fmtEur(n: number) {
 /* ─── Page ───────────────────────────────────────────────────────────────── */
 export default function COGSPage() {
   const [primaryCat]  = useState<string>('Food Cost');
-  const [subCat, setSubCat]   = useState<SubCategory>('All');
+  const [subCat, setSubCat]     = useState<SubCategory>('All');
   const [timeMode, setTimeMode] = useState<'week' | 'month'>('month');
+  const [sortKey, setSortKey]   = useState<string>('total');   // 'total' | period key
+  const [sortDir, setSortDir]   = useState<'desc' | 'asc'>('desc');
+
+  const handleSort = (key: string) => {
+    if (sortKey === key) {
+      setSortDir((d) => (d === 'desc' ? 'asc' : 'desc'));
+    } else {
+      setSortKey(key);
+      setSortDir('desc');
+    }
+  };
 
   /* ─ Fetch all bill lines for Food Cost bills ─ */
   const { data: rawLines = [], isLoading } = useQuery<BillLine[]>({
@@ -184,6 +195,15 @@ export default function COGSPage() {
     return { periods, rows };
   }, [filtered, timeMode]);
 
+  /* ─ Sorted rows ─ */
+  const sortedRows = useMemo(() => {
+    return [...rows].sort((a, b) => {
+      const aVal = sortKey === 'total' ? a.rowTotal : (a.totals[sortKey] ?? 0);
+      const bVal = sortKey === 'total' ? b.rowTotal : (b.totals[sortKey] ?? 0);
+      return sortDir === 'desc' ? bVal - aVal : aVal - bVal;
+    });
+  }, [rows, sortKey, sortDir]);
+
   /* ─ Period totals (column sums) ─ */
   const colTotals = useMemo(() => {
     const t: Record<string, number> = {};
@@ -212,6 +232,13 @@ export default function COGSPage() {
     'Spices':      'bg-amber-50 text-amber-700 hover:bg-amber-100',
     'Dairy':       'bg-blue-50 text-blue-700 hover:bg-blue-100',
     'Other':       'bg-gray-50 text-gray-600 hover:bg-gray-100',
+  };
+
+  const SortIcon = ({ col }: { col: string }) => {
+    if (sortKey !== col) return <ChevronDownIcon size={10} className="opacity-30 ml-0.5" />;
+    return sortDir === 'desc'
+      ? <ChevronDownIcon size={10} className="opacity-90 ml-0.5" />
+      : <ChevronUp size={10} className="opacity-90 ml-0.5" />;
   };
 
   return (
@@ -322,17 +349,28 @@ export default function COGSPage() {
                     </th>
                   )}
                   {periods.map((pk) => (
-                    <th key={pk} className="px-3 py-3 text-right text-xs font-semibold uppercase tracking-wide min-w-[80px] border-l border-gray-600">
-                      {periodLabel(pk, timeMode)}
+                    <th
+                      key={pk}
+                      onClick={() => handleSort(pk)}
+                      className="px-3 py-3 text-right text-xs font-semibold uppercase tracking-wide min-w-[80px] border-l border-gray-600 cursor-pointer hover:bg-gray-600 select-none"
+                    >
+                      <span className="inline-flex items-center justify-end gap-0.5">
+                        {periodLabel(pk, timeMode)}<SortIcon col={pk} />
+                      </span>
                     </th>
                   ))}
-                  <th className="px-3 py-3 text-right text-xs font-semibold uppercase tracking-wide min-w-[90px] border-l border-gray-500 bg-gray-600">
-                    Total
+                  <th
+                    onClick={() => handleSort('total')}
+                    className="px-3 py-3 text-right text-xs font-semibold uppercase tracking-wide min-w-[90px] border-l border-gray-500 bg-gray-600 cursor-pointer hover:bg-gray-500 select-none"
+                  >
+                    <span className="inline-flex items-center justify-end gap-0.5">
+                      Total<SortIcon col="total" />
+                    </span>
                   </th>
                 </tr>
               </thead>
               <tbody>
-                {rows.map((row, i) => (
+                {sortedRows.map((row, i) => (
                   <tr key={i} className="border-t border-gray-50 hover:bg-gray-50/40">
                     <td className="sticky left-0 z-10 bg-white px-4 py-2.5 text-sm text-gray-800 border-r border-gray-100 hover:bg-gray-50/40 min-w-[220px]">
                       {row.description}
