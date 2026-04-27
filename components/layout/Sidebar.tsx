@@ -279,10 +279,7 @@ export default function Sidebar() {
                     {/* Parent row */}
                     {hasChildren ? (
                       <button
-                        onClick={() => {
-                          router.push(item.href);
-                          toggleExpanded(item.href);
-                        }}
+                        onClick={() => toggleExpanded(item.href)}
                         className={`w-full flex items-center gap-3 rounded-lg text-sm font-medium transition-colors px-3 py-2 ${
                           active
                             ? 'text-white'
