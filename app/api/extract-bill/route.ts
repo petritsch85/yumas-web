@@ -79,15 +79,20 @@ function cleanResponse(text: string): string {
   return extractJSONObject(stripped);
 }
 
-/** Ask Claude to repair malformed JSON */
+/** Ask Claude to repair or complete malformed/truncated JSON */
 async function repairJSON(bad: string): Promise<string> {
+  const isTruncated = !bad.trimEnd().endsWith('}');
+  const instruction = isTruncated
+    ? `The following JSON was cut off mid-response and is incomplete. Complete it so it is valid JSON matching this structure: { supplier_name, invoice_number, invoice_date, due_date, currency, payment_method, net_amount, vat_amount, gross_amount, suggested_category, lines[] }. Return only the completed valid JSON, no markdown, no explanation:`
+    : `The following text is supposed to be a JSON object but has syntax errors. Fix it and return only valid JSON, no markdown, no trailing commas, all property names in double quotes:`;
+
   const repair = await client.messages.create({
-    model: 'claude-haiku-4-5',
-    max_tokens: 4096,
+    model: 'claude-opus-4-5',
+    max_tokens: 8192,
     messages: [
       {
         role: 'user',
-        content: `The following text is supposed to be a JSON object but has syntax errors. Fix it and return only valid JSON with no explanation, no markdown, no trailing commas, and all property names in double quotes:\n\n${bad}`,
+        content: `${instruction}\n\n${bad}`,
       },
     ],
   });
@@ -105,7 +110,7 @@ export async function POST(req: NextRequest) {
 
     const response = await client.messages.create({
       model: 'claude-opus-4-5',
-      max_tokens: 4096,
+      max_tokens: 8192,
       system: SYSTEM_PROMPT,
       messages: [
         {
