@@ -302,16 +302,29 @@ export default function BillsPage() {
         return { locationId: loc.id, locationLabel: loc.name };
       }
     }
-    // Fallback: match known keywords / postcodes to location names
+    // Fallback: match known keywords / postcodes / streets to location names
     const KEYWORD_MAP: Record<string, string> = {
-      'eschborn':   'Eschborn',
-      '65760':      'Eschborn',
-      'taunus':     'Taunus',
-      'westend':    'Westend',
-      'zentralküche': 'ZK',
-      'zentralkueche': 'ZK',
-      'central':    'ZK',
-      'produktion': 'ZK',
+      // Westend — Feuerbachstrasse 36, 60325 Frankfurt
+      'feuerbachstr':   'Westend',
+      '60325':          'Westend',
+      'westend':        'Westend',
+      // Eschborn — Rahmannstrasse 1, 65760 Eschborn
+      'rahmannstr':     'Eschborn',
+      '65760':          'Eschborn',
+      'eschborn':       'Eschborn',
+      // Taunus — Taunusstrasse 22, 60329 Frankfurt
+      'taunusstr':      'Taunus',
+      '60329':          'Taunus',
+      'taunus':         'Taunus',
+      // Central Kitchen — Alte Königsteiner Strasse 23a, 65779 Kelkheim
+      'königsteiner':   'ZK',
+      'koenigsteiner':  'ZK',
+      'alte k':         'ZK',
+      '65779':          'ZK',
+      'kelkheim':       'ZK',
+      'zentralküche':   'ZK',
+      'zentralkueche':  'ZK',
+      'central kitchen':'ZK',
     };
     for (const [kw, locName] of Object.entries(KEYWORD_MAP)) {
       if (haystack.includes(kw)) {
