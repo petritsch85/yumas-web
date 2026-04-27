@@ -724,6 +724,16 @@ export default function BillsPage() {
                   )}
                 </div>
               ))}
+
+              {/* Clear all button */}
+              <div className="flex justify-end pt-1">
+                <button
+                  onClick={() => setQueue([])}
+                  className="text-xs text-gray-400 hover:text-red-500 transition-colors underline underline-offset-2"
+                >
+                  Clear all
+                </button>
+              </div>
             </div>
           )}
         </div>
