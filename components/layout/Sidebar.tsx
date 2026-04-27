@@ -104,9 +104,14 @@ const navGroups: NavGroup[] = [
       { label: 'Buying',             href: '/purchase-orders',         icon: ShoppingCart },
       { label: 'Controlling',        href: '/coming-soon/controlling', icon: TrendingUp },
       { label: 'Waste Log',          href: '/waste',                   icon: Trash2 },
-      { label: 'Delivery Run',       href: '/delivery',                icon: Truck },
-      { label: 'Target Levels',      href: '/delivery/targets',        icon: Target },
-      { label: 'Sales Forecast',     href: '/delivery/forecast',       icon: TrendingUp },
+      {
+        label: 'Delivery', href: '/delivery', icon: Truck,
+        children: [
+          { label: 'Delivery Run',   href: '/delivery',          icon: Truck },
+          { label: 'Target Levels',  href: '/delivery/targets',  icon: Target },
+          { label: 'Sales Forecast', href: '/delivery/forecast', icon: TrendingUp },
+        ],
+      },
     ],
   },
   {
