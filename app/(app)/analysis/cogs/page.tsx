@@ -23,7 +23,7 @@ type BillLine = {
 /* ─── Constants ──────────────────────────────────────────────────────────── */
 const PRIMARY_CATEGORIES = ['Food Cost'] as const;
 
-const SUB_CATEGORIES = ['All', 'Fruit & Veg', 'Meat', 'Spices', 'Dairy', 'Other'] as const;
+const SUB_CATEGORIES = ['All', 'Fruit & Veg', 'Meat', 'Spices', 'Dairy', 'Leergut', 'Other'] as const;
 type SubCategory = typeof SUB_CATEGORIES[number];
 
 // Keyword-based sub-category classifier (German + Spanish food terms)
@@ -66,13 +66,21 @@ const SUB_CATEGORY_KEYWORDS: Record<Exclude<SubCategory, 'All' | 'Other'>, strin
     'mozzarella', 'parmesan', 'gouda', 'emmental', 'feta', 'ricotta', 'mascarpone',
     'condensed', 'kondensmilch', 'molke', 'whey',
   ],
+  'Leergut': [
+    'leergut', 'klappkiste', 'rollcontainer', 'kiste', 'pfand', 'depot',
+    'tray', 'palette', 'trolley', 'behälter', 'container',
+  ],
 };
+
+const CLASSIFICATION_ORDER: Array<Exclude<SubCategory, 'All' | 'Other'>> = [
+  'Leergut', 'Fruit & Veg', 'Meat', 'Spices', 'Dairy',
+];
 
 function classifyLine(description: string): Exclude<SubCategory, 'All'> {
   const lower = description.toLowerCase();
-  for (const [cat, keywords] of Object.entries(SUB_CATEGORY_KEYWORDS)) {
-    if (keywords.some((kw) => lower.includes(kw))) {
-      return cat as Exclude<SubCategory, 'All'>;
+  for (const cat of CLASSIFICATION_ORDER) {
+    if (SUB_CATEGORY_KEYWORDS[cat].some((kw) => lower.includes(kw))) {
+      return cat;
     }
   }
   return 'Other';
@@ -223,6 +231,7 @@ export default function COGSPage() {
     'Meat':        'bg-red-700 text-white',
     'Spices':      'bg-amber-600 text-white',
     'Dairy':       'bg-blue-500 text-white',
+    'Leergut':     'bg-slate-600 text-white',
     'Other':       'bg-gray-500 text-white',
   };
   const SUB_CAT_INACTIVE: Record<SubCategory, string> = {
@@ -231,6 +240,7 @@ export default function COGSPage() {
     'Meat':        'bg-red-50 text-red-700 hover:bg-red-100',
     'Spices':      'bg-amber-50 text-amber-700 hover:bg-amber-100',
     'Dairy':       'bg-blue-50 text-blue-700 hover:bg-blue-100',
+    'Leergut':     'bg-slate-100 text-slate-600 hover:bg-slate-200',
     'Other':       'bg-gray-50 text-gray-600 hover:bg-gray-100',
   };
 
