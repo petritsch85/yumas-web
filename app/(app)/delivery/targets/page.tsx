@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef, useMemo } from 'react';
+import React, { useState, useRef, useMemo, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
 import { Upload, Target, SlidersHorizontal, X, Save } from 'lucide-react';
@@ -248,6 +248,7 @@ export default function DeliveryTargetsPage() {
   const [pendingScaleIds, setPendingScaleIds] = useState<Set<string>>(new Set());
   const [showStandards, setShowStandards] = useState(false);
   const [stdEdits, setStdEdits] = useState<Record<string, { mon: number; tue: number; wed: number; fri: number }>>({});
+  const [stdStore, setStdStore] = useState<Store>('Eschborn');
 
   const selectedWeek = weekOptions.find(w => w.key === selectedWeekKey) ?? weekOptions[4];
   const monday = useMemo(
@@ -311,6 +312,33 @@ export default function DeliveryTargetsPage() {
   const standards = weekData?.standards ?? [];
   const forecasts = weekData?.forecasts ?? [];
   const submissions = weekData?.submissions ?? [];
+
+  /* ─ Standards panel query (independent store) ─ */
+  const { data: stdTargetsData } = useQuery({
+    queryKey: ['std-targets', stdStore],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('delivery_targets')
+        .select('*')
+        .eq('location_name', stdStore)
+        .order('section')
+        .order('item_name');
+      if (error) throw error;
+      return data as TargetRow[];
+    },
+    enabled: showStandards,
+  });
+  const stdTargets = stdTargetsData ?? [];
+
+  // Re-initialise edits whenever the store's targets load/change
+  useEffect(() => {
+    if (!stdTargetsData || stdTargetsData.length === 0) return;
+    const initial: Record<string, { mon: number; tue: number; wed: number; fri: number }> = {};
+    for (const t of stdTargetsData) {
+      initial[t.id] = { mon: t.mon_target, tue: t.tue_target, wed: t.wed_target, fri: t.fri_target };
+    }
+    setStdEdits(initial);
+  }, [stdTargetsData]);
 
   /* ─ Compute per-day scaling factors ─ */
   const dayScales: { scale: number; hasForecast: boolean }[] = DAY_KEYS.map((dayKey, idx) => {
@@ -400,17 +428,13 @@ export default function DeliveryTargetsPage() {
 
   /* ─ Standards panel ─ */
   const openStandards = () => {
-    const initial: Record<string, { mon: number; tue: number; wed: number; fri: number }> = {};
-    for (const t of targets) {
-      initial[t.id] = { mon: t.mon_target, tue: t.tue_target, wed: t.wed_target, fri: t.fri_target };
-    }
-    setStdEdits(initial);
+    setStdStore(activeStore);
     setShowStandards(true);
   };
 
   const saveStandards = useMutation({
     mutationFn: async () => {
-      const payload = targets.map(t => ({
+      const payload = stdTargets.map(t => ({
         id: t.id,
         location_name: t.location_name,
         section: t.section,
@@ -429,6 +453,7 @@ export default function DeliveryTargetsPage() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['targets-weekly'] });
+      qc.invalidateQueries({ queryKey: ['std-targets'] });
       setShowStandards(false);
     },
   });
@@ -519,106 +544,132 @@ export default function DeliveryTargetsPage() {
 
   return (
     <div>
-      {/* ── Standard Targets drawer ────────────────────────────────────────── */}
-      {showStandards && (
-        <>
-          {/* Backdrop */}
-          <div
-            className="fixed inset-0 z-40 bg-black/30 backdrop-blur-sm"
-            onClick={() => setShowStandards(false)}
-          />
+      {/* ── Standard Targets modal ───────────────────────────────────────── */}
+      {showStandards && (() => {
+        // Compute sections for the stdStore targets
+        const stdGrouped = SECTIONS.reduce<Record<string, TargetRow[]>>((acc, sec) => {
+          acc[sec] = stdTargets.filter(t => t.section === sec);
+          return acc;
+        }, {});
+        const stdOtherSections = [...new Set(stdTargets.map(t => t.section).filter(s => !new Set(SECTIONS).has(s)))];
+        const stdAllSections = [...SECTIONS, ...stdOtherSections];
 
-          {/* Panel */}
-          <div className="fixed right-0 top-0 z-50 h-full w-[520px] max-w-full bg-white shadow-2xl flex flex-col">
-            {/* Header */}
-            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 flex-shrink-0">
-              <div>
-                <div className="flex items-center gap-2">
-                  <SlidersHorizontal size={16} className="text-[#1B5E20]" />
-                  <h2 className="text-base font-semibold text-gray-900">Standard Targets</h2>
-                </div>
-                <p className="text-xs text-gray-500 mt-0.5">{activeStore} — base delivery quantities per day</p>
-              </div>
-              <button
-                onClick={() => setShowStandards(false)}
-                className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"
-              >
-                <X size={18} />
-              </button>
-            </div>
+        return (
+          <>
+            {/* Backdrop */}
+            <div
+              className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm"
+              onClick={() => setShowStandards(false)}
+            />
 
-            {/* Scrollable table */}
-            <div className="flex-1 overflow-y-auto">
-              {targets.length === 0 ? (
-                <div className="p-8 text-center text-sm text-gray-400">
-                  No targets uploaded yet for {activeStore}.
-                </div>
-              ) : (
-                <table className="w-full text-sm border-collapse">
-                  <thead className="sticky top-0 z-10 bg-white border-b-2 border-gray-200">
-                    <tr>
-                      <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide w-[40%]">Item</th>
-                      <th className="px-2 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide w-[10%]">Unit</th>
-                      {DAY_LABELS.map(d => (
-                        <th key={d} className="px-2 py-2.5 text-center text-xs font-semibold text-gray-500 uppercase tracking-wide w-[12.5%]">{d}</th>
+            {/* Centred modal */}
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-6 pointer-events-none">
+              <div className="bg-white rounded-2xl shadow-2xl flex flex-col w-full max-w-2xl max-h-[88vh] pointer-events-auto">
+
+                {/* Header */}
+                <div className="flex items-start justify-between px-6 py-4 border-b border-gray-100 flex-shrink-0">
+                  <div>
+                    <div className="flex items-center gap-2 mb-2">
+                      <SlidersHorizontal size={16} className="text-[#1B5E20]" />
+                      <h2 className="text-base font-semibold text-gray-900">Standard Targets</h2>
+                    </div>
+                    {/* Store switcher */}
+                    <div className="flex gap-1 bg-gray-100 rounded-lg p-0.5 w-fit">
+                      {STORES.map(store => (
+                        <button
+                          key={store}
+                          onClick={() => setStdStore(store)}
+                          className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
+                            stdStore === store
+                              ? 'bg-white text-[#1B5E20] shadow-sm font-semibold'
+                              : 'text-gray-500 hover:text-gray-700'
+                          }`}
+                        >
+                          {store}
+                        </button>
                       ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {allSections.map(section => {
-                      const sectionRows = grouped[section] ?? targets.filter(t => t.section === section);
-                      if (sectionRows.length === 0) return null;
-                      return (
-                        <React.Fragment key={section}>
-                          {/* Section header */}
-                          <tr className="bg-green-50">
-                            <td colSpan={6} className="px-4 py-1.5">
-                              <span className="text-[11px] font-bold text-[#1B5E20] uppercase tracking-wider">{section}</span>
-                            </td>
-                          </tr>
-                          {sectionRows.map(row => (
-                            <tr key={row.id} className="border-t border-gray-50 hover:bg-gray-50/50">
-                              <td className="px-4 py-2 text-sm text-gray-800 leading-tight">{row.item_name}</td>
-                              <td className="px-2 py-2 text-xs text-gray-400">{row.unit}</td>
-                              {(['mon', 'tue', 'wed', 'fri'] as const).map(day => (
-                                <td key={day} className="px-2 py-1.5 text-center">
-                                  <input
-                                    type="number"
-                                    min={0}
-                                    step={1}
-                                    value={stdEdits[row.id]?.[day] ?? (day === 'mon' ? row.mon_target : day === 'tue' ? row.tue_target : day === 'wed' ? row.wed_target : row.fri_target)}
-                                    onChange={e => setStdEdit(row.id, day, e.target.value)}
-                                    className="w-14 text-center text-sm border border-gray-200 rounded-md py-1 px-1.5 focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20]/50"
-                                  />
-                                </td>
-                              ))}
-                            </tr>
-                          ))}
-                        </React.Fragment>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              )}
-            </div>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setShowStandards(false)}
+                    className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors mt-0.5"
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
 
-            {/* Footer */}
-            <div className="px-5 py-4 border-t border-gray-100 flex-shrink-0 flex items-center justify-between bg-gray-50/50">
-              <p className="text-xs text-gray-400">
-                Changes update the base targets for all future weeks.
-              </p>
-              <button
-                onClick={() => saveStandards.mutate()}
-                disabled={saveStandards.isPending || targets.length === 0}
-                className="flex items-center gap-2 bg-[#1B5E20] text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-[#2E7D32] transition-colors disabled:opacity-50"
-              >
-                <Save size={15} />
-                {saveStandards.isPending ? 'Saving…' : 'Save Changes'}
-              </button>
+                {/* Scrollable table */}
+                <div className="flex-1 overflow-y-auto">
+                  {stdTargets.length === 0 ? (
+                    <div className="p-8 text-center text-sm text-gray-400">
+                      No targets uploaded yet for {stdStore}.
+                    </div>
+                  ) : (
+                    <table className="w-full text-sm border-collapse">
+                      <thead className="sticky top-0 z-10 bg-white border-b-2 border-gray-200">
+                        <tr>
+                          <th className="px-5 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Item</th>
+                          <th className="px-2 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide w-24">Unit</th>
+                          {DAY_LABELS.map(d => (
+                            <th key={d} className="px-2 py-2.5 text-center text-xs font-semibold text-gray-500 uppercase tracking-wide w-20">{d}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {stdAllSections.map(section => {
+                          const sectionRows = stdGrouped[section] ?? stdTargets.filter(t => t.section === section);
+                          if (sectionRows.length === 0) return null;
+                          return (
+                            <React.Fragment key={section}>
+                              <tr className="bg-green-50">
+                                <td colSpan={6} className="px-5 py-1.5">
+                                  <span className="text-[11px] font-bold text-[#1B5E20] uppercase tracking-wider">{section}</span>
+                                </td>
+                              </tr>
+                              {sectionRows.map(row => (
+                                <tr key={row.id} className="border-t border-gray-50 hover:bg-gray-50/50">
+                                  <td className="px-5 py-2 text-sm text-gray-800">{row.item_name}</td>
+                                  <td className="px-2 py-2 text-xs text-gray-400">{row.unit}</td>
+                                  {(['mon', 'tue', 'wed', 'fri'] as const).map(day => (
+                                    <td key={day} className="px-2 py-1.5 text-center">
+                                      <input
+                                        type="number"
+                                        min={0}
+                                        step={1}
+                                        value={stdEdits[row.id]?.[day] ?? (day === 'mon' ? row.mon_target : day === 'tue' ? row.tue_target : day === 'wed' ? row.wed_target : row.fri_target)}
+                                        onChange={e => setStdEdit(row.id, day, e.target.value)}
+                                        className="w-16 text-center text-sm border border-gray-200 rounded-md py-1 px-1.5 focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20]/50"
+                                      />
+                                    </td>
+                                  ))}
+                                </tr>
+                              ))}
+                            </React.Fragment>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+
+                {/* Footer */}
+                <div className="px-6 py-4 border-t border-gray-100 flex-shrink-0 flex items-center justify-between bg-gray-50/50 rounded-b-2xl">
+                  <p className="text-xs text-gray-400">Changes update the base targets for all future weeks.</p>
+                  <button
+                    onClick={() => saveStandards.mutate()}
+                    disabled={saveStandards.isPending || stdTargets.length === 0}
+                    className="flex items-center gap-2 bg-[#1B5E20] text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-[#2E7D32] transition-colors disabled:opacity-50"
+                  >
+                    <Save size={15} />
+                    {saveStandards.isPending ? 'Saving…' : 'Save Changes'}
+                  </button>
+                </div>
+
+              </div>
             </div>
-          </div>
-        </>
-      )}
+          </>
+        );
+      })()}
 
       {/* Page header */}
       <div className="flex items-center justify-between mb-6">
