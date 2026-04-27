@@ -111,6 +111,12 @@ const navGroups: NavGroup[] = [
           { label: 'Sales Forecast', href: '/delivery/forecast', icon: TrendingUp },
         ],
       },
+      {
+        label: 'Analysis', href: '/analysis', icon: BarChart3,
+        children: [
+          { label: 'COGS', href: '/analysis/cogs', icon: TrendingDown },
+        ],
+      },
     ],
   },
   {
