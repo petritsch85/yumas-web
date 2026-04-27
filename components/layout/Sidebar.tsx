@@ -319,7 +319,7 @@ export default function Sidebar() {
                       <div className="mt-0.5 space-y-0.5">
                         {item.children!.map((child) => {
                           const ChildIcon = child.icon;
-                          const childActive = isActive(child.href);
+                          const childActive = pathname === child.href;
                           return (
                             <Link
                               key={child.href}
