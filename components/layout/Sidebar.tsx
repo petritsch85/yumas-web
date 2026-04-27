@@ -192,20 +192,27 @@ export default function Sidebar() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
-  // Auto-expand any parent whose children include the current path
+  // Auto-expand any parent whose children include the current path.
+  // We MERGE into the existing set so manually-opened items never get collapsed.
   useEffect(() => {
-    const toExpand = new Set<string>();
+    const toExpand: string[] = [];
     for (const group of navGroups) {
       for (const item of group.items) {
         if (item.children) {
           const childActive = item.children.some((c) =>
             pathname === c.href || pathname.startsWith(c.href + '/')
           );
-          if (childActive) toExpand.add(item.href);
+          if (childActive) toExpand.push(item.href);
         }
       }
     }
-    setExpanded(toExpand);
+    if (toExpand.length > 0) {
+      setExpanded(prev => {
+        const next = new Set(prev);
+        for (const href of toExpand) next.add(href);
+        return next;
+      });
+    }
   }, [pathname]);
 
   useEffect(() => {
