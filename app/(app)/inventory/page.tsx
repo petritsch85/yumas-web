@@ -1,22 +1,29 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { FilePlus, ClipboardList } from 'lucide-react';
+import { FilePlus, BarChart3, ClipboardList } from 'lucide-react';
 
 const items = [
   {
     icon: FilePlus,
     label: 'Add New Inventory',
-    sublabel: 'Add a new item or opening stock',
+    sublabel: 'Submit a new inventory count for a location',
     href: '/inventory/add',
     color: '#2E7D32',
   },
   {
-    icon: ClipboardList,
+    icon: BarChart3,
     label: 'Current Inventory',
-    sublabel: 'View stock levels by location',
-    href: '/inventory/counts',
+    sublabel: 'Live stock levels across all locations',
+    href: '/inventory/overview',
     color: '#1565C0',
+  },
+  {
+    icon: ClipboardList,
+    label: 'Inventory Reports',
+    sublabel: 'All submitted inventory reports with timing',
+    href: '/inventory/counts',
+    color: '#6A1B9A',
   },
 ];
 
