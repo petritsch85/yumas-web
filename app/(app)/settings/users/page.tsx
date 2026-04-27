@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
-import { Plus, Pencil, X, Eye, EyeOff } from 'lucide-react';
+import { Plus, Pencil, X, Eye, EyeOff, Trash2 } from 'lucide-react';
 
 type Location = { id: string; name: string };
 
@@ -286,6 +286,22 @@ export default function TeamPage() {
     },
   });
 
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+
+  const deleteUser = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await fetch(`/api/admin/users/${id}`, { method: 'DELETE' });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? 'Failed to delete');
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['team-users'] });
+      qc.invalidateQueries({ queryKey: ['team-emails'] });
+      setConfirmDeleteId(null);
+      setEditingId(null);
+    },
+  });
+
   const startEdit = (user: UserRow) => {
     setEditingId(user.id);
     setEditDraft({
@@ -439,6 +455,41 @@ export default function TeamPage() {
         </div>
       )}
 
+      {/* Delete confirmation modal */}
+      {confirmDeleteId && (() => {
+        const target = users?.find(u => u.id === confirmDeleteId);
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+            <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-sm mx-4">
+              <h3 className="text-base font-semibold text-gray-900 mb-1">Delete account?</h3>
+              <p className="text-sm text-gray-500 mb-5">
+                <span className="font-medium text-gray-700">{target?.full_name ?? 'This user'}</span>'s
+                account will be permanently deleted and they will no longer be able to log in.
+                This cannot be undone.
+              </p>
+              {deleteUser.error && (
+                <p className="text-red-500 text-xs mb-3">{(deleteUser.error as any).message}</p>
+              )}
+              <div className="flex justify-end gap-2">
+                <button
+                  onClick={() => { setConfirmDeleteId(null); deleteUser.reset(); }}
+                  className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => deleteUser.mutate(confirmDeleteId)}
+                  disabled={deleteUser.isPending}
+                  className="bg-red-600 text-white px-5 py-2 rounded-lg text-sm font-medium hover:bg-red-700 transition-colors disabled:opacity-50"
+                >
+                  {deleteUser.isPending ? 'Deleting…' : 'Delete permanently'}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Users table */}
       <div className="bg-white rounded-lg shadow-sm border border-gray-100">
         <div className="overflow-x-auto">
@@ -461,7 +512,7 @@ export default function TeamPage() {
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">Role</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">Location</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">Status</th>
-                  <th className="px-4 py-3 w-8" />
+                  <th className="px-4 py-3 w-16" />
                 </tr>
               </thead>
               <tbody>
@@ -487,13 +538,22 @@ export default function TeamPage() {
                         </span>
                       </td>
                       <td className="px-4 py-3 text-right">
-                        <button
-                          onClick={() => editingId === user.id ? setEditingId(null) : startEdit(user)}
-                          className={`transition-colors ${editingId === user.id ? 'text-indigo-500' : 'text-gray-300 hover:text-indigo-500'}`}
-                          title="Edit"
-                        >
-                          <Pencil size={14} />
-                        </button>
+                        <div className="flex items-center justify-end gap-3">
+                          <button
+                            onClick={() => editingId === user.id ? setEditingId(null) : startEdit(user)}
+                            className={`transition-colors ${editingId === user.id ? 'text-indigo-500' : 'text-gray-300 hover:text-indigo-500'}`}
+                            title="Edit"
+                          >
+                            <Pencil size={14} />
+                          </button>
+                          <button
+                            onClick={() => setConfirmDeleteId(user.id)}
+                            className="text-gray-300 hover:text-red-500 transition-colors"
+                            title="Delete"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
                       </td>
                     </tr>
 

@@ -1,6 +1,27 @@
 import { NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase-admin';
 
+export async function DELETE(
+  _request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id } = await params;
+    const admin = getSupabaseAdmin();
+
+    // Delete profile row first (FK may block auth deletion otherwise)
+    await admin.from('profiles').delete().eq('id', id);
+
+    // Delete the Supabase Auth user (permanent)
+    const { error } = await admin.auth.admin.deleteUser(id);
+    if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+
+    return NextResponse.json({ success: true });
+  } catch (e: any) {
+    return NextResponse.json({ error: e?.message ?? 'Unexpected error' }, { status: 500 });
+  }
+}
+
 export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
