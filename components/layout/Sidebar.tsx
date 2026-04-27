@@ -89,7 +89,9 @@ const navGroups: NavGroup[] = [
       {
         label: 'Inventory', href: '/inventory', icon: ClipboardList,
         children: [
-          { label: 'Current Inventory', href: '/inventory/counts', icon: ClipboardList },
+          { label: 'Add New Inventory',  href: '/inventory/add',      icon: FilePlus },
+          { label: 'Current Inventory',  href: '/inventory/overview', icon: BarChart3 },
+          { label: 'Inventory Reports',  href: '/inventory/counts',   icon: ClipboardList },
         ],
       },
       {
@@ -129,7 +131,6 @@ const navGroups: NavGroup[] = [
           { label: 'Drinks Prep', href: '/staff-videos/drinks-prep', icon: Utensils },
         ],
       },
-      { label: 'Add New Inventory', href: '/inventory/add',             icon: FilePlus },
       { label: 'Shift Roster',      href: '/coming-soon/shift-roster',  icon: CalendarDays },
     ],
   },
