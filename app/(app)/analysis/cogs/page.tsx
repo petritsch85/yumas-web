@@ -67,8 +67,7 @@ const SUB_CATEGORY_KEYWORDS: Record<Exclude<SubCategory, 'All' | 'Other'>, strin
     'condensed', 'kondensmilch', 'molke', 'whey',
   ],
   'Leergut': [
-    'leergut', 'klappkiste', 'rollcontainer', 'kiste', 'pfand', 'depot',
-    'tray', 'palette', 'trolley', 'behälter', 'container',
+    'leergut', 'klappkiste', 'rollcontainer',
   ],
 };
 
