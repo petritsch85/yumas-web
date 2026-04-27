@@ -231,7 +231,7 @@ export default function COGSPage() {
     'Meat':        'bg-red-700 text-white',
     'Spices':      'bg-amber-600 text-white',
     'Dairy':       'bg-blue-500 text-white',
-    'Leergut':     'bg-slate-600 text-white',
+    'Leergut':     'bg-amber-900 text-white',
     'Other':       'bg-gray-500 text-white',
   };
   const SUB_CAT_INACTIVE: Record<SubCategory, string> = {
@@ -240,7 +240,7 @@ export default function COGSPage() {
     'Meat':        'bg-red-50 text-red-700 hover:bg-red-100',
     'Spices':      'bg-amber-50 text-amber-700 hover:bg-amber-100',
     'Dairy':       'bg-blue-50 text-blue-700 hover:bg-blue-100',
-    'Leergut':     'bg-slate-100 text-slate-600 hover:bg-slate-200',
+    'Leergut':     'bg-amber-100 text-amber-900 hover:bg-amber-200',
     'Other':       'bg-gray-50 text-gray-600 hover:bg-gray-100',
   };
 
