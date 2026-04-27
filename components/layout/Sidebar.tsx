@@ -114,7 +114,8 @@ const navGroups: NavGroup[] = [
       {
         label: 'Analysis', href: '/analysis', icon: BarChart3,
         children: [
-          { label: 'COGS', href: '/analysis/cogs', icon: TrendingDown },
+          { label: 'COGS',        href: '/analysis/cogs',        icon: TrendingDown },
+          { label: 'Store Yield', href: '/analysis/store-yield', icon: BarChart3 },
         ],
       },
     ],
