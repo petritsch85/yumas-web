@@ -32,6 +32,12 @@ Return this exact JSON structure:
   "vat_amount": number,
   "gross_amount": number,
   "suggested_category": "one of: Food Cost | Drinks Cost | Packaging | Software & Technology | Delivery Platform Fees | Repairs & Maintenance | Cleaning Services | Utilities | Rent | Labour | Marketing | Other",
+  "delivery_address": {
+    "street": "string or null",
+    "postcode": "string or null",
+    "city": "string or null",
+    "full": "string or null"
+  },
   "lines": [
     {
       "description": "string",
@@ -52,7 +58,8 @@ Rules:
 - For deposit/Leergut items: include them with is_deposit: true
 - If multiple VAT rates exist, use the dominant one for the header; capture per-line rates in lines
 - Suggest category based on supplier type and line item descriptions
-- If a discount is applied, reflect it in the net_amount (post-discount)`;
+- If a discount is applied, reflect it in the net_amount (post-discount)
+- delivery_address: extract the delivery/ship-to address from the invoice (Lieferadresse / Lieferanschrift / Warenempfänger). This is the address where goods were delivered TO, NOT the supplier's address. Set to null fields if not found`;
 
 /** Pull the outermost JSON object out of a string that may contain surrounding text */
 function extractJSONObject(text: string): string {

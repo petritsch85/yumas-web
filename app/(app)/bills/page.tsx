@@ -21,6 +21,13 @@ type ExtractedLine = {
   is_deposit:  boolean;
 };
 
+type DeliveryAddress = {
+  street:   string | null;
+  postcode: string | null;
+  city:     string | null;
+  full:     string | null;
+};
+
 type Extracted = {
   supplier_name:      string;
   invoice_number:     string | null;
@@ -32,6 +39,7 @@ type Extracted = {
   vat_amount:         number;
   gross_amount:       number;
   suggested_category: string;
+  delivery_address:   DeliveryAddress | null;
   lines:              ExtractedLine[];
 };
 
@@ -280,6 +288,40 @@ export default function BillsPage() {
     vat:   filtered.reduce((s, b) => s + b.vat_amount,   0),
   };
 
+  // ── Match delivery address to a known location ────────────────────────────────
+  const matchLocation = useCallback((addr: DeliveryAddress | null, locs: Location[]): { locationId: string; locationLabel: string } | null => {
+    if (!addr || locs.length === 0) return null;
+    const haystack = [addr.full, addr.street, addr.postcode, addr.city]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase();
+    if (!haystack) return null;
+    // Try each location name as a substring match in the address text
+    for (const loc of locs) {
+      if (haystack.includes(loc.name.toLowerCase())) {
+        return { locationId: loc.id, locationLabel: loc.name };
+      }
+    }
+    // Fallback: match known keywords / postcodes to location names
+    const KEYWORD_MAP: Record<string, string> = {
+      'eschborn':   'Eschborn',
+      '65760':      'Eschborn',
+      'taunus':     'Taunus',
+      'westend':    'Westend',
+      'zentralküche': 'ZK',
+      'zentralkueche': 'ZK',
+      'central':    'ZK',
+      'produktion': 'ZK',
+    };
+    for (const [kw, locName] of Object.entries(KEYWORD_MAP)) {
+      if (haystack.includes(kw)) {
+        const loc = locs.find((l) => l.name === locName);
+        if (loc) return { locationId: loc.id, locationLabel: loc.name };
+      }
+    }
+    return null;
+  }, []);
+
   // ── Extract via Claude ────────────────────────────────────────────────────────
   const extractItem = useCallback(async (item: QueueItem) => {
     setQueue((q) => q.map((i) => i.id === item.id ? { ...i, status: 'extracting' } : i));
@@ -292,14 +334,23 @@ export default function BillsPage() {
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? 'Extraction failed');
       const invoiceDate = json.data?.invoice_date ?? null;
+      const autoLocation = matchLocation(json.data?.delivery_address ?? null, locations);
       setQueue((q) => q.map((i) => i.id === item.id
-        ? { ...i, status: 'done', data: json.data, periodType: 'single_date', periodStart: invoiceDate, periodEnd: invoiceDate }
+        ? {
+            ...i,
+            status: 'done',
+            data: json.data,
+            periodType: 'single_date',
+            periodStart: invoiceDate,
+            periodEnd: invoiceDate,
+            ...(autoLocation && !i.locationId ? autoLocation : {}),
+          }
         : i
       ));
     } catch (err: any) {
       setQueue((q) => q.map((i) => i.id === item.id ? { ...i, status: 'error', error: err.message } : i));
     }
-  }, []);
+  }, [locations, matchLocation]);
 
   const processFiles = useCallback(async (files: File[]) => {
     const pdfs = files.filter((f) => f.name.toLowerCase().endsWith('.pdf'));
@@ -638,6 +689,12 @@ export default function BillsPage() {
                             </select>
                             <ChevronDown size={12} className="absolute right-2 top-2 text-gray-400 pointer-events-none" />
                           </div>
+                          {/* Show detected delivery address */}
+                          {item.data?.delivery_address?.full && (
+                            <p className="text-[10px] text-gray-400 mt-1 truncate" title={item.data.delivery_address.full}>
+                              📍 {item.data.delivery_address.full}
+                            </p>
+                          )}
                         </div>
 
                         {/* Period type */}
