@@ -69,7 +69,6 @@ const navGroups: NavGroup[] = [
     label: 'DATA',
     items: [
       { label: 'Suppliers',  href: '/suppliers',  icon: Store },
-      { label: 'Locations',  href: '/locations',  icon: MapPin },
       { label: 'Menus',      href: '/products/menus', icon: UtensilsCrossed },
       { label: 'Machines',   href: '/coming-soon/machines',   icon: Wrench },
       { label: 'Team',        href: '/settings/users',          icon: Users },
