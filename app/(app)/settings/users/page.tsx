@@ -3,28 +3,106 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
-import { Plus, Pencil, X, Eye, EyeOff, Trash2 } from 'lucide-react';
+import { Plus, Pencil, X, Eye, EyeOff, Trash2, CheckSquare, Square } from 'lucide-react';
 
 type Location = { id: string; name: string };
 
+/* ─── Permissions ────────────────────────────────────────────────────────── */
 type AppPermissions = {
-  inventory_report: string[];   // location names
-  view_inventory:   string[];   // location names
-  waste_log:        boolean;
-  delivery_confirm: boolean;
-  production:       boolean;
-  staff_videos:     boolean;
+  // Web section access (booleans)
+  inventory:    boolean;
+  production:   boolean;
+  buying:       boolean;
+  waste_log:    boolean;
+  delivery:     boolean;
+  analysis:     boolean;
+  events:       boolean;
+  staff_videos: boolean;
+  bills:        boolean;
+  pl_reports:   boolean;
+  suppliers:    boolean;
+  products:     boolean;
 };
 
-const DEFAULT_PERMISSIONS: AppPermissions = {
-  inventory_report: [],
-  view_inventory:   [],
-  waste_log:        false,
-  delivery_confirm: false,
-  production:       false,
-  staff_videos:     false,
+type PermKey = keyof AppPermissions;
+
+type ModuleItem = { key: PermKey; label: string; description?: string };
+type ModuleGroup = { group: string; items: ModuleItem[] };
+
+const MODULE_GROUPS: ModuleGroup[] = [
+  {
+    group: 'Supply Chain',
+    items: [
+      { key: 'inventory',  label: 'Inventory',       description: 'Add counts, view stock levels, reports' },
+      { key: 'production', label: 'Production',      description: 'Batches & recipes' },
+      { key: 'buying',     label: 'Purchase Orders', description: 'Create & view orders' },
+      { key: 'waste_log',  label: 'Waste Log',       description: 'Log waste entries' },
+      { key: 'delivery',   label: 'Delivery',        description: 'Runs, target levels, sales forecast' },
+      { key: 'analysis',   label: 'Analysis',        description: 'COGS & Store Yield' },
+    ],
+  },
+  {
+    group: 'Events',
+    items: [
+      { key: 'events', label: 'Events', description: 'View & manage events' },
+    ],
+  },
+  {
+    group: 'In Store',
+    items: [
+      { key: 'staff_videos', label: 'Staff Videos', description: 'Food & drinks prep videos' },
+    ],
+  },
+  {
+    group: 'Data',
+    items: [
+      { key: 'suppliers', label: 'Suppliers', description: 'Supplier list & details' },
+      { key: 'products',  label: 'Products / Menus', description: 'Raw materials, semi-finished, finished' },
+    ],
+  },
+  {
+    group: 'Reports',
+    items: [
+      { key: 'pl_reports', label: 'P&L Reports', description: 'Sales reports & monthly P&L' },
+    ],
+  },
+  {
+    group: 'Admin',
+    items: [
+      { key: 'bills', label: 'Bills', description: 'Upload & review supplier invoices' },
+    ],
+  },
+];
+
+const STAFF_DEFAULTS: AppPermissions = {
+  inventory: true, production: false, buying: false, waste_log: true,
+  delivery: false, analysis: false, events: false, staff_videos: true,
+  bills: false, pl_reports: false, suppliers: false, products: false,
 };
 
+const MANAGER_DEFAULTS: AppPermissions = {
+  inventory: true, production: true, buying: true, waste_log: true,
+  delivery: true, analysis: true, events: true, staff_videos: true,
+  bills: false, pl_reports: true, suppliers: true, products: true,
+};
+
+const ADMIN_DEFAULTS: AppPermissions = {
+  inventory: true, production: true, buying: true, waste_log: true,
+  delivery: true, analysis: true, events: true, staff_videos: true,
+  bills: true, pl_reports: true, suppliers: true, products: true,
+};
+
+function defaultsForRole(role: string): AppPermissions {
+  if (role === 'admin')   return { ...ADMIN_DEFAULTS };
+  if (role === 'manager') return { ...MANAGER_DEFAULTS };
+  return { ...STAFF_DEFAULTS };
+}
+
+function mergePermissions(raw?: Partial<AppPermissions>): AppPermissions {
+  return { ...STAFF_DEFAULTS, ...(raw ?? {}) };
+}
+
+/* ─── Types ──────────────────────────────────────────────────────────────── */
 type UserRow = {
   id: string;
   full_name: string;
@@ -36,19 +114,13 @@ type UserRow = {
 };
 
 type AddDraft = {
-  fullName: string;
-  email: string;
-  password: string;
-  role: string;
-  locationId: string;
+  fullName: string; email: string; password: string;
+  role: string; locationId: string;
 };
 
 type EditDraft = {
-  role: string;
-  locationId: string;
-  isActive: boolean;
-  permissions: AppPermissions;
-  newPassword: string;
+  role: string; locationId: string; isActive: boolean;
+  permissions: AppPermissions; newPassword: string;
 };
 
 const ROLES = ['staff', 'manager', 'admin'];
@@ -58,128 +130,115 @@ const roleColor: Record<string, string> = {
   manager: 'bg-blue-100 text-blue-700',
   staff:   'bg-gray-100 text-gray-600',
 };
-
 const roleHint: Record<string, string> = {
-  staff:   'App only — inventory forms',
-  manager: 'App + web, assigned location',
+  staff:   'Inventory forms only',
+  manager: 'Operational access, assigned location',
   admin:   'Full access, all locations',
 };
 
-// Features that have per-location selection
-const LOCATION_FEATURES: { key: keyof AppPermissions; label: string }[] = [
-  { key: 'inventory_report', label: 'Add Inventory' },
-  { key: 'view_inventory',   label: 'View Inventory' },
-];
-
-// Boolean features (no location)
-const BOOL_FEATURES: { key: keyof AppPermissions; label: string }[] = [
-  { key: 'waste_log',        label: 'Waste Log' },
-  { key: 'delivery_confirm', label: 'Delivery Confirm' },
-  { key: 'production',       label: 'Production' },
-  { key: 'staff_videos',     label: 'Staff Videos' },
-];
-
-function mergePermissions(raw?: Partial<AppPermissions>): AppPermissions {
-  return {
-    ...DEFAULT_PERMISSIONS,
-    ...(raw ?? {}),
-    inventory_report: raw?.inventory_report ?? [],
-    view_inventory:   raw?.view_inventory ?? [],
-  };
-}
-
-// ── Permissions editor sub-component ────────────────────────────────────────
+/* ─── Permissions editor ─────────────────────────────────────────────────── */
 function PermissionsEditor({
   perms,
-  locationNames,
   onChange,
+  isAdmin,
 }: {
   perms: AppPermissions;
-  locationNames: string[];
   onChange: (p: AppPermissions) => void;
+  isAdmin?: boolean;
 }) {
-  const toggleLocation = (feature: 'inventory_report' | 'view_inventory', loc: string) => {
-    const current = perms[feature] as string[];
-    const next = current.includes(loc)
-      ? current.filter(l => l !== loc)
-      : [...current, loc];
-    onChange({ ...perms, [feature]: next });
-  };
+  if (isAdmin) {
+    return (
+      <div className="mt-4 pt-4 border-t border-gray-100">
+        <p className="text-xs text-gray-400 italic">Admins have access to everything — no restrictions apply.</p>
+      </div>
+    );
+  }
 
-  const toggleBool = (feature: keyof AppPermissions) => {
-    onChange({ ...perms, [feature]: !perms[feature] });
+  const toggle = (key: PermKey) => onChange({ ...perms, [key]: !perms[key] });
+
+  const groupAllOn  = (group: ModuleGroup) => {
+    const patch = Object.fromEntries(group.items.map(i => [i.key, true])) as Partial<AppPermissions>;
+    onChange({ ...perms, ...patch });
+  };
+  const groupAllOff = (group: ModuleGroup) => {
+    const patch = Object.fromEntries(group.items.map(i => [i.key, false])) as Partial<AppPermissions>;
+    onChange({ ...perms, ...patch });
   };
 
   return (
-    <div className="mt-4 pt-4 border-t border-indigo-100">
-      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
-        App Permissions
-      </p>
+    <div className="mt-4 pt-4 border-t border-gray-100 space-y-5">
+      <div className="flex items-center justify-between">
+        <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Section Access</p>
+        <div className="flex gap-3">
+          <button
+            type="button"
+            onClick={() => onChange(Object.fromEntries(MODULE_GROUPS.flatMap(g => g.items).map(i => [i.key, true])) as AppPermissions)}
+            className="text-xs text-indigo-600 hover:underline font-medium"
+          >
+            Enable all
+          </button>
+          <button
+            type="button"
+            onClick={() => onChange(Object.fromEntries(MODULE_GROUPS.flatMap(g => g.items).map(i => [i.key, false])) as AppPermissions)}
+            className="text-xs text-gray-400 hover:underline"
+          >
+            Clear all
+          </button>
+        </div>
+      </div>
 
-      <div className="space-y-4">
-        {/* Location-based features */}
-        {LOCATION_FEATURES.map(({ key, label }) => (
-          <div key={key}>
-            <p className="text-xs font-medium text-gray-700 mb-1.5">{label}</p>
-            <div className="flex flex-wrap gap-2">
-              {locationNames.map(loc => {
-                const checked = (perms[key] as string[]).includes(loc);
+      {MODULE_GROUPS.map((group) => {
+        const allOn = group.items.every(i => perms[i.key]);
+        return (
+          <div key={group.group}>
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">{group.group}</p>
+              <button
+                type="button"
+                onClick={() => allOn ? groupAllOff(group) : groupAllOn(group)}
+                className="text-xs text-gray-400 hover:text-indigo-600 transition-colors"
+              >
+                {allOn ? 'Deselect all' : 'Select all'}
+              </button>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+              {group.items.map(({ key, label, description }) => {
+                const checked = !!perms[key];
                 return (
                   <label
-                    key={loc}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs cursor-pointer transition-colors select-none ${
+                    key={key}
+                    className={`flex items-start gap-2.5 p-3 rounded-xl border cursor-pointer transition-all select-none ${
                       checked
-                        ? 'bg-indigo-600 border-indigo-600 text-white'
-                        : 'bg-white border-gray-200 text-gray-600 hover:border-indigo-300'
+                        ? 'bg-indigo-50 border-indigo-300 text-indigo-900'
+                        : 'bg-white border-gray-200 text-gray-600 hover:border-indigo-200 hover:bg-gray-50'
                     }`}
                   >
                     <input
                       type="checkbox"
                       className="sr-only"
                       checked={checked}
-                      onChange={() => toggleLocation(key as 'inventory_report' | 'view_inventory', loc)}
+                      onChange={() => toggle(key)}
                     />
-                    {loc}
+                    {checked
+                      ? <CheckSquare size={15} className="text-indigo-600 flex-shrink-0 mt-0.5" />
+                      : <Square size={15} className="text-gray-300 flex-shrink-0 mt-0.5" />
+                    }
+                    <div>
+                      <div className={`text-xs font-semibold ${checked ? 'text-indigo-800' : 'text-gray-700'}`}>{label}</div>
+                      {description && <div className="text-xs text-gray-400 mt-0.5 leading-tight">{description}</div>}
+                    </div>
                   </label>
                 );
               })}
             </div>
           </div>
-        ))}
-
-        {/* Boolean features */}
-        <div>
-          <p className="text-xs font-medium text-gray-700 mb-1.5">Other Features</p>
-          <div className="flex flex-wrap gap-2">
-            {BOOL_FEATURES.map(({ key, label }) => {
-              const checked = !!perms[key];
-              return (
-                <label
-                  key={key}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs cursor-pointer transition-colors select-none ${
-                    checked
-                      ? 'bg-indigo-600 border-indigo-600 text-white'
-                      : 'bg-white border-gray-200 text-gray-600 hover:border-indigo-300'
-                  }`}
-                >
-                  <input
-                    type="checkbox"
-                    className="sr-only"
-                    checked={checked}
-                    onChange={() => toggleBool(key)}
-                  />
-                  {label}
-                </label>
-              );
-            })}
-          </div>
-        </div>
-      </div>
+        );
+      })}
     </div>
   );
 }
 
-// ── Main page ────────────────────────────────────────────────────────────────
+/* ─── Main page ──────────────────────────────────────────────────────────── */
 export default function TeamPage() {
   const qc = useQueryClient();
 
@@ -187,13 +246,14 @@ export default function TeamPage() {
   const [addDraft, setAddDraft] = useState<AddDraft>({
     fullName: '', email: '', password: '', role: 'staff', locationId: '',
   });
+  const [addPerms, setAddPerms] = useState<AppPermissions>(defaultsForRole('staff'));
   const [showPassword, setShowPassword] = useState(false);
   const [addError, setAddError] = useState('');
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<EditDraft>({
     role: 'staff', locationId: '', isActive: true,
-    permissions: { ...DEFAULT_PERMISSIONS }, newPassword: '',
+    permissions: { ...STAFF_DEFAULTS }, newPassword: '',
   });
 
   const { data: users, isLoading } = useQuery({
@@ -207,7 +267,6 @@ export default function TeamPage() {
     },
   });
 
-  // Fetch email addresses from Supabase Auth (admin API)
   const { data: emailMap } = useQuery({
     queryKey: ['team-emails'],
     queryFn: async () => {
@@ -229,19 +288,18 @@ export default function TeamPage() {
     },
   });
 
-  const locationNames = (locations ?? []).map(l => l.name);
-
   const createUser = useMutation({
-    mutationFn: async (draft: AddDraft) => {
+    mutationFn: async ({ draft, perms }: { draft: AddDraft; perms: AppPermissions }) => {
       const res = await fetch('/api/admin/users', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          fullName: draft.fullName,
-          email: draft.email,
-          password: draft.password,
-          role: draft.role,
-          locationId: draft.locationId || null,
+          fullName:    draft.fullName,
+          email:       draft.email,
+          password:    draft.password,
+          role:        draft.role,
+          locationId:  draft.locationId || null,
+          permissions: draft.role !== 'admin' ? perms : null,
         }),
       });
       const json = await res.json();
@@ -251,6 +309,7 @@ export default function TeamPage() {
       qc.invalidateQueries({ queryKey: ['team-users'] });
       setShowAdd(false);
       setAddDraft({ fullName: '', email: '', password: '', role: 'staff', locationId: '' });
+      setAddPerms(defaultsForRole('staff'));
       setAddError('');
       setShowPassword(false);
     },
@@ -260,18 +319,13 @@ export default function TeamPage() {
   const updateUser = useMutation({
     mutationFn: async ({ id, draft }: { id: string; draft: EditDraft }) => {
       const body: Record<string, any> = {
-        role: draft.role,
+        role:       draft.role,
         locationId: draft.locationId || null,
-        isActive: draft.isActive,
+        isActive:   draft.isActive,
       };
-      // Only send permissions for staff
-      if (draft.role === 'staff') {
-        body.permissions = draft.permissions;
-      }
-      // Only send password if filled in
-      if (draft.newPassword.trim()) {
-        body.newPassword = draft.newPassword.trim();
-      }
+      if (draft.role !== 'admin') body.permissions = draft.permissions;
+      if (draft.newPassword.trim()) body.newPassword = draft.newPassword.trim();
+
       const res = await fetch(`/api/admin/users/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -305,18 +359,15 @@ export default function TeamPage() {
   const startEdit = (user: UserRow) => {
     setEditingId(user.id);
     setEditDraft({
-      role: user.role,
-      locationId: user.location_id ?? '',
-      isActive: user.is_active,
+      role:        user.role,
+      locationId:  user.location_id ?? '',
+      isActive:    user.is_active,
       permissions: mergePermissions(user.permissions),
       newPassword: '',
     });
   };
 
-  const canCreate =
-    !!addDraft.fullName.trim() &&
-    !!addDraft.email.trim() &&
-    addDraft.password.length >= 6;
+  const canCreate = !!addDraft.fullName.trim() && !!addDraft.email.trim() && addDraft.password.length >= 6;
 
   return (
     <div>
@@ -347,15 +398,12 @@ export default function TeamPage() {
         ))}
       </div>
 
-      {/* Add panel */}
+      {/* ── Add panel ── */}
       {showAdd && (
-        <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-5 mb-6">
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5 mb-6">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-sm font-semibold text-gray-900">New Team Member</h2>
-            <button
-              onClick={() => { setShowAdd(false); setAddError(''); }}
-              className="text-gray-400 hover:text-gray-600"
-            >
+            <button onClick={() => { setShowAdd(false); setAddError(''); }} className="text-gray-400 hover:text-gray-600">
               <X size={16} />
             </button>
           </div>
@@ -393,11 +441,8 @@ export default function TeamPage() {
                   className="w-full border border-gray-200 rounded-lg px-3 py-2 pr-9 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30"
                   placeholder="Min 6 characters"
                 />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(p => !p)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                >
+                <button type="button" onClick={() => setShowPassword(p => !p)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
                   {showPassword ? <EyeOff size={14} /> : <Eye size={14} />}
                 </button>
               </div>
@@ -407,13 +452,15 @@ export default function TeamPage() {
               <label className="block text-xs font-medium text-gray-500 mb-1">Role *</label>
               <select
                 value={addDraft.role}
-                onChange={e => setAddDraft(d => ({ ...d, role: e.target.value }))}
+                onChange={e => {
+                  const role = e.target.value;
+                  setAddDraft(d => ({ ...d, role }));
+                  setAddPerms(defaultsForRole(role));
+                }}
                 className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30"
               >
                 {ROLES.map(r => (
-                  <option key={r} value={r}>
-                    {r.charAt(0).toUpperCase() + r.slice(1)} — {roleHint[r]}
-                  </option>
+                  <option key={r} value={r}>{r.charAt(0).toUpperCase() + r.slice(1)} — {roleHint[r]}</option>
                 ))}
               </select>
             </div>
@@ -426,26 +473,27 @@ export default function TeamPage() {
                 className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30"
               >
                 <option value="">All locations (for admin)</option>
-                {locations?.map(l => (
-                  <option key={l.id} value={l.id}>{l.name}</option>
-                ))}
+                {locations?.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
               </select>
             </div>
           </div>
 
-          {addError && (
-            <p className="text-red-500 text-xs mt-3 font-medium">{addError}</p>
-          )}
+          {/* Permissions for staff + manager */}
+          <PermissionsEditor
+            perms={addPerms}
+            onChange={setAddPerms}
+            isAdmin={addDraft.role === 'admin'}
+          />
+
+          {addError && <p className="text-red-500 text-xs mt-3 font-medium">{addError}</p>}
 
           <div className="flex justify-end gap-2 mt-5">
-            <button
-              onClick={() => { setShowAdd(false); setAddError(''); }}
-              className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900"
-            >
+            <button onClick={() => { setShowAdd(false); setAddError(''); }}
+              className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900">
               Cancel
             </button>
             <button
-              onClick={() => createUser.mutate(addDraft)}
+              onClick={() => createUser.mutate({ draft: addDraft, perms: addPerms })}
               disabled={createUser.isPending || !canCreate}
               className="bg-[#1B5E20] text-white px-5 py-2 rounded-lg text-sm font-medium hover:bg-[#2E7D32] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
@@ -455,7 +503,7 @@ export default function TeamPage() {
         </div>
       )}
 
-      {/* Delete confirmation modal */}
+      {/* Delete confirmation */}
       {confirmDeleteId && (() => {
         const target = users?.find(u => u.id === confirmDeleteId);
         return (
@@ -464,23 +512,16 @@ export default function TeamPage() {
               <h3 className="text-base font-semibold text-gray-900 mb-1">Delete account?</h3>
               <p className="text-sm text-gray-500 mb-5">
                 <span className="font-medium text-gray-700">{target?.full_name ?? 'This user'}</span>'s
-                account will be permanently deleted and they will no longer be able to log in.
-                This cannot be undone.
+                account will be permanently deleted. This cannot be undone.
               </p>
-              {deleteUser.error && (
-                <p className="text-red-500 text-xs mb-3">{(deleteUser.error as any).message}</p>
-              )}
+              {deleteUser.error && <p className="text-red-500 text-xs mb-3">{(deleteUser.error as any).message}</p>}
               <div className="flex justify-end gap-2">
-                <button
-                  onClick={() => { setConfirmDeleteId(null); deleteUser.reset(); }}
-                  className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900"
-                >
-                  Cancel
-                </button>
+                <button onClick={() => { setConfirmDeleteId(null); deleteUser.reset(); }}
+                  className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900">Cancel</button>
                 <button
                   onClick={() => deleteUser.mutate(confirmDeleteId)}
                   disabled={deleteUser.isPending}
-                  className="bg-red-600 text-white px-5 py-2 rounded-lg text-sm font-medium hover:bg-red-700 transition-colors disabled:opacity-50"
+                  className="bg-red-600 text-white px-5 py-2 rounded-lg text-sm font-medium hover:bg-red-700 disabled:opacity-50"
                 >
                   {deleteUser.isPending ? 'Deleting…' : 'Delete permanently'}
                 </button>
@@ -495,9 +536,7 @@ export default function TeamPage() {
         <div className="overflow-x-auto">
           {isLoading ? (
             <div className="p-6 space-y-3">
-              {[...Array(4)].map((_, i) => (
-                <div key={i} className="h-4 bg-gray-100 rounded animate-pulse" />
-              ))}
+              {[...Array(4)].map((_, i) => <div key={i} className="h-4 bg-gray-100 rounded animate-pulse" />)}
             </div>
           ) : !users || users.length === 0 ? (
             <div className="p-10 text-center">
@@ -518,7 +557,6 @@ export default function TeamPage() {
               <tbody>
                 {users.map(user => (
                   <React.Fragment key={user.id}>
-                    {/* Main row */}
                     <tr className="border-t border-gray-100 hover:bg-gray-50 transition-colors">
                       <td className="px-4 py-3 font-medium text-gray-900">{user.full_name}</td>
                       <td className="px-4 py-3 text-gray-500 text-xs font-mono">
@@ -546,11 +584,8 @@ export default function TeamPage() {
                           >
                             <Pencil size={14} />
                           </button>
-                          <button
-                            onClick={() => setConfirmDeleteId(user.id)}
-                            className="text-gray-300 hover:text-red-500 transition-colors"
-                            title="Delete"
-                          >
+                          <button onClick={() => setConfirmDeleteId(user.id)}
+                            className="text-gray-300 hover:text-red-500 transition-colors" title="Delete">
                             <Trash2 size={14} />
                           </button>
                         </div>
@@ -559,20 +594,21 @@ export default function TeamPage() {
 
                     {/* Inline edit row */}
                     {editingId === user.id && (
-                      <tr className="border-t border-indigo-100 bg-indigo-50/30">
+                      <tr className="border-t border-indigo-100 bg-indigo-50/20">
                         <td colSpan={6} className="px-4 py-4">
-                          {/* Basic fields row */}
-                          <div className="grid grid-cols-5 gap-3 items-end">
+                          {/* Basic fields */}
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 items-end">
                             <div>
                               <label className="block text-xs font-medium text-gray-500 mb-1">Role</label>
                               <select
                                 value={editDraft.role}
-                                onChange={e => setEditDraft(d => ({ ...d, role: e.target.value }))}
+                                onChange={e => {
+                                  const role = e.target.value;
+                                  setEditDraft(d => ({ ...d, role, permissions: defaultsForRole(role) }));
+                                }}
                                 className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
                               >
-                                {ROLES.map(r => (
-                                  <option key={r} value={r}>{r.charAt(0).toUpperCase() + r.slice(1)}</option>
-                                ))}
+                                {ROLES.map(r => <option key={r} value={r}>{r.charAt(0).toUpperCase() + r.slice(1)}</option>)}
                               </select>
                             </div>
                             <div>
@@ -583,9 +619,7 @@ export default function TeamPage() {
                                 className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
                               >
                                 <option value="">All locations</option>
-                                {locations?.map(l => (
-                                  <option key={l.id} value={l.id}>{l.name}</option>
-                                ))}
+                                {locations?.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
                               </select>
                             </div>
                             <div>
@@ -611,31 +645,28 @@ export default function TeamPage() {
                                 placeholder="min 6 chars"
                               />
                             </div>
-                            <div className="flex gap-2">
-                              <button
-                                onClick={() => updateUser.mutate({ id: user.id, draft: editDraft })}
-                                disabled={updateUser.isPending}
-                                className="flex-1 bg-indigo-600 text-white px-3 py-2 rounded-lg text-xs font-semibold hover:bg-indigo-700 transition-colors disabled:opacity-50"
-                              >
-                                {updateUser.isPending ? 'Saving…' : 'Save'}
-                              </button>
-                              <button
-                                onClick={() => setEditingId(null)}
-                                className="px-3 py-2 text-xs text-gray-500 hover:text-gray-700"
-                              >
-                                Cancel
-                              </button>
-                            </div>
                           </div>
 
-                          {/* Permissions editor — staff only */}
-                          {editDraft.role === 'staff' && (
-                            <PermissionsEditor
-                              perms={editDraft.permissions}
-                              locationNames={locationNames}
-                              onChange={p => setEditDraft(d => ({ ...d, permissions: p }))}
-                            />
-                          )}
+                          {/* Permissions */}
+                          <PermissionsEditor
+                            perms={editDraft.permissions}
+                            onChange={p => setEditDraft(d => ({ ...d, permissions: p }))}
+                            isAdmin={editDraft.role === 'admin'}
+                          />
+
+                          <div className="flex gap-2 mt-4">
+                            <button
+                              onClick={() => updateUser.mutate({ id: user.id, draft: editDraft })}
+                              disabled={updateUser.isPending}
+                              className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-xs font-semibold hover:bg-indigo-700 transition-colors disabled:opacity-50"
+                            >
+                              {updateUser.isPending ? 'Saving…' : 'Save changes'}
+                            </button>
+                            <button onClick={() => setEditingId(null)}
+                              className="px-4 py-2 text-xs text-gray-500 hover:text-gray-700">
+                              Cancel
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     )}

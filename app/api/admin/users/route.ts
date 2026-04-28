@@ -18,7 +18,7 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    const { fullName, email, password, role, locationId } = await request.json();
+    const { fullName, email, password, role, locationId, permissions } = await request.json();
 
     if (!fullName || !email || !password || !role) {
       return NextResponse.json({ error: 'Name, email, password and role are required' }, { status: 400 });
@@ -42,18 +42,18 @@ export async function POST(request: Request) {
     }
 
     // Upsert the profile row (a trigger may have already created one)
+    const profilePayload: Record<string, any> = {
+      id: data.user.id,
+      full_name: fullName,
+      role,
+      location_id: locationId || null,
+      is_active: true,
+    };
+    if (permissions !== undefined) profilePayload.permissions = permissions;
+
     const { error: profileError } = await admin
       .from('profiles')
-      .upsert(
-        {
-          id: data.user.id,
-          full_name: fullName,
-          role,
-          location_id: locationId || null,
-          is_active: true,
-        },
-        { onConflict: 'id' }
-      );
+      .upsert(profilePayload, { onConflict: 'id' });
 
     if (profileError) {
       // Roll back the auth user if profile fails
