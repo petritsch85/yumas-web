@@ -120,7 +120,7 @@ type AddDraft = {
 
 type EditDraft = {
   role: string; locationId: string; isActive: boolean;
-  permissions: AppPermissions; newPassword: string;
+  permissions: AppPermissions; newPassword: string; newEmail: string;
 };
 
 const ROLES = ['staff', 'manager', 'admin'];
@@ -253,7 +253,7 @@ export default function TeamPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<EditDraft>({
     role: 'staff', locationId: '', isActive: true,
-    permissions: { ...STAFF_DEFAULTS }, newPassword: '',
+    permissions: { ...STAFF_DEFAULTS }, newPassword: '', newEmail: '',
   });
 
   const { data: users, isLoading } = useQuery({
@@ -307,6 +307,7 @@ export default function TeamPage() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['team-users'] });
+      qc.invalidateQueries({ queryKey: ['team-emails'] });
       setShowAdd(false);
       setAddDraft({ fullName: '', email: '', password: 'Yumas2026!', role: 'staff', locationId: '' });
       setAddPerms(defaultsForRole('staff'));
@@ -325,6 +326,7 @@ export default function TeamPage() {
       };
       if (draft.role !== 'admin') body.permissions = draft.permissions;
       if (draft.newPassword.trim()) body.newPassword = draft.newPassword.trim();
+      if (draft.newEmail.trim()) body.newEmail = draft.newEmail.trim();
 
       const res = await fetch(`/api/admin/users/${id}`, {
         method: 'PATCH',
@@ -336,6 +338,7 @@ export default function TeamPage() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['team-users'] });
+      qc.invalidateQueries({ queryKey: ['team-emails'] });
       setEditingId(null);
     },
   });
@@ -364,6 +367,7 @@ export default function TeamPage() {
       isActive:    user.is_active,
       permissions: mergePermissions(user.permissions),
       newPassword: '',
+      newEmail:    emailMap?.[user.id] ?? '',
     });
   };
 
@@ -597,6 +601,30 @@ export default function TeamPage() {
                       <tr className="border-t border-indigo-100 bg-indigo-50/20">
                         <td colSpan={6} className="px-4 py-4">
                           {/* Basic fields */}
+                          <div className="grid grid-cols-2 md:grid-cols-3 gap-3 items-end mb-3">
+                            <div className="col-span-2 md:col-span-1">
+                              <label className="block text-xs font-medium text-gray-500 mb-1">Email</label>
+                              <input
+                                type="email"
+                                value={editDraft.newEmail}
+                                onChange={e => setEditDraft(d => ({ ...d, newEmail: e.target.value }))}
+                                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                                placeholder="email@example.com"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-xs font-medium text-gray-500 mb-1">
+                                New password <span className="text-gray-400 font-normal">(leave blank to keep)</span>
+                              </label>
+                              <input
+                                type="text"
+                                value={editDraft.newPassword}
+                                onChange={e => setEditDraft(d => ({ ...d, newPassword: e.target.value }))}
+                                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300 font-mono"
+                                placeholder="min 6 chars"
+                              />
+                            </div>
+                          </div>
                           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 items-end">
                             <div>
                               <label className="block text-xs font-medium text-gray-500 mb-1">Role</label>
@@ -632,18 +660,6 @@ export default function TeamPage() {
                                 <option value="active">Active</option>
                                 <option value="inactive">Inactive</option>
                               </select>
-                            </div>
-                            <div>
-                              <label className="block text-xs font-medium text-gray-500 mb-1">
-                                New password <span className="text-gray-400 font-normal">(leave blank to keep)</span>
-                              </label>
-                              <input
-                                type="text"
-                                value={editDraft.newPassword}
-                                onChange={e => setEditDraft(d => ({ ...d, newPassword: e.target.value }))}
-                                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300 font-mono"
-                                placeholder="min 6 chars"
-                              />
                             </div>
                           </div>
 

@@ -28,7 +28,7 @@ export async function PATCH(
 ) {
   try {
     const { id } = await params;
-    const { role, locationId, isActive, permissions, newPassword } = await request.json();
+    const { role, locationId, isActive, permissions, newPassword, newEmail } = await request.json();
 
     const admin = getSupabaseAdmin();
 
@@ -51,15 +51,18 @@ export async function PATCH(
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
 
-    // Optionally reset password
-    if (newPassword) {
-      if (newPassword.length < 6) {
+    // Optionally update auth fields (email and/or password)
+    const authUpdate: Record<string, any> = {};
+    if (newEmail?.trim()) authUpdate.email = newEmail.trim();
+    if (newPassword?.trim()) {
+      if (newPassword.trim().length < 6) {
         return NextResponse.json({ error: 'Password must be at least 6 characters' }, { status: 400 });
       }
-      const { error: pwError } = await admin.auth.admin.updateUserById(id, { password: newPassword });
-      if (pwError) {
-        return NextResponse.json({ error: pwError.message }, { status: 400 });
-      }
+      authUpdate.password = newPassword.trim();
+    }
+    if (Object.keys(authUpdate).length > 0) {
+      const { error: authErr } = await admin.auth.admin.updateUserById(id, authUpdate);
+      if (authErr) return NextResponse.json({ error: authErr.message }, { status: 400 });
     }
 
     return NextResponse.json({ success: true });
