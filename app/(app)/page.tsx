@@ -120,7 +120,7 @@ export default function DashboardPage() {
 
   const { data: lowStockCount, isLoading: loadingLowStock }  = useQuery({
     queryKey: ['kpi-low-stock'],
-    enabled: can('inventory'),
+    enabled: can('analysis'),
     queryFn: async () => {
       const { data } = await supabase.from('inventory_levels').select('quantity, low_stock_threshold');
       return (data ?? []).filter((r) => r.low_stock_threshold != null && r.quantity <= r.low_stock_threshold).length;
@@ -141,7 +141,7 @@ export default function DashboardPage() {
 
   const { data: lowStockItems,  isLoading: loadingLowStockItems }  = useQuery({
     queryKey: ['low-stock-items'],
-    enabled: can('inventory'),
+    enabled: can('analysis'),
     queryFn: async () => {
       const { data } = await supabase.from('inventory_levels')
         .select('*, item:items(name, sku), location:locations(name)')
@@ -159,14 +159,14 @@ export default function DashboardPage() {
     { label: 'Total Items',      value: itemCount     ?? 0, icon: Package,       color: '#1B5E20', loading: loadingItems,    show: can('products')  },
     { label: 'Active Suppliers', value: supplierCount ?? 0, icon: Truck,         color: '#FF8F00', loading: loadingSuppliers, show: can('suppliers') },
     { label: 'Pending POs',      value: pendingPOs    ?? 0, icon: ShoppingCart,  color: '#1565C0', loading: loadingPOs,       show: can('buying')    },
-    { label: 'Low Stock Items',  value: lowStockCount ?? 0, icon: AlertTriangle, color: '#C62828', loading: loadingLowStock,  show: can('inventory') },
+    { label: 'Low Stock Items',  value: lowStockCount ?? 0, icon: AlertTriangle, color: '#C62828', loading: loadingLowStock,  show: can('analysis') },
   ].filter((k) => k.show);
 
   /* Visible quick links */
   const visibleLinks = QUICK_LINKS.filter((l) => can(l.permKey, l.adminOnly));
 
   const showPOPanel        = can('buying');
-  const showLowStockPanel  = can('inventory');
+  const showLowStockPanel  = can('analysis');
   const showPanelRow       = showPOPanel || showLowStockPanel;
 
   return (
