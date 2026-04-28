@@ -455,51 +455,55 @@ export default function LocationInventoryFormPage({
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="flex items-center gap-3 mb-4 flex-wrap">
+      <div className="mb-5">
+        {/* Back link */}
         <button
           onClick={() => router.back()}
-          className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-800 transition-colors"
+          className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-800 transition-colors mb-3"
         >
           <ChevronLeft size={16} />
           Back
         </button>
-        <div className="h-4 w-px bg-gray-200" />
-        <h1 className="text-2xl font-bold text-gray-900 flex-1">{locationName} — Inventory</h1>
 
-        {/* Timer */}
-        {!timerStarted ? (
-          <button
-            onClick={startTimer}
-            className="flex items-center gap-2 bg-[#1B5E20] text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-[#2E7D32] transition-colors"
-          >
-            <Play size={14} />
-            Start Timer
-          </button>
-        ) : (
-          <div className="flex items-center gap-2 bg-gray-100 rounded-lg px-3 py-2">
-            <Timer size={15} className={timerRunning ? 'text-[#1B5E20]' : 'text-gray-400'} />
-            <span className="text-base font-mono font-bold text-gray-800 tabular-nums min-w-[52px]">
-              {formatTimer(elapsedSeconds)}
-            </span>
-            {timerRunning ? (
-              <button
-                onClick={pauseTimer}
-                className="flex items-center gap-1 text-xs text-amber-600 hover:text-amber-800 font-medium ml-1"
-              >
-                <Pause size={13} />
-                Pause
-              </button>
-            ) : (
-              <button
-                onClick={resumeTimer}
-                className="flex items-center gap-1 text-xs text-[#1B5E20] hover:text-[#2E7D32] font-medium ml-1"
-              >
-                <Play size={13} />
-                Resume
-              </button>
-            )}
-          </div>
-        )}
+        {/* Title row + timer row */}
+        <div className="flex items-start justify-between gap-4">
+          <h1 className="text-2xl font-bold text-gray-900">{locationName} — Inventory</h1>
+
+          {/* Timer */}
+          {!timerStarted ? (
+            <button
+              onClick={startTimer}
+              className="flex-shrink-0 flex items-center gap-2 bg-[#1B5E20] text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-[#2E7D32] transition-colors"
+            >
+              <Play size={14} />
+              Start Inventory
+            </button>
+          ) : (
+            <div className="flex-shrink-0 flex items-center gap-2 bg-gray-100 rounded-lg px-3 py-2">
+              <Timer size={15} className={timerRunning ? 'text-[#1B5E20]' : 'text-gray-400'} />
+              <span className="text-base font-mono font-bold text-gray-800 tabular-nums min-w-[52px]">
+                {formatTimer(elapsedSeconds)}
+              </span>
+              {timerRunning ? (
+                <button
+                  onClick={pauseTimer}
+                  className="flex items-center gap-1 text-xs text-amber-600 hover:text-amber-800 font-medium ml-1"
+                >
+                  <Pause size={13} />
+                  Pause
+                </button>
+              ) : (
+                <button
+                  onClick={resumeTimer}
+                  className="flex items-center gap-1 text-xs text-[#1B5E20] hover:text-[#2E7D32] font-medium ml-1"
+                >
+                  <Play size={13} />
+                  Resume
+                </button>
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Status banners */}
