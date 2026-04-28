@@ -244,7 +244,7 @@ export default function TeamPage() {
 
   const [showAdd, setShowAdd] = useState(false);
   const [addDraft, setAddDraft] = useState<AddDraft>({
-    fullName: '', email: '', password: '', role: 'staff', locationId: '',
+    fullName: '', email: '', password: 'Yumas2026!', role: 'staff', locationId: '',
   });
   const [addPerms, setAddPerms] = useState<AppPermissions>(defaultsForRole('staff'));
   const [showPassword, setShowPassword] = useState(false);
@@ -308,7 +308,7 @@ export default function TeamPage() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['team-users'] });
       setShowAdd(false);
-      setAddDraft({ fullName: '', email: '', password: '', role: 'staff', locationId: '' });
+      setAddDraft({ fullName: '', email: '', password: 'Yumas2026!', role: 'staff', locationId: '' });
       setAddPerms(defaultsForRole('staff'));
       setAddError('');
       setShowPassword(false);
