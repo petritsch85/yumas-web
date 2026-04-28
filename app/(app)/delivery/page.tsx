@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
-import { Truck, RefreshCw, CheckCircle2, AlertCircle, Package, TrendingUp, Eye, Settings2 } from 'lucide-react';
+import { RefreshCw, CheckCircle2, AlertCircle, Package, TrendingUp, Eye, Settings2, Truck } from 'lucide-react';
 import type { Profile } from '@/types';
 
 /* ─── Types ─────────────────────────────────────────────────────────────── */
@@ -689,15 +689,9 @@ export default function DeliveryPage() {
         </div>
 
         {/* ── Date banner ── */}
-        <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 mb-5 flex items-center justify-between">
-          <div>
-            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-0.5">Delivery Date</p>
-            <p className="text-base font-semibold text-gray-900">{fmtDate(targetDate)}</p>
-          </div>
-          <div className="flex items-center gap-2 text-xs text-gray-400">
-            <Truck size={14} />
-            <span>Eschborn → Taunus → Westend</span>
-          </div>
+        <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 mb-5">
+          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-0.5">Delivery Date</p>
+          <p className="text-base font-semibold text-gray-900">{fmtDate(targetDate)}</p>
         </div>
 
         {generateError && (
