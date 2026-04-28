@@ -240,18 +240,24 @@ function StoreDeliveryList({
       </div>
 
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
+        <div className={isManager ? 'overflow-x-auto' : ''}>
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b border-gray-100">
               <tr>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide w-[40%]">Item</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Unit</th>
+                <th className="px-3 md:px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Item</th>
+                {/* Unit: hidden on mobile in packer view, folded under item name instead */}
+                {isManager && (
+                  <th className="px-3 md:px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Unit</th>
+                )}
+                <th className="hidden sm:table-cell px-3 md:px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                  {!isManager && 'Unit'}
+                </th>
                 {isManager && <>
-                  <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wide">Reported</th>
-                  <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wide">Target</th>
+                  <th className="px-3 md:px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wide">Reported</th>
+                  <th className="px-3 md:px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wide">Target</th>
                 </>}
-                <th className="px-4 py-3 text-center text-xs font-semibold text-[#1B5E20] uppercase tracking-wide">To Deliver</th>
-                <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wide">Packed</th>
+                <th className="px-3 md:px-4 py-3 text-center text-xs font-semibold text-[#1B5E20] uppercase tracking-wide">To Deliver</th>
+                <th className="px-3 md:px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wide">Packed</th>
               </tr>
             </thead>
             <tbody>
@@ -260,7 +266,7 @@ function StoreDeliveryList({
                 return (
                   <React.Fragment key={section}>
                     <tr className="bg-gray-50">
-                      <td colSpan={colSpanCount} className="px-4 py-2">
+                      <td colSpan={colSpanCount} className="px-3 md:px-4 py-2">
                         <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">{section}</span>
                       </td>
                     </tr>
@@ -273,14 +279,22 @@ function StoreDeliveryList({
                           key={line.id}
                           className={`border-t border-gray-50 transition-colors ${muted ? 'opacity-40' : 'hover:bg-gray-50/50'}`}
                         >
-                          <td className={`px-4 py-2.5 font-medium ${muted ? 'text-gray-400' : 'text-gray-800'}`}>
+                          <td className={`px-3 md:px-4 py-2.5 font-medium ${muted ? 'text-gray-400' : 'text-gray-800'}`}>
                             {line.item_name}
+                            {/* Unit shown inline on mobile in packer view */}
+                            {!isManager && (
+                              <div className="text-xs text-gray-400 font-normal mt-0.5 sm:hidden">{line.unit}</div>
+                            )}
                           </td>
-                          <td className="px-4 py-2.5 text-xs text-gray-500">{line.unit}</td>
+                          {/* Unit as separate column: always in manager view, desktop-only in packer view */}
+                          {isManager
+                            ? <td className="px-3 md:px-4 py-2.5 text-xs text-gray-500">{line.unit}</td>
+                            : <td className="hidden sm:table-cell px-3 md:px-4 py-2.5 text-xs text-gray-500">{line.unit}</td>
+                          }
 
                           {isManager && <>
-                            <td className="px-4 py-2.5 text-center text-gray-500">{line.reported_qty}</td>
-                            <td className="px-4 py-2.5 text-center">
+                            <td className="px-3 md:px-4 py-2.5 text-center text-gray-500">{line.reported_qty}</td>
+                            <td className="px-3 md:px-4 py-2.5 text-center">
                               <input
                                 type="number"
                                 min="0"
@@ -292,7 +306,7 @@ function StoreDeliveryList({
                             </td>
                           </>}
 
-                          <td className="px-4 py-2.5 text-center">
+                          <td className="px-2 md:px-4 py-2.5 text-center">
                             {deliverQty > 0 ? (
                               <span className="inline-flex items-center justify-center min-w-[2rem] px-2 py-0.5 rounded-md bg-[#1B5E20]/10 text-[#1B5E20] font-bold text-sm">
                                 {deliverQty}
@@ -302,18 +316,18 @@ function StoreDeliveryList({
                             )}
                           </td>
 
-                          <td className="px-4 py-2.5 text-center">
+                          <td className="px-2 md:px-4 py-2.5 text-center">
                             {deliverQty > 0 ? (
                               <button
                                 onClick={() => onTogglePacked(line.id, !line.is_packed)}
-                                className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors mx-auto ${
+                                className={`w-6 h-6 rounded border-2 flex items-center justify-center transition-colors mx-auto ${
                                   line.is_packed
                                     ? 'bg-[#1B5E20] border-[#1B5E20]'
                                     : 'border-gray-300 hover:border-[#1B5E20]'
                                 }`}
                                 title={line.is_packed ? 'Mark as unpacked' : 'Mark as packed'}
                               >
-                                {line.is_packed && <CheckCircle2 size={12} className="text-white" />}
+                                {line.is_packed && <CheckCircle2 size={14} className="text-white" />}
                               </button>
                             ) : (
                               <span className="text-gray-200 text-xs">—</span>
