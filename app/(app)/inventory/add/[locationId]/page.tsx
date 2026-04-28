@@ -158,6 +158,7 @@ export default function LocationInventoryFormPage({
   const locationName = searchParams.get('name') ?? 'Location';
 
   const [counts, setCounts] = useState<Record<string, string>>({});
+  const [comment, setComment] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
 
@@ -196,6 +197,7 @@ export default function LocationInventoryFormPage({
           submitted_by: user.id,
           submitted_at: new Date().toISOString(),
           data,
+          comment: comment.trim() || null,
         });
 
       if (insertError) {
@@ -205,6 +207,7 @@ export default function LocationInventoryFormPage({
       }
 
       setSubmitted(true);
+      setComment('');
     } catch (e: unknown) {
       alert((e as Error)?.message ?? 'An unexpected error occurred.');
     } finally {
@@ -224,7 +227,7 @@ export default function LocationInventoryFormPage({
         <p className="text-sm text-gray-500">Your inventory for {locationName} has been saved.</p>
         <div className="flex gap-3 mt-2">
           <button
-            onClick={() => { setCounts({}); setSubmitted(false); }}
+            onClick={() => { setCounts({}); setComment(''); setSubmitted(false); }}
             className="px-4 py-2 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50"
           >
             New Submission
@@ -256,7 +259,7 @@ export default function LocationInventoryFormPage({
       </div>
 
       {/* Sections */}
-      <div className="flex-1 space-y-4 pb-28">
+      <div className="flex-1 space-y-4">
         {SECTIONS.map((section) => (
           <div key={section.title} className="bg-white rounded-lg shadow-sm border border-gray-100 overflow-hidden">
             {/* Section header */}
@@ -289,6 +292,22 @@ export default function LocationInventoryFormPage({
             </div>
           </div>
         ))}
+      </div>
+
+      {/* Comment box */}
+      <div className="bg-white rounded-lg shadow-sm border border-gray-100 overflow-hidden mb-28">
+        <div className="flex items-center justify-between px-4 py-2.5" style={{ backgroundColor: '#1B5E20' }}>
+          <span className="text-white text-xs font-bold tracking-widest uppercase">Comments</span>
+        </div>
+        <div className="px-4 py-3">
+          <textarea
+            rows={3}
+            value={comment}
+            onChange={(e) => setComment(e.target.value)}
+            placeholder="Add any extra comments or notes for this inventory report…"
+            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#1B5E20] resize-none bg-gray-50"
+          />
+        </div>
       </div>
 
       {/* Fixed bottom bar */}

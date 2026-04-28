@@ -10,6 +10,7 @@ type SubmissionRow = {
   location_name: string;
   submitted_at: string;
   submitted_by: string | null;
+  comment: string | null;
   data: { section: string; name: string; unit: string; quantity: number }[];
   profile: { full_name: string } | null;
 };
@@ -55,7 +56,7 @@ export default function CurrentInventoryPage() {
     queryFn: async () => {
       let q = supabase
         .from('inventory_submissions')
-        .select('id, location_name, submitted_at, submitted_by, duration_seconds, data')
+        .select('id, location_name, submitted_at, submitted_by, duration_seconds, data, comment')
         .order('submitted_at', { ascending: false });
       if (locationFilter !== 'all') q = q.eq('location_name', locationFilter);
       const { data, error } = await q;
@@ -183,6 +184,12 @@ export default function CurrentInventoryPage() {
                         ))}
                       </div>
                     ))}
+                    {(sub as any).comment && (
+                      <div className="px-4 py-3 bg-amber-50 border-t border-amber-100">
+                        <p className="text-xs font-bold text-amber-700 uppercase tracking-wider mb-1">Comment</p>
+                        <p className="text-sm text-gray-700 whitespace-pre-wrap">{(sub as any).comment}</p>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
