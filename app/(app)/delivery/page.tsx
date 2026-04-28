@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
-import { Truck, Printer, RefreshCw, CheckCircle2, AlertCircle, Package, TrendingUp } from 'lucide-react';
+import { Truck, RefreshCw, CheckCircle2, AlertCircle, Package, TrendingUp } from 'lucide-react';
 
 /* ─── Types ─────────────────────────────────────────────────────────────── */
 type DeliveryRun = {
@@ -533,17 +533,6 @@ export default function DeliveryPage() {
 
   return (
     <>
-      {/* Print styles */}
-      <style>{`
-        @media print {
-          body * { visibility: hidden; }
-          .print-store, .print-store * { visibility: visible; }
-          .print-store { position: absolute; top: 0; left: 0; width: 100%; }
-          .print-header, .print-header * { visibility: visible; }
-          .print-header { position: absolute; top: 0; left: 0; width: 100%; }
-        }
-      `}</style>
-
       <div>
         {/* ── Page header ── */}
         <div className="flex items-start justify-between mb-6">
@@ -558,15 +547,6 @@ export default function DeliveryPage() {
           </div>
 
           <div className="flex items-center gap-3 print:hidden">
-            {run && (
-              <button
-                onClick={() => window.print()}
-                className="flex items-center gap-2 bg-white border border-gray-200 text-gray-600 px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors shadow-sm"
-              >
-                <Printer size={15} />
-                Print List
-              </button>
-            )}
             <button
               onClick={handleGenerate}
               disabled={generating}
