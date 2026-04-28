@@ -5,7 +5,13 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase-browser';
 import { saveDraft, loadDraft, clearDraft } from '@/lib/draft-store';
 import { enqueue, dequeueAll, removeFromQueue, pendingCount } from '@/lib/offline-queue';
-import { ChevronLeft, Send, WifiOff, Wifi, RefreshCw, CheckCircle2 } from 'lucide-react';
+import { ChevronLeft, Send, WifiOff, Wifi, RefreshCw, CheckCircle2, Timer, Play, Pause } from 'lucide-react';
+
+function formatTimer(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
 
 type Item    = { name: string; unit: string };
 type Section = { title: string; data: Item[] };
@@ -157,12 +163,13 @@ async function syncPendingQueue(): Promise<number> {
   for (const item of items) {
     try {
       const { error } = await supabase.from('inventory_submissions').insert({
-        location_id:  item.locationId,
-        location_name: item.locationName,
-        submitted_by: item.userId,
-        submitted_at: item.queuedAt,
-        data:         item.data,
-        comment:      item.comment,
+        location_id:      item.locationId,
+        location_name:    item.locationName,
+        submitted_by:     item.userId,
+        submitted_at:     item.queuedAt,
+        data:             item.data,
+        comment:          item.comment,
+        duration_seconds: (item as any).durationSeconds ?? null,
       });
       if (!error) {
         await removeFromQueue(item.id!);
@@ -193,6 +200,28 @@ export default function LocationInventoryFormPage({
   const [justSynced, setJustSynced] = useState(false);
   const [draftLoaded, setDraftLoaded] = useState(false);
   const draftTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // ── Timer ──
+  const [timerStarted, setTimerStarted]   = useState(false);
+  const [timerRunning, setTimerRunning]   = useState(false);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const timerInterval = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const startTimer = () => {
+    setTimerStarted(true);
+    setTimerRunning(true);
+  };
+  const pauseTimer = () => setTimerRunning(false);
+  const resumeTimer = () => setTimerRunning(true);
+
+  useEffect(() => {
+    if (timerRunning) {
+      timerInterval.current = setInterval(() => setElapsedSeconds(s => s + 1), 1000);
+    } else {
+      if (timerInterval.current) clearInterval(timerInterval.current);
+    }
+    return () => { if (timerInterval.current) clearInterval(timerInterval.current); };
+  }, [timerRunning]);
 
   /* ── Load draft on mount ── */
   useEffect(() => {
@@ -259,6 +288,11 @@ export default function LocationInventoryFormPage({
   const handleSubmit = async () => {
     if (!window.confirm(`Submit inventory for ${locationName}? (${filledCount} / ${TOTAL_ITEMS} items filled)`)) return;
 
+    // Stop the timer and capture final elapsed time
+    if (timerInterval.current) clearInterval(timerInterval.current);
+    setTimerRunning(false);
+    const durationSeconds = elapsedSeconds;
+
     setSubmitting(true);
     try {
       const { data: { user }, error: userError } = await supabase.auth.getUser();
@@ -280,12 +314,13 @@ export default function LocationInventoryFormPage({
       if (!navigator.onLine) {
         // ── Offline path: save to IndexedDB queue ──
         await enqueue({
-          locationId:   params.locationId,
+          locationId:      params.locationId,
           locationName,
-          userId:       user.id,
+          userId:          user.id,
           data,
-          comment:      comment.trim() || null,
-          queuedAt:     new Date().toISOString(),
+          comment:         comment.trim() || null,
+          durationSeconds: durationSeconds > 0 ? durationSeconds : null,
+          queuedAt:        new Date().toISOString(),
         });
         clearDraft(params.locationId);
         await refreshQueueCount();
@@ -297,12 +332,13 @@ export default function LocationInventoryFormPage({
         const { error: insertError } = await supabase
           .from('inventory_submissions')
           .insert({
-            location_id:   params.locationId,
-            location_name: locationName,
-            submitted_by:  user.id,
-            submitted_at:  new Date().toISOString(),
+            location_id:      params.locationId,
+            location_name:    locationName,
+            submitted_by:     user.id,
+            submitted_at:     new Date().toISOString(),
             data,
-            comment:       comment.trim() || null,
+            comment:          comment.trim() || null,
+            duration_seconds: durationSeconds > 0 ? durationSeconds : null,
           });
 
         if (insertError) {
@@ -337,6 +373,10 @@ export default function LocationInventoryFormPage({
     setSubmitted(false);
     setSavedOffline(false);
     setDraftLoaded(false);
+    setTimerStarted(false);
+    setTimerRunning(false);
+    setElapsedSeconds(0);
+    if (timerInterval.current) clearInterval(timerInterval.current);
   };
 
   /* ─── Offline-saved screen ─── */
@@ -415,7 +455,7 @@ export default function LocationInventoryFormPage({
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="flex items-center gap-3 mb-4">
+      <div className="flex items-center gap-3 mb-4 flex-wrap">
         <button
           onClick={() => router.back()}
           className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-800 transition-colors"
@@ -424,7 +464,42 @@ export default function LocationInventoryFormPage({
           Back
         </button>
         <div className="h-4 w-px bg-gray-200" />
-        <h1 className="text-2xl font-bold text-gray-900">{locationName} — Inventory</h1>
+        <h1 className="text-2xl font-bold text-gray-900 flex-1">{locationName} — Inventory</h1>
+
+        {/* Timer */}
+        {!timerStarted ? (
+          <button
+            onClick={startTimer}
+            className="flex items-center gap-2 bg-[#1B5E20] text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-[#2E7D32] transition-colors"
+          >
+            <Play size={14} />
+            Start Timer
+          </button>
+        ) : (
+          <div className="flex items-center gap-2 bg-gray-100 rounded-lg px-3 py-2">
+            <Timer size={15} className={timerRunning ? 'text-[#1B5E20]' : 'text-gray-400'} />
+            <span className="text-base font-mono font-bold text-gray-800 tabular-nums min-w-[52px]">
+              {formatTimer(elapsedSeconds)}
+            </span>
+            {timerRunning ? (
+              <button
+                onClick={pauseTimer}
+                className="flex items-center gap-1 text-xs text-amber-600 hover:text-amber-800 font-medium ml-1"
+              >
+                <Pause size={13} />
+                Pause
+              </button>
+            ) : (
+              <button
+                onClick={resumeTimer}
+                className="flex items-center gap-1 text-xs text-[#1B5E20] hover:text-[#2E7D32] font-medium ml-1"
+              >
+                <Play size={13} />
+                Resume
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Status banners */}
