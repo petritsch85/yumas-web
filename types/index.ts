@@ -66,7 +66,23 @@ export interface Transfer {
   to_location?: { id: string; name: string };
 }
 
+export interface AppPermissions {
+  inventory:    boolean;
+  production:   boolean;
+  buying:       boolean;
+  waste_log:    boolean;
+  delivery:     boolean;
+  analysis:     boolean;
+  events:       boolean;
+  staff_videos: boolean;
+  bills:        boolean;
+  pl_reports:   boolean;
+  suppliers:    boolean;
+  products:     boolean;
+}
+
 export interface Profile {
   id: string; full_name: string; role: UserRole;
   location_id: string | null; is_active: boolean;
+  permissions?: Partial<AppPermissions>;
 }

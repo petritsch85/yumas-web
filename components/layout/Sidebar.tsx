@@ -40,6 +40,8 @@ import { supabase } from '@/lib/supabase-browser';
 import { useEffect, useState } from 'react';
 import type { Profile } from '@/types';
 
+import type { AppPermissions } from '@/types';
+
 type ChildItem = {
   label: string;
   href: string;
@@ -51,11 +53,14 @@ type NavItem = {
   href: string;
   icon: React.ComponentType<{ size?: number; style?: React.CSSProperties }>;
   children?: ChildItem[];
+  permKey?: keyof AppPermissions; // required permission; absent = always visible
+  adminOnly?: boolean;            // only shown to admins
 };
 
 type NavGroup = {
   label: string;
   items: NavItem[];
+  adminOnly?: boolean;
 };
 
 const navGroups: NavGroup[] = [
@@ -68,17 +73,17 @@ const navGroups: NavGroup[] = [
   {
     label: 'DATA',
     items: [
-      { label: 'Suppliers',  href: '/suppliers',  icon: Store },
-      { label: 'Menus',      href: '/products/menus', icon: UtensilsCrossed },
-      { label: 'Machines',   href: '/coming-soon/machines',   icon: Wrench },
-      { label: 'Team',        href: '/settings/users',          icon: Users },
+      { label: 'Suppliers', href: '/suppliers',         icon: Store,          permKey: 'suppliers' },
+      { label: 'Menus',     href: '/products/menus',    icon: UtensilsCrossed, permKey: 'products' },
+      { label: 'Machines',  href: '/coming-soon/machines', icon: Wrench,      adminOnly: true },
+      { label: 'Team',      href: '/settings/users',    icon: Users,          adminOnly: true },
     ],
   },
   {
     label: 'SUPPLY CHAIN',
     items: [
       {
-        label: 'Products', href: '/products', icon: Package,
+        label: 'Products', href: '/products', icon: Package, permKey: 'products',
         children: [
           { label: '1 - Raw Materials', href: '/products/raw-materials', icon: Package },
           { label: '2 - Semi Finished', href: '/products/semi-finished', icon: FlaskConical },
@@ -86,7 +91,7 @@ const navGroups: NavGroup[] = [
         ],
       },
       {
-        label: 'Inventory', href: '/inventory', icon: ClipboardList,
+        label: 'Inventory', href: '/inventory', icon: ClipboardList, permKey: 'inventory',
         children: [
           { label: 'Add New Inventory',  href: '/inventory/add',      icon: FilePlus },
           { label: 'Current Inventory',  href: '/inventory/overview', icon: BarChart3 },
@@ -94,17 +99,17 @@ const navGroups: NavGroup[] = [
         ],
       },
       {
-        label: 'Production', href: '/production', icon: Factory,
+        label: 'Production', href: '/production', icon: Factory, permKey: 'production',
         children: [
           { label: 'Batches', href: '/production',         icon: Factory },
           { label: 'Recipes', href: '/production/recipes', icon: ClipboardList },
         ],
       },
-      { label: 'Buying',             href: '/purchase-orders',         icon: ShoppingCart },
-      { label: 'Controlling',        href: '/coming-soon/controlling', icon: TrendingUp },
-      { label: 'Waste Log',          href: '/waste',                   icon: Trash2 },
+      { label: 'Buying',      href: '/purchase-orders',         icon: ShoppingCart, permKey: 'buying' },
+      { label: 'Controlling', href: '/coming-soon/controlling', icon: TrendingUp,   adminOnly: true },
+      { label: 'Waste Log',   href: '/waste',                   icon: Trash2,       permKey: 'waste_log' },
       {
-        label: 'Delivery', href: '/delivery', icon: Truck,
+        label: 'Delivery', href: '/delivery', icon: Truck, permKey: 'delivery',
         children: [
           { label: 'Delivery Run',   href: '/delivery',          icon: Truck },
           { label: 'Target Levels',  href: '/delivery/targets',  icon: Target },
@@ -112,7 +117,7 @@ const navGroups: NavGroup[] = [
         ],
       },
       {
-        label: 'Analysis', href: '/analysis', icon: BarChart3,
+        label: 'Analysis', href: '/analysis', icon: BarChart3, permKey: 'analysis',
         children: [
           { label: 'COGS',        href: '/analysis/cogs',        icon: TrendingDown },
           { label: 'Store Yield', href: '/analysis/store-yield', icon: BarChart3 },
@@ -123,66 +128,70 @@ const navGroups: NavGroup[] = [
   {
     label: 'EVENTS',
     items: [
-      { label: 'Events', href: '/events', icon: PartyPopper },
+      { label: 'Events', href: '/events', icon: PartyPopper, permKey: 'events' },
     ],
   },
   {
     label: 'IN STORE',
     items: [
       {
-        label: 'Staff Videos', href: '/staff-videos', icon: Users,
+        label: 'Staff Videos', href: '/staff-videos', icon: Users, permKey: 'staff_videos',
         children: [
           { label: 'Food Prep',   href: '/staff-videos/food-prep',   icon: UtensilsCrossed },
           { label: 'Drinks Prep', href: '/staff-videos/drinks-prep', icon: Utensils },
         ],
       },
-      { label: 'Shift Roster',      href: '/coming-soon/shift-roster',  icon: CalendarDays },
+      { label: 'Shift Roster', href: '/coming-soon/shift-roster', icon: CalendarDays, adminOnly: true },
     ],
   },
   {
     label: 'STAFFING',
+    adminOnly: true,
     items: [
-      { label: 'Holidays',        href: '/coming-soon/holidays',        icon: CalendarDays },
-      { label: 'Sick Days',       href: '/coming-soon/sick-days',       icon: CalendarDays },
-      { label: 'Training',        href: '/coming-soon/training',        icon: Users },
-      { label: 'Health & Safety', href: '/coming-soon/health-safety',   icon: Users },
+      { label: 'Holidays',        href: '/coming-soon/holidays',      icon: CalendarDays },
+      { label: 'Sick Days',       href: '/coming-soon/sick-days',     icon: CalendarDays },
+      { label: 'Training',        href: '/coming-soon/training',      icon: Users },
+      { label: 'Health & Safety', href: '/coming-soon/health-safety', icon: Users },
     ],
   },
   {
     label: 'P&L REPORTS',
     items: [
-      { label: 'Sales Reports',  href: '/pl-reports/sales-reports', icon: LineChart },
-      { label: 'Monthly P&L',    href: '/pl-reports/sales-reports', icon: TableProperties },
+      { label: 'Sales Reports', href: '/pl-reports/sales-reports', icon: LineChart,       permKey: 'pl_reports' },
+      { label: 'Monthly P&L',   href: '/pl-reports/sales-reports', icon: TableProperties, permKey: 'pl_reports' },
     ],
   },
   {
     label: 'ANALYSIS',
+    adminOnly: true,
     items: [
-      { label: 'P&L Reports',     href: '/reports',                      icon: BarChart3 },
-      { label: 'Cash Flow Check', href: '/coming-soon/cash-flow',        icon: Banknote },
-      { label: 'Demand Forecast', href: '/coming-soon/demand-forecast',  icon: TrendingDown },
+      { label: 'P&L Reports',     href: '/reports',                     icon: BarChart3 },
+      { label: 'Cash Flow Check', href: '/coming-soon/cash-flow',       icon: Banknote },
+      { label: 'Demand Forecast', href: '/coming-soon/demand-forecast', icon: TrendingDown },
     ],
   },
   {
     label: 'ADMIN',
     items: [
-      { label: 'Accounts',      href: '/coming-soon/accounts',       icon: Building2 },
-      { label: 'Bills',         href: '/bills',                      icon: FilePlus },
-      { label: 'Create Bills',  href: '/bills/new',                  icon: FileCheck },
-      { label: 'Approve Bills', href: '/coming-soon/approve-bills',  icon: FileCheck },
+      { label: 'Accounts',      href: '/coming-soon/accounts',      icon: Building2, adminOnly: true },
+      { label: 'Bills',         href: '/bills',                     icon: FilePlus,  permKey: 'bills' },
+      { label: 'Create Bills',  href: '/bills/new',                 icon: FileCheck, permKey: 'bills' },
+      { label: 'Approve Bills', href: '/coming-soon/approve-bills', icon: FileCheck, adminOnly: true },
     ],
   },
   {
     label: 'DOCUMENTS',
+    adminOnly: true,
     items: [
-      { label: 'Staff',      href: '/coming-soon/docs-staff',      icon: UserSquare },
-      { label: 'Locations',  href: '/coming-soon/docs-locations',  icon: MapPin },
-      { label: 'Suppliers',  href: '/coming-soon/docs-suppliers',  icon: Truck },
-      { label: 'Other',      href: '/coming-soon/docs-other',      icon: FolderOpen },
+      { label: 'Staff',     href: '/coming-soon/docs-staff',     icon: UserSquare },
+      { label: 'Locations', href: '/coming-soon/docs-locations', icon: MapPin },
+      { label: 'Suppliers', href: '/coming-soon/docs-suppliers', icon: Truck },
+      { label: 'Other',     href: '/coming-soon/docs-other',     icon: FolderOpen },
     ],
   },
   {
     label: 'SETTINGS',
+    adminOnly: true,
     items: [
       { label: 'Users',      href: '/settings/users',      icon: Users },
       { label: 'Locations',  href: '/settings/locations',  icon: MapPin },
@@ -206,7 +215,7 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
   // We MERGE into the existing set so manually-opened items never get collapsed.
   useEffect(() => {
     const toExpand: string[] = [];
-    for (const group of navGroups) {
+    for (const group of navGroups) {  // full list intentional — expand state independent of visibility
       for (const item of group.items) {
         if (item.children) {
           const childActive = item.children.some((c) =>
@@ -250,6 +259,22 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
     return pathname === href || pathname.startsWith(href + '/');
   };
 
+  // ── Permission filtering ──────────────────────────────────────────────────
+  const isAdmin = profile?.role === 'admin';
+  const perms   = profile?.permissions ?? {};
+
+  const canSeeItem = (item: NavItem): boolean => {
+    if (isAdmin) return true;
+    if (item.adminOnly) return false;
+    if (item.permKey) return !!perms[item.permKey];
+    return true;
+  };
+
+  const visibleGroups = navGroups
+    .filter(group => isAdmin || !group.adminOnly)
+    .map(group => ({ ...group, items: group.items.filter(canSeeItem) }))
+    .filter(group => group.items.length > 0);
+
   const toggleExpanded = (href: string) => {
     setExpanded((prev) => {
       const next = new Set(prev);
@@ -275,7 +300,7 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
 
       {/* Nav */}
       <nav className="flex-1 px-3 py-4 space-y-5 overflow-y-auto">
-        {navGroups.map((group) => (
+        {visibleGroups.map((group) => (
           <div key={group.label}>
             <div className="px-2 mb-1 text-white/40 text-xs font-semibold tracking-wider">
               {group.label}
