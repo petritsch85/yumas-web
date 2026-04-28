@@ -1,0 +1,17 @@
+{
+  "name": "Yumas Inventory",
+  "short_name": "Yumas",
+  "description": "Daily inventory counts for Yumas restaurants",
+  "start_url": "/inventory/add",
+  "display": "standalone",
+  "background_color": "#1B5E20",
+  "theme_color": "#1B5E20",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

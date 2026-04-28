@@ -1,11 +1,13 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase-browser';
-import { ChevronLeft, Send } from 'lucide-react';
+import { saveDraft, loadDraft, clearDraft } from '@/lib/draft-store';
+import { enqueue, dequeueAll, removeFromQueue, pendingCount } from '@/lib/offline-queue';
+import { ChevronLeft, Send, WifiOff, Wifi, RefreshCw, CheckCircle2 } from 'lucide-react';
 
-type Item = { name: string; unit: string };
+type Item    = { name: string; unit: string };
 type Section = { title: string; data: Item[] };
 
 const SECTIONS: Section[] = [
@@ -148,19 +150,104 @@ const SECTIONS: Section[] = [
 
 const TOTAL_ITEMS = SECTIONS.reduce((sum, s) => sum + s.data.length, 0);
 
+/* ─── Sync queue to Supabase ──────────────────────────────────────────────── */
+async function syncPendingQueue(): Promise<number> {
+  const items = await dequeueAll();
+  let synced = 0;
+  for (const item of items) {
+    try {
+      const { error } = await supabase.from('inventory_submissions').insert({
+        location_id:  item.locationId,
+        location_name: item.locationName,
+        submitted_by: item.userId,
+        submitted_at: item.queuedAt,
+        data:         item.data,
+        comment:      item.comment,
+      });
+      if (!error) {
+        await removeFromQueue(item.id!);
+        synced++;
+      }
+    } catch { /* network still unavailable for this item */ }
+  }
+  return synced;
+}
+
 export default function LocationInventoryFormPage({
   params,
 }: {
   params: { locationId: string };
 }) {
-  const router = useRouter();
+  const router       = useRouter();
   const searchParams = useSearchParams();
   const locationName = searchParams.get('name') ?? 'Location';
 
-  const [counts, setCounts] = useState<Record<string, string>>({});
-  const [comment, setComment] = useState('');
+  const [counts, setCounts]         = useState<Record<string, string>>({});
+  const [comment, setComment]       = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [submitted, setSubmitted] = useState(false);
+  const [submitted, setSubmitted]   = useState(false);
+  const [savedOffline, setSavedOffline] = useState(false);
+  const [isOnline, setIsOnline]     = useState(true);
+  const [queueCount, setQueueCount] = useState(0);
+  const [syncing, setSyncing]       = useState(false);
+  const [justSynced, setJustSynced] = useState(false);
+  const [draftLoaded, setDraftLoaded] = useState(false);
+  const draftTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  /* ── Load draft on mount ── */
+  useEffect(() => {
+    const draft = loadDraft(params.locationId);
+    if (draft) {
+      setCounts(draft.counts);
+      setComment(draft.comment);
+      setDraftLoaded(true);
+    }
+  }, [params.locationId]);
+
+  /* ── Refresh queue count from IndexedDB ── */
+  const refreshQueueCount = useCallback(async () => {
+    const n = await pendingCount();
+    setQueueCount(n);
+  }, []);
+
+  useEffect(() => { refreshQueueCount(); }, [refreshQueueCount]);
+
+  /* ── Online / offline detection ── */
+  useEffect(() => {
+    setIsOnline(navigator.onLine);
+
+    const handleOnline = async () => {
+      setIsOnline(true);
+      // Auto-sync any queued submissions
+      const n = await pendingCount();
+      if (n > 0) {
+        setSyncing(true);
+        await syncPendingQueue();
+        await refreshQueueCount();
+        setSyncing(false);
+        setJustSynced(true);
+        setTimeout(() => setJustSynced(false), 3000);
+      }
+    };
+
+    const handleOffline = () => setIsOnline(false);
+
+    window.addEventListener('online',  handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online',  handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, [refreshQueueCount]);
+
+  /* ── Auto-save draft (debounced 800 ms) ── */
+  useEffect(() => {
+    if (draftTimer.current) clearTimeout(draftTimer.current);
+    draftTimer.current = setTimeout(() => {
+      saveDraft(params.locationId, counts, comment);
+    }, 800);
+    return () => { if (draftTimer.current) clearTimeout(draftTimer.current); };
+  }, [counts, comment, params.locationId]);
 
   const filledCount = Object.values(counts).filter((v) => v.trim() !== '').length;
 
@@ -168,6 +255,7 @@ export default function LocationInventoryFormPage({
     setCounts((prev) => ({ ...prev, [name]: value }));
   };
 
+  /* ── Submit ── */
   const handleSubmit = async () => {
     if (!window.confirm(`Submit inventory for ${locationName}? (${filledCount} / ${TOTAL_ITEMS} items filled)`)) return;
 
@@ -182,32 +270,60 @@ export default function LocationInventoryFormPage({
 
       const data = SECTIONS.flatMap((section) =>
         section.data.map((item) => ({
-          section: section.title,
-          name: item.name,
-          unit: item.unit,
+          section:  section.title,
+          name:     item.name,
+          unit:     item.unit,
           quantity: parseFloat(counts[item.name] ?? '0') || 0,
         }))
       );
 
-      const { error: insertError } = await supabase
-        .from('inventory_submissions')
-        .insert({
-          location_id: params.locationId,
-          location_name: locationName,
-          submitted_by: user.id,
-          submitted_at: new Date().toISOString(),
+      if (!navigator.onLine) {
+        // ── Offline path: save to IndexedDB queue ──
+        await enqueue({
+          locationId:   params.locationId,
+          locationName,
+          userId:       user.id,
           data,
-          comment: comment.trim() || null,
+          comment:      comment.trim() || null,
+          queuedAt:     new Date().toISOString(),
         });
+        clearDraft(params.locationId);
+        await refreshQueueCount();
+        setSavedOffline(true);
+        setCounts({});
+        setComment('');
+      } else {
+        // ── Online path: submit directly ──
+        const { error: insertError } = await supabase
+          .from('inventory_submissions')
+          .insert({
+            location_id:   params.locationId,
+            location_name: locationName,
+            submitted_by:  user.id,
+            submitted_at:  new Date().toISOString(),
+            data,
+            comment:       comment.trim() || null,
+          });
 
-      if (insertError) {
-        alert(`Error: ${insertError.message}`);
-        setSubmitting(false);
-        return;
+        if (insertError) {
+          alert(`Error: ${insertError.message}`);
+          setSubmitting(false);
+          return;
+        }
+
+        clearDraft(params.locationId);
+        // Also drain any queued items opportunistically
+        const n = await pendingCount();
+        if (n > 0) {
+          setSyncing(true);
+          await syncPendingQueue();
+          await refreshQueueCount();
+          setSyncing(false);
+        }
+        setSubmitted(true);
+        setCounts({});
+        setComment('');
       }
-
-      setSubmitted(true);
-      setComment('');
     } catch (e: unknown) {
       alert((e as Error)?.message ?? 'An unexpected error occurred.');
     } finally {
@@ -215,6 +331,58 @@ export default function LocationInventoryFormPage({
     }
   };
 
+  const startNew = () => {
+    setCounts({});
+    setComment('');
+    setSubmitted(false);
+    setSavedOffline(false);
+    setDraftLoaded(false);
+  };
+
+  /* ─── Offline-saved screen ─── */
+  if (savedOffline) {
+    return (
+      <div className="flex flex-col items-center justify-center py-24 gap-4 text-center px-4">
+        <div className="w-16 h-16 rounded-full bg-amber-100 flex items-center justify-center">
+          <WifiOff size={30} className="text-amber-500" />
+        </div>
+        <h2 className="text-xl font-bold text-gray-900">Saved Offline</h2>
+        <p className="text-sm text-gray-500 max-w-sm">
+          Your inventory count has been saved to this device. It will sync automatically to the server as soon as you have an internet connection.
+        </p>
+        {queueCount > 0 && (
+          <div className={`flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-full ${
+            syncing ? 'bg-blue-50 text-blue-700' : 'bg-amber-50 text-amber-700'
+          }`}>
+            <RefreshCw size={14} className={syncing ? 'animate-spin' : ''} />
+            {syncing ? 'Syncing now…' : `${queueCount} submission${queueCount > 1 ? 's' : ''} waiting to sync`}
+          </div>
+        )}
+        {justSynced && queueCount === 0 && (
+          <div className="flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-full bg-green-50 text-green-700">
+            <CheckCircle2 size={14} />
+            All synced successfully
+          </div>
+        )}
+        <div className="flex gap-3 mt-2">
+          <button
+            onClick={startNew}
+            className="px-4 py-2 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50"
+          >
+            New Submission
+          </button>
+          <button
+            onClick={() => router.push('/inventory/counts')}
+            className="px-4 py-2 bg-[#1B5E20] text-white rounded-lg text-sm font-medium hover:bg-[#2E7D32]"
+          >
+            View Reports
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  /* ─── Online-submitted screen ─── */
   if (submitted) {
     return (
       <div className="flex flex-col items-center justify-center py-24 gap-4">
@@ -227,7 +395,7 @@ export default function LocationInventoryFormPage({
         <p className="text-sm text-gray-500">Your inventory for {locationName} has been saved.</p>
         <div className="flex gap-3 mt-2">
           <button
-            onClick={() => { setCounts({}); setComment(''); setSubmitted(false); }}
+            onClick={startNew}
             className="px-4 py-2 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50"
           >
             New Submission
@@ -243,10 +411,11 @@ export default function LocationInventoryFormPage({
     );
   }
 
+  /* ─── Main form ─── */
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="flex items-center gap-3 mb-6">
+      <div className="flex items-center gap-3 mb-4">
         <button
           onClick={() => router.back()}
           className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-800 transition-colors"
@@ -258,16 +427,55 @@ export default function LocationInventoryFormPage({
         <h1 className="text-2xl font-bold text-gray-900">{locationName} — Inventory</h1>
       </div>
 
+      {/* Status banners */}
+      {!isOnline && (
+        <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5 mb-3 text-sm text-amber-700">
+          <WifiOff size={15} className="text-amber-500 flex-shrink-0" />
+          <span><strong>You're offline.</strong> Keep counting — your data will be saved locally and synced when you reconnect.</span>
+        </div>
+      )}
+
+      {isOnline && syncing && (
+        <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 rounded-xl px-4 py-2.5 mb-3 text-sm text-blue-700">
+          <RefreshCw size={15} className="animate-spin text-blue-500 flex-shrink-0" />
+          Syncing offline submissions…
+        </div>
+      )}
+
+      {isOnline && justSynced && (
+        <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-xl px-4 py-2.5 mb-3 text-sm text-green-700">
+          <CheckCircle2 size={15} className="text-green-500 flex-shrink-0" />
+          Offline submissions synced successfully.
+        </div>
+      )}
+
+      {isOnline && !syncing && !justSynced && queueCount > 0 && (
+        <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5 mb-3 text-sm text-amber-700">
+          <RefreshCw size={15} className="text-amber-500 flex-shrink-0" />
+          {queueCount} offline submission{queueCount > 1 ? 's' : ''} pending sync.
+        </div>
+      )}
+
+      {draftLoaded && (
+        <div className="flex items-center justify-between bg-blue-50 border border-blue-100 rounded-xl px-4 py-2 mb-3 text-xs text-blue-700">
+          <span>Draft restored from last session</span>
+          <button
+            onClick={() => { setCounts({}); setComment(''); setDraftLoaded(false); clearDraft(params.locationId); }}
+            className="text-blue-500 hover:text-blue-700 font-medium"
+          >
+            Clear
+          </button>
+        </div>
+      )}
+
       {/* Sections */}
       <div className="flex-1 space-y-4">
         {SECTIONS.map((section) => (
           <div key={section.title} className="bg-white rounded-lg shadow-sm border border-gray-100 overflow-hidden">
-            {/* Section header */}
             <div className="flex items-center justify-between px-4 py-2.5" style={{ backgroundColor: '#1B5E20' }}>
               <span className="text-white text-xs font-bold tracking-widest uppercase">{section.title}</span>
               <span className="text-green-300 text-xs font-medium">{section.data.length} items</span>
             </div>
-            {/* Items */}
             <div>
               {section.data.map((item, idx) => (
                 <div
@@ -292,36 +500,42 @@ export default function LocationInventoryFormPage({
             </div>
           </div>
         ))}
-      </div>
 
-      {/* Comment box */}
-      <div className="bg-white rounded-lg shadow-sm border border-gray-100 overflow-hidden mb-28">
-        <div className="flex items-center justify-between px-4 py-2.5" style={{ backgroundColor: '#1B5E20' }}>
-          <span className="text-white text-xs font-bold tracking-widest uppercase">Comments</span>
-        </div>
-        <div className="px-4 py-3">
-          <textarea
-            rows={3}
-            value={comment}
-            onChange={(e) => setComment(e.target.value)}
-            placeholder="Add any extra comments or notes for this inventory report…"
-            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#1B5E20] resize-none bg-gray-50"
-          />
+        {/* Comment box */}
+        <div className="bg-white rounded-lg shadow-sm border border-gray-100 overflow-hidden mb-28">
+          <div className="flex items-center justify-between px-4 py-2.5" style={{ backgroundColor: '#1B5E20' }}>
+            <span className="text-white text-xs font-bold tracking-widest uppercase">Comments</span>
+          </div>
+          <div className="px-4 py-3">
+            <textarea
+              rows={3}
+              value={comment}
+              onChange={(e) => setComment(e.target.value)}
+              placeholder="Add any extra comments or notes for this inventory report…"
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#1B5E20] resize-none bg-gray-50"
+            />
+          </div>
         </div>
       </div>
 
       {/* Fixed bottom bar */}
       <div className="fixed bottom-0 left-60 right-0 bg-white border-t border-gray-200 px-6 py-3 flex items-center justify-between shadow-lg z-10">
-        <span className="text-sm text-gray-500 font-medium">
-          {filledCount} / {TOTAL_ITEMS} items filled
-        </span>
+        <div className="flex items-center gap-3">
+          <span className="text-sm text-gray-500 font-medium">
+            {filledCount} / {TOTAL_ITEMS} items filled
+          </span>
+          {isOnline
+            ? <span className="flex items-center gap-1 text-xs text-green-600"><Wifi size={12} /> Online</span>
+            : <span className="flex items-center gap-1 text-xs text-amber-600"><WifiOff size={12} /> Offline</span>
+          }
+        </div>
         <button
           onClick={handleSubmit}
           disabled={submitting}
           className="flex items-center gap-2 bg-[#1B5E20] text-white px-6 py-2.5 rounded-lg text-sm font-bold hover:bg-[#2E7D32] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <Send size={15} />
-          {submitting ? 'Sending…' : 'Send'}
+          {submitting ? 'Saving…' : isOnline ? 'Submit' : 'Save Offline'}
         </button>
       </div>
     </div>
