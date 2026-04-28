@@ -3,7 +3,8 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
-import { Truck, RefreshCw, CheckCircle2, AlertCircle, Package, TrendingUp } from 'lucide-react';
+import { Truck, RefreshCw, CheckCircle2, AlertCircle, Package, TrendingUp, Eye, Settings2 } from 'lucide-react';
+import type { Profile } from '@/types';
 
 /* ─── Types ─────────────────────────────────────────────────────────────── */
 type DeliveryRun = {
@@ -179,6 +180,10 @@ function StoreDeliveryList({
   onTogglePacked,
   forecast,
   standard,
+  viewMode,
+  editingTargets,
+  onTargetChange,
+  onTargetBlur,
 }: {
   store: Store;
   lines: DeliveryLine[];
@@ -187,6 +192,10 @@ function StoreDeliveryList({
   onTogglePacked: (id: string, value: boolean) => void;
   forecast: WeeklyForecast | null;
   standard: number;
+  viewMode: 'packer' | 'manager';
+  editingTargets: Record<string, string>;
+  onTargetChange: (id: string, value: string) => void;
+  onTargetBlur: (line: DeliveryLine, value: string) => void;
 }) {
   if (!hasSubmission) {
     return (
@@ -197,13 +206,25 @@ function StoreDeliveryList({
     );
   }
 
-  const itemsToDeliver = lines.filter(l => l.delivery_qty > 0);
+  const isManager = viewMode === 'manager';
+  const colSpanCount = isManager ? 6 : 4;
+
+  // Compute live delivery qty taking into account any unsaved target edits
+  const liveDeliveryQty = (line: DeliveryLine): number => {
+    if (!isManager) return line.delivery_qty;
+    const raw = editingTargets[line.id];
+    if (raw === undefined) return line.delivery_qty;
+    const t = parseFloat(raw);
+    return Math.max(0, (isNaN(t) ? line.target_qty : t) - line.reported_qty);
+  };
+
+  const itemsToDeliver = lines.filter(l => liveDeliveryQty(l) > 0);
   const sections = [...new Set(lines.map(l => l.section))].sort();
 
   return (
-    <div className={`print-store ${isActive ? 'block' : 'hidden print:hidden'}`}>
-      {/* Forecast info banner */}
-      <ForecastBanner store={store} forecast={forecast} standard={standard} />
+    <div className={isActive ? 'block' : 'hidden'}>
+      {/* Forecast info banner — manager only */}
+      {isManager && <ForecastBanner store={store} forecast={forecast} standard={standard} />}
 
       {/* Summary */}
       <div className="flex items-center gap-3 mb-4">
@@ -223,12 +244,14 @@ function StoreDeliveryList({
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b border-gray-100">
               <tr>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide w-[35%]">Item</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide w-[40%]">Item</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Unit</th>
-                <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wide">Reported</th>
-                <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wide">Target</th>
+                {isManager && <>
+                  <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wide">Reported</th>
+                  <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wide">Target</th>
+                </>}
                 <th className="px-4 py-3 text-center text-xs font-semibold text-[#1B5E20] uppercase tracking-wide">To Deliver</th>
-                <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wide print:hidden">Packed</th>
+                <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wide">Packed</th>
               </tr>
             </thead>
             <tbody>
@@ -237,38 +260,50 @@ function StoreDeliveryList({
                 return (
                   <React.Fragment key={section}>
                     <tr className="bg-gray-50">
-                      <td colSpan={6} className="px-4 py-2">
-                        <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                          {section}
-                        </span>
+                      <td colSpan={colSpanCount} className="px-4 py-2">
+                        <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">{section}</span>
                       </td>
                     </tr>
                     {sectionLines.map(line => {
-                      const muted = line.delivery_qty === 0;
+                      const deliverQty = liveDeliveryQty(line);
+                      const muted = deliverQty === 0;
+                      const targetVal = editingTargets[line.id] ?? String(line.target_qty);
                       return (
                         <tr
                           key={line.id}
-                          className={`border-t border-gray-50 transition-colors ${
-                            muted ? 'opacity-40' : 'hover:bg-gray-50/50'
-                          }`}
+                          className={`border-t border-gray-50 transition-colors ${muted ? 'opacity-40' : 'hover:bg-gray-50/50'}`}
                         >
                           <td className={`px-4 py-2.5 font-medium ${muted ? 'text-gray-400' : 'text-gray-800'}`}>
                             {line.item_name}
                           </td>
                           <td className="px-4 py-2.5 text-xs text-gray-500">{line.unit}</td>
-                          <td className="px-4 py-2.5 text-center text-gray-600">{line.reported_qty}</td>
-                          <td className="px-4 py-2.5 text-center text-gray-600">{line.target_qty}</td>
+
+                          {isManager && <>
+                            <td className="px-4 py-2.5 text-center text-gray-500">{line.reported_qty}</td>
+                            <td className="px-4 py-2.5 text-center">
+                              <input
+                                type="number"
+                                min="0"
+                                value={targetVal}
+                                onChange={e => onTargetChange(line.id, e.target.value)}
+                                onBlur={e => onTargetBlur(line, e.target.value)}
+                                className="w-16 text-center border border-gray-200 rounded-md px-1.5 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20] bg-white"
+                              />
+                            </td>
+                          </>}
+
                           <td className="px-4 py-2.5 text-center">
-                            {line.delivery_qty > 0 ? (
+                            {deliverQty > 0 ? (
                               <span className="inline-flex items-center justify-center min-w-[2rem] px-2 py-0.5 rounded-md bg-[#1B5E20]/10 text-[#1B5E20] font-bold text-sm">
-                                {line.delivery_qty}
+                                {deliverQty}
                               </span>
                             ) : (
                               <span className="text-gray-300 text-xs">—</span>
                             )}
                           </td>
-                          <td className="px-4 py-2.5 text-center print:hidden">
-                            {line.delivery_qty > 0 ? (
+
+                          <td className="px-4 py-2.5 text-center">
+                            {deliverQty > 0 ? (
                               <button
                                 onClick={() => onTogglePacked(line.id, !line.is_packed)}
                                 className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors mx-auto ${
@@ -278,9 +313,7 @@ function StoreDeliveryList({
                                 }`}
                                 title={line.is_packed ? 'Mark as unpacked' : 'Mark as packed'}
                               >
-                                {line.is_packed && (
-                                  <CheckCircle2 size={12} className="text-white" />
-                                )}
+                                {line.is_packed && <CheckCircle2 size={12} className="text-white" />}
                               </button>
                             ) : (
                               <span className="text-gray-200 text-xs">—</span>
@@ -306,6 +339,23 @@ export default function DeliveryPage() {
   const [activeStore, setActiveStore] = useState<Store>('Eschborn');
   const [generating, setGenerating] = useState(false);
   const [generateError, setGenerateError] = useState('');
+
+  // View mode: packer (default) or manager
+  const [viewMode, setViewMode] = useState<'packer' | 'manager'>(() => {
+    if (typeof window !== 'undefined') {
+      return (localStorage.getItem('delivery-view-mode') as 'packer' | 'manager') ?? 'packer';
+    }
+    return 'packer';
+  });
+
+  // Inline target edits: line id → string value (unsaved)
+  const [editingTargets, setEditingTargets] = useState<Record<string, string>>({});
+
+  const setMode = (mode: 'packer' | 'manager') => {
+    setViewMode(mode);
+    localStorage.setItem('delivery-view-mode', mode);
+    if (mode === 'packer') setEditingTargets({});
+  };
 
   const { date: targetDate, dayOfWeek, isDeliveryDay } = getDeliveryDate();
   const stdDayKey = DOW_TO_STD_KEY[dayOfWeek];
@@ -359,6 +409,50 @@ export default function DeliveryPage() {
       return data as WeeklyForecast[];
     },
   });
+
+  /* ─ Profile (to gate manager toggle) ─ */
+  const { data: profile } = useQuery<Profile | null>({
+    queryKey: ['delivery-profile'],
+    queryFn: async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return null;
+      const { data } = await supabase.from('profiles').select('*').eq('id', user.id).single();
+      return data as Profile | null;
+    },
+  });
+  const canManage = profile?.role === 'admin' || profile?.role === 'manager';
+
+  /* ─ Update target qty on a line ─ */
+  const updateTarget = useMutation({
+    mutationFn: async ({ line, newTarget }: { line: DeliveryLine; newTarget: number }) => {
+      const newDelivery = Math.max(0, newTarget - line.reported_qty);
+      const { error } = await supabase
+        .from('delivery_run_lines')
+        .update({ target_qty: newTarget, delivery_qty: newDelivery })
+        .eq('id', line.id);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['delivery-run', targetDate] }),
+  });
+
+  const handleTargetChange = (id: string, value: string) => {
+    setEditingTargets(prev => ({ ...prev, [id]: value }));
+  };
+
+  const handleTargetBlur = (line: DeliveryLine, value: string) => {
+    const parsed = parseFloat(value);
+    const newTarget = isNaN(parsed) ? line.target_qty : Math.max(0, Math.round(parsed));
+    // Only save if changed
+    if (newTarget !== line.target_qty) {
+      updateTarget.mutate({ line, newTarget });
+    }
+    // Clear local override — DB value will come back via query invalidation
+    setEditingTargets(prev => {
+      const next = { ...prev };
+      delete next[line.id];
+      return next;
+    });
+  };
 
   /* ─ Toggle packed ─ */
   const togglePacked = useMutation({
@@ -546,7 +640,34 @@ export default function DeliveryPage() {
             </p>
           </div>
 
-          <div className="flex items-center gap-3 print:hidden">
+          <div className="flex items-center gap-3">
+            {/* View mode toggle — managers/admins only */}
+            {canManage && (
+              <div className="flex items-center bg-gray-100 rounded-lg p-1 gap-1">
+                <button
+                  onClick={() => setMode('packer')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${
+                    viewMode === 'packer'
+                      ? 'bg-white text-gray-800 shadow-sm'
+                      : 'text-gray-500 hover:text-gray-700'
+                  }`}
+                >
+                  <Eye size={13} />
+                  Packer
+                </button>
+                <button
+                  onClick={() => setMode('manager')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${
+                    viewMode === 'manager'
+                      ? 'bg-white text-[#1B5E20] shadow-sm'
+                      : 'text-gray-500 hover:text-gray-700'
+                  }`}
+                >
+                  <Settings2 size={13} />
+                  Manager
+                </button>
+              </div>
+            )}
             <button
               onClick={handleGenerate}
               disabled={generating}
@@ -673,6 +794,10 @@ export default function DeliveryPage() {
                   onTogglePacked={(id, value) => togglePacked.mutate({ id, value })}
                   forecast={getStoreForecast(store)}
                   standard={getStoreStandard(store)}
+                  viewMode={viewMode}
+                  editingTargets={editingTargets}
+                  onTargetChange={handleTargetChange}
+                  onTargetBlur={handleTargetBlur}
                 />
               </div>
             ))}
