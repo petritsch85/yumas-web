@@ -598,8 +598,21 @@ export default function TeamPage() {
 
                     {/* Inline edit row */}
                     {editingId === user.id && (
-                      <tr className="border-t border-indigo-100 bg-indigo-50/20">
-                        <td colSpan={6} className="px-4 py-4">
+                      <tr className="border-t-4 border-indigo-400">
+                        <td colSpan={6} className="p-0 bg-indigo-50">
+                          {/* Edit panel header */}
+                          <div className="flex items-center justify-between px-5 py-3 bg-indigo-600">
+                            <div className="flex items-center gap-2.5">
+                              <div className="w-7 h-7 rounded-full bg-white/20 flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
+                                {user.full_name.charAt(0)}
+                              </div>
+                              <span className="text-white text-sm font-semibold">Editing: {user.full_name}</span>
+                            </div>
+                            <button onClick={() => setEditingId(null)} className="text-white/70 hover:text-white transition-colors">
+                              <X size={15} />
+                            </button>
+                          </div>
+                          <div className="px-5 py-4">
                           {/* Basic fields */}
                           <div className="grid grid-cols-2 md:grid-cols-3 gap-3 items-end mb-3">
                             <div className="col-span-2 md:col-span-1">
@@ -683,6 +696,7 @@ export default function TeamPage() {
                               Cancel
                             </button>
                           </div>
+                          </div>{/* end content padding div */}
                         </td>
                       </tr>
                     )}
