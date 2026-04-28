@@ -558,7 +558,12 @@ export default function LocationInventoryFormPage({
                     value={counts[item.name] ?? ''}
                     onChange={(e) => handleChange(item.name, e.target.value)}
                     placeholder="0"
-                    className="w-20 text-right border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20] bg-gray-50"
+                    disabled={!timerStarted}
+                    className={`w-20 text-right border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20] transition-colors ${
+                      timerStarted
+                        ? 'border-gray-200 bg-gray-50'
+                        : 'border-gray-100 bg-gray-100 text-gray-300 cursor-not-allowed'
+                    }`}
                   />
                 </div>
               ))}
@@ -577,7 +582,12 @@ export default function LocationInventoryFormPage({
               value={comment}
               onChange={(e) => setComment(e.target.value)}
               placeholder="Add any extra comments or notes for this inventory report…"
-              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#1B5E20] resize-none bg-gray-50"
+              disabled={!timerStarted}
+              className={`w-full border rounded-lg px-3 py-2 text-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#1B5E20] resize-none transition-colors ${
+                timerStarted
+                  ? 'border-gray-200 bg-gray-50 text-gray-800'
+                  : 'border-gray-100 bg-gray-100 text-gray-300 cursor-not-allowed'
+              }`}
             />
           </div>
         </div>
@@ -596,7 +606,7 @@ export default function LocationInventoryFormPage({
         </div>
         <button
           onClick={handleSubmit}
-          disabled={submitting}
+          disabled={submitting || !timerStarted}
           className="flex items-center gap-2 bg-[#1B5E20] text-white px-6 py-2.5 rounded-lg text-sm font-bold hover:bg-[#2E7D32] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <Send size={15} />
