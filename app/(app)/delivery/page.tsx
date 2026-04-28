@@ -26,6 +26,13 @@ type DeliveryRun = {
   delivery_date: string;
   status: 'draft' | 'ready' | 'in_progress' | 'completed';
   created_at: string;
+  packing_started_at: string | null;
+  packing_finished_at: string | null;
+  packing_duration_seconds: number | null;
+  items_packed_count: number | null;
+  packed_by: string | null;
+  delivery_started_at: string | null;
+  delivery_started_by: string | null;
 };
 
 type DeliveryLine = {
@@ -401,19 +408,54 @@ export default function DeliveryPage() {
   const [packingFinished, setPackingFinished] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const packingInterval = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [startingDelivery, setStartingDelivery] = useState(false);
 
   useEffect(() => {
     return () => { if (packingInterval.current) clearInterval(packingInterval.current); };
   }, []);
 
-  const startPacking = () => {
+  const startPacking = async () => {
     setPackingStarted(true);
     packingInterval.current = setInterval(() => setElapsedSeconds(s => s + 1), 1000);
+    if (run) {
+      const { data: { user } } = await supabase.auth.getUser();
+      await supabase.from('delivery_runs').update({
+        packing_started_at: new Date().toISOString(),
+        packed_by: user?.id ?? null,
+      }).eq('id', run.id);
+      qc.invalidateQueries({ queryKey: ['delivery-run', targetDate] });
+    }
   };
 
-  const finishPacking = () => {
+  const finishPacking = async () => {
     if (packingInterval.current) clearInterval(packingInterval.current);
     setPackingFinished(true);
+    if (run) {
+      const { data: { user } } = await supabase.auth.getUser();
+      await supabase.from('delivery_runs').update({
+        packing_finished_at: new Date().toISOString(),
+        packing_duration_seconds: elapsedSeconds,
+        items_packed_count: totalPackStats.packed,
+        packed_by: user?.id ?? null,
+      }).eq('id', run.id);
+      qc.invalidateQueries({ queryKey: ['delivery-run', targetDate] });
+    }
+  };
+
+  const startDelivery = async () => {
+    if (!run) return;
+    setStartingDelivery(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      await supabase.from('delivery_runs').update({
+        delivery_started_at: new Date().toISOString(),
+        delivery_started_by: user?.id ?? null,
+        status: 'in_progress',
+      }).eq('id', run.id);
+      qc.invalidateQueries({ queryKey: ['delivery-run', targetDate] });
+    } finally {
+      setStartingDelivery(false);
+    }
   };
 
   const { date: targetDate, dayOfWeek, isDeliveryDay } = getDeliveryDate();
@@ -766,18 +808,30 @@ export default function DeliveryPage() {
               )
             )}
 
-            {/* Manager view: Regenerate */}
+            {/* Manager view: Start Delivery + Regenerate */}
             {viewMode === 'manager' && (
-              <button
-                onClick={handleGenerate}
-                disabled={generating}
-                className="flex items-center gap-2 bg-[#1B5E20] text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-[#2E7D32] transition-colors disabled:opacity-60 shadow-sm"
-              >
-                {generating
-                  ? <><RefreshCw size={15} className="animate-spin" /> Generating…</>
-                  : <><RefreshCw size={15} /> {run ? 'Regenerate' : 'Generate List'}</>
-                }
-              </button>
+              <>
+                {run && run.packing_finished_at && !run.delivery_started_at && (
+                  <button
+                    onClick={startDelivery}
+                    disabled={startingDelivery}
+                    className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors disabled:opacity-60 shadow-sm"
+                  >
+                    <Truck size={15} />
+                    {startingDelivery ? 'Logging…' : 'Start Delivery'}
+                  </button>
+                )}
+                <button
+                  onClick={handleGenerate}
+                  disabled={generating}
+                  className="flex items-center gap-2 bg-[#1B5E20] text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-[#2E7D32] transition-colors disabled:opacity-60 shadow-sm"
+                >
+                  {generating
+                    ? <><RefreshCw size={15} className="animate-spin" /> Generating…</>
+                    : <><RefreshCw size={15} /> {run ? 'Regenerate' : 'Generate List'}</>
+                  }
+                </button>
+              </>
             )}
           </div>
         </div>
