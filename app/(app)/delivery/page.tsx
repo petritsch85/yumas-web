@@ -89,12 +89,6 @@ const DOW_TO_STD_KEY: Record<number, string> = {
   5: 'fri',
 };
 
-const STATUS_CONFIG = {
-  draft:       { label: 'Draft',       color: 'bg-gray-100 text-gray-600' },
-  ready:       { label: 'Ready',       color: 'bg-blue-100 text-blue-700' },
-  in_progress: { label: 'In Progress', color: 'bg-yellow-100 text-yellow-700' },
-  completed:   { label: 'Completed',   color: 'bg-green-100 text-green-700' },
-};
 
 /* ─── Helpers ────────────────────────────────────────────────────────────── */
 function toLocalDateString(d: Date): string {
@@ -637,7 +631,6 @@ export default function DeliveryPage() {
     return s?.standard_sales_eur ?? 0;
   };
 
-  const dayLabel = DAY_NAMES[dayOfWeek]?.toUpperCase() ?? '';
 
   return (
     <>
@@ -695,37 +688,13 @@ export default function DeliveryPage() {
           </div>
         </div>
 
-        {/* ── Date / status banner ── */}
-        <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 mb-5 flex items-center justify-between print-header">
-          <div className="flex items-center gap-4">
-            <div>
-              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-0.5">Delivery Date</p>
-              <p className="text-base font-semibold text-gray-900">{fmtDate(targetDate)}</p>
-            </div>
-            <div className="h-8 w-px bg-gray-100" />
-            <div>
-              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-0.5">Today</p>
-              <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold ${
-                isDeliveryDay
-                  ? 'bg-green-100 text-green-700'
-                  : 'bg-gray-100 text-gray-500'
-              }`}>
-                {isDeliveryDay ? '✓ Delivery Day' : `Next delivery: ${dayLabel}`}
-              </span>
-            </div>
-            {run && (
-              <>
-                <div className="h-8 w-px bg-gray-100" />
-                <div>
-                  <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-0.5">Status</p>
-                  <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold ${STATUS_CONFIG[run.status].color}`}>
-                    {STATUS_CONFIG[run.status].label}
-                  </span>
-                </div>
-              </>
-            )}
+        {/* ── Date banner ── */}
+        <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 mb-5 flex items-center justify-between">
+          <div>
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-0.5">Delivery Date</p>
+            <p className="text-base font-semibold text-gray-900">{fmtDate(targetDate)}</p>
           </div>
-          <div className="flex items-center gap-2 text-xs text-gray-400 print:hidden">
+          <div className="flex items-center gap-2 text-xs text-gray-400">
             <Truck size={14} />
             <span>Eschborn → Taunus → Westend</span>
           </div>
