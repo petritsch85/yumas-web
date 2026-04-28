@@ -169,7 +169,7 @@ async function syncPendingQueue(): Promise<number> {
         submitted_at:     item.queuedAt,
         data:             item.data,
         comment:          item.comment,
-        duration_seconds: (item as any).durationSeconds ?? null,
+        duration_seconds: item.durationSeconds ?? null,
       });
       if (!error) {
         await removeFromQueue(item.id!);

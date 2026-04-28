@@ -4,13 +4,14 @@ const DB_NAME = 'yumas-offline';
 const STORE   = 'pending-submissions';
 
 export type PendingSubmission = {
-  id?:          number;
-  locationId:   string;
-  locationName: string;
-  userId:       string;
-  data:         { section: string; name: string; unit: string; quantity: number }[];
-  comment:      string | null;
-  queuedAt:     string;
+  id?:             number;
+  locationId:      string;
+  locationName:    string;
+  userId:          string;
+  data:            { section: string; name: string; unit: string; quantity: number }[];
+  comment:         string | null;
+  durationSeconds: number | null;
+  queuedAt:        string;
 };
 
 async function getDB() {
