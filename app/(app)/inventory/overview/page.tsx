@@ -26,6 +26,24 @@ function formatDate(iso: string) {
   });
 }
 
+function timeAgo(iso: string): string {
+  const diffMins = (Date.now() - new Date(iso).getTime()) / 60_000;
+  // Round to nearest 30 minutes
+  const r = Math.round(diffMins / 30) * 30;
+  if (r < 30)  return 'just now';
+  if (r < 60)  return '30 min ago';
+
+  const totalHours = r / 60;
+  const days  = Math.floor(totalHours / 24);
+  const hours = totalHours - days * 24; // 0, 0.5, 1, 1.5 … 23.5
+
+  const hLabel = hours === 0 ? '' : hours === 0.5 ? ' 30 min' : ` ${hours}h`;
+
+  if (days === 0) return `${hours}h ago`;
+  if (days === 1) return `1 day${hLabel} ago`;
+  return `${days} days${hLabel} ago`;
+}
+
 export default function InventoryOverviewPage() {
   const { data, isLoading } = useQuery({
     queryKey: ['inventory-overview'],
@@ -91,11 +109,18 @@ export default function InventoryOverviewPage() {
           const sub = latestByLocation[loc];
           return (
             <div key={loc} className="bg-white border border-gray-100 rounded-lg px-3 py-2 text-xs shadow-sm">
-              <span className="font-semibold text-gray-700">{loc}</span>
-              {sub
-                ? <span className="text-gray-400 ml-1.5">as of {formatDate(sub.submitted_at)}</span>
-                : <span className="text-red-400 ml-1.5">no data</span>
-              }
+              <div className="flex items-baseline gap-1.5">
+                <span className="font-semibold text-gray-700">{loc}</span>
+                {sub
+                  ? <span className="text-gray-400">as of {formatDate(sub.submitted_at)}</span>
+                  : <span className="text-red-400">no data</span>
+                }
+              </div>
+              {sub && (
+                <div className="text-gray-400 mt-0.5 font-medium" style={{ color: '#1B5E20', opacity: 0.7 }}>
+                  {timeAgo(sub.submitted_at)}
+                </div>
+              )}
             </div>
           );
         })}
