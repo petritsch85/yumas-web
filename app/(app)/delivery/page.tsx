@@ -1,10 +1,24 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
-import { RefreshCw, CheckCircle2, AlertCircle, Package, TrendingUp, Eye, Settings2, Truck } from 'lucide-react';
+import { RefreshCw, CheckCircle2, AlertCircle, Package, TrendingUp, Eye, Settings2, Truck, Play, Timer, Flag } from 'lucide-react';
 import type { Profile } from '@/types';
+
+function formatTimer(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
+
+function formatDuration(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  if (m === 0) return `${s}s`;
+  if (s === 0) return `${m} min`;
+  return `${m} min ${s}s`;
+}
 
 /* ─── Types ─────────────────────────────────────────────────────────────── */
 type DeliveryRun = {
@@ -178,6 +192,7 @@ function StoreDeliveryList({
   editingTargets,
   onTargetChange,
   onTargetBlur,
+  packingStarted,
 }: {
   store: Store;
   lines: DeliveryLine[];
@@ -190,6 +205,7 @@ function StoreDeliveryList({
   editingTargets: Record<string, string>;
   onTargetChange: (id: string, value: string) => void;
   onTargetBlur: (line: DeliveryLine, value: string) => void;
+  packingStarted: boolean;
 }) {
   if (!hasSubmission) {
     return (
@@ -202,6 +218,7 @@ function StoreDeliveryList({
 
   const isManager = viewMode === 'manager';
   const colSpanCount = isManager ? 6 : 4;
+  const canPack = isManager || packingStarted;
 
   // Compute live delivery qty taking into account any unsaved target edits
   const liveDeliveryQty = (line: DeliveryLine): number => {
@@ -222,13 +239,24 @@ function StoreDeliveryList({
 
       {/* Summary */}
       <div className="flex items-center gap-3 mb-4">
-        <span className="text-sm font-medium text-gray-700">
-          <span className="text-[#1B5E20] font-bold text-base">{itemsToDeliver.length}</span>
-          {' '}item{itemsToDeliver.length !== 1 ? 's' : ''} to deliver
-        </span>
-        {lines.length > itemsToDeliver.length && (
-          <span className="text-xs text-gray-400">
-            ({lines.length - itemsToDeliver.length} at target — no delivery needed)
+        {isManager ? (
+          <>
+            <span className="text-sm font-medium text-gray-700">
+              <span className="text-[#1B5E20] font-bold text-base">{itemsToDeliver.length}</span>
+              {' '}item{itemsToDeliver.length !== 1 ? 's' : ''} to pack
+            </span>
+            {lines.length > itemsToDeliver.length && (
+              <span className="text-xs text-gray-400">
+                ({lines.length - itemsToDeliver.length} at target — no delivery needed)
+              </span>
+            )}
+          </>
+        ) : (
+          <span className="text-sm font-medium text-gray-700">
+            <span className="text-[#1B5E20] font-bold text-base">
+              {itemsToDeliver.filter(l => l.is_packed).length}
+            </span>
+            <span className="text-gray-400 font-normal"> / {itemsToDeliver.length} packed</span>
           </span>
         )}
       </div>
@@ -313,13 +341,16 @@ function StoreDeliveryList({
                           <td className="px-2 md:px-4 py-2.5 text-center">
                             {deliverQty > 0 ? (
                               <button
-                                onClick={() => onTogglePacked(line.id, !line.is_packed)}
+                                onClick={() => canPack && onTogglePacked(line.id, !line.is_packed)}
+                                disabled={!canPack}
                                 className={`w-6 h-6 rounded border-2 flex items-center justify-center transition-colors mx-auto ${
                                   line.is_packed
                                     ? 'bg-[#1B5E20] border-[#1B5E20]'
-                                    : 'border-gray-300 hover:border-[#1B5E20]'
+                                    : canPack
+                                    ? 'border-gray-300 hover:border-[#1B5E20]'
+                                    : 'border-gray-200 bg-gray-50 cursor-not-allowed'
                                 }`}
-                                title={line.is_packed ? 'Mark as unpacked' : 'Mark as packed'}
+                                title={!canPack ? 'Start packing first' : line.is_packed ? 'Mark as unpacked' : 'Mark as packed'}
                               >
                                 {line.is_packed && <CheckCircle2 size={14} className="text-white" />}
                               </button>
@@ -363,6 +394,26 @@ export default function DeliveryPage() {
     setViewMode(mode);
     localStorage.setItem('delivery-view-mode', mode);
     if (mode === 'packer') setEditingTargets({});
+  };
+
+  // Packing timer
+  const [packingStarted, setPackingStarted] = useState(false);
+  const [packingFinished, setPackingFinished] = useState(false);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const packingInterval = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    return () => { if (packingInterval.current) clearInterval(packingInterval.current); };
+  }, []);
+
+  const startPacking = () => {
+    setPackingStarted(true);
+    packingInterval.current = setInterval(() => setElapsedSeconds(s => s + 1), 1000);
+  };
+
+  const finishPacking = () => {
+    if (packingInterval.current) clearInterval(packingInterval.current);
+    setPackingFinished(true);
   };
 
   const { date: targetDate, dayOfWeek, isDeliveryDay } = getDeliveryDate();
@@ -623,6 +674,20 @@ export default function DeliveryPage() {
     return sl.length > 0;
   };
 
+  const storePackStats = (store: Store) => {
+    const sl = storeLines(store).filter(l => l.delivery_qty > 0);
+    const packed = sl.filter(l => l.is_packed).length;
+    return { packed, total: sl.length, complete: sl.length > 0 && packed === sl.length };
+  };
+
+  const totalPackStats = STORES.reduce(
+    (acc, store) => {
+      const { packed, total } = storePackStats(store);
+      return { packed: acc.packed + packed, total: acc.total + total };
+    },
+    { packed: 0, total: 0 }
+  );
+
   const getStoreForecast = (store: Store): WeeklyForecast | null =>
     forecasts.find(f => f.location_name === store) ?? null;
 
@@ -654,9 +719,7 @@ export default function DeliveryPage() {
                 <button
                   onClick={() => setMode('packer')}
                   className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${
-                    viewMode === 'packer'
-                      ? 'bg-white text-gray-800 shadow-sm'
-                      : 'text-gray-500 hover:text-gray-700'
+                    viewMode === 'packer' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500 hover:text-gray-700'
                   }`}
                 >
                   <Eye size={13} />
@@ -665,9 +728,7 @@ export default function DeliveryPage() {
                 <button
                   onClick={() => setMode('manager')}
                   className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${
-                    viewMode === 'manager'
-                      ? 'bg-white text-[#1B5E20] shadow-sm'
-                      : 'text-gray-500 hover:text-gray-700'
+                    viewMode === 'manager' ? 'bg-white text-[#1B5E20] shadow-sm' : 'text-gray-500 hover:text-gray-700'
                   }`}
                 >
                   <Settings2 size={13} />
@@ -675,16 +736,49 @@ export default function DeliveryPage() {
                 </button>
               </div>
             )}
-            <button
-              onClick={handleGenerate}
-              disabled={generating}
-              className="flex items-center gap-2 bg-[#1B5E20] text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-[#2E7D32] transition-colors disabled:opacity-60 shadow-sm"
-            >
-              {generating
-                ? <><RefreshCw size={15} className="animate-spin" /> Generating…</>
-                : <><RefreshCw size={15} /> {run ? 'Regenerate' : 'Generate Delivery List'}</>
-              }
-            </button>
+
+            {/* Packer view: Start Packing / timer / Packing Finished */}
+            {viewMode === 'packer' && run && !packingFinished && (
+              !packingStarted ? (
+                <button
+                  onClick={startPacking}
+                  className="flex items-center gap-2 bg-[#1B5E20] text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-[#2E7D32] transition-colors shadow-sm"
+                >
+                  <Play size={15} />
+                  Start Packing
+                </button>
+              ) : (
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2 bg-gray-100 rounded-lg px-3 py-2">
+                    <Timer size={14} className="text-[#1B5E20]" />
+                    <span className="font-mono font-bold text-gray-800 tabular-nums text-sm">
+                      {formatTimer(elapsedSeconds)}
+                    </span>
+                  </div>
+                  <button
+                    onClick={finishPacking}
+                    className="flex items-center gap-2 bg-[#1B5E20] text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-[#2E7D32] transition-colors shadow-sm"
+                  >
+                    <Flag size={15} />
+                    Packing Finished
+                  </button>
+                </div>
+              )
+            )}
+
+            {/* Manager view: Regenerate */}
+            {viewMode === 'manager' && (
+              <button
+                onClick={handleGenerate}
+                disabled={generating}
+                className="flex items-center gap-2 bg-[#1B5E20] text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-[#2E7D32] transition-colors disabled:opacity-60 shadow-sm"
+              >
+                {generating
+                  ? <><RefreshCw size={15} className="animate-spin" /> Generating…</>
+                  : <><RefreshCw size={15} /> {run ? 'Regenerate' : 'Generate List'}</>
+                }
+              </button>
+            )}
           </div>
         </div>
 
@@ -693,6 +787,22 @@ export default function DeliveryPage() {
           <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-0.5">Delivery Date</p>
           <p className="text-base font-semibold text-gray-900">{fmtDate(targetDate)}</p>
         </div>
+
+        {/* Packing finished banner */}
+        {packingFinished && (
+          <div className="mb-5 flex items-center gap-4 p-4 bg-green-50 border border-green-200 rounded-xl">
+            <div className="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center flex-shrink-0">
+              <CheckCircle2 size={22} className="text-[#1B5E20]" />
+            </div>
+            <div>
+              <p className="font-semibold text-green-900">Packing complete!</p>
+              <p className="text-sm text-green-700">
+                {totalPackStats.packed} / {totalPackStats.total} items packed in{' '}
+                <strong>{formatDuration(elapsedSeconds)}</strong>
+              </p>
+            </div>
+          </div>
+        )}
 
         {generateError && (
           <div className="mb-4 flex items-center gap-3 p-4 bg-red-50 border border-red-100 rounded-xl text-sm text-red-700">
@@ -714,43 +824,56 @@ export default function DeliveryPage() {
             <Package size={40} className="mx-auto text-gray-200 mb-4" />
             <p className="text-base font-semibold text-gray-400 mb-1">No delivery list yet</p>
             <p className="text-sm text-gray-300 mb-6">
-              Click "Generate Delivery List" to pull the latest inventory counts and calculate what needs to be delivered to each store.
+              Switch to Manager view and click "Generate List" to pull the latest inventory counts.
             </p>
-            <button
-              onClick={handleGenerate}
-              disabled={generating}
-              className="bg-[#1B5E20] text-white px-6 py-2.5 rounded-lg text-sm font-medium hover:bg-[#2E7D32] transition-colors disabled:opacity-60"
-            >
-              {generating ? 'Generating…' : 'Generate Delivery List'}
-            </button>
+            {viewMode === 'manager' && (
+              <button
+                onClick={handleGenerate}
+                disabled={generating}
+                className="bg-[#1B5E20] text-white px-6 py-2.5 rounded-lg text-sm font-medium hover:bg-[#2E7D32] transition-colors disabled:opacity-60"
+              >
+                {generating ? 'Generating…' : 'Generate Delivery List'}
+              </button>
+            )}
           </div>
         ) : (
           /* ── Store tabs + content ── */
           <>
             {/* Store tabs */}
-            <div className="flex gap-1 mb-5 bg-gray-100 rounded-xl p-1 w-fit print:hidden">
+            <div className="flex gap-1 mb-5 bg-gray-100 rounded-xl p-1 w-fit">
               {STORES.map(store => {
-                const sl = storeLines(store);
-                const toDeliver = sl.filter(l => l.delivery_qty > 0).length;
+                const { packed, total, complete } = storePackStats(store);
+                const isActive = activeStore === store;
+                const isPacker = viewMode === 'packer';
                 return (
                   <button
                     key={store}
                     onClick={() => setActiveStore(store)}
-                    className={`px-5 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 ${
-                      activeStore === store
+                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 ${
+                      isActive
                         ? 'bg-white text-[#1B5E20] shadow-sm font-semibold'
                         : 'text-gray-500 hover:text-gray-700'
                     }`}
                   >
                     {store}
-                    {toDeliver > 0 && (
-                      <span className={`text-xs rounded-full px-1.5 py-0.5 font-bold leading-none ${
-                        activeStore === store
-                          ? 'bg-[#1B5E20] text-white'
-                          : 'bg-gray-300 text-gray-600'
-                      }`}>
-                        {toDeliver}
-                      </span>
+                    {isPacker && packingStarted ? (
+                      complete ? (
+                        <CheckCircle2 size={14} className="text-[#1B5E20]" />
+                      ) : (
+                        <span className={`text-xs rounded-full px-1.5 py-0.5 font-bold leading-none ${
+                          isActive ? 'bg-[#1B5E20] text-white' : 'bg-gray-300 text-gray-600'
+                        }`}>
+                          {packed}/{total}
+                        </span>
+                      )
+                    ) : (
+                      total > 0 && (
+                        <span className={`text-xs rounded-full px-1.5 py-0.5 font-bold leading-none ${
+                          isActive ? 'bg-[#1B5E20] text-white' : 'bg-gray-300 text-gray-600'
+                        }`}>
+                          {total}
+                        </span>
+                      )
                     )}
                   </button>
                 );
@@ -775,6 +898,7 @@ export default function DeliveryPage() {
                   editingTargets={editingTargets}
                   onTargetChange={handleTargetChange}
                   onTargetBlur={handleTargetBlur}
+                  packingStarted={packingStarted}
                 />
               </div>
             ))}
