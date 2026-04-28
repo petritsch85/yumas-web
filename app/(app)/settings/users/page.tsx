@@ -33,12 +33,19 @@ const MODULE_GROUPS: ModuleGroup[] = [
   {
     group: 'Supply Chain',
     items: [
-      { key: 'inventory',  label: 'Inventory',       description: 'Add counts, view stock levels, reports' },
-      { key: 'production', label: 'Production',      description: 'Batches & recipes' },
-      { key: 'buying',     label: 'Purchase Orders', description: 'Create & view orders' },
-      { key: 'waste_log',  label: 'Waste Log',       description: 'Log waste entries' },
-      { key: 'delivery',   label: 'Delivery',        description: 'Runs, target levels, sales forecast' },
-      { key: 'analysis',   label: 'Analysis',        description: 'COGS & Store Yield' },
+      { key: 'products',   label: 'Products / Menus', description: 'Raw materials, semi-finished, finished, menus' },
+      { key: 'inventory',  label: 'Inventory',        description: 'Add counts, view stock levels, reports' },
+      { key: 'production', label: 'Production',       description: 'Batches & recipes' },
+      { key: 'buying',     label: 'Purchase Orders',  description: 'Create & view orders' },
+      { key: 'waste_log',  label: 'Waste Log',        description: 'Log waste entries' },
+      { key: 'delivery',   label: 'Delivery',         description: 'Runs, target levels, sales forecast' },
+      { key: 'analysis',   label: 'Analysis',         description: 'COGS & Store Yield' },
+    ],
+  },
+  {
+    group: 'Data',
+    items: [
+      { key: 'suppliers', label: 'Suppliers', description: 'Supplier list & details' },
     ],
   },
   {
@@ -51,13 +58,6 @@ const MODULE_GROUPS: ModuleGroup[] = [
     group: 'In Store',
     items: [
       { key: 'staff_videos', label: 'Staff Videos', description: 'Food & drinks prep videos' },
-    ],
-  },
-  {
-    group: 'Data',
-    items: [
-      { key: 'suppliers', label: 'Suppliers', description: 'Supplier list & details' },
-      { key: 'products',  label: 'Products / Menus', description: 'Raw materials, semi-finished, finished' },
     ],
   },
   {
