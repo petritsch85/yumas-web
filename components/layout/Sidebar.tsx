@@ -191,11 +191,16 @@ const navGroups: NavGroup[] = [
   },
 ];
 
-export default function Sidebar() {
+type SidebarProps = { isOpen: boolean; onClose: () => void };
+
+export default function Sidebar({ isOpen, onClose }: SidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+
+  // Close sidebar on route change (mobile nav)
+  useEffect(() => { onClose(); }, [pathname]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-expand any parent whose children include the current path.
   // We MERGE into the existing set so manually-opened items never get collapsed.
@@ -258,7 +263,10 @@ export default function Sidebar() {
   };
 
   return (
-    <div className="w-60 flex-shrink-0 h-screen flex flex-col overflow-y-auto" style={{ backgroundColor: '#1B5E20' }}>
+    <div
+      className={`fixed inset-y-0 left-0 z-40 w-64 flex flex-col overflow-y-auto transition-transform duration-300 ease-in-out md:relative md:w-60 md:flex-shrink-0 md:translate-x-0 ${isOpen ? 'translate-x-0' : '-translate-x-full'}`}
+      style={{ backgroundColor: '#1B5E20' }}
+    >
       {/* Logo */}
       <div className="px-5 py-5 border-b border-white/10">
         <div className="text-white font-bold text-xl tracking-tight">Yumas</div>

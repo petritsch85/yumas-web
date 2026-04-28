@@ -519,7 +519,7 @@ export default function LocationInventoryFormPage({
       </div>
 
       {/* Fixed bottom bar */}
-      <div className="fixed bottom-0 left-60 right-0 bg-white border-t border-gray-200 px-6 py-3 flex items-center justify-between shadow-lg z-10">
+      <div className="fixed bottom-0 left-0 md:left-60 right-0 bg-white border-t border-gray-200 px-4 md:px-6 py-3 flex items-center justify-between shadow-lg z-10">
         <div className="flex items-center gap-3">
           <span className="text-sm text-gray-500 font-medium">
             {filledCount} / {TOTAL_ITEMS} items filled

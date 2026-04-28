@@ -1,7 +1,7 @@
 'use client';
 
 import { usePathname } from 'next/navigation';
-import { Bell } from 'lucide-react';
+import { Bell, Menu } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase-browser';
 
@@ -35,7 +35,7 @@ function getTitle(pathname: string): string {
   return 'Yumas Inventory';
 }
 
-export default function TopBar() {
+export default function TopBar({ onMenuToggle }: { onMenuToggle: () => void }) {
   const pathname = usePathname();
   const [initials, setInitials] = useState('');
 
@@ -48,9 +48,17 @@ export default function TopBar() {
   }, []);
 
   return (
-    <div className="h-14 bg-white border-b border-gray-200 flex items-center px-6 flex-shrink-0">
-      <div className="flex-1">
-        <h2 className="text-base font-semibold text-gray-900">{getTitle(pathname)}</h2>
+    <div className="h-14 bg-white border-b border-gray-200 flex items-center px-4 md:px-6 flex-shrink-0">
+      {/* Hamburger — mobile only */}
+      <button
+        onClick={onMenuToggle}
+        className="md:hidden mr-3 text-gray-500 hover:text-gray-800 transition-colors p-1"
+        aria-label="Open menu"
+      >
+        <Menu size={22} />
+      </button>
+      <div className="flex-1 min-w-0">
+        <h2 className="text-base font-semibold text-gray-900 truncate">{getTitle(pathname)}</h2>
       </div>
       <div className="flex items-center gap-4">
         <button className="text-gray-400 hover:text-gray-600 transition-colors">

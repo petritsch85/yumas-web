@@ -21,7 +21,7 @@ function KpiCard({
   loading: boolean;
 }) {
   return (
-    <div className="bg-white rounded-lg shadow-sm border border-gray-100 p-6 flex items-center gap-4">
+    <div className="bg-white rounded-lg shadow-sm border border-gray-100 p-4 md:p-6 flex items-center gap-4">
       <div className="rounded-full p-3 flex-shrink-0" style={{ backgroundColor: `${color}20` }}>
         <Icon size={22} style={{ color }} />
       </div>
@@ -121,7 +121,7 @@ export default function DashboardPage() {
   return (
     <div>
       {/* KPI cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4 mb-6 md:mb-8">
         {kpis.map((kpi) => (
           <KpiCard key={kpi.label} {...kpi} />
         ))}
