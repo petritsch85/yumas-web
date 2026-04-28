@@ -583,13 +583,13 @@ export default function TeamPage() {
                         <div className="flex items-center justify-end gap-3">
                           <button
                             onClick={() => editingId === user.id ? setEditingId(null) : startEdit(user)}
-                            className={`transition-colors ${editingId === user.id ? 'text-indigo-500' : 'text-gray-300 hover:text-indigo-500'}`}
+                            className={`transition-colors ${editingId === user.id ? 'text-indigo-500' : 'text-gray-400 hover:text-indigo-500'}`}
                             title="Edit"
                           >
                             <Pencil size={14} />
                           </button>
                           <button onClick={() => setConfirmDeleteId(user.id)}
-                            className="text-gray-300 hover:text-red-500 transition-colors" title="Delete">
+                            className="text-gray-400 hover:text-red-500 transition-colors" title="Delete">
                             <Trash2 size={14} />
                           </button>
                         </div>
