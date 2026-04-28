@@ -11,7 +11,8 @@ const FOOD_CATEGORIES = ['Meat & Fish', 'Dairy & Eggs', 'Fruit & Vegetables', 'D
 
 export default function RawMaterialsPage() {
   const router = useRouter();
-  const [search, setSearch] = useState('');
+  const [search, setSearch]             = useState('');
+  const [activeCategory, setActiveCategory] = useState<string>('All');
 
   const { data: items, isLoading } = useQuery({
     queryKey: ['items', 'raw_material'],
@@ -26,20 +27,33 @@ export default function RawMaterialsPage() {
     },
   });
 
-  // Build SKU map: food items → 1-1…N alphabetically, drinks → 1-(N+1)… alphabetically
+  // Unique categories from data, preserving first-seen order
+  const categories = useMemo(() => {
+    const seen = new Map<string, { name: string; color_hex: string | null }>();
+    for (const item of items ?? []) {
+      if (item.category && !seen.has(item.category.name)) {
+        seen.set(item.category.name, { name: item.category.name, color_hex: item.category.color_hex ?? null });
+      }
+    }
+    return Array.from(seen.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }, [items]);
+
+  // Build SKU map: food items → F1-N, drinks → D1-N
   const skuMap = useMemo(() => {
     if (!items) return {} as Record<string, string>;
-    const foodItems = items.filter(i => !i.category || FOOD_CATEGORIES.includes(i.category.name));
+    const foodItems  = items.filter(i => !i.category || FOOD_CATEGORIES.includes(i.category.name));
     const drinkItems = items.filter(i => i.category?.name === 'Beverages');
     const map: Record<string, string> = {};
-    foodItems.forEach((item, i) => { map[item.id] = `F1-${i + 1}`; });
+    foodItems.forEach((item, i)  => { map[item.id] = `F1-${i + 1}`; });
     drinkItems.forEach((item, i) => { map[item.id] = `D1-${i + 1}`; });
     return map;
   }, [items]);
 
-  const filtered = (items ?? []).filter((i) =>
-    i.name.toLowerCase().includes(search.toLowerCase())
-  );
+  const filtered = (items ?? []).filter((i) => {
+    const matchesSearch   = i.name.toLowerCase().includes(search.toLowerCase());
+    const matchesCategory = activeCategory === 'All' || i.category?.name === activeCategory;
+    return matchesSearch && matchesCategory;
+  });
 
   return (
     <div>
@@ -50,6 +64,44 @@ export default function RawMaterialsPage() {
           Add Item
         </button>
       </div>
+
+      {/* Category filter buttons */}
+      {categories.length > 0 && (
+        <div className="flex flex-wrap gap-2 mb-4">
+          <button
+            onClick={() => setActiveCategory('All')}
+            className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
+              activeCategory === 'All'
+                ? 'bg-[#1B5E20] text-white'
+                : 'bg-white border border-gray-200 text-gray-600 hover:border-gray-300 hover:text-gray-900'
+            }`}
+          >
+            All
+          </button>
+          {categories.map((cat) => (
+            <button
+              key={cat.name}
+              onClick={() => setActiveCategory(cat.name)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
+                activeCategory === cat.name
+                  ? 'text-white'
+                  : 'bg-white border border-gray-200 text-gray-600 hover:border-gray-300 hover:text-gray-900'
+              }`}
+              style={activeCategory === cat.name && cat.color_hex
+                ? { backgroundColor: cat.color_hex, borderColor: cat.color_hex }
+                : undefined}
+            >
+              {cat.color_hex && (
+                <span
+                  className="w-2 h-2 rounded-full flex-shrink-0"
+                  style={{ backgroundColor: activeCategory === cat.name ? 'rgba(255,255,255,0.7)' : cat.color_hex }}
+                />
+              )}
+              {cat.name}
+            </button>
+          ))}
+        </div>
+      )}
 
       <div className="bg-white rounded-lg shadow-sm border border-gray-100">
         <div className="p-4 border-b border-gray-100">
