@@ -198,7 +198,6 @@ export default function LocationInventoryFormPage({
   const [queueCount, setQueueCount] = useState(0);
   const [syncing, setSyncing]       = useState(false);
   const [justSynced, setJustSynced] = useState(false);
-  const [draftLoaded, setDraftLoaded] = useState(false);
   const draftTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ── Timer ──
@@ -229,7 +228,6 @@ export default function LocationInventoryFormPage({
     if (draft) {
       setCounts(draft.counts);
       setComment(draft.comment);
-      setDraftLoaded(true);
     }
   }, [params.locationId]);
 
@@ -372,7 +370,6 @@ export default function LocationInventoryFormPage({
     setComment('');
     setSubmitted(false);
     setSavedOffline(false);
-    setDraftLoaded(false);
     setTimerStarted(false);
     setTimerRunning(false);
     setElapsedSeconds(0);
@@ -535,17 +532,6 @@ export default function LocationInventoryFormPage({
         </div>
       )}
 
-      {draftLoaded && (
-        <div className="flex items-center justify-between bg-blue-50 border border-blue-100 rounded-xl px-4 py-2 mb-3 text-xs text-blue-700">
-          <span>Draft restored from last session</span>
-          <button
-            onClick={() => { setCounts({}); setComment(''); setDraftLoaded(false); clearDraft(params.locationId); }}
-            className="text-blue-500 hover:text-blue-700 font-medium"
-          >
-            Clear
-          </button>
-        </div>
-      )}
 
       {/* Sections */}
       <div className="flex-1 space-y-4">
