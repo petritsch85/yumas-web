@@ -1164,6 +1164,12 @@ export default function DeliveryPage() {
     }
   };
 
+  /* ─ Derived state (needed before receiptStatus query) ─ */
+  const run = runData?.run ?? null;
+  const lines = runData?.lines ?? [];
+  const isPreview = runData?.isPreview ?? false;
+  const liveInventory = runData?.liveInventory ?? {};
+
   /* ─ Receipt status (for driver live view) ─ */
   const { data: receiptStatus = {} } = useQuery<Partial<Record<Store, boolean>>>({
     queryKey: ['store-receipts-status', run?.id],
@@ -1267,12 +1273,6 @@ export default function DeliveryPage() {
       setGenerating(false);
     }
   };
-
-  /* ─ Derived state ─ */
-  const run = runData?.run ?? null;
-  const lines = runData?.lines ?? [];
-  const isPreview = runData?.isPreview ?? false;
-  const liveInventory = runData?.liveInventory ?? {};
 
   const storeLines = (store: Store) => lines.filter(l => l.location_name === store);
   const storeHasSubmission = (store: Store) => storeLines(store).length > 0 || run !== null;
