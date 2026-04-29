@@ -1,10 +1,9 @@
 'use client';
 
-import React, { useState, useRef, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
-import { Upload, Target, SlidersHorizontal, X, Save } from 'lucide-react';
-import * as XLSX from 'xlsx';
+import { Target } from 'lucide-react';
 
 /* ─── Types ─────────────────────────────────────────────────────────────── */
 type TargetRow = {
@@ -18,16 +17,6 @@ type TargetRow = {
   wed_target: number;
   fri_target: number;
   scales_with_demand: boolean;
-};
-
-type ParsedItem = {
-  section: string;
-  item_name: string;
-  unit: string;
-  mon_target: number;
-  tue_target: number;
-  wed_target: number;
-  fri_target: number;
 };
 
 type SalesForecast = {
@@ -237,18 +226,12 @@ function DeliverCell({ qty }: { qty: number }) {
 /* ─── Main Page ──────────────────────────────────────────────────────────── */
 export default function DeliveryTargetsPage() {
   const qc = useQueryClient();
-  const fileRef = useRef<HTMLInputElement>(null);
 
   const weekOptions = useMemo(() => buildWeekOptions(), []);
   // Default to current week (index 4 = offset 0)
   const [selectedWeekKey, setSelectedWeekKey] = useState<string>(weekOptions[4].key);
   const [activeStore, setActiveStore] = useState<Store>('Eschborn');
-  const [uploading, setUploading] = useState(false);
-  const [uploadMsg, setUploadMsg] = useState('');
   const [pendingScaleIds, setPendingScaleIds] = useState<Set<string>>(new Set());
-  const [showStandards, setShowStandards] = useState(false);
-  const [stdEdits, setStdEdits] = useState<Record<string, { mon: number; tue: number; wed: number; fri: number }>>({});
-  const [stdStore, setStdStore] = useState<Store>('Eschborn');
 
   const selectedWeek = weekOptions.find(w => w.key === selectedWeekKey) ?? weekOptions[4];
   const monday = useMemo(
@@ -313,33 +296,6 @@ export default function DeliveryTargetsPage() {
   const forecasts = weekData?.forecasts ?? [];
   const submissions = weekData?.submissions ?? [];
 
-  /* ─ Standards panel query (independent store) ─ */
-  const { data: stdTargetsData } = useQuery({
-    queryKey: ['std-targets', stdStore],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('delivery_targets')
-        .select('*')
-        .eq('location_name', stdStore)
-        .order('section')
-        .order('item_name');
-      if (error) throw error;
-      return data as TargetRow[];
-    },
-    enabled: showStandards,
-  });
-  const stdTargets = stdTargetsData ?? [];
-
-  // Re-initialise edits whenever the store's targets load/change
-  useEffect(() => {
-    if (!stdTargetsData || stdTargetsData.length === 0) return;
-    const initial: Record<string, { mon: number; tue: number; wed: number; fri: number }> = {};
-    for (const t of stdTargetsData) {
-      initial[t.id] = { mon: t.mon_target, tue: t.tue_target, wed: t.wed_target, fri: t.fri_target };
-    }
-    setStdEdits(initial);
-  }, [stdTargetsData]);
-
   /* ─ Compute per-day scaling factors ─ */
   const dayScales: { scale: number; hasForecast: boolean }[] = DAY_KEYS.map((dayKey, idx) => {
     const deliveryDate = fmtDateISO(deliveryDays[idx]);
@@ -398,133 +354,6 @@ export default function DeliveryTargetsPage() {
     },
   });
 
-  /* ─ Upsert from Excel ─ */
-  const upsertTargets = useMutation({
-    mutationFn: async (rows: ParsedItem[]) => {
-      const payload = rows.map(r => ({
-        location_name: activeStore,
-        section: r.section,
-        item_name: r.item_name,
-        unit: r.unit,
-        mon_target: r.mon_target,
-        tue_target: r.tue_target,
-        wed_target: r.wed_target,
-        fri_target: r.fri_target,
-      }));
-      const { error } = await supabase
-        .from('delivery_targets')
-        .upsert(payload, { onConflict: 'location_name,item_name' });
-      if (error) throw error;
-    },
-    onSuccess: (_, rows) => {
-      qc.invalidateQueries({ queryKey: ['targets-weekly', activeStore, selectedWeekKey] });
-      setUploadMsg(`Imported ${rows.length} items successfully.`);
-      setTimeout(() => setUploadMsg(''), 4000);
-    },
-    onError: (e: Error) => {
-      setUploadMsg(`Error: ${e.message}`);
-    },
-  });
-
-  /* ─ Standards panel ─ */
-  const openStandards = () => {
-    setStdStore(activeStore);
-    setShowStandards(true);
-  };
-
-  const saveStandards = useMutation({
-    mutationFn: async () => {
-      const payload = stdTargets.map(t => ({
-        id: t.id,
-        location_name: t.location_name,
-        section: t.section,
-        item_name: t.item_name,
-        unit: t.unit,
-        mon_target: stdEdits[t.id]?.mon ?? t.mon_target,
-        tue_target: stdEdits[t.id]?.tue ?? t.tue_target,
-        wed_target: stdEdits[t.id]?.wed ?? t.wed_target,
-        fri_target: stdEdits[t.id]?.fri ?? t.fri_target,
-        scales_with_demand: t.scales_with_demand,
-      }));
-      const { error } = await supabase
-        .from('delivery_targets')
-        .upsert(payload, { onConflict: 'location_name,item_name' });
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['targets-weekly'] });
-      qc.invalidateQueries({ queryKey: ['std-targets'] });
-      setShowStandards(false);
-    },
-  });
-
-  const setStdEdit = (id: string, day: 'mon' | 'tue' | 'wed' | 'fri', val: string) => {
-    const num = parseFloat(val);
-    setStdEdits(prev => ({
-      ...prev,
-      [id]: { ...prev[id], [day]: isNaN(num) ? 0 : num },
-    }));
-  };
-
-  /* ─ Excel parse ─ */
-  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setUploading(true);
-    setUploadMsg('');
-
-    try {
-      const buffer = await file.arrayBuffer();
-      const wb = XLSX.read(buffer, { type: 'array' });
-      const ws = wb.Sheets[wb.SheetNames[0]];
-      const raw: unknown[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
-
-      const parsed: ParsedItem[] = [];
-      let currentSection = 'Uncategorised';
-
-      for (let i = 2; i < raw.length; i++) {
-        const row = raw[i] as unknown[];
-        const colA = String(row[0] ?? '').trim();
-        const colC = String(row[2] ?? '').trim();
-        const colD = row[3];
-        const colE = row[4];
-        const colF = row[5];
-        const colG = row[6];
-
-        if (!colA) continue;
-
-        const hasUnit = colC !== '';
-        const hasNumbers = [colD, colE, colF, colG].some(v => v !== '' && !isNaN(Number(v)));
-
-        if (!hasUnit && !hasNumbers) {
-          currentSection = colA;
-          continue;
-        }
-
-        parsed.push({
-          section: currentSection,
-          item_name: colA,
-          unit: colC,
-          mon_target: parseFloat(String(colD)) || 0,
-          tue_target: parseFloat(String(colE)) || 0,
-          wed_target: parseFloat(String(colF)) || 0,
-          fri_target: parseFloat(String(colG)) || 0,
-        });
-      }
-
-      if (parsed.length === 0) {
-        setUploadMsg('No data rows found in the file.');
-      } else {
-        upsertTargets.mutate(parsed);
-      }
-    } catch (err: unknown) {
-      setUploadMsg(`Parse error: ${err instanceof Error ? err.message : String(err)}`);
-    } finally {
-      setUploading(false);
-      if (fileRef.current) fileRef.current.value = '';
-    }
-  };
-
   /* ─ Group by section ─ */
   const grouped = SECTIONS.reduce<Record<string, TargetRow[]>>((acc, sec) => {
     acc[sec] = targets.filter(t => t.section === sec);
@@ -544,133 +373,6 @@ export default function DeliveryTargetsPage() {
 
   return (
     <div>
-      {/* ── Standard Targets modal ───────────────────────────────────────── */}
-      {showStandards && (() => {
-        // Compute sections for the stdStore targets
-        const stdGrouped = SECTIONS.reduce<Record<string, TargetRow[]>>((acc, sec) => {
-          acc[sec] = stdTargets.filter(t => t.section === sec);
-          return acc;
-        }, {});
-        const stdOtherSections = [...new Set(stdTargets.map(t => t.section).filter(s => !new Set(SECTIONS).has(s)))];
-        const stdAllSections = [...SECTIONS, ...stdOtherSections];
-
-        return (
-          <>
-            {/* Backdrop */}
-            <div
-              className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm"
-              onClick={() => setShowStandards(false)}
-            />
-
-            {/* Centred modal */}
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-6 pointer-events-none">
-              <div className="bg-white rounded-2xl shadow-2xl flex flex-col w-full max-w-2xl max-h-[88vh] pointer-events-auto">
-
-                {/* Header */}
-                <div className="flex items-start justify-between px-6 py-4 border-b border-gray-100 flex-shrink-0">
-                  <div>
-                    <div className="flex items-center gap-2 mb-2">
-                      <SlidersHorizontal size={16} className="text-[#1B5E20]" />
-                      <h2 className="text-base font-semibold text-gray-900">Standard Targets</h2>
-                    </div>
-                    {/* Store switcher */}
-                    <div className="flex gap-1 bg-gray-100 rounded-lg p-0.5 w-fit">
-                      {STORES.map(store => (
-                        <button
-                          key={store}
-                          onClick={() => setStdStore(store)}
-                          className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
-                            stdStore === store
-                              ? 'bg-white text-[#1B5E20] shadow-sm font-semibold'
-                              : 'text-gray-500 hover:text-gray-700'
-                          }`}
-                        >
-                          {store}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => setShowStandards(false)}
-                    className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors mt-0.5"
-                  >
-                    <X size={18} />
-                  </button>
-                </div>
-
-                {/* Scrollable table */}
-                <div className="flex-1 overflow-y-auto">
-                  {stdTargets.length === 0 ? (
-                    <div className="p-8 text-center text-sm text-gray-400">
-                      No targets uploaded yet for {stdStore}.
-                    </div>
-                  ) : (
-                    <table className="w-full text-sm border-collapse">
-                      <thead className="sticky top-0 z-10 bg-white border-b-2 border-gray-200">
-                        <tr>
-                          <th className="px-5 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Item</th>
-                          <th className="px-2 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide w-24">Unit</th>
-                          {DAY_LABELS.map(d => (
-                            <th key={d} className="px-2 py-2.5 text-center text-xs font-semibold text-gray-500 uppercase tracking-wide w-20">{d}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {stdAllSections.map(section => {
-                          const sectionRows = stdGrouped[section] ?? stdTargets.filter(t => t.section === section);
-                          if (sectionRows.length === 0) return null;
-                          return (
-                            <React.Fragment key={section}>
-                              <tr className="bg-green-50">
-                                <td colSpan={6} className="px-5 py-1.5">
-                                  <span className="text-[11px] font-bold text-[#1B5E20] uppercase tracking-wider">{section}</span>
-                                </td>
-                              </tr>
-                              {sectionRows.map(row => (
-                                <tr key={row.id} className="border-t border-gray-50 hover:bg-gray-50/50">
-                                  <td className="px-5 py-2 text-sm text-gray-800">{row.item_name}</td>
-                                  <td className="px-2 py-2 text-xs text-gray-400">{row.unit}</td>
-                                  {(['mon', 'tue', 'wed', 'fri'] as const).map(day => (
-                                    <td key={day} className="px-2 py-1.5 text-center">
-                                      <input
-                                        type="number"
-                                        min={0}
-                                        step={1}
-                                        value={stdEdits[row.id]?.[day] ?? (day === 'mon' ? row.mon_target : day === 'tue' ? row.tue_target : day === 'wed' ? row.wed_target : row.fri_target)}
-                                        onChange={e => setStdEdit(row.id, day, e.target.value)}
-                                        className="w-16 text-center text-sm border border-gray-200 rounded-md py-1 px-1.5 focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20]/50"
-                                      />
-                                    </td>
-                                  ))}
-                                </tr>
-                              ))}
-                            </React.Fragment>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  )}
-                </div>
-
-                {/* Footer */}
-                <div className="px-6 py-4 border-t border-gray-100 flex-shrink-0 flex items-center justify-between bg-gray-50/50 rounded-b-2xl">
-                  <p className="text-xs text-gray-400">Changes update the base targets for all future weeks.</p>
-                  <button
-                    onClick={() => saveStandards.mutate()}
-                    disabled={saveStandards.isPending || stdTargets.length === 0}
-                    className="flex items-center gap-2 bg-[#1B5E20] text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-[#2E7D32] transition-colors disabled:opacity-50"
-                  >
-                    <Save size={15} />
-                    {saveStandards.isPending ? 'Saving…' : 'Save Changes'}
-                  </button>
-                </div>
-
-              </div>
-            </div>
-          </>
-        );
-      })()}
-
       {/* Page header */}
       <div className="flex items-center justify-between mb-6">
         <div>
@@ -678,7 +380,7 @@ export default function DeliveryTargetsPage() {
             <Target size={20} className="text-[#1B5E20]" />
             <h1 className="text-2xl font-bold text-gray-900">Target Levels</h1>
           </div>
-          {/* Week selector + Standards button */}
+          {/* Week selector */}
           <div className="flex items-center gap-3 mt-2">
             <label className="text-xs text-gray-500 font-medium">Week:</label>
             <select
@@ -692,41 +394,7 @@ export default function DeliveryTargetsPage() {
                 </option>
               ))}
             </select>
-            <button
-              onClick={openStandards}
-              className="flex items-center gap-1.5 text-sm border border-gray-200 rounded-lg px-3 py-1.5 text-gray-600 bg-white shadow-sm hover:bg-gray-50 transition-colors"
-            >
-              <SlidersHorizontal size={14} />
-              Standard Targets
-            </button>
           </div>
-        </div>
-
-        <div className="flex items-center gap-3">
-          {uploadMsg && (
-            <span className={`text-xs font-medium px-3 py-1.5 rounded-lg ${
-              uploadMsg.startsWith('Error') || uploadMsg.startsWith('Parse')
-                ? 'bg-red-50 text-red-600'
-                : 'bg-green-50 text-green-700'
-            }`}>
-              {uploadMsg}
-            </span>
-          )}
-          <input
-            ref={fileRef}
-            type="file"
-            accept=".xlsx,.xls"
-            className="hidden"
-            onChange={handleFile}
-          />
-          <button
-            onClick={() => fileRef.current?.click()}
-            disabled={uploading || upsertTargets.isPending}
-            className="flex items-center gap-2 bg-white border border-gray-200 text-gray-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors disabled:opacity-50 shadow-sm"
-          >
-            <Upload size={15} />
-            {uploading || upsertTargets.isPending ? 'Importing…' : 'Upload Excel'}
-          </button>
         </div>
       </div>
 

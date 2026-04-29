@@ -1,12 +1,14 @@
 'use client';
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
 import {
   RefreshCw, CheckCircle2, AlertCircle, Package, TrendingUp,
   Eye, Settings2, Truck, Play, Timer, Flag, XCircle,
+  Upload, SlidersHorizontal, Save, X, CalendarDays,
 } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import type { Profile } from '@/types';
 
 function formatTimer(seconds: number): string {
@@ -53,6 +55,29 @@ type DeliveryLine = {
   packed_qty: number | null;
 };
 
+type TargetRow = {
+  id: string;
+  location_name: string;
+  section: string;
+  item_name: string;
+  unit: string;
+  mon_target: number;
+  tue_target: number;
+  wed_target: number;
+  fri_target: number;
+  scales_with_demand: boolean;
+};
+
+type ParsedItem = {
+  section: string;
+  item_name: string;
+  unit: string;
+  mon_target: number;
+  tue_target: number;
+  wed_target: number;
+  fri_target: number;
+};
+
 type InventoryItem = {
   section: string;
   name: string;
@@ -97,22 +122,20 @@ type WeeklyForecast = {
 const STORES = ['Eschborn', 'Taunus', 'Westend'] as const;
 type Store = typeof STORES[number];
 
-const DELIVERY_DAYS = [1, 2, 3, 5];
-const DAY_NAMES = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+const SECTIONS = ['Kühlhaus', 'Tiefkühler', 'Trockenware', 'Regale', 'Lager'];
+
+const DELIVERY_DAYS = [1, 2, 3, 5]; // Mon=1 Tue=2 Wed=3 Fri=5
 type DayKey = 'mon_target' | 'tue_target' | 'wed_target' | 'fri_target';
 
 const DAY_KEY_MAP: Record<number, DayKey> = {
-  1: 'mon_target',
-  2: 'tue_target',
-  3: 'wed_target',
-  5: 'fri_target',
+  1: 'mon_target', 2: 'tue_target', 3: 'wed_target', 5: 'fri_target',
 };
 
 const DOW_TO_STD_KEY: Record<number, string> = {
   1: 'mon', 2: 'tue', 3: 'wed', 5: 'fri',
 };
 
-/* ─── Helpers ────────────────────────────────────────────────────────────── */
+/* ─── Date helpers ───────────────────────────────────────────────────────── */
 function toLocalDateString(d: Date): string {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, '0');
@@ -120,19 +143,34 @@ function toLocalDateString(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
-function getDeliveryDate(): { date: string; dayOfWeek: number; isDeliveryDay: boolean } {
+function getDefaultDeliveryDate(): string {
   const now = new Date();
   const dow = now.getDay();
-  if (DELIVERY_DAYS.includes(dow)) {
-    return { date: toLocalDateString(now), dayOfWeek: dow, isDeliveryDay: true };
-  }
+  if (DELIVERY_DAYS.includes(dow)) return toLocalDateString(now);
   let next = new Date(now);
   for (let i = 1; i <= 7; i++) {
     next = new Date(now);
     next.setDate(now.getDate() + i);
     if (DELIVERY_DAYS.includes(next.getDay())) break;
   }
-  return { date: toLocalDateString(next), dayOfWeek: next.getDay(), isDeliveryDay: false };
+  return toLocalDateString(next);
+}
+
+/** Next N upcoming delivery dates (Mon/Tue/Wed/Fri) starting from today */
+function getUpcomingDeliveryDates(count = 24): { date: string; label: string; dow: number }[] {
+  const result: { date: string; label: string; dow: number }[] = [];
+  const todayStr = toLocalDateString(new Date());
+  const d = new Date();
+  while (result.length < count) {
+    const dow = d.getDay();
+    if (DELIVERY_DAYS.includes(dow)) {
+      const dateStr = toLocalDateString(d);
+      const label = d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+      result.push({ date: dateStr, label: dateStr === todayStr ? `Today — ${label}` : label, dow });
+    }
+    d.setDate(d.getDate() + 1);
+  }
+  return result;
 }
 
 function fmtDate(dateStr: string): string {
@@ -148,16 +186,12 @@ function fmtEur(n: number): string {
 /* ─── Packing status indicator ───────────────────────────────────────────── */
 function PackingStatus({ packedQty, deliveryQty }: { packedQty: number | null; deliveryQty: number }) {
   if (packedQty === null) return <span className="text-gray-200 text-xs select-none">—</span>;
-  if (packedQty >= deliveryQty) {
-    return <CheckCircle2 size={17} className="text-green-600 mx-auto" />;
-  }
-  if (packedQty > 0) {
-    return <CheckCircle2 size={17} className="text-orange-400 mx-auto" />;
-  }
+  if (packedQty >= deliveryQty) return <CheckCircle2 size={17} className="text-green-600 mx-auto" />;
+  if (packedQty > 0)            return <CheckCircle2 size={17} className="text-orange-400 mx-auto" />;
   return <XCircle size={17} className="text-red-400 mx-auto" />;
 }
 
-/* ─── Forecast info banner per store ────────────────────────────────────── */
+/* ─── Forecast banner ────────────────────────────────────────────────────── */
 function ForecastBanner({ store, forecast, standard }: {
   store: Store; forecast: WeeklyForecast | null; standard: number;
 }) {
@@ -171,19 +205,14 @@ function ForecastBanner({ store, forecast, standard }: {
   }
   const scale = standard > 0 ? forecast.forecasted_sales_eur / standard : 1;
   const scalePct = Math.round(scale * 100);
-  const scaleStr = scale.toFixed(2);
   const isAbove = scale > 1.02;
   const isBelow = scale < 0.98;
   return (
     <div className="flex items-center gap-3 mb-4 px-4 py-2.5 bg-blue-50 border border-blue-100 rounded-lg text-xs">
       <TrendingUp size={14} className="flex-shrink-0 text-blue-500" />
-      <span className="text-blue-700">
-        Forecast for <strong>{store}</strong>: <strong>{fmtEur(forecast.forecasted_sales_eur)}</strong>
-      </span>
-      <span className={`px-2 py-0.5 rounded font-bold ${
-        isAbove ? 'bg-green-100 text-green-700' : isBelow ? 'bg-red-100 text-red-600' : 'bg-gray-100 text-gray-500'
-      }`}>
-        ×{scaleStr} vs standard ({scalePct}%)
+      <span className="text-blue-700">Forecast for <strong>{store}</strong>: <strong>{fmtEur(forecast.forecasted_sales_eur)}</strong></span>
+      <span className={`px-2 py-0.5 rounded font-bold ${isAbove ? 'bg-green-100 text-green-700' : isBelow ? 'bg-red-100 text-red-600' : 'bg-gray-100 text-gray-500'}`}>
+        ×{scale.toFixed(2)} ({scalePct}%)
       </span>
     </div>
   );
@@ -221,6 +250,7 @@ function StoreDeliveryList({
 
   const isManager = viewMode === 'manager';
   const canPack = isManager || packingStarted;
+  const colCount = isManager ? 6 : 5;
 
   const liveDeliveryQty = (line: DeliveryLine): number => {
     if (!isManager) return line.delivery_qty;
@@ -233,15 +263,9 @@ function StoreDeliveryList({
   const itemsToDeliver = lines.filter(l => liveDeliveryQty(l) > 0);
   const sections = [...new Set(lines.map(l => l.section))].sort();
 
-  // Summary counts
-  const fullCount = itemsToDeliver.filter(l => l.packed_qty !== null && l.packed_qty >= l.delivery_qty).length;
+  const fullCount    = itemsToDeliver.filter(l => l.packed_qty !== null && l.packed_qty >= l.delivery_qty).length;
   const partialCount = itemsToDeliver.filter(l => l.packed_qty !== null && l.packed_qty > 0 && l.packed_qty < l.delivery_qty).length;
-  const noneCount = itemsToDeliver.filter(l => l.packed_qty !== null && l.packed_qty === 0).length;
-
-  // Column counts for section header colspan
-  // Manager: Item, Unit, Reported, Standard Target, Target Today, To Pack = 6
-  // Packer:  Item, Unit(hidden), To Pack, Packed, Full/Partial = 5
-  const colCount = isManager ? 6 : 5;
+  const noneCount    = itemsToDeliver.filter(l => l.packed_qty !== null && l.packed_qty === 0).length;
 
   return (
     <div className={isActive ? 'block' : 'hidden'}>
@@ -255,21 +279,9 @@ function StoreDeliveryList({
         </span>
         {packingStarted && (
           <span className="text-xs text-gray-500 flex items-center gap-2">
-            {fullCount > 0 && (
-              <span className="flex items-center gap-1 text-green-700">
-                <CheckCircle2 size={12} /> {fullCount} full
-              </span>
-            )}
-            {partialCount > 0 && (
-              <span className="flex items-center gap-1 text-orange-500">
-                <CheckCircle2 size={12} /> {partialCount} partial
-              </span>
-            )}
-            {noneCount > 0 && (
-              <span className="flex items-center gap-1 text-red-400">
-                <XCircle size={12} /> {noneCount} skipped
-              </span>
-            )}
+            {fullCount    > 0 && <span className="flex items-center gap-1 text-green-700"><CheckCircle2 size={12} /> {fullCount} full</span>}
+            {partialCount > 0 && <span className="flex items-center gap-1 text-orange-500"><CheckCircle2 size={12} /> {partialCount} partial</span>}
+            {noneCount    > 0 && <span className="flex items-center gap-1 text-red-400"><XCircle size={12} /> {noneCount} skipped</span>}
           </span>
         )}
       </div>
@@ -310,44 +322,29 @@ function StoreDeliveryList({
                       const deliverQty = liveDeliveryQty(line);
                       const muted = deliverQty === 0;
                       const targetVal = editingTargets[line.id] ?? String(line.target_qty);
-
-                      // Packed qty: local edit takes priority, then DB value
                       const packedVal = editingPackedQty[line.id] ?? (line.packed_qty !== null ? String(line.packed_qty) : '');
 
                       return (
-                        <tr
-                          key={line.id}
-                          className={`border-t border-gray-50 transition-colors ${muted ? 'opacity-40' : 'hover:bg-gray-50/50'}`}
-                        >
-                          {/* Item name */}
+                        <tr key={line.id} className={`border-t border-gray-50 transition-colors ${muted ? 'opacity-40' : 'hover:bg-gray-50/50'}`}>
                           <td className={`px-3 md:px-4 py-2.5 font-medium ${muted ? 'text-gray-400' : 'text-gray-800'}`}>
                             {line.item_name}
-                            {!isManager && (
-                              <div className="text-xs text-gray-400 font-normal mt-0.5 sm:hidden">{line.unit}</div>
-                            )}
+                            {!isManager && <div className="text-xs text-gray-400 font-normal mt-0.5 sm:hidden">{line.unit}</div>}
                           </td>
-
-                          {/* Unit */}
                           {isManager
                             ? <td className="px-3 md:px-4 py-2.5 text-xs text-gray-500">{line.unit}</td>
                             : <td className="hidden sm:table-cell px-3 md:px-4 py-2.5 text-xs text-gray-500">{line.unit}</td>
                           }
-
-                          {/* Manager-only: Reported + Standard Target + Target Today */}
                           {isManager && <>
                             <td className="px-3 md:px-4 py-2.5 text-center text-gray-500">{line.reported_qty}</td>
-                            {/* Standard Target — read-only, dimmed */}
                             <td className="px-3 md:px-4 py-2.5 text-center text-gray-400 tabular-nums">
                               {line.standard_target_qty ?? line.target_qty}
                               {line.standard_target_qty !== line.target_qty && line.standard_target_qty != null && (
                                 <span className="ml-1 text-xs text-blue-400" title="Adjusted by forecast">↗</span>
                               )}
                             </td>
-                            {/* Target Today — editable */}
                             <td className="px-3 md:px-4 py-2.5 text-center">
                               <input
-                                type="number"
-                                min="0"
+                                type="number" min="0"
                                 value={targetVal}
                                 onChange={e => onTargetChange(line.id, e.target.value)}
                                 onBlur={e => onTargetBlur(line, e.target.value)}
@@ -355,59 +352,37 @@ function StoreDeliveryList({
                               />
                             </td>
                           </>}
-
-                          {/* To Pack */}
                           <td className="px-2 md:px-4 py-2.5 text-center">
                             {deliverQty > 0 ? (
-                              <span className="inline-flex items-center justify-center min-w-[2rem] px-2 py-0.5 rounded-md bg-[#1B5E20]/10 text-[#1B5E20] font-bold text-sm">
-                                {deliverQty}
-                              </span>
-                            ) : (
-                              <span className="text-gray-300 text-xs">—</span>
-                            )}
+                              <span className="inline-flex items-center justify-center min-w-[2rem] px-2 py-0.5 rounded-md bg-[#1B5E20]/10 text-[#1B5E20] font-bold text-sm">{deliverQty}</span>
+                            ) : <span className="text-gray-300 text-xs">—</span>}
                           </td>
-
-                          {/* Packed qty input — packer view only */}
                           {!isManager && (
                             <td className="px-2 md:px-4 py-2.5 text-center">
                               {deliverQty > 0 ? (
                                 <input
-                                  type="number"
-                                  min="0"
-                                  step="1"
+                                  type="number" min="0" step="1"
                                   value={packedVal}
                                   placeholder="—"
                                   disabled={!canPack}
                                   onChange={e => onPackedQtyChange(line.id, e.target.value)}
                                   onBlur={e => onPackedQtyBlur(line.id, e.target.value, deliverQty)}
-                                  className={`w-16 text-center border rounded-md px-1.5 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20] tabular-nums ${
-                                    !canPack
-                                      ? 'border-gray-100 bg-gray-50 text-gray-300 cursor-not-allowed'
-                                      : 'border-gray-200 bg-white'
-                                  }`}
+                                  className={`w-16 text-center border rounded-md px-1.5 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20] tabular-nums ${!canPack ? 'border-gray-100 bg-gray-50 text-gray-300 cursor-not-allowed' : 'border-gray-200 bg-white'}`}
                                   title={!canPack ? 'Start packing first' : ''}
                                 />
-                              ) : (
-                                <span className="text-gray-200 text-xs">—</span>
-                              )}
+                              ) : <span className="text-gray-200 text-xs">—</span>}
                             </td>
                           )}
-
-                          {/* Full / Partial indicator — packer view only */}
                           {!isManager && (
                             <td className="px-2 md:px-4 py-2.5 text-center">
                               {deliverQty > 0 ? (
                                 <PackingStatus
-                                  packedQty={
-                                    editingPackedQty[line.id] !== undefined
-                                      ? (editingPackedQty[line.id] === '' ? null : parseFloat(editingPackedQty[line.id]))
-                                      : line.packed_qty
-                                  }
+                                  packedQty={editingPackedQty[line.id] !== undefined
+                                    ? (editingPackedQty[line.id] === '' ? null : parseFloat(editingPackedQty[line.id]))
+                                    : line.packed_qty}
                                   deliveryQty={deliverQty}
                                 />
-                              ) : (
-                                <span className="text-gray-200 text-xs">—</span>
-                              )}
+                              ) : <span className="text-gray-200 text-xs">—</span>}
                             </td>
                           )}
                         </tr>
@@ -427,10 +402,13 @@ function StoreDeliveryList({
 /* ─── Main Page ──────────────────────────────────────────────────────────── */
 export default function DeliveryPage() {
   const qc = useQueryClient();
+  const fileRef = useRef<HTMLInputElement>(null);
+
   const [activeStore, setActiveStore] = useState<Store>('Eschborn');
   const [generating, setGenerating] = useState(false);
   const [generateError, setGenerateError] = useState('');
 
+  /* View mode */
   const [viewMode, setViewMode] = useState<'packer' | 'manager'>(() => {
     if (typeof window !== 'undefined') {
       return (localStorage.getItem('delivery-view-mode') as 'packer' | 'manager') ?? 'packer';
@@ -438,8 +416,27 @@ export default function DeliveryPage() {
     return 'packer';
   });
 
+  const defaultDate = useMemo(() => getDefaultDeliveryDate(), []);
+  const deliveryDateOptions = useMemo(() => getUpcomingDeliveryDates(24), []);
+
+  /* Manager-selected delivery date; packer always uses default */
+  const [managerDate, setManagerDate] = useState<string>(defaultDate);
+  const targetDate = viewMode === 'manager' ? managerDate : defaultDate;
+  const dayOfWeek = new Date(targetDate + 'T12:00:00').getDay();
+  const stdDayKey = DOW_TO_STD_KEY[dayOfWeek] ?? 'mon';
+
+  /* Inline edit state */
   const [editingTargets, setEditingTargets] = useState<Record<string, string>>({});
   const [editingPackedQty, setEditingPackedQty] = useState<Record<string, string>>({});
+
+  /* Standard Targets modal */
+  const [showStandards, setShowStandards] = useState(false);
+  const [stdStore, setStdStore] = useState<Store>('Eschborn');
+  const [stdEdits, setStdEdits] = useState<Record<string, { mon: number; tue: number; wed: number; fri: number }>>({});
+
+  /* Upload Excel */
+  const [uploading, setUploading] = useState(false);
+  const [uploadMsg, setUploadMsg] = useState('');
 
   const setMode = (mode: 'packer' | 'manager') => {
     setViewMode(mode);
@@ -447,6 +444,7 @@ export default function DeliveryPage() {
     if (mode === 'packer') setEditingTargets({});
   };
 
+  /* Packing timer */
   const [packingStarted, setPackingStarted] = useState(false);
   const [packingFinished, setPackingFinished] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
@@ -457,14 +455,225 @@ export default function DeliveryPage() {
     return () => { if (packingInterval.current) clearInterval(packingInterval.current); };
   }, []);
 
+  /* ─ Query: delivery run ─ */
+  const { data: runData, isLoading } = useQuery({
+    queryKey: ['delivery-run', targetDate],
+    queryFn: async () => {
+      const { data: run, error: runErr } = await supabase
+        .from('delivery_runs').select('*').eq('delivery_date', targetDate).maybeSingle();
+      if (runErr) throw runErr;
+      if (!run) return null;
+      const { data: lines, error: linesErr } = await supabase
+        .from('delivery_run_lines').select('*').eq('run_id', run.id)
+        .order('location_name').order('section').order('item_name');
+      if (linesErr) throw linesErr;
+      return { run: run as DeliveryRun, lines: (lines ?? []) as DeliveryLine[] };
+    },
+  });
+
+  /* ─ Query: standards ─ */
+  const { data: standards = [] } = useQuery<StoreDayStandard[]>({
+    queryKey: ['store-day-standards'],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('store_day_standards').select('*');
+      if (error) throw error;
+      return data as StoreDayStandard[];
+    },
+    staleTime: Infinity,
+  });
+
+  /* ─ Query: forecasts for selected date ─ */
+  const { data: forecasts = [] } = useQuery<WeeklyForecast[]>({
+    queryKey: ['weekly-forecasts-today', targetDate],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('weekly_sales_forecasts')
+        .select('location_name, forecast_date, forecasted_sales_eur, is_locked')
+        .eq('forecast_date', targetDate)
+        .in('location_name', [...STORES]);
+      if (error) throw error;
+      return data as WeeklyForecast[];
+    },
+  });
+
+  /* ─ Profile ─ */
+  const { data: profile } = useQuery<Profile | null>({
+    queryKey: ['delivery-profile'],
+    queryFn: async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return null;
+      const { data } = await supabase.from('profiles').select('*').eq('id', user.id).single();
+      return data as Profile | null;
+    },
+  });
+  const canManage = profile?.role === 'admin' || profile?.role === 'manager';
+
+  /* ─ Standard Targets query (modal only) ─ */
+  const { data: stdTargetsData } = useQuery({
+    queryKey: ['std-targets', stdStore],
+    enabled: showStandards,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('delivery_targets').select('*').eq('location_name', stdStore)
+        .order('section').order('item_name');
+      if (error) throw error;
+      return data as TargetRow[];
+    },
+  });
+  const stdTargets = stdTargetsData ?? [];
+
+  /* Initialise std edits when data loads */
+  useEffect(() => {
+    if (!stdTargetsData || stdTargetsData.length === 0) return;
+    const initial: Record<string, { mon: number; tue: number; wed: number; fri: number }> = {};
+    for (const t of stdTargetsData) {
+      initial[t.id] = { mon: t.mon_target, tue: t.tue_target, wed: t.wed_target, fri: t.fri_target };
+    }
+    setStdEdits(initial);
+  }, [stdTargetsData]);
+
+  /* ─ Save Standard Targets ─ */
+  const saveStandards = useMutation({
+    mutationFn: async () => {
+      const payload = stdTargets.map(t => ({
+        id: t.id,
+        location_name: t.location_name,
+        section: t.section,
+        item_name: t.item_name,
+        unit: t.unit,
+        mon_target: stdEdits[t.id]?.mon ?? t.mon_target,
+        tue_target: stdEdits[t.id]?.tue ?? t.tue_target,
+        wed_target: stdEdits[t.id]?.wed ?? t.wed_target,
+        fri_target: stdEdits[t.id]?.fri ?? t.fri_target,
+        scales_with_demand: t.scales_with_demand,
+      }));
+      const { error } = await supabase
+        .from('delivery_targets').upsert(payload, { onConflict: 'location_name,item_name' });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['std-targets'] });
+      qc.invalidateQueries({ queryKey: ['delivery-run', targetDate] });
+      setShowStandards(false);
+    },
+  });
+
+  const setStdEdit = (id: string, day: 'mon' | 'tue' | 'wed' | 'fri', val: string) => {
+    const num = parseFloat(val);
+    setStdEdits(prev => ({ ...prev, [id]: { ...prev[id], [day]: isNaN(num) ? 0 : num } }));
+  };
+
+  /* ─ Upload Excel ─ */
+  const upsertTargets = useMutation({
+    mutationFn: async (rows: ParsedItem[]) => {
+      const payload = rows.map(r => ({
+        location_name: activeStore,
+        section: r.section,
+        item_name: r.item_name,
+        unit: r.unit,
+        mon_target: r.mon_target,
+        tue_target: r.tue_target,
+        wed_target: r.wed_target,
+        fri_target: r.fri_target,
+      }));
+      const { error } = await supabase
+        .from('delivery_targets').upsert(payload, { onConflict: 'location_name,item_name' });
+      if (error) throw error;
+    },
+    onSuccess: (_, rows) => {
+      qc.invalidateQueries({ queryKey: ['delivery-run', targetDate] });
+      setUploadMsg(`Imported ${rows.length} items for ${activeStore}.`);
+      setTimeout(() => setUploadMsg(''), 4000);
+    },
+    onError: (e: Error) => setUploadMsg(`Error: ${e.message}`),
+  });
+
+  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    setUploadMsg('');
+    try {
+      const buffer = await file.arrayBuffer();
+      const wb = XLSX.read(buffer, { type: 'array' });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const raw: unknown[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+      const parsed: ParsedItem[] = [];
+      let currentSection = 'Uncategorised';
+      for (let i = 2; i < raw.length; i++) {
+        const row = raw[i] as unknown[];
+        const colA = String(row[0] ?? '').trim();
+        const colC = String(row[2] ?? '').trim();
+        const colD = row[3]; const colE = row[4]; const colF = row[5]; const colG = row[6];
+        if (!colA) continue;
+        const hasUnit = colC !== '';
+        const hasNumbers = [colD, colE, colF, colG].some(v => v !== '' && !isNaN(Number(v)));
+        if (!hasUnit && !hasNumbers) { currentSection = colA; continue; }
+        parsed.push({
+          section: currentSection, item_name: colA, unit: colC,
+          mon_target: parseFloat(String(colD)) || 0,
+          tue_target: parseFloat(String(colE)) || 0,
+          wed_target: parseFloat(String(colF)) || 0,
+          fri_target: parseFloat(String(colG)) || 0,
+        });
+      }
+      if (parsed.length === 0) setUploadMsg('No data rows found in the file.');
+      else upsertTargets.mutate(parsed);
+    } catch (err: unknown) {
+      setUploadMsg(`Parse error: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setUploading(false);
+      if (fileRef.current) fileRef.current.value = '';
+    }
+  };
+
+  /* ─ Update target qty ─ */
+  const updateTarget = useMutation({
+    mutationFn: async ({ line, newTarget }: { line: DeliveryLine; newTarget: number }) => {
+      const newDelivery = Math.max(0, newTarget - line.reported_qty);
+      const { error } = await supabase
+        .from('delivery_run_lines').update({ target_qty: newTarget, delivery_qty: newDelivery }).eq('id', line.id);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['delivery-run', targetDate] }),
+  });
+
+  const handleTargetChange = (id: string, value: string) => setEditingTargets(prev => ({ ...prev, [id]: value }));
+  const handleTargetBlur = (line: DeliveryLine, value: string) => {
+    const parsed = parseFloat(value);
+    const newTarget = isNaN(parsed) ? line.target_qty : Math.max(0, Math.round(parsed));
+    if (newTarget !== line.target_qty) updateTarget.mutate({ line, newTarget });
+    setEditingTargets(prev => { const next = { ...prev }; delete next[line.id]; return next; });
+  };
+
+  /* ─ Set packed qty ─ */
+  const setPackedQty = useMutation({
+    mutationFn: async ({ id, qty }: { id: string; qty: number | null }) => {
+      const { error } = await supabase
+        .from('delivery_run_lines').update({ packed_qty: qty, is_packed: qty !== null && qty > 0 }).eq('id', id);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['delivery-run', targetDate] }),
+  });
+
+  const handlePackedQtyChange = (id: string, value: string) => setEditingPackedQty(prev => ({ ...prev, [id]: value }));
+  const handlePackedQtyBlur = (id: string, value: string, _deliveryQty: number) => {
+    if (value.trim() === '') setPackedQty.mutate({ id, qty: null });
+    else {
+      const parsed = Math.max(0, Math.round(parseFloat(value)));
+      if (!isNaN(parsed)) setPackedQty.mutate({ id, qty: parsed });
+    }
+    setEditingPackedQty(prev => { const next = { ...prev }; delete next[id]; return next; });
+  };
+
+  /* ─ Packing timer ─ */
   const startPacking = async () => {
     setPackingStarted(true);
     packingInterval.current = setInterval(() => setElapsedSeconds(s => s + 1), 1000);
     if (run) {
       const { data: { user } } = await supabase.auth.getUser();
       await supabase.from('delivery_runs').update({
-        packing_started_at: new Date().toISOString(),
-        packed_by: user?.id ?? null,
+        packing_started_at: new Date().toISOString(), packed_by: user?.id ?? null,
       }).eq('id', run.id);
       qc.invalidateQueries({ queryKey: ['delivery-run', targetDate] });
     }
@@ -501,165 +710,26 @@ export default function DeliveryPage() {
     }
   };
 
-  const { date: targetDate, dayOfWeek, isDeliveryDay } = getDeliveryDate();
-  const stdDayKey = DOW_TO_STD_KEY[dayOfWeek];
-
-  /* ─ Query: existing run ─ */
-  const { data: runData, isLoading } = useQuery({
-    queryKey: ['delivery-run', targetDate],
-    queryFn: async () => {
-      const { data: run, error: runErr } = await supabase
-        .from('delivery_runs')
-        .select('*')
-        .eq('delivery_date', targetDate)
-        .maybeSingle();
-      if (runErr) throw runErr;
-      if (!run) return null;
-
-      const { data: lines, error: linesErr } = await supabase
-        .from('delivery_run_lines')
-        .select('*')
-        .eq('run_id', run.id)
-        .order('location_name')
-        .order('section')
-        .order('item_name');
-      if (linesErr) throw linesErr;
-
-      return { run: run as DeliveryRun, lines: (lines ?? []) as DeliveryLine[] };
-    },
-  });
-
-  /* ─ Query: standards ─ */
-  const { data: standards = [] } = useQuery<StoreDayStandard[]>({
-    queryKey: ['store-day-standards'],
-    queryFn: async () => {
-      const { data, error } = await supabase.from('store_day_standards').select('*');
-      if (error) throw error;
-      return data as StoreDayStandard[];
-    },
-    staleTime: Infinity,
-  });
-
-  /* ─ Query: forecasts ─ */
-  const { data: forecasts = [] } = useQuery<WeeklyForecast[]>({
-    queryKey: ['weekly-forecasts-today', targetDate],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('weekly_sales_forecasts')
-        .select('location_name, forecast_date, forecasted_sales_eur, is_locked')
-        .eq('forecast_date', targetDate)
-        .in('location_name', [...STORES]);
-      if (error) throw error;
-      return data as WeeklyForecast[];
-    },
-  });
-
-  /* ─ Profile (to gate manager toggle) ─ */
-  const { data: profile } = useQuery<Profile | null>({
-    queryKey: ['delivery-profile'],
-    queryFn: async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return null;
-      const { data } = await supabase.from('profiles').select('*').eq('id', user.id).single();
-      return data as Profile | null;
-    },
-  });
-  const canManage = profile?.role === 'admin' || profile?.role === 'manager';
-
-  /* ─ Update target qty ─ */
-  const updateTarget = useMutation({
-    mutationFn: async ({ line, newTarget }: { line: DeliveryLine; newTarget: number }) => {
-      const newDelivery = Math.max(0, newTarget - line.reported_qty);
-      const { error } = await supabase
-        .from('delivery_run_lines')
-        .update({ target_qty: newTarget, delivery_qty: newDelivery })
-        .eq('id', line.id);
-      if (error) throw error;
-    },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['delivery-run', targetDate] }),
-  });
-
-  const handleTargetChange = (id: string, value: string) => {
-    setEditingTargets(prev => ({ ...prev, [id]: value }));
-  };
-
-  const handleTargetBlur = (line: DeliveryLine, value: string) => {
-    const parsed = parseFloat(value);
-    const newTarget = isNaN(parsed) ? line.target_qty : Math.max(0, Math.round(parsed));
-    if (newTarget !== line.target_qty) {
-      updateTarget.mutate({ line, newTarget });
-    }
-    setEditingTargets(prev => { const next = { ...prev }; delete next[line.id]; return next; });
-  };
-
-  /* ─ Set packed qty ─ */
-  const setPackedQty = useMutation({
-    mutationFn: async ({ id, qty }: { id: string; qty: number | null }) => {
-      const { error } = await supabase
-        .from('delivery_run_lines')
-        .update({ packed_qty: qty, is_packed: qty !== null && qty > 0 })
-        .eq('id', id);
-      if (error) throw error;
-    },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['delivery-run', targetDate] }),
-  });
-
-  const handlePackedQtyChange = (id: string, value: string) => {
-    setEditingPackedQty(prev => ({ ...prev, [id]: value }));
-  };
-
-  const handlePackedQtyBlur = (id: string, value: string, deliveryQty: number) => {
-    if (value.trim() === '') {
-      // Cleared — set to null
-      setPackedQty.mutate({ id, qty: null });
-    } else {
-      const parsed = Math.max(0, Math.round(parseFloat(value)));
-      if (!isNaN(parsed)) {
-        setPackedQty.mutate({ id, qty: parsed });
-      }
-    }
-    setEditingPackedQty(prev => { const next = { ...prev }; delete next[id]; return next; });
-  };
-
   /* ─ Generate delivery list ─ */
   const handleGenerate = async () => {
     setGenerating(true);
     setGenerateError('');
     try {
       const dayKey = DAY_KEY_MAP[dayOfWeek] as DayKey;
-
-      const { data: allStandards } = await supabase
-        .from('store_day_standards')
-        .select('*')
-        .eq('day_of_week', stdDayKey);
-
-      const { data: allForecasts } = await supabase
-        .from('weekly_sales_forecasts')
-        .select('*')
-        .eq('forecast_date', targetDate)
-        .in('location_name', [...STORES]);
+      const { data: allStandards } = await supabase.from('store_day_standards').select('*').eq('day_of_week', stdDayKey);
+      const { data: allForecasts } = await supabase.from('weekly_sales_forecasts').select('*').eq('forecast_date', targetDate).in('location_name', [...STORES]);
 
       const stdMap: Record<string, number> = {};
       for (const s of (allStandards ?? [])) stdMap[s.location_name] = s.standard_sales_eur;
-
       const forecastMap: Record<string, number> = {};
       for (const f of (allForecasts ?? [])) forecastMap[f.location_name] = f.forecasted_sales_eur;
 
       const storeData: { store: Store; submission: InventorySubmission | null; targets: DeliveryTarget[] }[] = [];
-
       for (const store of STORES) {
         const { data: submissions } = await supabase
-          .from('inventory_submissions')
-          .select('*')
-          .eq('location_name', store)
-          .order('submitted_at', { ascending: false })
-          .limit(1);
-
-        const { data: targets } = await supabase
-          .from('delivery_targets')
-          .select('*')
-          .eq('location_name', store);
-
+          .from('inventory_submissions').select('*').eq('location_name', store)
+          .order('submitted_at', { ascending: false }).limit(1);
+        const { data: targets } = await supabase.from('delivery_targets').select('*').eq('location_name', store);
         storeData.push({
           store,
           submission: (submissions?.[0] as InventorySubmission | undefined) ?? null,
@@ -668,21 +738,17 @@ export default function DeliveryPage() {
       }
 
       const { data: runRow, error: runErr } = await supabase
-        .from('delivery_runs')
-        .upsert({ delivery_date: targetDate, status: 'draft' }, { onConflict: 'delivery_date' })
-        .select()
-        .single();
+        .from('delivery_runs').upsert({ delivery_date: targetDate, status: 'draft' }, { onConflict: 'delivery_date' })
+        .select().single();
       if (runErr) throw runErr;
 
       const runId = (runRow as DeliveryRun).id;
       await supabase.from('delivery_run_lines').delete().eq('run_id', runId);
 
       const allLines: Omit<DeliveryLine, 'id' | 'created_at'>[] = [];
-
       for (const { store, submission, targets } of storeData) {
         const standardSales = stdMap[store] ?? 0;
         const forecastedSales = forecastMap[store] ?? null;
-
         for (const target of targets) {
           const baseTarget = target[dayKey] ?? 0;
           let effectiveTarget: number;
@@ -700,21 +766,13 @@ export default function DeliveryPage() {
             );
             if (found) reportedQty = Number(found.quantity) || 0;
           }
-
           const deliveryQty = Math.max(0, effectiveTarget - reportedQty);
-
           allLines.push({
-            run_id: runId,
-            location_name: store,
-            section: target.section,
-            item_name: target.item_name,
-            unit: target.unit,
-            standard_target_qty: baseTarget,
-            target_qty: effectiveTarget,
-            reported_qty: reportedQty,
-            delivery_qty: deliveryQty,
-            is_packed: false,
-            packed_qty: null,
+            run_id: runId, location_name: store, section: target.section,
+            item_name: target.item_name, unit: target.unit,
+            standard_target_qty: baseTarget, target_qty: effectiveTarget,
+            reported_qty: reportedQty, delivery_qty: deliveryQty,
+            is_packed: false, packed_qty: null,
           });
         }
       }
@@ -725,10 +783,7 @@ export default function DeliveryPage() {
       }
 
       const allSubmitted = storeData.every(s => s.submission !== null);
-      await supabase
-        .from('delivery_runs')
-        .update({ status: allSubmitted ? 'ready' : 'draft' })
-        .eq('id', runId);
+      await supabase.from('delivery_runs').update({ status: allSubmitted ? 'ready' : 'draft' }).eq('id', runId);
 
       qc.invalidateQueries({ queryKey: ['delivery-run', targetDate] });
       qc.invalidateQueries({ queryKey: ['weekly-forecasts-today', targetDate] });
@@ -744,136 +799,242 @@ export default function DeliveryPage() {
   const lines = runData?.lines ?? [];
 
   const storeLines = (store: Store) => lines.filter(l => l.location_name === store);
-  const storeHasSubmission = (store: Store) => {
-    const sl = storeLines(store);
-    return sl.length > 0 || run !== null;
-  };
+  const storeHasSubmission = (store: Store) => storeLines(store).length > 0 || run !== null;
 
   const storePackStats = (store: Store) => {
     const sl = storeLines(store).filter(l => l.delivery_qty > 0);
-    const full = sl.filter(l => l.packed_qty !== null && l.packed_qty >= l.delivery_qty).length;
+    const full    = sl.filter(l => l.packed_qty !== null && l.packed_qty >= l.delivery_qty).length;
     const partial = sl.filter(l => l.packed_qty !== null && l.packed_qty > 0 && l.packed_qty < l.delivery_qty).length;
     return { full, partial, total: sl.length, complete: sl.length > 0 && full === sl.length };
   };
 
   const totalPackStats = STORES.reduce(
-    (acc, store) => {
-      const { full, partial, total } = storePackStats(store);
-      return { full: acc.full + full, partial: acc.partial + partial, total: acc.total + total };
-    },
+    (acc, store) => { const { full, partial, total } = storePackStats(store); return { full: acc.full + full, partial: acc.partial + partial, total: acc.total + total }; },
     { full: 0, partial: 0, total: 0 }
   );
 
-  const getStoreForecast = (store: Store): WeeklyForecast | null =>
-    forecasts.find(f => f.location_name === store) ?? null;
-
+  const getStoreForecast = (store: Store): WeeklyForecast | null => forecasts.find(f => f.location_name === store) ?? null;
   const getStoreStandard = (store: Store): number => {
     const s = standards.find(s => s.location_name === store && s.day_of_week === stdDayKey);
     return s?.standard_sales_eur ?? 0;
   };
 
+  /* ─────────────────────────────────────────────────────────────────────── */
   return (
     <>
+      {/* ── Standard Targets Modal ── */}
+      {showStandards && (() => {
+        const stdGrouped = SECTIONS.reduce<Record<string, TargetRow[]>>((acc, sec) => {
+          acc[sec] = stdTargets.filter(t => t.section === sec);
+          return acc;
+        }, {});
+        const stdOther = [...new Set(stdTargets.map(t => t.section).filter(s => !new Set(SECTIONS).has(s)))];
+        const stdAllSections = [...SECTIONS, ...stdOther];
+
+        return (
+          <>
+            <div className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm" onClick={() => setShowStandards(false)} />
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-6 pointer-events-none">
+              <div className="bg-white rounded-2xl shadow-2xl flex flex-col w-full max-w-2xl max-h-[88vh] pointer-events-auto">
+                {/* Header */}
+                <div className="flex items-start justify-between px-6 py-4 border-b border-gray-100 flex-shrink-0">
+                  <div>
+                    <div className="flex items-center gap-2 mb-2">
+                      <SlidersHorizontal size={16} className="text-[#1B5E20]" />
+                      <h2 className="text-base font-semibold text-gray-900">Standard Targets</h2>
+                    </div>
+                    <div className="flex gap-1 bg-gray-100 rounded-lg p-0.5 w-fit">
+                      {STORES.map(store => (
+                        <button key={store} onClick={() => setStdStore(store)}
+                          className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${stdStore === store ? 'bg-white text-[#1B5E20] shadow-sm font-semibold' : 'text-gray-500 hover:text-gray-700'}`}
+                        >{store}</button>
+                      ))}
+                    </div>
+                  </div>
+                  <button onClick={() => setShowStandards(false)} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors mt-0.5">
+                    <X size={18} />
+                  </button>
+                </div>
+                {/* Table */}
+                <div className="flex-1 overflow-y-auto">
+                  {stdTargets.length === 0 ? (
+                    <div className="p-8 text-center text-sm text-gray-400">No targets uploaded yet for {stdStore}.</div>
+                  ) : (
+                    <table className="w-full text-sm border-collapse">
+                      <thead className="sticky top-0 z-10 bg-white border-b-2 border-gray-200">
+                        <tr>
+                          <th className="px-5 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Item</th>
+                          <th className="px-2 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide w-24">Unit</th>
+                          {(['MON','TUE','WED','FRI'] as const).map(d => (
+                            <th key={d} className="px-2 py-2.5 text-center text-xs font-semibold text-gray-500 uppercase tracking-wide w-20">{d}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {stdAllSections.map(section => {
+                          const sectionRows = stdGrouped[section] ?? stdTargets.filter(t => t.section === section);
+                          if (sectionRows.length === 0) return null;
+                          return (
+                            <React.Fragment key={section}>
+                              <tr className="bg-green-50">
+                                <td colSpan={6} className="px-5 py-1.5">
+                                  <span className="text-[11px] font-bold text-[#1B5E20] uppercase tracking-wider">{section}</span>
+                                </td>
+                              </tr>
+                              {sectionRows.map(row => (
+                                <tr key={row.id} className="border-t border-gray-50 hover:bg-gray-50/50">
+                                  <td className="px-5 py-2 text-sm text-gray-800">{row.item_name}</td>
+                                  <td className="px-2 py-2 text-xs text-gray-400">{row.unit}</td>
+                                  {(['mon','tue','wed','fri'] as const).map(day => (
+                                    <td key={day} className="px-2 py-1.5 text-center">
+                                      <input
+                                        type="number" min={0} step={1}
+                                        value={stdEdits[row.id]?.[day] ?? (row as any)[`${day}_target`]}
+                                        onChange={e => setStdEdit(row.id, day, e.target.value)}
+                                        className="w-16 text-center text-sm border border-gray-200 rounded-md py-1 px-1.5 focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20]/50"
+                                      />
+                                    </td>
+                                  ))}
+                                </tr>
+                              ))}
+                            </React.Fragment>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+                {/* Footer */}
+                <div className="px-6 py-4 border-t border-gray-100 flex-shrink-0 flex items-center justify-between bg-gray-50/50 rounded-b-2xl">
+                  <p className="text-xs text-gray-400">Changes update the base targets for all future weeks.</p>
+                  <button
+                    onClick={() => saveStandards.mutate()}
+                    disabled={saveStandards.isPending || stdTargets.length === 0}
+                    className="flex items-center gap-2 bg-[#1B5E20] text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-[#2E7D32] transition-colors disabled:opacity-50"
+                  >
+                    <Save size={15} />
+                    {saveStandards.isPending ? 'Saving…' : 'Save Changes'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </>
+        );
+      })()}
+
+      {/* Hidden file input */}
+      <input ref={fileRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={handleFile} />
+
       <div>
         {/* ── Page header ── */}
-        <div className="flex items-start justify-between mb-6">
+        <div className="flex items-start justify-between mb-4">
           <div>
             <div className="flex items-center gap-2 mb-1">
               <Truck size={20} className="text-[#1B5E20]" />
               <h1 className="text-2xl font-bold text-gray-900">Packing</h1>
             </div>
-            <p className="text-sm text-gray-500">
-              Mon · Tue · Wed · Fri — departs ZK at 14:00
-            </p>
+            <p className="text-sm text-gray-500">Mon · Tue · Wed · Fri — departs ZK at 14:00</p>
           </div>
 
-          <div className="flex items-center gap-3">
-            {/* View mode toggle — managers/admins only */}
+          <div className="flex items-center gap-3 flex-wrap justify-end">
+            {/* View mode toggle */}
             {canManage && (
               <div className="flex items-center bg-gray-100 rounded-lg p-1 gap-1">
-                <button
-                  onClick={() => setMode('packer')}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${
-                    viewMode === 'packer' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500 hover:text-gray-700'
-                  }`}
-                >
-                  <Eye size={13} />
-                  Packer
+                <button onClick={() => setMode('packer')} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${viewMode === 'packer' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+                  <Eye size={13} /> Packer
                 </button>
-                <button
-                  onClick={() => setMode('manager')}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${
-                    viewMode === 'manager' ? 'bg-white text-[#1B5E20] shadow-sm' : 'text-gray-500 hover:text-gray-700'
-                  }`}
-                >
-                  <Settings2 size={13} />
-                  Manager
+                <button onClick={() => setMode('manager')} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${viewMode === 'manager' ? 'bg-white text-[#1B5E20] shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+                  <Settings2 size={13} /> Manager
                 </button>
               </div>
             )}
 
-            {/* Packer view: Start Packing / timer / Packing Finished */}
+            {/* Packer: Start Packing / timer / Finish */}
             {viewMode === 'packer' && run && !packingFinished && (
               !packingStarted ? (
-                <button
-                  onClick={startPacking}
-                  className="flex items-center gap-2 bg-[#1B5E20] text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-[#2E7D32] transition-colors shadow-sm"
-                >
-                  <Play size={15} />
-                  Start Packing
+                <button onClick={startPacking} className="flex items-center gap-2 bg-[#1B5E20] text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-[#2E7D32] transition-colors shadow-sm">
+                  <Play size={15} /> Start Packing
                 </button>
               ) : (
                 <div className="flex items-center gap-3">
                   <div className="flex items-center gap-2 bg-gray-100 rounded-lg px-3 py-2">
                     <Timer size={14} className="text-[#1B5E20]" />
-                    <span className="font-mono font-bold text-gray-800 tabular-nums text-sm">
-                      {formatTimer(elapsedSeconds)}
-                    </span>
+                    <span className="font-mono font-bold text-gray-800 tabular-nums text-sm">{formatTimer(elapsedSeconds)}</span>
                   </div>
-                  <button
-                    onClick={finishPacking}
-                    className="flex items-center gap-2 bg-[#1B5E20] text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-[#2E7D32] transition-colors shadow-sm"
-                  >
-                    <Flag size={15} />
-                    Packing Finished
+                  <button onClick={finishPacking} className="flex items-center gap-2 bg-[#1B5E20] text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-[#2E7D32] transition-colors shadow-sm">
+                    <Flag size={15} /> Packing Finished
                   </button>
                 </div>
               )
             )}
 
-            {/* Manager view: Start Delivery + Regenerate */}
+            {/* Manager: Start Delivery + Generate */}
             {viewMode === 'manager' && (
               <>
                 {run && run.packing_finished_at && !run.delivery_started_at && (
-                  <button
-                    onClick={startDelivery}
-                    disabled={startingDelivery}
-                    className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors disabled:opacity-60 shadow-sm"
-                  >
-                    <Truck size={15} />
-                    {startingDelivery ? 'Logging…' : 'Start Delivery'}
+                  <button onClick={startDelivery} disabled={startingDelivery} className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors disabled:opacity-60 shadow-sm">
+                    <Truck size={15} /> {startingDelivery ? 'Logging…' : 'Start Delivery'}
                   </button>
                 )}
-                <button
-                  onClick={handleGenerate}
-                  disabled={generating}
-                  className="flex items-center gap-2 bg-[#1B5E20] text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-[#2E7D32] transition-colors disabled:opacity-60 shadow-sm"
-                >
-                  {generating
-                    ? <><RefreshCw size={15} className="animate-spin" /> Generating…</>
-                    : <><RefreshCw size={15} /> {run ? 'Regenerate' : 'Generate List'}</>
-                  }
+                <button onClick={handleGenerate} disabled={generating} className="flex items-center gap-2 bg-[#1B5E20] text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-[#2E7D32] transition-colors disabled:opacity-60 shadow-sm">
+                  {generating ? <><RefreshCw size={15} className="animate-spin" /> Generating…</> : <><RefreshCw size={15} /> {run ? 'Regenerate' : 'Generate List'}</>}
                 </button>
               </>
             )}
           </div>
         </div>
 
-        {/* ── Date banner ── */}
-        <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 mb-5">
-          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-0.5">Delivery Date</p>
-          <p className="text-base font-semibold text-gray-900">{fmtDate(targetDate)}</p>
-        </div>
+        {/* ── Manager toolbar: date picker + Standard Targets + Upload Excel ── */}
+        {viewMode === 'manager' && (
+          <div className="flex items-center gap-3 flex-wrap mb-5 p-3 bg-gray-50 border border-gray-100 rounded-xl">
+            {/* Date picker */}
+            <div className="flex items-center gap-2">
+              <CalendarDays size={15} className="text-gray-400 flex-shrink-0" />
+              <label className="text-xs text-gray-500 font-medium whitespace-nowrap">Delivery Date:</label>
+              <select
+                value={managerDate}
+                onChange={e => setManagerDate(e.target.value)}
+                className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 text-gray-700 bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 min-w-[180px]"
+              >
+                {deliveryDateOptions.map(opt => (
+                  <option key={opt.date} value={opt.date}>{opt.label}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="h-5 w-px bg-gray-200 hidden sm:block" />
+
+            {/* Standard Targets */}
+            <button
+              onClick={() => { setStdStore(activeStore); setShowStandards(true); }}
+              className="flex items-center gap-1.5 text-sm border border-gray-200 rounded-lg px-3 py-1.5 text-gray-600 bg-white shadow-sm hover:bg-gray-50 transition-colors"
+            >
+              <SlidersHorizontal size={14} /> Standard Targets
+            </button>
+
+            {/* Upload Excel */}
+            {uploadMsg && (
+              <span className={`text-xs font-medium px-2.5 py-1 rounded-lg ${uploadMsg.startsWith('Error') || uploadMsg.startsWith('Parse') ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-700'}`}>
+                {uploadMsg}
+              </span>
+            )}
+            <button
+              onClick={() => fileRef.current?.click()}
+              disabled={uploading || upsertTargets.isPending}
+              className="flex items-center gap-1.5 text-sm border border-gray-200 rounded-lg px-3 py-1.5 text-gray-600 bg-white shadow-sm hover:bg-gray-50 transition-colors disabled:opacity-50"
+            >
+              <Upload size={14} /> {uploading || upsertTargets.isPending ? 'Importing…' : 'Upload Excel'}
+            </button>
+          </div>
+        )}
+
+        {/* ── Date banner (packer view) ── */}
+        {viewMode === 'packer' && (
+          <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 mb-5">
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-0.5">Delivery Date</p>
+            <p className="text-base font-semibold text-gray-900">{fmtDate(targetDate)}</p>
+          </div>
+        )}
 
         {/* ── Packing finished banner ── */}
         {packingFinished && (
@@ -884,9 +1045,8 @@ export default function DeliveryPage() {
             <div>
               <p className="font-semibold text-green-900">Packing complete!</p>
               <p className="text-sm text-green-700">
-                {totalPackStats.full} fully packed
-                {totalPackStats.partial > 0 && `, ${totalPackStats.partial} partial`}
-                {' '}out of {totalPackStats.total} items — <strong>{formatDuration(elapsedSeconds)}</strong>
+                {totalPackStats.full} fully packed{totalPackStats.partial > 0 && `, ${totalPackStats.partial} partial`}{' '}
+                out of {totalPackStats.total} items — <strong>{formatDuration(elapsedSeconds)}</strong>
               </p>
             </div>
           </div>
@@ -894,32 +1054,25 @@ export default function DeliveryPage() {
 
         {generateError && (
           <div className="mb-4 flex items-center gap-3 p-4 bg-red-50 border border-red-100 rounded-xl text-sm text-red-700">
-            <AlertCircle size={16} className="flex-shrink-0" />
-            {generateError}
+            <AlertCircle size={16} className="flex-shrink-0" /> {generateError}
           </div>
         )}
 
         {/* ── Loading ── */}
         {isLoading ? (
-          <div className="space-y-3">
-            {[...Array(3)].map((_, i) => (
-              <div key={i} className="h-12 bg-gray-100 rounded-xl animate-pulse" />
-            ))}
-          </div>
+          <div className="space-y-3">{[...Array(3)].map((_, i) => <div key={i} className="h-12 bg-gray-100 rounded-xl animate-pulse" />)}</div>
         ) : !run ? (
           <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-12 text-center">
             <Package size={40} className="mx-auto text-gray-200 mb-4" />
-            <p className="text-base font-semibold text-gray-400 mb-1">No delivery list yet</p>
+            <p className="text-base font-semibold text-gray-400 mb-1">No packing list for {fmtDate(targetDate)}</p>
             <p className="text-sm text-gray-300 mb-6">
-              Switch to Manager view and click "Generate List" to pull the latest inventory counts.
+              {viewMode === 'manager'
+                ? 'Click "Generate List" to pull the latest inventory counts for this date.'
+                : 'Switch to Manager view and generate the packing list first.'}
             </p>
             {viewMode === 'manager' && (
-              <button
-                onClick={handleGenerate}
-                disabled={generating}
-                className="bg-[#1B5E20] text-white px-6 py-2.5 rounded-lg text-sm font-medium hover:bg-[#2E7D32] transition-colors disabled:opacity-60"
-              >
-                {generating ? 'Generating…' : 'Generate Delivery List'}
+              <button onClick={handleGenerate} disabled={generating} className="bg-[#1B5E20] text-white px-6 py-2.5 rounded-lg text-sm font-medium hover:bg-[#2E7D32] transition-colors disabled:opacity-60">
+                {generating ? 'Generating…' : 'Generate List'}
               </button>
             )}
           </div>
@@ -928,45 +1081,27 @@ export default function DeliveryPage() {
             {/* Store tabs */}
             <div className="flex gap-1 mb-5 bg-gray-100 rounded-xl p-1 w-fit">
               {STORES.map(store => {
-                const { full, partial, total, complete } = storePackStats(store);
+                const { full, total, complete } = storePackStats(store);
                 const isActive = activeStore === store;
                 const isPacker = viewMode === 'packer';
                 return (
-                  <button
-                    key={store}
-                    onClick={() => setActiveStore(store)}
-                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 ${
-                      isActive
-                        ? 'bg-white text-[#1B5E20] shadow-sm font-semibold'
-                        : 'text-gray-500 hover:text-gray-700'
-                    }`}
+                  <button key={store} onClick={() => setActiveStore(store)}
+                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 ${isActive ? 'bg-white text-[#1B5E20] shadow-sm font-semibold' : 'text-gray-500 hover:text-gray-700'}`}
                   >
                     {store}
                     {isPacker && packingStarted ? (
-                      complete ? (
-                        <CheckCircle2 size={14} className="text-[#1B5E20]" />
-                      ) : (
-                        <span className={`text-xs rounded-full px-1.5 py-0.5 font-bold leading-none ${
-                          isActive ? 'bg-[#1B5E20] text-white' : 'bg-gray-300 text-gray-600'
-                        }`}>
-                          {full}/{total}
-                        </span>
-                      )
+                      complete
+                        ? <CheckCircle2 size={14} className="text-[#1B5E20]" />
+                        : <span className={`text-xs rounded-full px-1.5 py-0.5 font-bold leading-none ${isActive ? 'bg-[#1B5E20] text-white' : 'bg-gray-300 text-gray-600'}`}>{full}/{total}</span>
                     ) : (
-                      total > 0 && (
-                        <span className={`text-xs rounded-full px-1.5 py-0.5 font-bold leading-none ${
-                          isActive ? 'bg-[#1B5E20] text-white' : 'bg-gray-300 text-gray-600'
-                        }`}>
-                          {total}
-                        </span>
-                      )
+                      total > 0 && <span className={`text-xs rounded-full px-1.5 py-0.5 font-bold leading-none ${isActive ? 'bg-[#1B5E20] text-white' : 'bg-gray-300 text-gray-600'}`}>{total}</span>
                     )}
                   </button>
                 );
               })}
             </div>
 
-            {/* Store delivery lists */}
+            {/* Store lists */}
             {STORES.map(store => (
               <div key={store} className={activeStore === store ? 'block' : 'hidden'}>
                 <StoreDeliveryList
