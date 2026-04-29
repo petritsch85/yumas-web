@@ -45,6 +45,7 @@ type DeliveryLine = {
   section: string;
   item_name: string;
   unit: string;
+  standard_target_qty: number;
   target_qty: number;
   reported_qty: number;
   delivery_qty: number;
@@ -238,7 +239,9 @@ function StoreDeliveryList({
   const noneCount = itemsToDeliver.filter(l => l.packed_qty !== null && l.packed_qty === 0).length;
 
   // Column counts for section header colspan
-  const colCount = isManager ? 7 : 5;
+  // Manager: Item, Unit, Reported, Standard Target, Target Today, To Pack = 6
+  // Packer:  Item, Unit(hidden), To Pack, Packed, Full/Partial = 5
+  const colCount = isManager ? 6 : 5;
 
   return (
     <div className={isActive ? 'block' : 'hidden'}>
@@ -283,11 +286,14 @@ function StoreDeliveryList({
                 }
                 {isManager && <>
                   <th className="px-3 md:px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wide">Reported</th>
-                  <th className="px-3 md:px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wide">Target</th>
+                  <th className="px-3 md:px-4 py-3 text-center text-xs font-semibold text-gray-400 uppercase tracking-wide">Std Target</th>
+                  <th className="px-3 md:px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wide">Target Today</th>
                 </>}
                 <th className="px-3 md:px-4 py-3 text-center text-xs font-semibold text-[#1B5E20] uppercase tracking-wide">To Pack</th>
-                <th className="px-3 md:px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wide">Packed</th>
-                <th className="px-3 md:px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wide">Full/Partial</th>
+                {!isManager && <>
+                  <th className="px-3 md:px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wide">Packed</th>
+                  <th className="px-3 md:px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wide">Full/Partial</th>
+                </>}
               </tr>
             </thead>
             <tbody>
@@ -327,9 +333,17 @@ function StoreDeliveryList({
                             : <td className="hidden sm:table-cell px-3 md:px-4 py-2.5 text-xs text-gray-500">{line.unit}</td>
                           }
 
-                          {/* Manager-only: Reported + Target */}
+                          {/* Manager-only: Reported + Standard Target + Target Today */}
                           {isManager && <>
                             <td className="px-3 md:px-4 py-2.5 text-center text-gray-500">{line.reported_qty}</td>
+                            {/* Standard Target — read-only, dimmed */}
+                            <td className="px-3 md:px-4 py-2.5 text-center text-gray-400 tabular-nums">
+                              {line.standard_target_qty ?? line.target_qty}
+                              {line.standard_target_qty !== line.target_qty && line.standard_target_qty != null && (
+                                <span className="ml-1 text-xs text-blue-400" title="Adjusted by forecast">↗</span>
+                              )}
+                            </td>
+                            {/* Target Today — editable */}
                             <td className="px-3 md:px-4 py-2.5 text-center">
                               <input
                                 type="number"
@@ -353,45 +367,49 @@ function StoreDeliveryList({
                             )}
                           </td>
 
-                          {/* Packed qty input */}
-                          <td className="px-2 md:px-4 py-2.5 text-center">
-                            {deliverQty > 0 ? (
-                              <input
-                                type="number"
-                                min="0"
-                                step="1"
-                                value={packedVal}
-                                placeholder="—"
-                                disabled={!canPack}
-                                onChange={e => onPackedQtyChange(line.id, e.target.value)}
-                                onBlur={e => onPackedQtyBlur(line.id, e.target.value, deliverQty)}
-                                className={`w-16 text-center border rounded-md px-1.5 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20] tabular-nums ${
-                                  !canPack
-                                    ? 'border-gray-100 bg-gray-50 text-gray-300 cursor-not-allowed'
-                                    : 'border-gray-200 bg-white'
-                                }`}
-                                title={!canPack ? 'Start packing first' : ''}
-                              />
-                            ) : (
-                              <span className="text-gray-200 text-xs">—</span>
-                            )}
-                          </td>
+                          {/* Packed qty input — packer view only */}
+                          {!isManager && (
+                            <td className="px-2 md:px-4 py-2.5 text-center">
+                              {deliverQty > 0 ? (
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="1"
+                                  value={packedVal}
+                                  placeholder="—"
+                                  disabled={!canPack}
+                                  onChange={e => onPackedQtyChange(line.id, e.target.value)}
+                                  onBlur={e => onPackedQtyBlur(line.id, e.target.value, deliverQty)}
+                                  className={`w-16 text-center border rounded-md px-1.5 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20] tabular-nums ${
+                                    !canPack
+                                      ? 'border-gray-100 bg-gray-50 text-gray-300 cursor-not-allowed'
+                                      : 'border-gray-200 bg-white'
+                                  }`}
+                                  title={!canPack ? 'Start packing first' : ''}
+                                />
+                              ) : (
+                                <span className="text-gray-200 text-xs">—</span>
+                              )}
+                            </td>
+                          )}
 
-                          {/* Full / Partial indicator */}
-                          <td className="px-2 md:px-4 py-2.5 text-center">
-                            {deliverQty > 0 ? (
-                              <PackingStatus
-                                packedQty={
-                                  editingPackedQty[line.id] !== undefined
-                                    ? (editingPackedQty[line.id] === '' ? null : parseFloat(editingPackedQty[line.id]))
-                                    : line.packed_qty
-                                }
-                                deliveryQty={deliverQty}
-                              />
-                            ) : (
-                              <span className="text-gray-200 text-xs">—</span>
-                            )}
-                          </td>
+                          {/* Full / Partial indicator — packer view only */}
+                          {!isManager && (
+                            <td className="px-2 md:px-4 py-2.5 text-center">
+                              {deliverQty > 0 ? (
+                                <PackingStatus
+                                  packedQty={
+                                    editingPackedQty[line.id] !== undefined
+                                      ? (editingPackedQty[line.id] === '' ? null : parseFloat(editingPackedQty[line.id]))
+                                      : line.packed_qty
+                                  }
+                                  deliveryQty={deliverQty}
+                                />
+                              ) : (
+                                <span className="text-gray-200 text-xs">—</span>
+                              )}
+                            </td>
+                          )}
                         </tr>
                       );
                     })}
@@ -691,6 +709,7 @@ export default function DeliveryPage() {
             section: target.section,
             item_name: target.item_name,
             unit: target.unit,
+            standard_target_qty: baseTarget,
             target_qty: effectiveTarget,
             reported_qty: reportedQty,
             delivery_qty: deliveryQty,
