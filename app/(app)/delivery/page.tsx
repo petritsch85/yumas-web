@@ -619,6 +619,7 @@ export default function DeliveryPage() {
         tue_target: r.tue_target,
         wed_target: r.wed_target,
         fri_target: r.fri_target,
+        scales_with_demand: true,  // always scale with forecast by default
       }));
       const { error } = await supabase
         .from('delivery_targets').upsert(payload, { onConflict: 'location_name,item_name' });
