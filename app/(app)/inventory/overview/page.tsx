@@ -2,6 +2,7 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
+import { RefreshCw } from 'lucide-react';
 
 const LOCATIONS = ['Eschborn', 'Taunus', 'Westend', 'ZK'] as const;
 type LocationName = typeof LOCATIONS[number];
@@ -45,8 +46,10 @@ function timeAgo(iso: string): string {
 }
 
 export default function InventoryOverviewPage() {
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isFetching, dataUpdatedAt, refetch } = useQuery({
     queryKey: ['inventory-overview'],
+    staleTime: 0,
+    refetchOnWindowFocus: true,
     queryFn: async () => {
       // Fetch all submissions, newest first
       const { data: submissions, error } = await supabase
@@ -98,9 +101,26 @@ export default function InventoryOverviewPage() {
 
   return (
     <div>
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Current Inventory</h1>
-        <p className="text-sm text-gray-500 mt-0.5">Latest submitted quantities per location</p>
+      <div className="flex items-start justify-between mb-6">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Current Inventory</h1>
+          <p className="text-sm text-gray-500 mt-0.5">Latest submitted quantities per location</p>
+        </div>
+        <div className="flex items-center gap-3">
+          {dataUpdatedAt > 0 && !isFetching && (
+            <span className="text-xs text-gray-400">
+              Updated {new Date(dataUpdatedAt).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+            </span>
+          )}
+          <button
+            onClick={() => refetch()}
+            disabled={isFetching}
+            className="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 bg-white text-sm text-gray-600 hover:bg-gray-50 transition-colors shadow-sm disabled:opacity-50"
+          >
+            <RefreshCw size={14} className={isFetching ? 'animate-spin text-[#1B5E20]' : ''} />
+            {isFetching ? 'Refreshing…' : 'Refresh'}
+          </button>
+        </div>
       </div>
 
       {/* "As of" dates per location */}
