@@ -222,7 +222,7 @@ function ForecastBanner({ store, forecast, standard }: {
 function StoreDeliveryList({
   store, lines, hasSubmission, isActive, onPackedQtyBlur,
   forecast, standard, viewMode, editingTargets, editingPackedQty,
-  onTargetChange, onTargetBlur, onPackedQtyChange, packingStarted,
+  onTargetChange, onTargetBlur, onPackedQtyChange, packingStarted, isPreview,
 }: {
   store: Store;
   lines: DeliveryLine[];
@@ -238,6 +238,7 @@ function StoreDeliveryList({
   onTargetBlur: (line: DeliveryLine, value: string) => void;
   onPackedQtyChange: (id: string, value: string) => void;
   packingStarted: boolean;
+  isPreview: boolean;
 }) {
   if (!hasSubmission) {
     return (
@@ -249,7 +250,7 @@ function StoreDeliveryList({
   }
 
   const isManager = viewMode === 'manager';
-  const canPack = isManager || packingStarted;
+  const canPack = !isPreview && (isManager || packingStarted);
   const colCount = isManager ? 6 : 5;
 
   const liveDeliveryQty = (line: DeliveryLine): number => {
@@ -343,13 +344,17 @@ function StoreDeliveryList({
                               )}
                             </td>
                             <td className="px-3 md:px-4 py-2.5 text-center">
-                              <input
-                                type="number" min="0"
-                                value={targetVal}
-                                onChange={e => onTargetChange(line.id, e.target.value)}
-                                onBlur={e => onTargetBlur(line, e.target.value)}
-                                className="w-16 text-center border border-gray-200 rounded-md px-1.5 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20] bg-white"
-                              />
+                              {isPreview ? (
+                                <span className="tabular-nums text-gray-400">{line.target_qty}</span>
+                              ) : (
+                                <input
+                                  type="number" min="0"
+                                  value={targetVal}
+                                  onChange={e => onTargetChange(line.id, e.target.value)}
+                                  onBlur={e => onTargetBlur(line, e.target.value)}
+                                  className="w-16 text-center border border-gray-200 rounded-md px-1.5 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20] bg-white"
+                                />
+                              )}
                             </td>
                           </>}
                           <td className="px-2 md:px-4 py-2.5 text-center">
@@ -455,19 +460,58 @@ export default function DeliveryPage() {
     return () => { if (packingInterval.current) clearInterval(packingInterval.current); };
   }, []);
 
-  /* ─ Query: delivery run ─ */
+  /* ─ Query: delivery run (always returns data — synthetic preview when no run exists) ─ */
   const { data: runData, isLoading } = useQuery({
     queryKey: ['delivery-run', targetDate],
     queryFn: async () => {
       const { data: run, error: runErr } = await supabase
         .from('delivery_runs').select('*').eq('delivery_date', targetDate).maybeSingle();
       if (runErr) throw runErr;
-      if (!run) return null;
-      const { data: lines, error: linesErr } = await supabase
-        .from('delivery_run_lines').select('*').eq('run_id', run.id)
-        .order('location_name').order('section').order('item_name');
-      if (linesErr) throw linesErr;
-      return { run: run as DeliveryRun, lines: (lines ?? []) as DeliveryLine[] };
+
+      // Run exists — return real lines
+      if (run) {
+        const { data: lines, error: linesErr } = await supabase
+          .from('delivery_run_lines').select('*').eq('run_id', run.id)
+          .order('location_name').order('section').order('item_name');
+        if (linesErr) throw linesErr;
+        return { run: run as DeliveryRun, lines: (lines ?? []) as DeliveryLine[], isPreview: false };
+      }
+
+      // No run yet — build a preview from delivery_targets (reported = 0)
+      const dow = new Date(targetDate + 'T12:00:00').getDay();
+      const dKey = DAY_KEY_MAP[dow] as DayKey | undefined;
+      if (!dKey) return { run: null, lines: [] as DeliveryLine[], isPreview: true };
+
+      const allTargetsResults = await Promise.all(
+        STORES.map(store =>
+          supabase.from('delivery_targets').select('*').eq('location_name', store)
+            .order('section').order('item_name')
+        )
+      );
+
+      const previewLines: DeliveryLine[] = [];
+      STORES.forEach((store, i) => {
+        const targets = (allTargetsResults[i].data ?? []) as DeliveryTarget[];
+        for (const t of targets) {
+          const baseTarget = (t[dKey] as number) ?? 0;
+          previewLines.push({
+            id: t.id,
+            run_id: '',
+            location_name: store,
+            section: t.section,
+            item_name: t.item_name,
+            unit: t.unit,
+            standard_target_qty: baseTarget,
+            target_qty: baseTarget,
+            reported_qty: 0,
+            delivery_qty: baseTarget,
+            is_packed: false,
+            packed_qty: null,
+          });
+        }
+      });
+
+      return { run: null, lines: previewLines, isPreview: true };
     },
   });
 
@@ -797,6 +841,7 @@ export default function DeliveryPage() {
   /* ─ Derived state ─ */
   const run = runData?.run ?? null;
   const lines = runData?.lines ?? [];
+  const isPreview = runData?.isPreview ?? false;
 
   const storeLines = (store: Store) => lines.filter(l => l.location_name === store);
   const storeHasSubmission = (store: Store) => storeLines(store).length > 0 || run !== null;
@@ -1061,23 +1106,31 @@ export default function DeliveryPage() {
         {/* ── Loading ── */}
         {isLoading ? (
           <div className="space-y-3">{[...Array(3)].map((_, i) => <div key={i} className="h-12 bg-gray-100 rounded-xl animate-pulse" />)}</div>
-        ) : !run ? (
+        ) : lines.length === 0 ? (
+          /* No targets configured at all */
           <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-12 text-center">
             <Package size={40} className="mx-auto text-gray-200 mb-4" />
-            <p className="text-base font-semibold text-gray-400 mb-1">No packing list for {fmtDate(targetDate)}</p>
-            <p className="text-sm text-gray-300 mb-6">
-              {viewMode === 'manager'
-                ? 'Click "Generate List" to pull the latest inventory counts for this date.'
-                : 'Switch to Manager view and generate the packing list first.'}
+            <p className="text-base font-semibold text-gray-400 mb-1">No targets configured</p>
+            <p className="text-sm text-gray-300">
+              Upload standard targets via the Manager view to get started.
             </p>
-            {viewMode === 'manager' && (
-              <button onClick={handleGenerate} disabled={generating} className="bg-[#1B5E20] text-white px-6 py-2.5 rounded-lg text-sm font-medium hover:bg-[#2E7D32] transition-colors disabled:opacity-60">
-                {generating ? 'Generating…' : 'Generate List'}
-              </button>
-            )}
           </div>
         ) : (
           <>
+            {/* Preview banner — shown when no real run exists yet */}
+            {isPreview && (
+              <div className="mb-5 flex items-start gap-3 p-4 bg-amber-50 border border-amber-200 rounded-xl">
+                <AlertCircle size={17} className="flex-shrink-0 text-amber-500 mt-0.5" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-amber-800">Showing standard targets — inventory not yet reported</p>
+                  <p className="text-xs text-amber-600 mt-0.5">
+                    Quantities below are based on standard targets only. Once inventory reports come in,{' '}
+                    {viewMode === 'manager' ? 'click "Generate List" to calculate actual delivery quantities.' : 'ask a manager to generate the list.'}
+                  </p>
+                </div>
+              </div>
+            )}
+
             {/* Store tabs */}
             <div className="flex gap-1 mb-5 bg-gray-100 rounded-xl p-1 w-fit">
               {STORES.map(store => {
@@ -1119,6 +1172,7 @@ export default function DeliveryPage() {
                   onTargetBlur={handleTargetBlur}
                   onPackedQtyChange={handlePackedQtyChange}
                   packingStarted={packingStarted}
+                  isPreview={isPreview}
                 />
               </div>
             ))}
