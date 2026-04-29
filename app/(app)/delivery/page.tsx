@@ -66,6 +66,7 @@ type TargetRow = {
   wed_target: number;
   fri_target: number;
   scales_with_demand: boolean;
+  demand_scale_factor: number; // 1.0 = fully proportional; 0.5 = half; 0 = fixed
 };
 
 type ParsedItem = {
@@ -103,6 +104,7 @@ type DeliveryTarget = {
   wed_target: number;
   fri_target: number;
   scales_with_demand: boolean;
+  demand_scale_factor: number;
 };
 
 type StoreDayStandard = {
@@ -437,7 +439,7 @@ export default function DeliveryPage() {
   /* Standard Targets modal */
   const [showStandards, setShowStandards] = useState(false);
   const [stdStore, setStdStore] = useState<Store>('Eschborn');
-  const [stdEdits, setStdEdits] = useState<Record<string, { mon: number; tue: number; wed: number; fri: number }>>({});
+  const [stdEdits, setStdEdits] = useState<Record<string, { mon: number; tue: number; wed: number; fri: number; scales: boolean; scaleFactor: number }>>({});
 
   /* Upload Excel */
   const [uploading, setUploading] = useState(false);
@@ -569,9 +571,13 @@ export default function DeliveryPage() {
   /* Initialise std edits when data loads */
   useEffect(() => {
     if (!stdTargetsData || stdTargetsData.length === 0) return;
-    const initial: Record<string, { mon: number; tue: number; wed: number; fri: number }> = {};
+    const initial: Record<string, { mon: number; tue: number; wed: number; fri: number; scales: boolean; scaleFactor: number }> = {};
     for (const t of stdTargetsData) {
-      initial[t.id] = { mon: t.mon_target, tue: t.tue_target, wed: t.wed_target, fri: t.fri_target };
+      initial[t.id] = {
+        mon: t.mon_target, tue: t.tue_target, wed: t.wed_target, fri: t.fri_target,
+        scales: t.scales_with_demand ?? true,
+        scaleFactor: t.demand_scale_factor ?? 1.0,
+      };
     }
     setStdEdits(initial);
   }, [stdTargetsData]);
@@ -589,7 +595,8 @@ export default function DeliveryPage() {
         tue_target: stdEdits[t.id]?.tue ?? t.tue_target,
         wed_target: stdEdits[t.id]?.wed ?? t.wed_target,
         fri_target: stdEdits[t.id]?.fri ?? t.fri_target,
-        scales_with_demand: t.scales_with_demand,
+        scales_with_demand: stdEdits[t.id]?.scales ?? t.scales_with_demand,
+        demand_scale_factor: stdEdits[t.id]?.scaleFactor ?? t.demand_scale_factor ?? 1.0,
       }));
       const { error } = await supabase
         .from('delivery_targets').upsert(payload, { onConflict: 'location_name,item_name' });
@@ -605,6 +612,14 @@ export default function DeliveryPage() {
   const setStdEdit = (id: string, day: 'mon' | 'tue' | 'wed' | 'fri', val: string) => {
     const num = parseFloat(val);
     setStdEdits(prev => ({ ...prev, [id]: { ...prev[id], [day]: isNaN(num) ? 0 : num } }));
+  };
+  const setStdScales = (id: string, scales: boolean) => {
+    setStdEdits(prev => ({ ...prev, [id]: { ...prev[id], scales } }));
+  };
+  const setStdScaleFactor = (id: string, val: string) => {
+    const pct = parseFloat(val);
+    const factor = isNaN(pct) ? 1.0 : Math.max(0, Math.min(200, pct)) / 100;
+    setStdEdits(prev => ({ ...prev, [id]: { ...prev[id], scaleFactor: factor } }));
   };
 
   /* ─ Upload Excel ─ */
@@ -798,7 +813,11 @@ export default function DeliveryPage() {
           const baseTarget = target[dayKey] ?? 0;
           let effectiveTarget: number;
           if (target.scales_with_demand && forecastedSales !== null && standardSales > 0) {
-            effectiveTarget = Math.round(baseTarget * (forecastedSales / standardSales));
+            const rawRatio = forecastedSales / standardSales;
+            const factor = target.demand_scale_factor ?? 1.0;
+            // factor=1 → fully proportional; factor=0.5 → half the swing; factor=0 → fixed
+            const adjustedRatio = 1 + (rawRatio - 1) * factor;
+            effectiveTarget = Math.round(baseTarget * Math.max(0, adjustedRatio));
           } else {
             effectiveTarget = baseTarget;
           }
@@ -881,7 +900,7 @@ export default function DeliveryPage() {
           <>
             <div className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm" onClick={() => setShowStandards(false)} />
             <div className="fixed inset-0 z-50 flex items-center justify-center p-6 pointer-events-none">
-              <div className="bg-white rounded-2xl shadow-2xl flex flex-col w-full max-w-2xl max-h-[88vh] pointer-events-auto">
+              <div className="bg-white rounded-2xl shadow-2xl flex flex-col w-full max-w-3xl max-h-[88vh] pointer-events-auto">
                 {/* Header */}
                 <div className="flex items-start justify-between px-6 py-4 border-b border-gray-100 flex-shrink-0">
                   <div>
@@ -912,8 +931,10 @@ export default function DeliveryPage() {
                           <th className="px-5 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Item</th>
                           <th className="px-2 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide w-24">Unit</th>
                           {(['MON','TUE','WED','FRI'] as const).map(d => (
-                            <th key={d} className="px-2 py-2.5 text-center text-xs font-semibold text-gray-500 uppercase tracking-wide w-20">{d}</th>
+                            <th key={d} className="px-2 py-2.5 text-center text-xs font-semibold text-gray-500 uppercase tracking-wide w-16">{d}</th>
                           ))}
+                          <th className="px-2 py-2.5 text-center text-xs font-semibold text-blue-500 uppercase tracking-wide w-16" title="Does this item scale with the sales forecast?">Scales?</th>
+                          <th className="px-2 py-2.5 text-center text-xs font-semibold text-blue-500 uppercase tracking-wide w-20" title="100% = fully proportional. 50% = half the swing. 0% = fixed.">Scale %</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -923,11 +944,14 @@ export default function DeliveryPage() {
                           return (
                             <React.Fragment key={section}>
                               <tr className="bg-green-50">
-                                <td colSpan={6} className="px-5 py-1.5">
+                                <td colSpan={8} className="px-5 py-1.5">
                                   <span className="text-[11px] font-bold text-[#1B5E20] uppercase tracking-wider">{section}</span>
                                 </td>
                               </tr>
-                              {sectionRows.map(row => (
+                              {sectionRows.map(row => {
+                                const scales = stdEdits[row.id]?.scales ?? row.scales_with_demand ?? true;
+                                const scaleFactor = stdEdits[row.id]?.scaleFactor ?? row.demand_scale_factor ?? 1.0;
+                                return (
                                 <tr key={row.id} className="border-t border-gray-50 hover:bg-gray-50/50">
                                   <td className="px-5 py-2 text-sm text-gray-800">{row.item_name}</td>
                                   <td className="px-2 py-2 text-xs text-gray-400">{row.unit}</td>
@@ -937,12 +961,38 @@ export default function DeliveryPage() {
                                         type="number" min={0} step={1}
                                         value={stdEdits[row.id]?.[day] ?? (row as any)[`${day}_target`]}
                                         onChange={e => setStdEdit(row.id, day, e.target.value)}
-                                        className="w-16 text-center text-sm border border-gray-200 rounded-md py-1 px-1.5 focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20]/50"
+                                        className="w-14 text-center text-sm border border-gray-200 rounded-md py-1 px-1 focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20]/50"
                                       />
                                     </td>
                                   ))}
+                                  {/* Scales toggle */}
+                                  <td className="px-2 py-1.5 text-center">
+                                    <input
+                                      type="checkbox"
+                                      checked={scales}
+                                      onChange={e => setStdScales(row.id, e.target.checked)}
+                                      className="w-4 h-4 rounded accent-[#1B5E20] cursor-pointer"
+                                    />
+                                  </td>
+                                  {/* Scale % */}
+                                  <td className="px-2 py-1.5 text-center">
+                                    {scales ? (
+                                      <div className="relative inline-flex items-center">
+                                        <input
+                                          type="number" min={0} max={200} step={10}
+                                          value={Math.round(scaleFactor * 100)}
+                                          onChange={e => setStdScaleFactor(row.id, e.target.value)}
+                                          className="w-16 text-center text-sm border border-blue-200 rounded-md py-1 px-1 focus:outline-none focus:ring-2 focus:ring-blue-300/40 focus:border-blue-400/50"
+                                        />
+                                        <span className="absolute right-1.5 text-xs text-gray-400 pointer-events-none">%</span>
+                                      </div>
+                                    ) : (
+                                      <span className="text-xs text-gray-300">—</span>
+                                    )}
+                                  </td>
                                 </tr>
-                              ))}
+                                );
+                              })}
                             </React.Fragment>
                           );
                         })}
@@ -952,7 +1002,10 @@ export default function DeliveryPage() {
                 </div>
                 {/* Footer */}
                 <div className="px-6 py-4 border-t border-gray-100 flex-shrink-0 flex items-center justify-between bg-gray-50/50 rounded-b-2xl">
-                  <p className="text-xs text-gray-400">Changes update the base targets for all future weeks.</p>
+                  <div>
+                    <p className="text-xs text-gray-400">Changes update the base targets for all future runs.</p>
+                    <p className="text-xs text-blue-400 mt-0.5"><span className="font-semibold">Scale %:</span> 100% = fully proportional · 50% = half the swing · 0% = fixed quantity</p>
+                  </div>
                   <button
                     onClick={() => saveStandards.mutate()}
                     disabled={saveStandards.isPending || stdTargets.length === 0}
