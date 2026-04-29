@@ -111,8 +111,7 @@ const navGroups: NavGroup[] = [
       {
         label: 'Delivery', href: '/delivery', icon: Truck, permKey: 'delivery',
         children: [
-          { label: 'Packing',            href: '/delivery',          icon: Truck },
-          { label: 'Target Levels',     href: '/delivery/targets',  icon: Target },
+          { label: 'Packing',           href: '/delivery',          icon: Truck },
           { label: 'Sales Forecast',    href: '/delivery/forecast', icon: TrendingUp },
           { label: 'Delivery Reports',  href: '/delivery/reports',  icon: ClipboardList },
         ],
