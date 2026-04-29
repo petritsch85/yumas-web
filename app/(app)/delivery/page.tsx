@@ -7,6 +7,7 @@ import {
   RefreshCw, CheckCircle2, AlertCircle, Package, TrendingUp,
   Eye, Settings2, Truck, Play, Timer, Flag, XCircle,
   Upload, SlidersHorizontal, Save, X, CalendarDays,
+  Navigation, Store, ClipboardCheck, Clock,
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import type { Profile } from '@/types';
@@ -26,6 +27,8 @@ function formatDuration(seconds: number): string {
 }
 
 /* ─── Types ─────────────────────────────────────────────────────────────── */
+type ViewMode = 'manager' | 'packer' | 'driver' | 'store';
+
 type DeliveryRun = {
   id: string;
   delivery_date: string;
@@ -38,6 +41,18 @@ type DeliveryRun = {
   packed_by: string | null;
   delivery_started_at: string | null;
   delivery_started_by: string | null;
+  delivery_finished_at: string | null;
+  delivery_finished_by: string | null;
+};
+
+type StoreReceipt = {
+  id: string;
+  run_id: string;
+  location_name: string;
+  received_at: string;
+  received_by: string | null;
+  notes: string | null;
+  items_confirmed_count: number | null;
 };
 
 type DeliveryLine = {
@@ -420,6 +435,313 @@ function StoreDeliveryList({
   );
 }
 
+/* ─── Driver View ────────────────────────────────────────────────────────── */
+function DriverView({ run, targetDate, onStart, onFinish, startingDelivery, finishingDelivery, receiptStatus }: {
+  run: DeliveryRun | null;
+  targetDate: string;
+  onStart: () => void;
+  onFinish: () => void;
+  startingDelivery: boolean;
+  finishingDelivery: boolean;
+  receiptStatus: Partial<Record<Store, boolean>>;
+}) {
+  const [deliveryTimer, setDeliveryTimer] = useState(0);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    if (run?.delivery_started_at && !run?.delivery_finished_at) {
+      const startMs = new Date(run.delivery_started_at).getTime();
+      const tick = () => setDeliveryTimer(Math.floor((Date.now() - startMs) / 1000));
+      tick();
+      timerRef.current = setInterval(tick, 1000);
+    } else {
+      if (timerRef.current) clearInterval(timerRef.current);
+    }
+    return () => { if (timerRef.current) clearInterval(timerRef.current); };
+  }, [run?.delivery_started_at, run?.delivery_finished_at]);
+
+  const canStart      = !!run?.packing_finished_at && !run?.delivery_started_at;
+  const inProgress    = !!run?.delivery_started_at && !run?.delivery_finished_at;
+  const done          = !!run?.delivery_finished_at;
+  const allConfirmed  = STORES.every(s => receiptStatus[s]);
+
+  return (
+    <div className="max-w-md mx-auto space-y-4 pt-2">
+      {/* Date card */}
+      <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
+        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-0.5">Delivery Date</p>
+        <p className="text-base font-semibold text-gray-900">{fmtDate(targetDate)}</p>
+      </div>
+
+      {/* Status / action card */}
+      {!run ? (
+        <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-10 text-center">
+          <Package size={36} className="text-gray-200 mx-auto mb-3" />
+          <p className="text-sm text-gray-400">No delivery run for today yet.</p>
+        </div>
+      ) : done ? (
+        <div className="bg-green-50 border border-green-200 rounded-xl p-8 text-center space-y-2">
+          <CheckCircle2 size={44} className="text-green-500 mx-auto" />
+          <p className="text-lg font-bold text-green-800">Delivery Complete</p>
+          <p className="text-sm text-green-600">
+            Returned at {new Date(run.delivery_finished_at!).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}
+          </p>
+          {run.delivery_started_at && (
+            <p className="text-xs text-green-500">
+              Total time: {formatDuration(Math.floor((new Date(run.delivery_finished_at!).getTime() - new Date(run.delivery_started_at).getTime()) / 1000))}
+            </p>
+          )}
+        </div>
+      ) : inProgress ? (
+        <div className="bg-blue-50 border border-blue-200 rounded-xl p-6 text-center space-y-5">
+          <div>
+            <p className="text-xs font-semibold text-blue-500 uppercase tracking-widest mb-1">In Transit</p>
+            <div className="text-5xl font-mono font-bold text-blue-800 tabular-nums">{formatTimer(deliveryTimer)}</div>
+            <p className="text-xs text-blue-400 mt-1">
+              Departed {new Date(run.delivery_started_at!).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}
+            </p>
+          </div>
+          <button
+            onClick={onFinish}
+            disabled={finishingDelivery}
+            className="w-full flex items-center justify-center gap-2 bg-blue-600 text-white py-3.5 rounded-xl font-semibold text-base hover:bg-blue-700 transition-colors disabled:opacity-60 shadow-sm"
+          >
+            <Flag size={18} /> {finishingDelivery ? 'Logging…' : 'Finish Delivery (Back at ZK)'}
+          </button>
+        </div>
+      ) : canStart ? (
+        <div className="bg-white border border-gray-100 rounded-xl p-8 text-center space-y-4 shadow-sm">
+          <Truck size={44} className="text-gray-300 mx-auto" />
+          <div>
+            <p className="font-semibold text-gray-700">Packing finished — ready to depart</p>
+            <p className="text-xs text-gray-400 mt-1">Press when leaving ZK</p>
+          </div>
+          <button
+            onClick={onStart}
+            disabled={startingDelivery}
+            className="w-full flex items-center justify-center gap-2 bg-[#1B5E20] text-white py-3.5 rounded-xl font-semibold text-base hover:bg-[#2E7D32] transition-colors disabled:opacity-60 shadow-sm"
+          >
+            <Play size={18} /> {startingDelivery ? 'Logging…' : 'Start Delivery'}
+          </button>
+        </div>
+      ) : (
+        <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-8 text-center">
+          <Clock size={36} className="text-gray-200 mx-auto mb-3" />
+          <p className="text-sm text-gray-400">Waiting for packing to be completed…</p>
+        </div>
+      )}
+
+      {/* Store confirmation status */}
+      <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
+        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Store Receipt Confirmations</p>
+        <div className="space-y-2">
+          {STORES.map(store => (
+            <div key={store} className="flex items-center justify-between py-1.5 border-b border-gray-50 last:border-0">
+              <span className="text-sm font-medium text-gray-700">{store}</span>
+              {receiptStatus[store]
+                ? <span className="flex items-center gap-1.5 text-xs text-green-700 font-semibold bg-green-50 px-2 py-0.5 rounded-full"><CheckCircle2 size={12} /> Confirmed</span>
+                : <span className="text-xs text-gray-400 bg-gray-50 px-2 py-0.5 rounded-full">Pending</span>
+              }
+            </div>
+          ))}
+        </div>
+        {allConfirmed && done && (
+          <p className="mt-3 text-xs text-center text-green-600 font-semibold">✓ All stores confirmed — run complete</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ─── Store Manager Receipt View ─────────────────────────────────────────── */
+function StoreManagerView({ run, lines, targetDate, myStore }: {
+  run: DeliveryRun | null;
+  lines: DeliveryLine[];
+  targetDate: string;
+  myStore: Store | null; // null = manager viewing all (shows tabs)
+}) {
+  const qc = useQueryClient();
+  const [activeTab, setActiveTab] = useState<Store>(myStore ?? 'Eschborn');
+  const [notes, setNotes] = useState('');
+
+  const currentStore = myStore ?? activeTab;
+  const storeLines = lines.filter(l => l.location_name === currentStore && (l.delivery_qty > 0 || l.packed_qty !== null));
+
+  /* Fetch receipt for current store */
+  const { data: receipt, isLoading: receiptLoading } = useQuery<StoreReceipt | null>({
+    queryKey: ['store-receipt', run?.id, currentStore],
+    enabled: !!run?.id,
+    refetchInterval: 20_000,
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('store_delivery_receipts')
+        .select('*')
+        .eq('run_id', run!.id)
+        .eq('location_name', currentStore)
+        .maybeSingle();
+      return (data as StoreReceipt | null);
+    },
+  });
+
+  /* Confirm receipt */
+  const confirmReceipt = useMutation({
+    mutationFn: async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      const { error } = await supabase.from('store_delivery_receipts').upsert({
+        run_id: run!.id,
+        location_name: currentStore,
+        received_at: new Date().toISOString(),
+        received_by: user?.id ?? null,
+        notes: notes.trim() || null,
+        items_confirmed_count: storeLines.length,
+      }, { onConflict: 'run_id,location_name' });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['store-receipt', run?.id, currentStore] });
+      qc.invalidateQueries({ queryKey: ['store-receipts-status', run?.id] });
+      setNotes('');
+    },
+  });
+
+  const isConfirmed = !!receipt?.received_at;
+  const sections = [...new Set(storeLines.map(l => l.section))].sort();
+
+  return (
+    <div className="space-y-4">
+      {/* Store tabs — only shown to managers viewing all stores */}
+      {!myStore && (
+        <div className="flex gap-1 bg-gray-100 rounded-xl p-1 w-fit">
+          {STORES.map(s => (
+            <button key={s} onClick={() => setActiveTab(s)}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${activeTab === s ? 'bg-white text-[#1B5E20] shadow-sm font-semibold' : 'text-gray-500 hover:text-gray-700'}`}
+            >{s}</button>
+          ))}
+        </div>
+      )}
+
+      {/* Date + store header */}
+      <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 flex items-center justify-between">
+        <div>
+          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">{currentStore} — Delivery</p>
+          <p className="text-base font-semibold text-gray-900">{fmtDate(targetDate)}</p>
+        </div>
+        {isConfirmed && (
+          <span className="flex items-center gap-1.5 text-sm text-green-700 font-semibold bg-green-50 px-3 py-1.5 rounded-full border border-green-100">
+            <CheckCircle2 size={15} /> Receipt Confirmed
+          </span>
+        )}
+      </div>
+
+      {/* No run yet */}
+      {!run ? (
+        <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-10 text-center">
+          <Package size={36} className="text-gray-200 mx-auto mb-3" />
+          <p className="text-sm text-gray-400">No delivery scheduled yet for this date.</p>
+        </div>
+      ) : storeLines.length === 0 ? (
+        <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-10 text-center">
+          <p className="text-sm text-gray-400">No items packed for {currentStore} on this run.</p>
+        </div>
+      ) : (
+        <>
+          {/* Packed items list */}
+          <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+            <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+              <span className="text-sm font-semibold text-gray-700">
+                {storeLines.length} item{storeLines.length !== 1 ? 's' : ''} packed for you
+              </span>
+              {isConfirmed && (
+                <span className="text-xs text-gray-400">
+                  Confirmed at {new Date(receipt!.received_at).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}
+                </span>
+              )}
+            </div>
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 border-b border-gray-100">
+                <tr>
+                  <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Item</th>
+                  <th className="px-3 py-2.5 text-left text-xs font-semibold text-gray-400 uppercase tracking-wide hidden sm:table-cell">Unit</th>
+                  <th className="px-4 py-2.5 text-center text-xs font-semibold text-[#1B5E20] uppercase tracking-wide">Qty Packed</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sections.map(section => (
+                  <React.Fragment key={section}>
+                    <tr className="bg-gray-50">
+                      <td colSpan={3} className="px-4 py-1.5">
+                        <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">{section}</span>
+                      </td>
+                    </tr>
+                    {storeLines.filter(l => l.section === section).map(line => {
+                      const qty = line.packed_qty ?? line.delivery_qty;
+                      return (
+                        <tr key={line.id} className="border-t border-gray-50 hover:bg-gray-50/50">
+                          <td className="px-4 py-2.5 font-medium text-gray-800">{line.item_name}</td>
+                          <td className="px-3 py-2.5 text-xs text-gray-400 hidden sm:table-cell">{line.unit}</td>
+                          <td className="px-4 py-2.5 text-center">
+                            <span className="inline-flex items-center justify-center min-w-[2rem] px-2 py-0.5 rounded-md bg-[#1B5E20]/10 text-[#1B5E20] font-bold text-sm">
+                              {qty}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </React.Fragment>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Confirm receipt */}
+          {!isConfirmed ? (
+            <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 space-y-3">
+              <p className="text-sm font-semibold text-gray-700">Confirm delivery received</p>
+              <textarea
+                value={notes}
+                onChange={e => setNotes(e.target.value)}
+                placeholder="Any missing or damaged items? (optional)"
+                rows={2}
+                className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 resize-none focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20]/40 placeholder-gray-300"
+              />
+              <button
+                onClick={() => confirmReceipt.mutate()}
+                disabled={confirmReceipt.isPending || !run.delivery_started_at}
+                className="w-full flex items-center justify-center gap-2 bg-[#1B5E20] text-white py-3 rounded-xl font-semibold text-sm hover:bg-[#2E7D32] transition-colors disabled:opacity-50 shadow-sm"
+                title={!run.delivery_started_at ? 'Delivery has not been started yet' : ''}
+              >
+                <ClipboardCheck size={17} />
+                {confirmReceipt.isPending ? 'Confirming…' : 'Confirm All Received'}
+              </button>
+              {!run.delivery_started_at && (
+                <p className="text-xs text-center text-gray-400">Delivery hasn't been started by the driver yet</p>
+              )}
+            </div>
+          ) : (
+            <div className="bg-green-50 border border-green-200 rounded-xl p-5 space-y-2">
+              <div className="flex items-center gap-2 text-green-800 font-semibold">
+                <CheckCircle2 size={18} className="text-green-500" /> Receipt confirmed
+              </div>
+              {receipt?.notes && (
+                <p className="text-sm text-green-700 bg-white/60 rounded-lg p-2 border border-green-100">
+                  <span className="font-medium">Note: </span>{receipt.notes}
+                </p>
+              )}
+              <button
+                onClick={() => confirmReceipt.mutate()}
+                disabled={confirmReceipt.isPending}
+                className="text-xs text-green-600 hover:text-green-800 underline"
+              >
+                Update confirmation
+              </button>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 /* ─── Main Page ──────────────────────────────────────────────────────────── */
 export default function DeliveryPage() {
   const qc = useQueryClient();
@@ -430,9 +752,9 @@ export default function DeliveryPage() {
   const [generateError, setGenerateError] = useState('');
 
   /* View mode */
-  const [viewMode, setViewMode] = useState<'packer' | 'manager'>(() => {
+  const [viewMode, setViewMode] = useState<ViewMode>(() => {
     if (typeof window !== 'undefined') {
-      return (localStorage.getItem('delivery-view-mode') as 'packer' | 'manager') ?? 'packer';
+      return (localStorage.getItem('delivery-view-mode') as ViewMode) ?? 'packer';
     }
     return 'packer';
   });
@@ -459,10 +781,10 @@ export default function DeliveryPage() {
   const [uploading, setUploading] = useState(false);
   const [uploadMsg, setUploadMsg] = useState('');
 
-  const setMode = (mode: 'packer' | 'manager') => {
+  const setMode = (mode: ViewMode) => {
     setViewMode(mode);
     localStorage.setItem('delivery-view-mode', mode);
-    if (mode === 'packer') setEditingTargets({});
+    if (mode !== 'manager') setEditingTargets({});
   };
 
   /* Packing timer */
@@ -471,6 +793,7 @@ export default function DeliveryPage() {
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const packingInterval = useRef<ReturnType<typeof setInterval> | null>(null);
   const [startingDelivery, setStartingDelivery] = useState(false);
+  const [finishingDelivery, setFinishingDelivery] = useState(false);
 
   useEffect(() => {
     return () => { if (packingInterval.current) clearInterval(packingInterval.current); };
@@ -581,16 +904,33 @@ export default function DeliveryPage() {
   });
 
   /* ─ Profile ─ */
-  const { data: profile } = useQuery<Profile | null>({
+  const { data: profile } = useQuery<(Profile & { locationName: string | null }) | null>({
     queryKey: ['delivery-profile'],
     queryFn: async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return null;
-      const { data } = await supabase.from('profiles').select('*').eq('id', user.id).single();
-      return data as Profile | null;
+      const { data } = await supabase
+        .from('profiles').select('*, location:locations(name)').eq('id', user.id).single();
+      if (!data) return null;
+      return { ...(data as Profile), locationName: (data as any).location?.name ?? null };
     },
   });
   const canManage = profile?.role === 'admin' || profile?.role === 'manager';
+
+  // For non-managers: auto-set view based on their role/location
+  useEffect(() => {
+    if (!profile || canManage) return;
+    const locName = profile.locationName;
+    if ((profile.permissions as any)?.driver) { setViewMode('driver'); return; }
+    if (locName && STORES.includes(locName as Store)) { setViewMode('store'); return; }
+    setViewMode('packer');
+  }, [profile?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Which store does this user belong to? (for Store Manager auto-filter)
+  const myStore: Store | null = (() => {
+    const loc = profile?.locationName;
+    return loc && STORES.includes(loc as Store) ? (loc as Store) : null;
+  })();
 
   /* ─ Standard Targets query (modal only) ─ */
   const { data: stdTargetsData } = useQuery({
@@ -807,6 +1147,38 @@ export default function DeliveryPage() {
       setStartingDelivery(false);
     }
   };
+
+  const finishDelivery = async () => {
+    if (!run) return;
+    setFinishingDelivery(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      await supabase.from('delivery_runs').update({
+        delivery_finished_at: new Date().toISOString(),
+        delivery_finished_by: user?.id ?? null,
+        status: 'completed',
+      }).eq('id', run.id);
+      qc.invalidateQueries({ queryKey: ['delivery-run', targetDate] });
+    } finally {
+      setFinishingDelivery(false);
+    }
+  };
+
+  /* ─ Receipt status (for driver live view) ─ */
+  const { data: receiptStatus = {} } = useQuery<Partial<Record<Store, boolean>>>({
+    queryKey: ['store-receipts-status', run?.id],
+    enabled: !!run?.id,
+    refetchInterval: viewMode === 'driver' ? 15_000 : false,
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('store_delivery_receipts')
+        .select('location_name, received_at')
+        .eq('run_id', run!.id);
+      const map: Partial<Record<Store, boolean>> = {};
+      for (const r of data ?? []) map[r.location_name as Store] = !!r.received_at;
+      return map;
+    },
+  });
 
   /* ─ Generate delivery list ─ */
   const handleGenerate = async () => {
@@ -1075,15 +1447,21 @@ export default function DeliveryPage() {
           </div>
 
           <div className="flex items-center gap-3 flex-wrap justify-end">
-            {/* View mode toggle */}
+            {/* 4-toggle — managers only */}
             {canManage && (
-              <div className="flex items-center bg-gray-100 rounded-lg p-1 gap-1">
-                <button onClick={() => setMode('packer')} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${viewMode === 'packer' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
-                  <Eye size={13} /> Packer
-                </button>
-                <button onClick={() => setMode('manager')} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${viewMode === 'manager' ? 'bg-white text-[#1B5E20] shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
-                  <Settings2 size={13} /> Manager
-                </button>
+              <div className="flex items-center bg-gray-100 rounded-lg p-1 gap-0.5">
+                {([
+                  { mode: 'manager' as ViewMode, icon: Settings2,    label: 'Manager' },
+                  { mode: 'packer'  as ViewMode, icon: Eye,          label: 'Packer'  },
+                  { mode: 'driver'  as ViewMode, icon: Navigation,   label: 'Driver'  },
+                  { mode: 'store'   as ViewMode, icon: Store,        label: 'Store'   },
+                ] as const).map(({ mode, icon: Icon, label }) => (
+                  <button key={mode} onClick={() => setMode(mode)}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${viewMode === mode ? 'bg-white text-[#1B5E20] shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                  >
+                    <Icon size={13} /> {label}
+                  </button>
+                ))}
               </div>
             )}
 
@@ -1106,18 +1484,11 @@ export default function DeliveryPage() {
               )
             )}
 
-            {/* Manager: Start Delivery + Generate */}
+            {/* Manager: Generate */}
             {viewMode === 'manager' && (
-              <>
-                {run && run.packing_finished_at && !run.delivery_started_at && (
-                  <button onClick={startDelivery} disabled={startingDelivery} className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors disabled:opacity-60 shadow-sm">
-                    <Truck size={15} /> {startingDelivery ? 'Logging…' : 'Start Delivery'}
-                  </button>
-                )}
-                <button onClick={handleGenerate} disabled={generating} className="flex items-center gap-2 bg-[#1B5E20] text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-[#2E7D32] transition-colors disabled:opacity-60 shadow-sm">
-                  {generating ? <><RefreshCw size={15} className="animate-spin" /> Generating…</> : <><RefreshCw size={15} /> {run ? 'Regenerate' : 'Generate List'}</>}
-                </button>
-              </>
+              <button onClick={handleGenerate} disabled={generating} className="flex items-center gap-2 bg-[#1B5E20] text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-[#2E7D32] transition-colors disabled:opacity-60 shadow-sm">
+                {generating ? <><RefreshCw size={15} className="animate-spin" /> Generating…</> : <><RefreshCw size={15} /> {run ? 'Regenerate' : 'Generate List'}</>}
+              </button>
             )}
           </div>
         </div>
@@ -1196,81 +1567,106 @@ export default function DeliveryPage() {
           </div>
         )}
 
-        {/* ── Loading ── */}
-        {isLoading ? (
-          <div className="space-y-3">{[...Array(3)].map((_, i) => <div key={i} className="h-12 bg-gray-100 rounded-xl animate-pulse" />)}</div>
-        ) : lines.length === 0 ? (
-          /* No targets configured at all */
-          <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-12 text-center">
-            <Package size={40} className="mx-auto text-gray-200 mb-4" />
-            <p className="text-base font-semibold text-gray-400 mb-1">No targets configured</p>
-            <p className="text-sm text-gray-300">
-              Upload standard targets via the Manager view to get started.
-            </p>
-          </div>
-        ) : (
-          <>
-            {/* Preview banner — shown when no real run exists yet */}
-            {isPreview && (
-              <div className="mb-5 flex items-start gap-3 p-4 bg-amber-50 border border-amber-200 rounded-xl">
-                <AlertCircle size={17} className="flex-shrink-0 text-amber-500 mt-0.5" />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-amber-800">Showing standard targets — inventory not yet reported</p>
-                  <p className="text-xs text-amber-600 mt-0.5">
-                    Quantities below are based on standard targets only. Once inventory reports come in,{' '}
-                    {viewMode === 'manager' ? 'click "Generate List" to calculate actual delivery quantities.' : 'ask a manager to generate the list.'}
-                  </p>
-                </div>
-              </div>
-            )}
+        {/* ── Driver view ── */}
+        {viewMode === 'driver' && (
+          <DriverView
+            run={run}
+            targetDate={targetDate}
+            onStart={startDelivery}
+            onFinish={finishDelivery}
+            startingDelivery={startingDelivery}
+            finishingDelivery={finishingDelivery}
+            receiptStatus={receiptStatus}
+          />
+        )}
 
-            {/* Store tabs */}
-            <div className="flex gap-1 mb-5 bg-gray-100 rounded-xl p-1 w-fit">
-              {STORES.map(store => {
-                const { full, total, complete } = storePackStats(store);
-                const isActive = activeStore === store;
-                const isPacker = viewMode === 'packer';
-                return (
-                  <button key={store} onClick={() => setActiveStore(store)}
-                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 ${isActive ? 'bg-white text-[#1B5E20] shadow-sm font-semibold' : 'text-gray-500 hover:text-gray-700'}`}
-                  >
-                    {store}
-                    {isPacker && packingStarted ? (
-                      complete
-                        ? <CheckCircle2 size={14} className="text-[#1B5E20]" />
-                        : <span className={`text-xs rounded-full px-1.5 py-0.5 font-bold leading-none ${isActive ? 'bg-[#1B5E20] text-white' : 'bg-gray-300 text-gray-600'}`}>{full}/{total}</span>
-                    ) : (
-                      total > 0 && <span className={`text-xs rounded-full px-1.5 py-0.5 font-bold leading-none ${isActive ? 'bg-[#1B5E20] text-white' : 'bg-gray-300 text-gray-600'}`}>{total}</span>
-                    )}
-                  </button>
-                );
-              })}
+        {/* ── Store manager receipt view ── */}
+        {viewMode === 'store' && (
+          <StoreManagerView
+            run={run}
+            lines={lines}
+            targetDate={targetDate}
+            myStore={myStore}
+          />
+        )}
+
+        {/* ── Packing list (manager + packer views) ── */}
+        {(viewMode === 'manager' || viewMode === 'packer') && (
+          isLoading ? (
+            <div className="space-y-3">{[...Array(3)].map((_, i) => <div key={i} className="h-12 bg-gray-100 rounded-xl animate-pulse" />)}</div>
+          ) : lines.length === 0 ? (
+            /* No targets configured at all */
+            <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-12 text-center">
+              <Package size={40} className="mx-auto text-gray-200 mb-4" />
+              <p className="text-base font-semibold text-gray-400 mb-1">No targets configured</p>
+              <p className="text-sm text-gray-300">
+                Upload standard targets via the Manager view to get started.
+              </p>
             </div>
+          ) : (
+            <>
+              {/* Preview banner — shown when no real run exists yet */}
+              {isPreview && (
+                <div className="mb-5 flex items-start gap-3 p-4 bg-amber-50 border border-amber-200 rounded-xl">
+                  <AlertCircle size={17} className="flex-shrink-0 text-amber-500 mt-0.5" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-amber-800">Showing standard targets — inventory not yet reported</p>
+                    <p className="text-xs text-amber-600 mt-0.5">
+                      Quantities below are based on standard targets only. Once inventory reports come in,{' '}
+                      {viewMode === 'manager' ? 'click "Generate List" to calculate actual delivery quantities.' : 'ask a manager to generate the list.'}
+                    </p>
+                  </div>
+                </div>
+              )}
 
-            {/* Store lists */}
-            {STORES.map(store => (
-              <div key={store} className={activeStore === store ? 'block' : 'hidden'}>
-                <StoreDeliveryList
-                  store={store}
-                  lines={storeLines(store)}
-                  hasSubmission={storeHasSubmission(store)}
-                  isActive={activeStore === store}
-                  onPackedQtyBlur={handlePackedQtyBlur}
-                  forecast={getStoreForecast(store)}
-                  standard={getStoreStandard(store)}
-                  viewMode={viewMode}
-                  editingTargets={editingTargets}
-                  editingPackedQty={editingPackedQty}
-                  onTargetChange={handleTargetChange}
-                  onTargetBlur={handleTargetBlur}
-                  onPackedQtyChange={handlePackedQtyChange}
-                  packingStarted={packingStarted}
-                  isPreview={isPreview}
-                  storeInventory={liveInventory[store] ?? {}}
-                />
+              {/* Store tabs */}
+              <div className="flex gap-1 mb-5 bg-gray-100 rounded-xl p-1 w-fit">
+                {STORES.map(store => {
+                  const { full, total, complete } = storePackStats(store);
+                  const isActive = activeStore === store;
+                  const isPacker = viewMode === 'packer';
+                  return (
+                    <button key={store} onClick={() => setActiveStore(store)}
+                      className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 ${isActive ? 'bg-white text-[#1B5E20] shadow-sm font-semibold' : 'text-gray-500 hover:text-gray-700'}`}
+                    >
+                      {store}
+                      {isPacker && packingStarted ? (
+                        complete
+                          ? <CheckCircle2 size={14} className="text-[#1B5E20]" />
+                          : <span className={`text-xs rounded-full px-1.5 py-0.5 font-bold leading-none ${isActive ? 'bg-[#1B5E20] text-white' : 'bg-gray-300 text-gray-600'}`}>{full}/{total}</span>
+                      ) : (
+                        total > 0 && <span className={`text-xs rounded-full px-1.5 py-0.5 font-bold leading-none ${isActive ? 'bg-[#1B5E20] text-white' : 'bg-gray-300 text-gray-600'}`}>{total}</span>
+                      )}
+                    </button>
+                  );
+                })}
               </div>
-            ))}
-          </>
+
+              {/* Store lists */}
+              {STORES.map(store => (
+                <div key={store} className={activeStore === store ? 'block' : 'hidden'}>
+                  <StoreDeliveryList
+                    store={store}
+                    lines={storeLines(store)}
+                    hasSubmission={storeHasSubmission(store)}
+                    isActive={activeStore === store}
+                    onPackedQtyBlur={handlePackedQtyBlur}
+                    forecast={getStoreForecast(store)}
+                    standard={getStoreStandard(store)}
+                    viewMode={viewMode as 'packer' | 'manager'}
+                    editingTargets={editingTargets}
+                    editingPackedQty={editingPackedQty}
+                    onTargetChange={handleTargetChange}
+                    onTargetBlur={handleTargetBlur}
+                    onPackedQtyChange={handlePackedQtyChange}
+                    packingStarted={packingStarted}
+                    isPreview={isPreview}
+                    storeInventory={liveInventory[store] ?? {}}
+                  />
+                </div>
+              ))}
+            </>
+          )
         )}
       </div>
     </>
