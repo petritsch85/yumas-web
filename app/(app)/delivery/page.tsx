@@ -747,7 +747,7 @@ export default function DeliveryPage() {
           <div>
             <div className="flex items-center gap-2 mb-1">
               <Truck size={20} className="text-[#1B5E20]" />
-              <h1 className="text-2xl font-bold text-gray-900">Delivery</h1>
+              <h1 className="text-2xl font-bold text-gray-900">Packing</h1>
             </div>
             <p className="text-sm text-gray-500">
               Mon · Tue · Wed · Fri — departs ZK at 14:00
