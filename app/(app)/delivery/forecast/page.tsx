@@ -1,9 +1,9 @@
 'use client';
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
-import { TrendingUp, ChevronLeft, ChevronRight, Lock } from 'lucide-react';
+import { TrendingUp, ChevronLeft, ChevronRight, Lock, Save, CheckCircle2 } from 'lucide-react';
 
 /* ─── Types ─────────────────────────────────────────────────────────────── */
 type StoreDayStandard = {
@@ -25,20 +25,12 @@ type WeeklyForecast = {
 const STORES = ['Eschborn', 'Taunus', 'Westend'] as const;
 type Store = typeof STORES[number];
 
-// day-of-week index → short key used in standards table
-const DOW_TO_KEY: Record<number, string> = {
-  1: 'mon',
-  2: 'tue',
-  3: 'wed',
-  5: 'fri',
-};
-
-// Delivery days: Mon=1, Tue=2, Wed=3, Fri=5
+const DOW_TO_KEY: Record<number, string> = { 1: 'mon', 2: 'tue', 3: 'wed', 5: 'fri' };
 const DELIVERY_DOW = [1, 2, 3, 5];
 
 /* ─── Helpers ────────────────────────────────────────────────────────────── */
 function getMondayOfWeek(d: Date): Date {
-  const day = d.getDay(); // 0=Sun
+  const day = d.getDay();
   const diff = day === 0 ? -6 : 1 - day;
   const monday = new Date(d);
   monday.setDate(d.getDate() + diff);
@@ -68,107 +60,60 @@ function formatWeekHeader(monday: Date): string {
 }
 
 function isLockedNow(dateStr: string): boolean {
-  // Locked if today is the delivery date and current time >= 03:00
   const today = toDateString(new Date());
   if (dateStr !== today) return false;
-  const now = new Date();
-  return now.getHours() >= 3;
+  return new Date().getHours() >= 3;
 }
 
 function isPastDay(dateStr: string): boolean {
-  const today = toDateString(new Date());
-  return dateStr < today;
+  return dateStr < toDateString(new Date());
 }
 
 function scalingBadge(forecasted: number, standard: number) {
+  if (standard === 0) return null;
   const pct = Math.round((forecasted / standard) * 100);
   const diff = Math.abs(pct - 100);
-  if (diff <= 2) {
-    return <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 font-semibold">100%</span>;
-  }
-  if (pct > 100) {
-    return <span className="text-xs px-1.5 py-0.5 rounded bg-green-100 text-green-700 font-semibold">{pct}%</span>;
-  }
+  if (diff <= 2)   return <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 font-semibold">100%</span>;
+  if (pct > 100)   return <span className="text-xs px-1.5 py-0.5 rounded bg-green-100 text-green-700 font-semibold">{pct}%</span>;
   return <span className="text-xs px-1.5 py-0.5 rounded bg-red-100 text-red-600 font-semibold">{pct}%</span>;
 }
 
 /* ─── Forecast Cell ──────────────────────────────────────────────────────── */
 function ForecastCell({
-  store,
-  dateStr,
-  standard,
-  existing,
-  onSave,
+  standard, value, readOnly, onChange,
 }: {
-  store: Store;
-  dateStr: string;
   standard: number;
-  existing: number | null;
-  onSave: (store: Store, dateStr: string, value: number) => void;
+  value: string;
+  readOnly: boolean;
+  onChange: (v: string) => void;
 }) {
-  const locked = isLockedNow(dateStr);
-  const past = isPastDay(dateStr);
-  const readOnly = (locked || past);
-
-  const [draft, setDraft] = useState<string>('');
-  const [focused, setFocused] = useState(false);
-
-  const displayValue = existing !== null ? existing : '';
-
-  const handleFocus = () => {
-    setDraft(existing !== null ? String(existing) : '');
-    setFocused(true);
-  };
-
-  const handleBlur = () => {
-    setFocused(false);
-    const parsed = parseFloat(draft);
-    if (!isNaN(parsed) && parsed >= 0) {
-      onSave(store, dateStr, parsed);
-    }
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') {
-      (e.target as HTMLInputElement).blur();
-    }
-  };
-
-  const forecastedForBadge = existing !== null ? existing : standard;
+  const numVal = parseFloat(value);
+  const hasValue = !isNaN(numVal) && value !== '';
 
   return (
     <div className="flex flex-col gap-1 min-w-[130px]">
       <div className="relative">
-        <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 text-sm pointer-events-none">€</span>
+        <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 text-sm pointer-events-none select-none">€</span>
         <input
-          type="number"
-          min={0}
-          step={100}
+          type="text"
+          inputMode="numeric"
           disabled={readOnly}
-          value={focused ? draft : (displayValue === '' ? '' : displayValue)}
-          placeholder={readOnly ? '' : String(standard)}
-          onFocus={handleFocus}
-          onBlur={handleBlur}
-          onChange={e => setDraft(e.target.value)}
-          onKeyDown={handleKeyDown}
-          className={`w-full pl-7 pr-2 py-1.5 text-sm rounded-lg border text-right
+          value={value}
+          placeholder={standard > 0 ? String(standard) : '0'}
+          onChange={e => onChange(e.target.value)}
+          className={`w-full pl-7 pr-2 py-1.5 text-sm rounded-lg border text-right transition-colors
             ${readOnly
               ? 'bg-gray-50 border-gray-100 text-gray-400 cursor-not-allowed'
-              : 'bg-white border-gray-200 text-gray-800 focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20]/40'
+              : 'bg-white border-gray-200 text-gray-800 focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20]/50 hover:border-gray-300'
             }
           `}
         />
       </div>
-      <div className="text-xs text-gray-400">
-        Standard: €{standard.toLocaleString('en-GB')}
-      </div>
-      {existing !== null && (
-        <div>{scalingBadge(forecastedForBadge, standard)}</div>
+      {standard > 0 && (
+        <div className="text-xs text-gray-400">Standard: €{standard.toLocaleString('en-GB')}</div>
       )}
-      {locked && (
-        <div className="flex items-center gap-1 text-xs text-amber-600 font-semibold">
-          <Lock size={11} /> LOCKED
-        </div>
+      {hasValue && standard > 0 && (
+        <div>{scalingBadge(numVal, standard)}</div>
       )}
     </div>
   );
@@ -178,22 +123,24 @@ function ForecastCell({
 export default function ForecastPage() {
   const qc = useQueryClient();
   const [weekOffset, setWeekOffset] = useState(0);
+  const [localEdits, setLocalEdits] = useState<Record<string, string>>({});
+  const [savedFlash, setSavedFlash] = useState(false);
 
   const today = new Date();
   const baseMonday = getMondayOfWeek(today);
   const monday = addDays(baseMonday, weekOffset * 7);
 
-  // Build the 4 delivery day dates for this week
   const deliveryDates: { dateStr: string; dow: number; date: Date }[] = DELIVERY_DOW.map(dow => {
-    // Mon offset from monday: Mon=0, Tue=1, Wed=2, Thu=3, Fri=4
     const offset = dow === 5 ? 4 : dow - 1;
     const date = addDays(monday, offset);
     return { dateStr: toDateString(date), dow, date };
   });
-
   const weekDates = deliveryDates.map(d => d.dateStr);
 
-  /* ─ Load standards (once) ─ */
+  // Clear local edits when week changes
+  useEffect(() => { setLocalEdits({}); }, [weekOffset]);
+
+  /* ─ Load standards ─ */
   const { data: standards = [] } = useQuery<StoreDayStandard[]>({
     queryKey: ['store-day-standards'],
     queryFn: async () => {
@@ -204,7 +151,7 @@ export default function ForecastPage() {
     staleTime: Infinity,
   });
 
-  /* ─ Load forecasts for this week ─ */
+  /* ─ Load forecasts ─ */
   const { data: forecasts = [] } = useQuery<WeeklyForecast[]>({
     queryKey: ['weekly-forecasts', weekDates[0], weekDates[3]],
     queryFn: async () => {
@@ -218,20 +165,29 @@ export default function ForecastPage() {
     },
   });
 
-  /* ─ Upsert forecast ─ */
-  const upsertForecast = useMutation({
-    mutationFn: async ({ store, dateStr, value }: { store: Store; dateStr: string; value: number }) => {
+  /* ─ Save all edits at once ─ */
+  const saveForecasts = useMutation({
+    mutationFn: async () => {
+      const rows = Object.entries(localEdits)
+        .map(([key, val]) => {
+          const [store, dateStr] = key.split('__');
+          const parsed = parseFloat(val);
+          if (isNaN(parsed) || parsed < 0) return null;
+          return { location_name: store, forecast_date: dateStr, forecasted_sales_eur: parsed };
+        })
+        .filter(Boolean) as { location_name: string; forecast_date: string; forecasted_sales_eur: number }[];
+
+      if (rows.length === 0) return;
       const { error } = await supabase
         .from('weekly_sales_forecasts')
-        .upsert(
-          { location_name: store, forecast_date: dateStr, forecasted_sales_eur: value },
-          { onConflict: 'location_name,forecast_date' }
-        );
+        .upsert(rows, { onConflict: 'location_name,forecast_date' });
       if (error) throw error;
     },
     onSuccess: () => {
+      setLocalEdits({});
+      setSavedFlash(true);
+      setTimeout(() => setSavedFlash(false), 2500);
       qc.invalidateQueries({ queryKey: ['weekly-forecasts', weekDates[0], weekDates[3]] });
-      // also invalidate delivery page so it picks up new forecasts
       qc.invalidateQueries({ queryKey: ['delivery-run'] });
     },
   });
@@ -246,14 +202,22 @@ export default function ForecastPage() {
         .in('location_name', [...STORES]);
       if (error) throw error;
     },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['weekly-forecasts', weekDates[0], weekDates[3]] });
-    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['weekly-forecasts', weekDates[0], weekDates[3]] }),
   });
 
-  const handleSave = useCallback((store: Store, dateStr: string, value: number) => {
-    upsertForecast.mutate({ store, dateStr, value });
-  }, [upsertForecast]);
+  /* ─ Cell key helpers ─ */
+  const cellKey = (store: Store, dateStr: string) => `${store}__${dateStr}`;
+
+  const getCellValue = (store: Store, dateStr: string): string => {
+    const key = cellKey(store, dateStr);
+    if (localEdits[key] !== undefined) return localEdits[key];
+    const f = forecasts.find(f => f.location_name === store && f.forecast_date === dateStr);
+    return f ? String(f.forecasted_sales_eur) : '';
+  };
+
+  const handleCellChange = (store: Store, dateStr: string, value: string) => {
+    setLocalEdits(prev => ({ ...prev, [cellKey(store, dateStr)]: value }));
+  };
 
   /* ─ Lookup helpers ─ */
   function getStandard(store: Store, dow: number): number {
@@ -274,11 +238,18 @@ export default function ForecastPage() {
     });
   }
 
+  /* ─ Dirty check (any valid unsaved edits?) ─ */
+  const hasDirtyChanges = Object.entries(localEdits).some(([_, val]) => {
+    const parsed = parseFloat(val);
+    return !isNaN(parsed) && parsed >= 0;
+  });
+
   /* ─ Column totals ─ */
   function storeWeekTotal(store: Store): number | null {
-    const vals = deliveryDates.map(({ dateStr, dow }) => {
-      const f = getForecast(store, dateStr);
-      return f !== null ? f : null;
+    const vals = deliveryDates.map(({ dateStr }) => {
+      const val = getCellValue(store, dateStr);
+      const n = parseFloat(val);
+      return isNaN(n) ? null : n;
     });
     if (vals.every(v => v === null)) return null;
     return vals.reduce<number>((sum, v) => sum + (v ?? 0), 0);
@@ -299,14 +270,43 @@ export default function ForecastPage() {
             Set expected sales per store per delivery day — targets scale proportionally
           </p>
         </div>
+
+        {/* Save button */}
+        <div className="flex items-center gap-3">
+          {savedFlash && (
+            <span className="flex items-center gap-1.5 text-sm text-green-700 font-medium">
+              <CheckCircle2 size={15} className="text-green-500" /> Saved
+            </span>
+          )}
+          <button
+            onClick={() => saveForecasts.mutate()}
+            disabled={!hasDirtyChanges || saveForecasts.isPending}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors shadow-sm
+              ${hasDirtyChanges
+                ? 'bg-[#1B5E20] text-white hover:bg-[#2E7D32]'
+                : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+              }
+              disabled:opacity-60
+            `}
+          >
+            <Save size={15} />
+            {saveForecasts.isPending ? 'Saving…' : 'Save Forecasts'}
+          </button>
+        </div>
       </div>
+
+      {/* Unsaved changes notice */}
+      {hasDirtyChanges && (
+        <div className="mb-4 px-4 py-2.5 bg-amber-50 border border-amber-100 rounded-xl text-xs text-amber-700 font-medium">
+          You have unsaved changes — click "Save Forecasts" to apply them.
+        </div>
+      )}
 
       {/* Week navigation */}
       <div className="flex items-center gap-3 mb-5">
         <button
           onClick={() => setWeekOffset(o => o - 1)}
           className="p-2 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 text-gray-600 transition-colors shadow-sm"
-          title="Previous week"
         >
           <ChevronLeft size={16} />
         </button>
@@ -323,7 +323,6 @@ export default function ForecastPage() {
         <button
           onClick={() => setWeekOffset(o => o + 1)}
           className="p-2 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 text-gray-600 transition-colors shadow-sm"
-          title="Next week"
         >
           <ChevronRight size={16} />
         </button>
@@ -343,17 +342,13 @@ export default function ForecastPage() {
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b border-gray-100">
               <tr>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide w-[180px]">
-                  Day
-                </th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide w-[180px]">Day</th>
                 {STORES.map(store => (
                   <th key={store} className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wide">
                     {store}
                   </th>
                 ))}
-                <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wide w-[110px]">
-                  Actions
-                </th>
+                <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wide w-[110px]">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -373,12 +368,8 @@ export default function ForecastPage() {
                   >
                     {/* Day label */}
                     <td className="px-4 py-4 align-top">
-                      <div className="font-semibold text-gray-800 text-sm">
-                        {formatDayLabel(date)}
-                      </div>
-                      {isToday && (
-                        <span className="text-xs text-[#1B5E20] font-semibold">Today</span>
-                      )}
+                      <div className="font-semibold text-gray-800 text-sm">{formatDayLabel(date)}</div>
+                      {isToday && <span className="text-xs text-[#1B5E20] font-semibold">Today</span>}
                       {autoLocked && (
                         <div className="flex items-center gap-1 text-xs text-amber-600 mt-1">
                           <Lock size={11} />
@@ -388,17 +379,22 @@ export default function ForecastPage() {
                     </td>
 
                     {/* Store cells */}
-                    {STORES.map(store => (
-                      <td key={store} className="px-4 py-4 align-top">
-                        <ForecastCell
-                          store={store}
-                          dateStr={dateStr}
-                          standard={getStandard(store, dow)}
-                          existing={getForecast(store, dateStr)}
-                          onSave={handleSave}
-                        />
-                      </td>
-                    ))}
+                    {STORES.map(store => {
+                      const readOnly = autoLocked || past;
+                      const isDirty = localEdits[cellKey(store, dateStr)] !== undefined;
+                      return (
+                        <td key={store} className="px-4 py-4 align-top">
+                          <div className={isDirty ? 'ring-2 ring-amber-300/60 rounded-lg' : ''}>
+                            <ForecastCell
+                              standard={getStandard(store, dow)}
+                              value={getCellValue(store, dateStr)}
+                              readOnly={readOnly}
+                              onChange={v => handleCellChange(store, dateStr, v)}
+                            />
+                          </div>
+                        </td>
+                      );
+                    })}
 
                     {/* Lock day button */}
                     <td className="px-4 py-4 text-center align-top">
@@ -412,9 +408,9 @@ export default function ForecastPage() {
                               : 'bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100'
                           }`}
                         >
-                          {locked ? (
-                            <span className="flex items-center gap-1"><Lock size={11} /> Locked</span>
-                          ) : 'Lock Day'}
+                          {locked
+                            ? <span className="flex items-center gap-1"><Lock size={11} /> Locked</span>
+                            : 'Lock Day'}
                         </button>
                       )}
                     </td>
@@ -426,20 +422,15 @@ export default function ForecastPage() {
             {/* Totals row */}
             <tfoot>
               <tr className="border-t-2 border-gray-100 bg-gray-50">
-                <td className="px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                  Week total
-                </td>
+                <td className="px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Week total</td>
                 {STORES.map(store => {
                   const total = storeWeekTotal(store);
                   return (
                     <td key={store} className="px-4 py-3 text-center">
-                      {total !== null ? (
-                        <span className="font-bold text-gray-800">
-                          €{total.toLocaleString('en-GB')}
-                        </span>
-                      ) : (
-                        <span className="text-gray-300 text-xs">—</span>
-                      )}
+                      {total !== null
+                        ? <span className="font-bold text-gray-800">€{total.toLocaleString('en-GB')}</span>
+                        : <span className="text-gray-300 text-xs">—</span>
+                      }
                     </td>
                   );
                 })}
@@ -452,20 +443,11 @@ export default function ForecastPage() {
 
       {/* Legend */}
       <div className="mt-4 flex flex-wrap gap-4 text-xs text-gray-400">
-        <span>Targets auto-lock at 03:00 on delivery morning (force-edit still possible via Target Levels page)</span>
+        <span>Targets auto-lock at 03:00 on delivery morning</span>
         <span>·</span>
-        <span className="flex items-center gap-1">
-          <span className="inline-block w-2 h-2 rounded-full bg-green-400" />
-          Above standard
-        </span>
-        <span className="flex items-center gap-1">
-          <span className="inline-block w-2 h-2 rounded-full bg-red-400" />
-          Below standard
-        </span>
-        <span className="flex items-center gap-1">
-          <span className="inline-block w-2 h-2 rounded-full bg-gray-300" />
-          At standard (±2%)
-        </span>
+        <span className="flex items-center gap-1"><span className="inline-block w-2 h-2 rounded-full bg-green-400" />Above standard</span>
+        <span className="flex items-center gap-1"><span className="inline-block w-2 h-2 rounded-full bg-red-400" />Below standard</span>
+        <span className="flex items-center gap-1"><span className="inline-block w-2 h-2 rounded-full bg-gray-300" />At standard (±2%)</span>
       </div>
     </div>
   );
