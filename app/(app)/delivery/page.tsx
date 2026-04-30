@@ -1163,10 +1163,29 @@ export default function DeliveryPage() {
     setFinishingDelivery(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
+
+      // Capture inventory snapshot at time of delivery completion
+      const invResults = await Promise.all(
+        STORES.map(store =>
+          supabase.from('inventory_submissions')
+            .select('submitted_at')
+            .eq('location_name', store)
+            .order('submitted_at', { ascending: false })
+            .limit(1)
+            .maybeSingle()
+        )
+      );
+      const inventorySnapshot: Record<string, { submitted_at: string }> = {};
+      STORES.forEach((store, i) => {
+        const sub = invResults[i].data;
+        if (sub?.submitted_at) inventorySnapshot[store] = { submitted_at: sub.submitted_at };
+      });
+
       await supabase.from('delivery_runs').update({
         delivery_finished_at: new Date().toISOString(),
         delivery_finished_by: user?.id ?? null,
         status: 'completed',
+        delivery_snapshot: { inventories: inventorySnapshot, snapped_at: new Date().toISOString() },
       }).eq('id', run.id);
       qc.invalidateQueries({ queryKey: ['delivery-run', targetDate] });
     } finally {

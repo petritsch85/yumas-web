@@ -8,6 +8,11 @@ import {
 } from 'lucide-react';
 
 /* ─── Types ─────────────────────────────────────────────────────────────── */
+type DeliverySnapshot = {
+  inventories: Record<string, { submitted_at: string }>;
+  snapped_at: string;
+};
+
 type Run = {
   id: string;
   delivery_date: string;
@@ -18,6 +23,8 @@ type Run = {
   packed_by: string | null;
   delivery_started_at: string | null;
   delivery_started_by: string | null;
+  delivery_finished_at: string | null;
+  delivery_snapshot: DeliverySnapshot | null;
 };
 
 type DeliveryLine = {
@@ -260,9 +267,9 @@ export default function DeliveryReportsPage() {
     queryFn: async () => {
       const { data } = await supabase
         .from('delivery_runs')
-        .select('id, delivery_date, packing_started_at, packing_finished_at, packing_duration_seconds, items_packed_count, packed_by, delivery_started_at, delivery_started_by')
+        .select('id, delivery_date, packing_started_at, packing_finished_at, packing_duration_seconds, items_packed_count, packed_by, delivery_started_at, delivery_started_by, delivery_finished_at, delivery_snapshot')
         .order('delivery_date', { ascending: false })
-        .limit(14);
+        .limit(30);
       return (data ?? []) as Run[];
     },
   });
@@ -399,24 +406,48 @@ export default function DeliveryReportsPage() {
         <p className="text-sm text-gray-500 mt-0.5">Step-by-step log of each delivery run</p>
       </div>
 
-      {/* ── Run selector ── */}
-      {runs.length > 0 && (
-        <div className="flex flex-wrap gap-2 mb-6">
-          {runs.map(run => (
+      {/* ── Run selector — split Upcoming / Past ── */}
+      {runs.length > 0 && (() => {
+        const todayStr = new Date().toISOString().slice(0, 10);
+        const upcoming = runs.filter(r => r.delivery_date >= todayStr && !r.delivery_finished_at);
+        const past     = runs.filter(r => r.delivery_date < todayStr  ||  !!r.delivery_finished_at);
+
+        const Btn = ({ run: r }: { run: Run }) => {
+          const isActive = activeRun?.id === r.id;
+          const isPast = !!r.delivery_finished_at;
+          return (
             <button
-              key={run.id}
-              onClick={() => { setSelectedRunId(run.id); setLocalChecked({}); setLocalNotes({}); }}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
-                activeRun?.id === run.id
-                  ? 'bg-[#1B5E20] text-white border-[#1B5E20]'
-                  : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300'
+              key={r.id}
+              onClick={() => { setSelectedRunId(r.id); setLocalChecked({}); setLocalNotes({}); }}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors flex items-center gap-1.5 ${
+                isActive
+                  ? isPast ? 'bg-gray-700 text-white border-gray-700' : 'bg-[#1B5E20] text-white border-[#1B5E20]'
+                  : isPast ? 'bg-white text-gray-500 border-gray-200 hover:border-gray-400' : 'bg-white text-[#1B5E20] border-[#1B5E20]/30 hover:border-[#1B5E20]'
               }`}
             >
-              {fmtDate(run.delivery_date)}
+              {fmtDate(r.delivery_date)}
+              {isPast && <span className="opacity-60">✓</span>}
             </button>
-          ))}
-        </div>
-      )}
+          );
+        };
+
+        return (
+          <div className="mb-6 space-y-3">
+            {upcoming.length > 0 && (
+              <div>
+                <p className="text-xs font-semibold text-[#1B5E20] uppercase tracking-wider mb-2">Upcoming</p>
+                <div className="flex flex-wrap gap-2">{upcoming.map(r => <Btn key={r.id} run={r} />)}</div>
+              </div>
+            )}
+            {past.length > 0 && (
+              <div>
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Past — snapshot</p>
+                <div className="flex flex-wrap gap-2">{past.map(r => <Btn key={r.id} run={r} />)}</div>
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* ── Empty state ── */}
       {!activeRun && (
@@ -426,18 +457,28 @@ export default function DeliveryReportsPage() {
         </div>
       )}
 
-      {/* ── Inventories Received — always shown, relative to next delivery ── */}
+      {/* ── Inventories row ── */}
+      {/* For past runs: use snapshot. For upcoming/no selection: use live data. */}
       {(() => {
-            const cutoff = deliveryCutoff(nextDeliveryDate);
-            const allGreen = STORES.every(s => inventoryFreshness(invSubFor(s)?.submitted_at ?? null, nextDeliveryDate) === 'green');
-            const anyRed   = STORES.some(s  => inventoryFreshness(invSubFor(s)?.submitted_at ?? null, nextDeliveryDate) === 'red');
+            const snapshot = activeRun?.delivery_snapshot ?? null;
+            const isPastRun = !!activeRun?.delivery_finished_at;
+            // Which date to evaluate freshness against
+            const evalDate = isPastRun && activeRun ? activeRun.delivery_date : nextDeliveryDate;
+            const cutoff = deliveryCutoff(evalDate);
+
+            // Resolve inventory timestamp per store
+            const getSubmittedAt = (store: Store): string | null => {
+              if (isPastRun && snapshot) return snapshot.inventories[store]?.submitted_at ?? null;
+              return invSubFor(store)?.submitted_at ?? null;
+            };
+
+            const allGreen = STORES.every(s => inventoryFreshness(getSubmittedAt(s), evalDate) === 'green');
+            const anyRed   = STORES.some(s  => inventoryFreshness(getSubmittedAt(s), evalDate) === 'red');
             const accent   = allGreen ? 'green' : anyRed ? 'amber' : 'amber';
 
-            const statusNode = allGreen
-              ? <GreenBadge label="All on time" />
-              : anyRed
-              ? <AmberBadge label="Some missing / late" />
-              : <AmberBadge label="Some late" />;
+            const statusNode = isPastRun
+              ? (allGreen ? <GreenBadge label="All on time" /> : anyRed ? <AmberBadge label="Some missing / late" /> : <AmberBadge label="Some late" />)
+              : (allGreen ? <GreenBadge label="All on time" /> : anyRed ? <AmberBadge label="Some missing / late" /> : <AmberBadge label="Some late" />);
 
             return (
               <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
@@ -450,14 +491,17 @@ export default function DeliveryReportsPage() {
                   <div className="w-36 flex-shrink-0">
                     <p className="text-sm font-semibold text-gray-900">Inventories</p>
                     <p className="text-xs text-gray-400 truncate">
-                      {cutoff.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })} · cutoff {cutoff.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}
+                      {isPastRun
+                        ? <>snapshot · {cutoff.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}</>
+                        : <>{cutoff.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })} · cutoff {cutoff.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}</>
+                      }
                     </p>
                   </div>
                   {/* Store ticks */}
                   <div className="flex items-center gap-4 flex-1 min-w-0 flex-wrap">
                     {STORES.map(store => {
-                      const sub = invSubFor(store);
-                      const freshness = inventoryFreshness(sub?.submitted_at ?? null, nextDeliveryDate);
+                      const submittedAt = getSubmittedAt(store);
+                      const freshness = inventoryFreshness(submittedAt, evalDate);
                       const tickColor = freshness === 'green'
                         ? 'text-green-600 bg-green-50 border-green-200'
                         : freshness === 'amber'
@@ -473,8 +517,8 @@ export default function DeliveryReportsPage() {
                           <div className="flex items-center gap-1 text-xs font-semibold">
                             {icon} {store}
                           </div>
-                          {sub
-                            ? <span className="text-xs opacity-70 font-mono">{fmtDateTime(sub.submitted_at)}</span>
+                          {submittedAt
+                            ? <span className="text-xs opacity-70 font-mono">{fmtDateTime(submittedAt)}</span>
                             : <span className="text-xs opacity-50">No submission</span>
                           }
                         </div>
@@ -491,6 +535,20 @@ export default function DeliveryReportsPage() {
       {/* ── Step rows (historical run) ── */}
       {activeRun && (
         <div className="space-y-3 mt-3">
+
+          {/* Snapshot notice for past runs */}
+          {activeRun.delivery_finished_at && (
+            <div className="flex items-center gap-2 px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-xs text-gray-500">
+              <CheckCircle2 size={13} className="text-gray-400 flex-shrink-0" />
+              <span>
+                Delivery completed — this is a <strong>saved snapshot</strong> from {fmtDateTime(activeRun.delivery_finished_at)}.
+                {activeRun.delivery_snapshot
+                  ? ` Inventory data captured at finish.`
+                  : ` Inventory snapshot not available (delivery finished before this feature was added).`
+                }
+              </span>
+            </div>
+          )}
 
           {/* ── Row 2: Packing ── */}
           {(() => {
