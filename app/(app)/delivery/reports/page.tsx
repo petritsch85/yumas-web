@@ -322,15 +322,21 @@ export default function DeliveryReportsPage() {
     staleTime: Infinity,
   });
 
-  /* ── Next upcoming delivery date (always relative to now) ── */
-  const nextDeliveryDate = useMemo(() => getNextDeliveryDate(), []);
+  /* ── Next upcoming run (earliest unfinished run on or after today) ── */
+  const nextUpcomingRun = useMemo<Run | null>(() => {
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const upcoming = runs.filter(r => !r.delivery_finished_at && r.delivery_date >= todayStr);
+    if (!upcoming.length) return null;
+    return upcoming.reduce((min, r) => r.delivery_date < min.delivery_date ? r : min);
+  }, [runs]);
 
-  /* ── Inventory submissions — always relative to next upcoming delivery ── */
+  /* ── Inventory submissions — relative to next upcoming run's date ── */
+  const invSubsDate = nextUpcomingRun?.delivery_date ?? getNextDeliveryDate();
   const { data: invSubs = [] } = useQuery<InventorySub[]>({
-    queryKey: ['dr-inv-subs', nextDeliveryDate],
+    queryKey: ['dr-inv-subs', invSubsDate],
     queryFn: async () => {
-      // Latest submission per store submitted BEFORE the next cutoff
-      const cutoffIso = deliveryCutoff(nextDeliveryDate).toISOString();
+      // Latest submission per store submitted BEFORE the cutoff of next upcoming run
+      const cutoffIso = deliveryCutoff(invSubsDate).toISOString();
       const results = await Promise.all(
         STORES.map(store =>
           supabase
@@ -347,6 +353,7 @@ export default function DeliveryReportsPage() {
         .map(r => r.data)
         .filter(Boolean) as InventorySub[];
     },
+    enabled: !!invSubsDate,
   });
 
   const invSubFor = (store: Store) => invSubs.find(s => s.location_name === store) ?? null;
@@ -374,11 +381,6 @@ export default function DeliveryReportsPage() {
   const totalLines = lines.length;
   const packedCount = activeRun?.items_packed_count ?? null;
   const missingPacked = (packedCount !== null && totalLines > 0) ? Math.max(0, totalLines - packedCount) : 0;
-
-  const lastReceiptAt = receipts.length > 0
-    ? receipts.reduce((latest, r) => r.received_at > latest ? r.received_at : latest, receipts[0].received_at)
-    : null;
-  const storesReceived = STORES.filter(s => receipts.some(r => r.location_name === s)).length;
 
   const receiptFor = (store: Store) => receipts.find(r => r.location_name === store) ?? null;
   const linesFor = (store: Store) => lines.filter(l => l.location_name === store);
@@ -460,12 +462,12 @@ export default function DeliveryReportsPage() {
       )}
 
       {/* ── Inventories row ── */}
-      {/* Shown only for: (a) past runs using snapshot, (b) the next upcoming delivery */}
-      {(!!activeRun?.delivery_finished_at || activeRun?.delivery_date === nextDeliveryDate) && (() => {
-            const snapshot = activeRun?.delivery_snapshot ?? null;
-            const isPastRun = !!activeRun?.delivery_finished_at;
-            // Which date to evaluate freshness against
-            const evalDate = isPastRun && activeRun ? activeRun.delivery_date : nextDeliveryDate;
+      {/* Shown for: (a) all past runs (snapshot), (b) the earliest upcoming run (live) */}
+      {activeRun && (!!activeRun.delivery_finished_at || activeRun.id === nextUpcomingRun?.id) && (() => {
+            const snapshot = activeRun.delivery_snapshot ?? null;
+            const isPastRun = !!activeRun.delivery_finished_at;
+            // Always evaluate freshness against the actual delivery date of the active run
+            const evalDate = activeRun.delivery_date;
             const cutoff = deliveryCutoff(evalDate);
 
             // Resolve inventory timestamp per store
