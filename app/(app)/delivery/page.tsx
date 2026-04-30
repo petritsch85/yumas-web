@@ -326,7 +326,7 @@ function StoreDeliveryList({
                   <th className="px-3 md:px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wide">
                     Current Inventory
                     {storeTimestamp && (
-                      <div className="text-gray-300 font-normal normal-case tracking-normal mt-0.5" style={{ fontSize: '10px' }}>
+                      <div className="text-gray-400 font-medium normal-case tracking-normal mt-0.5 text-xs">
                         {new Date(storeTimestamp).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
                       </div>
                     )}
