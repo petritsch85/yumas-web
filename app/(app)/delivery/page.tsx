@@ -240,7 +240,7 @@ function StoreDeliveryList({
   store, lines, hasSubmission, isActive, onPackedQtyBlur,
   forecast, standard, viewMode, editingTargets, editingPackedQty,
   onTargetChange, onTargetBlur, onPackedQtyChange, packingStarted, isPreview,
-  storeInventory,
+  storeInventory, storeTimestamp,
 }: {
   store: Store;
   lines: DeliveryLine[];
@@ -258,6 +258,7 @@ function StoreDeliveryList({
   packingStarted: boolean;
   isPreview: boolean;
   storeInventory: Record<string, number>; // item_name_lower → qty, always live
+  storeTimestamp?: string; // ISO timestamp of latest inventory submission
 }) {
   if (!hasSubmission) {
     return (
@@ -322,7 +323,14 @@ function StoreDeliveryList({
                   : <th className="hidden sm:table-cell px-3 md:px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Unit</th>
                 }
                 {isManager && <>
-                  <th className="px-3 md:px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wide">Current Inventory</th>
+                  <th className="px-3 md:px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                    Current Inventory
+                    {storeTimestamp && (
+                      <div className="text-gray-300 font-normal normal-case tracking-normal mt-0.5" style={{ fontSize: '10px' }}>
+                        {new Date(storeTimestamp).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                      </div>
+                    )}
+                  </th>
                   <th className="px-3 md:px-4 py-3 text-center text-xs font-semibold text-gray-400 uppercase tracking-wide">Std Target</th>
                   <th className="px-3 md:px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wide">Target Today</th>
                 </>}
@@ -807,7 +815,7 @@ export default function DeliveryPage() {
       const invResults = await Promise.all(
         STORES.map(store =>
           supabase.from('inventory_submissions')
-            .select('data')
+            .select('data, submitted_at')
             .eq('location_name', store)
             .order('submitted_at', { ascending: false })
             .limit(1)
@@ -816,6 +824,7 @@ export default function DeliveryPage() {
       );
       // Build map: store → { item_name_lower → quantity }
       const liveInventory: Partial<Record<Store, Record<string, number>>> = {};
+      const liveInventoryTimestamps: Partial<Record<Store, string>> = {};
       STORES.forEach((store, i) => {
         const sub = invResults[i].data;
         if (sub?.data) {
@@ -824,6 +833,7 @@ export default function DeliveryPage() {
             map[item.name.trim().toLowerCase()] = Number(item.quantity) || 0;
           }
           liveInventory[store] = map;
+          if ((sub as any).submitted_at) liveInventoryTimestamps[store] = (sub as any).submitted_at;
         }
       });
 
@@ -837,13 +847,13 @@ export default function DeliveryPage() {
           .from('delivery_run_lines').select('*').eq('run_id', run.id)
           .order('location_name').order('section').order('item_name');
         if (linesErr) throw linesErr;
-        return { run: run as DeliveryRun, lines: (lines ?? []) as DeliveryLine[], isPreview: false, liveInventory };
+        return { run: run as DeliveryRun, lines: (lines ?? []) as DeliveryLine[], isPreview: false, liveInventory, liveInventoryTimestamps };
       }
 
       // No run yet — build a preview from delivery_targets (reported = 0)
       const dow = new Date(targetDate + 'T12:00:00').getDay();
       const dKey = DAY_KEY_MAP[dow] as DayKey | undefined;
-      if (!dKey) return { run: null, lines: [] as DeliveryLine[], isPreview: true, liveInventory };
+      if (!dKey) return { run: null, lines: [] as DeliveryLine[], isPreview: true, liveInventory, liveInventoryTimestamps };
 
       const allTargetsResults = await Promise.all(
         STORES.map(store =>
@@ -874,7 +884,7 @@ export default function DeliveryPage() {
         }
       });
 
-      return { run: null, lines: previewLines, isPreview: true, liveInventory };
+      return { run: null, lines: previewLines, isPreview: true, liveInventory, liveInventoryTimestamps };
     },
   });
 
@@ -1169,6 +1179,7 @@ export default function DeliveryPage() {
   const lines = runData?.lines ?? [];
   const isPreview = runData?.isPreview ?? false;
   const liveInventory = runData?.liveInventory ?? {};
+  const liveInventoryTimestamps = runData?.liveInventoryTimestamps ?? {};
 
   /* ─ Receipt status (for driver live view) ─ */
   const { data: receiptStatus = {} } = useQuery<Partial<Record<Store, boolean>>>({
@@ -1662,6 +1673,7 @@ export default function DeliveryPage() {
                     packingStarted={packingStarted}
                     isPreview={isPreview}
                     storeInventory={liveInventory[store] ?? {}}
+                    storeTimestamp={liveInventoryTimestamps[store]}
                   />
                 </div>
               ))}
