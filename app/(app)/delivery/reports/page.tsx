@@ -550,18 +550,37 @@ export default function DeliveryReportsPage() {
             </div>
           )}
 
-          {/* ── Row 2: Packing ── */}
+          {/* ── Row 2: Packing Started ── */}
+          {(() => {
+            const started = !!activeRun.packing_started_at;
+            const byName = activeRun.packed_by ? (profileMap[activeRun.packed_by] ?? '—') : undefined;
+            const accent = started ? 'green' : 'gray';
+            const statusNode = started
+              ? <GreenBadge label="Started" />
+              : <GrayBadge label="Not started" />;
+
+            return (
+              <StepRow
+                step={2}
+                accent={accent}
+                title="Packing Started"
+                meta={byName}
+                timeLeft={fmt(activeRun.packing_started_at)}
+                status={statusNode}
+              >
+                {null}
+              </StepRow>
+            );
+          })()}
+
+          {/* ── Row 3: Packing Finished ── */}
           {(() => {
             const done = !!activeRun.packing_finished_at;
-            const started = !!activeRun.packing_started_at;
             const duration = fmtDuration(activeRun.packing_duration_seconds);
-            const byName = activeRun.packed_by ? (profileMap[activeRun.packed_by] ?? '—') : undefined;
-            const accent = !started ? 'gray' : missingPacked > 0 ? 'amber' : done ? 'green' : 'amber';
+            const accent = !done ? 'gray' : missingPacked > 0 ? 'amber' : 'green';
 
             let statusNode: React.ReactNode;
-            if (!started) {
-              statusNode = <GrayBadge label="Not started" />;
-            } else if (!done) {
+            if (!done) {
               statusNode = <GrayBadge label="In progress" />;
             } else if (missingPacked > 0) {
               statusNode = <AmberBadge label={`${missingPacked} missing`} />;
@@ -571,12 +590,10 @@ export default function DeliveryReportsPage() {
 
             return (
               <StepRow
-                step={2}
+                step={3}
                 accent={accent as 'green' | 'amber' | 'gray'}
-                title="Packing"
-                meta={byName}
-                timeLeft={fmt(activeRun.packing_started_at)}
-                timeRight={done ? fmt(activeRun.packing_finished_at) : undefined}
+                title="Packing Finished"
+                timeLeft={done ? fmt(activeRun.packing_finished_at) : undefined}
                 timeMid={done && duration ? `· ${duration}` : undefined}
                 status={statusNode}
               >
@@ -585,7 +602,7 @@ export default function DeliveryReportsPage() {
             );
           })()}
 
-          {/* ── Row 3: Delivery Started ── */}
+          {/* ── Row 4: Delivery Started ── */}
           {(() => {
             const started = !!activeRun.delivery_started_at;
             const byName = activeRun.delivery_started_by ? (profileMap[activeRun.delivery_started_by] ?? '—') : undefined;
@@ -596,7 +613,7 @@ export default function DeliveryReportsPage() {
 
             return (
               <StepRow
-                step={3}
+                step={4}
                 accent={accent}
                 title="Delivery Started"
                 meta={byName}
@@ -645,7 +662,7 @@ export default function DeliveryReportsPage() {
             return (
               <StepRow
                 key={store}
-                step={i + 4}
+                step={i + 5}
                 accent={accent}
                 title={store}
                 meta={receipt?.received_by ? profileMap[receipt.received_by] : undefined}
@@ -785,7 +802,7 @@ export default function DeliveryReportsPage() {
 
             return (
               <StepRow
-                step={7}
+                step={8}
                 accent={accent}
                 title="Delivery Finished"
                 timeLeft={fmt(activeRun.delivery_finished_at)}
