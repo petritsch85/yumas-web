@@ -322,21 +322,13 @@ export default function DeliveryReportsPage() {
     staleTime: Infinity,
   });
 
-  /* ── Next upcoming run (earliest unfinished run on or after today) ── */
-  const nextUpcomingRun = useMemo<Run | null>(() => {
-    const todayStr = new Date().toISOString().slice(0, 10);
-    const upcoming = runs.filter(r => !r.delivery_finished_at && r.delivery_date >= todayStr);
-    if (!upcoming.length) return null;
-    return upcoming.reduce((min, r) => r.delivery_date < min.delivery_date ? r : min);
-  }, [runs]);
-
-  /* ── Inventory submissions — relative to next upcoming run's date ── */
-  const invSubsDate = nextUpcomingRun?.delivery_date ?? getNextDeliveryDate();
+  /* ── Inventory submissions — relative to active run's date (upcoming) or next delivery (fallback) ── */
+  const invSubsDate = activeRun?.delivery_finished_at ? null : (activeRun?.delivery_date ?? getNextDeliveryDate());
   const { data: invSubs = [] } = useQuery<InventorySub[]>({
     queryKey: ['dr-inv-subs', invSubsDate],
     queryFn: async () => {
-      // Latest submission per store submitted BEFORE the cutoff of next upcoming run
-      const cutoffIso = deliveryCutoff(invSubsDate).toISOString();
+      // Latest submission per store submitted BEFORE the cutoff of this run
+      const cutoffIso = deliveryCutoff(invSubsDate!).toISOString();
       const results = await Promise.all(
         STORES.map(store =>
           supabase
@@ -354,6 +346,7 @@ export default function DeliveryReportsPage() {
         .filter(Boolean) as InventorySub[];
     },
     enabled: !!invSubsDate,
+    staleTime: 60_000,
   });
 
   const invSubFor = (store: Store) => invSubs.find(s => s.location_name === store) ?? null;
@@ -462,8 +455,8 @@ export default function DeliveryReportsPage() {
       )}
 
       {/* ── Inventories row ── */}
-      {/* Shown for: (a) all past runs (snapshot), (b) the earliest upcoming run (live) */}
-      {activeRun && (!!activeRun.delivery_finished_at || activeRun.id === nextUpcomingRun?.id) && (() => {
+      {/* Always shown: past runs use snapshot, upcoming runs use live data */}
+      {activeRun && (() => {
             const snapshot = activeRun.delivery_snapshot ?? null;
             const isPastRun = !!activeRun.delivery_finished_at;
             // Always evaluate freshness against the actual delivery date of the active run
