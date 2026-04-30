@@ -458,8 +458,8 @@ export default function DeliveryReportsPage() {
       )}
 
       {/* ── Inventories row ── */}
-      {/* For past runs: use snapshot. For upcoming/no selection: use live data. */}
-      {(() => {
+      {/* Shown only for: (a) past runs using snapshot, (b) the next upcoming delivery */}
+      {(!!activeRun?.delivery_finished_at || activeRun?.delivery_date === nextDeliveryDate) && (() => {
             const snapshot = activeRun?.delivery_snapshot ?? null;
             const isPastRun = !!activeRun?.delivery_finished_at;
             // Which date to evaluate freshness against
