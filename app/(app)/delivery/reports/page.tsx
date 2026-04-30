@@ -41,6 +41,11 @@ type Receipt = {
 
 type ProfileMap = Record<string, string>;
 
+type InventorySub = {
+  location_name: string;
+  submitted_at: string;
+};
+
 /* ─── Constants ──────────────────────────────────────────────────────────── */
 const STORES = ['Eschborn', 'Taunus', 'Westend'] as const;
 type Store = (typeof STORES)[number];
@@ -64,6 +69,27 @@ function fmtDuration(seconds: number | null): string {
   if (m === 0) return `${s}s`;
   if (s === 0) return `${m} min`;
   return `${m}m ${s}s`;
+}
+
+/** Returns the delivery cutoff (14:00 on delivery_date) as a Date */
+function deliveryCutoff(deliveryDate: string): Date {
+  return new Date(deliveryDate + 'T14:00:00');
+}
+
+/** 'green' = within 24 h, 'amber' = within 48 h, 'red' = older / missing */
+function inventoryFreshness(submittedAt: string | null, deliveryDate: string): 'green' | 'amber' | 'red' {
+  if (!submittedAt) return 'red';
+  const cutoff = deliveryCutoff(deliveryDate).getTime();
+  const diff = cutoff - new Date(submittedAt).getTime();   // ms before cutoff
+  if (diff <= 24 * 3600 * 1000) return 'green';
+  if (diff <= 48 * 3600 * 1000) return 'amber';
+  return 'red';
+}
+
+function fmtDateTime(iso: string): string {
+  return new Date(iso).toLocaleString('de-DE', {
+    day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit',
+  });
 }
 
 /* ─── Step row shell ─────────────────────────────────────────────────────── */
@@ -250,6 +276,31 @@ export default function DeliveryReportsPage() {
     staleTime: Infinity,
   });
 
+  /* ── Inventory submissions (latest per store before cutoff) ── */
+  const { data: invSubs = [] } = useQuery<InventorySub[]>({
+    queryKey: ['dr-inv-subs', activeRun?.delivery_date],
+    enabled: !!activeRun,
+    queryFn: async () => {
+      // Fetch the latest submission per store; we'll pick newest for each
+      const results = await Promise.all(
+        STORES.map(store =>
+          supabase
+            .from('inventory_submissions')
+            .select('location_name, submitted_at')
+            .eq('location_name', store)
+            .order('submitted_at', { ascending: false })
+            .limit(1)
+            .maybeSingle()
+        )
+      );
+      return results
+        .map(r => r.data)
+        .filter(Boolean) as InventorySub[];
+    },
+  });
+
+  const invSubFor = (store: Store) => invSubs.find(s => s.location_name === store) ?? null;
+
   /* ── Submit receipt ── */
   const submitReceipt = useMutation({
     mutationFn: async ({ locationName, count, notes }: { locationName: string; count: number; notes: string }) => {
@@ -338,7 +389,67 @@ export default function DeliveryReportsPage() {
       {activeRun && (
         <div className="space-y-3">
 
-          {/* ── Row 1: Packing ── */}
+          {/* ── Row 0: Inventories Received ── */}
+          {(() => {
+            const cutoff = deliveryCutoff(activeRun.delivery_date);
+            const allGreen = STORES.every(s => inventoryFreshness(invSubFor(s)?.submitted_at ?? null, activeRun.delivery_date) === 'green');
+            const anyRed   = STORES.some(s  => inventoryFreshness(invSubFor(s)?.submitted_at ?? null, activeRun.delivery_date) === 'red');
+            const accent   = allGreen ? 'green' : anyRed ? 'amber' : 'amber';
+
+            const statusNode = allGreen
+              ? <GreenBadge label="All on time" />
+              : anyRed
+              ? <AmberBadge label="Some missing / late" />
+              : <AmberBadge label="Some late" />;
+
+            return (
+              <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+                <div className="flex items-center gap-4 px-5 py-4">
+                  {/* Step number */}
+                  <div className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 ${accent === 'green' ? 'bg-[#1B5E20]' : 'bg-amber-500'}`}>
+                    <span className="text-white text-xs font-bold">1</span>
+                  </div>
+                  {/* Title */}
+                  <div className="w-28 flex-shrink-0">
+                    <p className="text-sm font-semibold text-gray-900">Inventories</p>
+                    <p className="text-xs text-gray-400 truncate">cutoff {cutoff.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}</p>
+                  </div>
+                  {/* Store ticks */}
+                  <div className="flex items-center gap-4 flex-1 min-w-0 flex-wrap">
+                    {STORES.map(store => {
+                      const sub = invSubFor(store);
+                      const freshness = inventoryFreshness(sub?.submitted_at ?? null, activeRun.delivery_date);
+                      const tickColor = freshness === 'green'
+                        ? 'text-green-600 bg-green-50 border-green-200'
+                        : freshness === 'amber'
+                        ? 'text-amber-600 bg-amber-50 border-amber-200'
+                        : 'text-gray-400 bg-gray-50 border-gray-200';
+                      const icon = freshness === 'green'
+                        ? <CheckCircle2 size={13} />
+                        : freshness === 'amber'
+                        ? <AlertTriangle size={13} />
+                        : <Clock size={13} />;
+                      return (
+                        <div key={store} className={`inline-flex flex-col items-center gap-0.5 border rounded-lg px-2.5 py-1.5 ${tickColor}`}>
+                          <div className="flex items-center gap-1 text-xs font-semibold">
+                            {icon} {store}
+                          </div>
+                          {sub
+                            ? <span className="text-xs opacity-70 font-mono">{fmtDateTime(sub.submitted_at)}</span>
+                            : <span className="text-xs opacity-50">No submission</span>
+                          }
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {/* Status */}
+                  <div className="flex-shrink-0 ml-auto">{statusNode}</div>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* ── Row 2: Packing (was 1) ── */}
           {(() => {
             const done = !!activeRun.packing_finished_at;
             const started = !!activeRun.packing_started_at;
@@ -359,7 +470,7 @@ export default function DeliveryReportsPage() {
 
             return (
               <StepRow
-                step={1}
+                step={2}
                 accent={accent as 'green' | 'amber' | 'gray'}
                 title="Packing"
                 meta={byName}
@@ -394,7 +505,7 @@ export default function DeliveryReportsPage() {
 
             return (
               <StepRow
-                step={2}
+                step={3}
                 accent={accent as 'green' | 'blue' | 'gray'}
                 title="Delivery"
                 meta={byName}
@@ -444,7 +555,7 @@ export default function DeliveryReportsPage() {
             return (
               <StepRow
                 key={store}
-                step={i + 3}
+                step={i + 4}
                 accent={accent}
                 title={store}
                 meta={receipt?.received_by ? profileMap[receipt.received_by] : undefined}
