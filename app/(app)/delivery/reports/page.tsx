@@ -25,6 +25,8 @@ type Run = {
   delivery_started_by: string | null;
   delivery_finished_at: string | null;
   delivery_snapshot: DeliverySnapshot | null;
+  lists_checked_at: string | null;
+  lists_checked_by: string | null;
 };
 
 type DeliveryLine = {
@@ -267,7 +269,7 @@ export default function DeliveryReportsPage() {
     queryFn: async () => {
       const { data } = await supabase
         .from('delivery_runs')
-        .select('id, delivery_date, packing_started_at, packing_finished_at, packing_duration_seconds, items_packed_count, packed_by, delivery_started_at, delivery_started_by, delivery_finished_at, delivery_snapshot')
+        .select('id, delivery_date, packing_started_at, packing_finished_at, packing_duration_seconds, items_packed_count, packed_by, delivery_started_at, delivery_started_by, delivery_finished_at, delivery_snapshot, lists_checked_at, lists_checked_by')
         .order('delivery_date', { ascending: false })
         .limit(30);
       return (data ?? []) as Run[];
@@ -550,7 +552,30 @@ export default function DeliveryReportsPage() {
             </div>
           )}
 
-          {/* ── Row 2: Packing Started ── */}
+          {/* ── Row 2: Delivery Lists Checked ── */}
+          {(() => {
+            const checked = !!activeRun.lists_checked_at;
+            const byName = activeRun.lists_checked_by ? (profileMap[activeRun.lists_checked_by] ?? '—') : undefined;
+            const accent = checked ? 'green' : 'gray';
+            const statusNode = checked
+              ? <GreenBadge label="Confirmed" />
+              : <GrayBadge label="Pending" />;
+
+            return (
+              <StepRow
+                step={2}
+                accent={accent}
+                title="Lists Checked"
+                meta={byName}
+                timeLeft={checked ? fmt(activeRun.lists_checked_at) : undefined}
+                status={statusNode}
+              >
+                {null}
+              </StepRow>
+            );
+          })()}
+
+          {/* ── Row 3: Packing Started ── */}
           {(() => {
             const started = !!activeRun.packing_started_at;
             const byName = activeRun.packed_by ? (profileMap[activeRun.packed_by] ?? '—') : undefined;
@@ -561,7 +586,7 @@ export default function DeliveryReportsPage() {
 
             return (
               <StepRow
-                step={2}
+                step={3}
                 accent={accent}
                 title="Packing Started"
                 meta={byName}
@@ -590,7 +615,7 @@ export default function DeliveryReportsPage() {
 
             return (
               <StepRow
-                step={3}
+                step={4}
                 accent={accent as 'green' | 'amber' | 'gray'}
                 title="Packing Finished"
                 timeLeft={done ? fmt(activeRun.packing_finished_at) : undefined}
@@ -613,7 +638,7 @@ export default function DeliveryReportsPage() {
 
             return (
               <StepRow
-                step={4}
+                step={5}
                 accent={accent}
                 title="Delivery Started"
                 meta={byName}
@@ -662,7 +687,7 @@ export default function DeliveryReportsPage() {
             return (
               <StepRow
                 key={store}
-                step={i + 5}
+                step={i + 6}
                 accent={accent}
                 title={store}
                 meta={receipt?.received_by ? profileMap[receipt.received_by] : undefined}
@@ -802,7 +827,7 @@ export default function DeliveryReportsPage() {
 
             return (
               <StepRow
-                step={8}
+                step={9}
                 accent={accent}
                 title="Delivery Finished"
                 timeLeft={fmt(activeRun.delivery_finished_at)}

@@ -43,6 +43,8 @@ type DeliveryRun = {
   delivery_started_by: string | null;
   delivery_finished_at: string | null;
   delivery_finished_by: string | null;
+  lists_checked_at: string | null;
+  lists_checked_by: string | null;
 };
 
 type StoreReceipt = {
@@ -802,6 +804,7 @@ export default function DeliveryPage() {
   const packingInterval = useRef<ReturnType<typeof setInterval> | null>(null);
   const [startingDelivery, setStartingDelivery] = useState(false);
   const [finishingDelivery, setFinishingDelivery] = useState(false);
+  const [confirmingList, setConfirmingList] = useState(false);
 
   useEffect(() => {
     return () => { if (packingInterval.current) clearInterval(packingInterval.current); };
@@ -1199,6 +1202,21 @@ export default function DeliveryPage() {
   const isPreview = runData?.isPreview ?? false;
   const liveInventory = runData?.liveInventory ?? {};
   const liveInventoryTimestamps = runData?.liveInventoryTimestamps ?? {};
+
+  const confirmList = async () => {
+    if (!run) return;
+    setConfirmingList(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      await supabase.from('delivery_runs').update({
+        lists_checked_at: new Date().toISOString(),
+        lists_checked_by: user?.id ?? null,
+      }).eq('id', run.id);
+      qc.invalidateQueries({ queryKey: ['delivery-run', targetDate] });
+    } finally {
+      setConfirmingList(false);
+    }
+  };
 
   /* ─ Receipt status (for driver live view) ─ */
   const { data: receiptStatus = {} } = useQuery<Partial<Record<Store, boolean>>>({
@@ -1647,6 +1665,41 @@ export default function DeliveryPage() {
                     </p>
                   </div>
                 </div>
+              )}
+
+              {/* ── Confirm packing list (manager only, run exists, not preview) ── */}
+              {viewMode === 'manager' && run && !isPreview && (
+                run.lists_checked_at ? (
+                  <div className="mb-4 flex items-center gap-3 px-4 py-3 bg-green-50 border border-green-200 rounded-xl">
+                    <CheckCircle2 size={16} className="text-green-600 flex-shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <span className="text-sm font-semibold text-green-800">Packing list confirmed</span>
+                      <span className="text-xs text-green-600 ml-2">
+                        {new Date(run.lists_checked_at).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    </div>
+                    <button
+                      onClick={confirmList}
+                      disabled={confirmingList}
+                      className="text-xs text-green-600 hover:text-green-800 underline whitespace-nowrap"
+                    >
+                      Re-confirm
+                    </button>
+                  </div>
+                ) : (
+                  <div className="mb-4 flex items-center gap-3 px-4 py-3 bg-white border border-gray-200 rounded-xl shadow-sm">
+                    <AlertCircle size={16} className="text-amber-500 flex-shrink-0" />
+                    <p className="text-sm text-gray-700 flex-1">Review the suggested packing quantities, then confirm the list is ready for packing.</p>
+                    <button
+                      onClick={confirmList}
+                      disabled={confirmingList}
+                      className="flex items-center gap-1.5 bg-[#1B5E20] text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-[#2E7D32] transition-colors disabled:opacity-60 whitespace-nowrap shadow-sm"
+                    >
+                      <CheckCircle2 size={14} />
+                      {confirmingList ? 'Confirming…' : 'Confirm List'}
+                    </button>
+                  </div>
+                )
               )}
 
               {/* Store tabs */}
