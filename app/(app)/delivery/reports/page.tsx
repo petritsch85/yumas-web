@@ -269,7 +269,7 @@ export default function DeliveryReportsPage() {
     queryFn: async () => {
       const { data } = await supabase
         .from('delivery_runs')
-        .select('id, delivery_date, packing_started_at, packing_finished_at, packing_duration_seconds, items_packed_count, packed_by, delivery_started_at, delivery_started_by, delivery_finished_at, delivery_snapshot, lists_checked_at, lists_checked_by')
+        .select('*')
         .order('delivery_date', { ascending: false })
         .limit(30);
       return (data ?? []) as Run[];
