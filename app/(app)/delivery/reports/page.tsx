@@ -207,18 +207,19 @@ function StepRow({
           <div className="flex-shrink-0" onClick={e => e.stopPropagation()}>
             {pendingReset ? (
               <div className="flex items-center gap-1.5">
+                <span className="text-xs text-gray-500 mr-0.5">Reset?</span>
                 <button
                   onClick={onReset}
                   disabled={resetting}
                   className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-red-500 text-white hover:bg-red-600 transition-colors disabled:opacity-50"
                 >
-                  {resetting ? '…' : 'Sure?'}
+                  {resetting ? '…' : 'Yes'}
                 </button>
                 <button
                   onClick={onResetClick}
-                  className="px-2 py-1 rounded-lg text-xs text-gray-400 hover:text-gray-600 transition-colors"
+                  className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors"
                 >
-                  ✕
+                  No
                 </button>
               </div>
             ) : (
