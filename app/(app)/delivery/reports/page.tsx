@@ -241,7 +241,7 @@ function StepRow({
           ) : (
             <button
               onClick={onResetClick}
-              className="px-3.5 py-1.5 rounded-lg text-xs font-semibold text-gray-500 border border-gray-300 bg-white hover:border-red-300 hover:text-red-500 transition-colors"
+              className="px-3.5 py-1.5 rounded-lg text-xs font-semibold text-white bg-orange-400 hover:bg-orange-500 transition-colors"
             >
               Reset
             </button>
