@@ -140,7 +140,9 @@ function fmtDateTime(iso: string): string {
 
 /* ─── Step row shell ─────────────────────────────────────────────────────── */
 function StepRow({
-  step, accent, title, meta, timeLeft, timeRight, timeMid, status, expandable, expanded, onToggle, children,
+  step, accent, title, meta, timeLeft, timeRight, timeMid, status,
+  expandable, expanded, onToggle, children,
+  onReset, resetting, pendingReset, onResetClick,
 }: {
   step: number;
   accent: 'green' | 'blue' | 'amber' | 'gray';
@@ -154,6 +156,10 @@ function StepRow({
   expanded?: boolean;
   onToggle?: () => void;
   children?: React.ReactNode;
+  onReset?: () => void;
+  resetting?: boolean;
+  pendingReset?: boolean;
+  onResetClick?: () => void;
 }) {
   const accentBg = accent === 'green' ? 'bg-[#1B5E20]'
     : accent === 'blue' ? 'bg-blue-600'
@@ -195,6 +201,36 @@ function StepRow({
 
         {/* Status */}
         <div className="flex-shrink-0 ml-auto">{status}</div>
+
+        {/* Reset button */}
+        {onReset && (
+          <div className="flex-shrink-0" onClick={e => e.stopPropagation()}>
+            {pendingReset ? (
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={onReset}
+                  disabled={resetting}
+                  className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-red-500 text-white hover:bg-red-600 transition-colors disabled:opacity-50"
+                >
+                  {resetting ? '…' : 'Sure?'}
+                </button>
+                <button
+                  onClick={onResetClick}
+                  className="px-2 py-1 rounded-lg text-xs text-gray-400 hover:text-gray-600 transition-colors"
+                >
+                  ✕
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={onResetClick}
+                className="px-2.5 py-1 rounded-lg text-xs font-medium text-gray-400 border border-gray-200 hover:border-gray-400 hover:text-gray-600 transition-colors"
+              >
+                Reset
+              </button>
+            )}
+          </div>
+        )}
 
         {/* Chevron */}
         {expandable && (
@@ -245,6 +281,10 @@ export default function DeliveryReportsPage() {
   const [localNotes, setLocalNotes] = useState<Record<string, string>>({});
   const [expandedStore, setExpandedStore] = useState<Store | null>(null);
   const [submittingStore, setSubmittingStore] = useState<Store | null>(null);
+
+  /* ── Reset state ── */
+  const [pendingReset, setPendingReset] = useState<string | null>(null); // step key awaiting confirm
+  const [resettingStep, setResettingStep] = useState<string | null>(null);
 
   /* ── Profile ── */
   const { data: profile } = useQuery({
@@ -394,6 +434,44 @@ export default function DeliveryReportsPage() {
       setSubmittingStore(null);
     }
   };
+
+  /* ── Reset a step ── */
+  const resetStep = async (stepKey: string, updates: Record<string, null | undefined>) => {
+    if (!activeRun) return;
+    setResettingStep(stepKey);
+    try {
+      await supabase.from('delivery_runs').update(updates).eq('id', activeRun.id);
+      qc.invalidateQueries({ queryKey: ['delivery-runs-list'] });
+      qc.invalidateQueries({ queryKey: ['dr-lines', activeRun.id] });
+    } finally {
+      setResettingStep(null);
+      setPendingReset(null);
+    }
+  };
+
+  const resetReceipt = async (store: Store) => {
+    if (!activeRun) return;
+    setResettingStep(`receipt-${store}`);
+    try {
+      await supabase.from('store_delivery_receipts')
+        .delete()
+        .eq('run_id', activeRun.id)
+        .eq('location_name', store);
+      qc.invalidateQueries({ queryKey: ['dr-receipts', activeRun.id] });
+    } finally {
+      setResettingStep(null);
+      setPendingReset(null);
+    }
+  };
+
+  const makeResetProps = (stepKey: string, onReset: () => void) => ({
+    onReset: isAdmin ? onReset : undefined,
+    resetting: resettingStep === stepKey,
+    pendingReset: pendingReset === stepKey,
+    onResetClick: isAdmin
+      ? () => setPendingReset(prev => prev === stepKey ? null : stepKey)
+      : undefined,
+  });
 
   /* ─── Render ─────────────────────────────────────────────────────────── */
   return (
@@ -564,6 +642,7 @@ export default function DeliveryReportsPage() {
                 meta={byName}
                 timeLeft={checked ? fmt(activeRun.lists_checked_at) : undefined}
                 status={statusNode}
+                {...(checked ? makeResetProps('lists-checked', () => resetStep('lists-checked', { lists_checked_at: null, lists_checked_by: null })) : {})}
               >
                 {null}
               </StepRow>
@@ -587,6 +666,7 @@ export default function DeliveryReportsPage() {
                 meta={byName}
                 timeLeft={fmt(activeRun.packing_started_at)}
                 status={statusNode}
+                {...(started ? makeResetProps('packing-started', () => resetStep('packing-started', { packing_started_at: null, packed_by: null })) : {})}
               >
                 {null}
               </StepRow>
@@ -616,6 +696,7 @@ export default function DeliveryReportsPage() {
                 timeLeft={done ? fmt(activeRun.packing_finished_at) : undefined}
                 timeMid={done && duration ? `· ${duration}` : undefined}
                 status={statusNode}
+                {...(done ? makeResetProps('packing-finished', () => resetStep('packing-finished', { packing_finished_at: null, packing_duration_seconds: null, items_packed_count: null })) : {})}
               >
                 {null}
               </StepRow>
@@ -639,6 +720,7 @@ export default function DeliveryReportsPage() {
                 meta={byName}
                 timeLeft={fmt(activeRun.delivery_started_at)}
                 status={statusNode}
+                {...(started ? makeResetProps('delivery-started', () => resetStep('delivery-started', { delivery_started_at: null, delivery_started_by: null })) : {})}
               >
                 {null}
               </StepRow>
@@ -691,6 +773,7 @@ export default function DeliveryReportsPage() {
                 expandable={canExpand || canInteract}
                 expanded={isExpanded}
                 onToggle={() => setExpandedStore(prev => prev === store ? null : store)}
+                {...(receipt ? makeResetProps(`receipt-${store}`, () => resetReceipt(store)) : {})}
               >
                 <div className="px-5 py-4 space-y-4">
 
@@ -827,6 +910,7 @@ export default function DeliveryReportsPage() {
                 title="Delivery Finished"
                 timeLeft={fmt(activeRun.delivery_finished_at)}
                 status={statusNode}
+                {...(finished ? makeResetProps('delivery-finished', () => resetStep('delivery-finished', { delivery_finished_at: null, delivery_snapshot: null })) : {})}
               >
                 {null}
               </StepRow>
