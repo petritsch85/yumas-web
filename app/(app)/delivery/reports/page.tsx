@@ -199,8 +199,41 @@ function StepRow({
           )}
         </div>
 
-        {/* Status */}
-        <div className="flex-shrink-0 ml-auto">{status}</div>
+        {/* Status + Reset — right side */}
+        <div className="flex items-center gap-2 flex-shrink-0 ml-auto">
+          <div className="flex-shrink-0">{status}</div>
+
+          {/* Reset */}
+          {onReset && (
+            <div className="flex-shrink-0" onClick={e => e.stopPropagation()}>
+              {pendingReset ? (
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs text-gray-400 whitespace-nowrap">Reset?</span>
+                  <button
+                    onClick={onReset}
+                    disabled={resetting}
+                    className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-red-500 text-white hover:bg-red-600 transition-colors disabled:opacity-50 whitespace-nowrap"
+                  >
+                    {resetting ? '…' : 'Yes'}
+                  </button>
+                  <button
+                    onClick={onResetClick}
+                    className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors"
+                  >
+                    No
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={onResetClick}
+                  className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-orange-400 hover:bg-orange-500 transition-colors"
+                >
+                  Reset
+                </button>
+              )}
+            </div>
+          )}
+        </div>
 
         {/* Chevron */}
         {expandable && (
@@ -213,40 +246,6 @@ function StepRow({
       {/* Expanded content */}
       {expandable && expanded && children && (
         <div className="border-t border-gray-100">{children}</div>
-      )}
-
-      {/* Reset panel — separated zone below the main row */}
-      {onReset && (
-        <div
-          className="flex items-center justify-end gap-2 px-5 py-2 border-t border-dashed border-gray-100 bg-gray-50/60"
-          onClick={e => e.stopPropagation()}
-        >
-          {pendingReset ? (
-            <>
-              <span className="text-xs text-gray-400">Reset this step?</span>
-              <button
-                onClick={onReset}
-                disabled={resetting}
-                className="px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-red-500 text-white hover:bg-red-600 transition-colors disabled:opacity-50"
-              >
-                {resetting ? 'Resetting…' : 'Yes, reset'}
-              </button>
-              <button
-                onClick={onResetClick}
-                className="px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-white text-gray-600 border border-gray-200 hover:border-gray-400 transition-colors"
-              >
-                No
-              </button>
-            </>
-          ) : (
-            <button
-              onClick={onResetClick}
-              className="px-3.5 py-1.5 rounded-lg text-xs font-semibold text-white bg-orange-400 hover:bg-orange-500 transition-colors"
-            >
-              Reset
-            </button>
-          )}
-        </div>
       )}
     </div>
   );
