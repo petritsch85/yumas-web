@@ -71,16 +71,53 @@ function fmtDuration(seconds: number | null): string {
   return `${m}m ${s}s`;
 }
 
+const DELIVERY_DAYS = [1, 2, 3, 5]; // Mon Tue Wed Fri
+
+/** Next upcoming delivery date string (YYYY-MM-DD) where cutoff (14:00) is still in the future */
+function getNextDeliveryDate(): string {
+  const now = new Date();
+  for (let i = 0; i <= 7; i++) {
+    const d = new Date(now);
+    d.setDate(now.getDate() + i);
+    if (DELIVERY_DAYS.includes(d.getDay())) {
+      // Check cutoff is still ahead
+      const cutoff = new Date(
+        d.getFullYear(), d.getMonth(), d.getDate(), 14, 0, 0
+      );
+      if (cutoff > now) {
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${y}-${m}-${day}`;
+      }
+    }
+  }
+  // Fallback: first delivery day found regardless of cutoff
+  const d = new Date(now);
+  for (let i = 1; i <= 7; i++) {
+    d.setDate(now.getDate() + i);
+    if (DELIVERY_DAYS.includes(d.getDay())) {
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${y}-${m}-${day}`;
+    }
+  }
+  return now.toISOString().slice(0, 10);
+}
+
 /** Returns the delivery cutoff (14:00 on delivery_date) as a Date */
 function deliveryCutoff(deliveryDate: string): Date {
   return new Date(deliveryDate + 'T14:00:00');
 }
 
-/** 'green' = within 24 h, 'amber' = within 48 h, 'red' = older / missing */
-function inventoryFreshness(submittedAt: string | null, deliveryDate: string): 'green' | 'amber' | 'red' {
+/** 'green' = within 24 h of cutoff, 'amber' = within 48 h, 'red' = older / missing / submitted after cutoff */
+function inventoryFreshness(submittedAt: string | null, cutoffDate: string): 'green' | 'amber' | 'red' {
   if (!submittedAt) return 'red';
-  const cutoff = deliveryCutoff(deliveryDate).getTime();
-  const diff = cutoff - new Date(submittedAt).getTime();   // ms before cutoff
+  const cutoff = deliveryCutoff(cutoffDate).getTime();
+  const submitted = new Date(submittedAt).getTime();
+  if (submitted >= cutoff) return 'red'; // submitted after cutoff — irrelevant for this delivery
+  const diff = cutoff - submitted; // ms before cutoff
   if (diff <= 24 * 3600 * 1000) return 'green';
   if (diff <= 48 * 3600 * 1000) return 'amber';
   return 'red';
@@ -276,18 +313,22 @@ export default function DeliveryReportsPage() {
     staleTime: Infinity,
   });
 
-  /* ── Inventory submissions (latest per store before cutoff) ── */
+  /* ── Next upcoming delivery date (always relative to now) ── */
+  const nextDeliveryDate = useMemo(() => getNextDeliveryDate(), []);
+
+  /* ── Inventory submissions — always relative to next upcoming delivery ── */
   const { data: invSubs = [] } = useQuery<InventorySub[]>({
-    queryKey: ['dr-inv-subs', activeRun?.delivery_date],
-    enabled: !!activeRun,
+    queryKey: ['dr-inv-subs', nextDeliveryDate],
     queryFn: async () => {
-      // Fetch the latest submission per store; we'll pick newest for each
+      // Latest submission per store submitted BEFORE the next cutoff
+      const cutoffIso = deliveryCutoff(nextDeliveryDate).toISOString();
       const results = await Promise.all(
         STORES.map(store =>
           supabase
             .from('inventory_submissions')
             .select('location_name, submitted_at')
             .eq('location_name', store)
+            .lt('submitted_at', cutoffIso)
             .order('submitted_at', { ascending: false })
             .limit(1)
             .maybeSingle()
@@ -385,15 +426,11 @@ export default function DeliveryReportsPage() {
         </div>
       )}
 
-      {/* ── Step rows ── */}
-      {activeRun && (
-        <div className="space-y-3">
-
-          {/* ── Row 0: Inventories Received ── */}
-          {(() => {
-            const cutoff = deliveryCutoff(activeRun.delivery_date);
-            const allGreen = STORES.every(s => inventoryFreshness(invSubFor(s)?.submitted_at ?? null, activeRun.delivery_date) === 'green');
-            const anyRed   = STORES.some(s  => inventoryFreshness(invSubFor(s)?.submitted_at ?? null, activeRun.delivery_date) === 'red');
+      {/* ── Inventories Received — always shown, relative to next delivery ── */}
+      {(() => {
+            const cutoff = deliveryCutoff(nextDeliveryDate);
+            const allGreen = STORES.every(s => inventoryFreshness(invSubFor(s)?.submitted_at ?? null, nextDeliveryDate) === 'green');
+            const anyRed   = STORES.some(s  => inventoryFreshness(invSubFor(s)?.submitted_at ?? null, nextDeliveryDate) === 'red');
             const accent   = allGreen ? 'green' : anyRed ? 'amber' : 'amber';
 
             const statusNode = allGreen
@@ -410,15 +447,17 @@ export default function DeliveryReportsPage() {
                     <span className="text-white text-xs font-bold">1</span>
                   </div>
                   {/* Title */}
-                  <div className="w-28 flex-shrink-0">
+                  <div className="w-36 flex-shrink-0">
                     <p className="text-sm font-semibold text-gray-900">Inventories</p>
-                    <p className="text-xs text-gray-400 truncate">cutoff {cutoff.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}</p>
+                    <p className="text-xs text-gray-400 truncate">
+                      {cutoff.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })} · cutoff {cutoff.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}
+                    </p>
                   </div>
                   {/* Store ticks */}
                   <div className="flex items-center gap-4 flex-1 min-w-0 flex-wrap">
                     {STORES.map(store => {
                       const sub = invSubFor(store);
-                      const freshness = inventoryFreshness(sub?.submitted_at ?? null, activeRun.delivery_date);
+                      const freshness = inventoryFreshness(sub?.submitted_at ?? null, nextDeliveryDate);
                       const tickColor = freshness === 'green'
                         ? 'text-green-600 bg-green-50 border-green-200'
                         : freshness === 'amber'
@@ -447,9 +486,13 @@ export default function DeliveryReportsPage() {
                 </div>
               </div>
             );
-          })()}
+      })()}
 
-          {/* ── Row 2: Packing (was 1) ── */}
+      {/* ── Step rows (historical run) ── */}
+      {activeRun && (
+        <div className="space-y-3 mt-3">
+
+          {/* ── Row 2: Packing ── */}
           {(() => {
             const done = !!activeRun.packing_finished_at;
             const started = !!activeRun.packing_started_at;
