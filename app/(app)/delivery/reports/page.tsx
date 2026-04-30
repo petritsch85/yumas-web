@@ -585,33 +585,22 @@ export default function DeliveryReportsPage() {
             );
           })()}
 
-          {/* ── Row 2: Delivery ── */}
+          {/* ── Row 3: Delivery Started ── */}
           {(() => {
             const started = !!activeRun.delivery_started_at;
             const byName = activeRun.delivery_started_by ? (profileMap[activeRun.delivery_started_by] ?? '—') : undefined;
-            const accent = !started ? 'gray' : storesReceived === STORES.length ? 'green' : 'blue';
-
-            let statusNode: React.ReactNode;
-            if (!started) {
-              statusNode = <GrayBadge label="Not started" />;
-            } else if (storesReceived === STORES.length) {
-              statusNode = <GreenBadge label="All received" />;
-            } else {
-              statusNode = (
-                <span className="inline-flex items-center gap-1 bg-blue-50 text-blue-700 border border-blue-200 text-xs font-semibold px-2.5 py-1 rounded-lg whitespace-nowrap">
-                  <Truck size={12} /> {storesReceived}/{STORES.length} received
-                </span>
-              );
-            }
+            const accent = started ? 'green' : 'gray';
+            const statusNode = started
+              ? <GreenBadge label="Departed ZK" />
+              : <GrayBadge label="Not started" />;
 
             return (
               <StepRow
                 step={3}
-                accent={accent as 'green' | 'blue' | 'gray'}
-                title="Delivery"
+                accent={accent}
+                title="Delivery Started"
                 meta={byName}
                 timeLeft={fmt(activeRun.delivery_started_at)}
-                timeRight={lastReceiptAt ? fmt(lastReceiptAt) : undefined}
                 status={statusNode}
               >
                 {null}
@@ -785,6 +774,27 @@ export default function DeliveryReportsPage() {
               </StepRow>
             );
           })}
+
+          {/* ── Row 7: Delivery Finished ── */}
+          {(() => {
+            const finished = !!activeRun.delivery_finished_at;
+            const accent = finished ? 'green' : 'gray';
+            const statusNode = finished
+              ? <GreenBadge label="Returned to ZK" />
+              : <GrayBadge label="Awaiting" />;
+
+            return (
+              <StepRow
+                step={7}
+                accent={accent}
+                title="Delivery Finished"
+                timeLeft={fmt(activeRun.delivery_finished_at)}
+                status={statusNode}
+              >
+                {null}
+              </StepRow>
+            );
+          })()}
 
         </div>
       )}
