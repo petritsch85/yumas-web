@@ -97,6 +97,7 @@ const navGroups: NavGroup[] = [
           { label: 'Add New Inventory',  href: '/inventory/add',      icon: FilePlus },
           { label: 'Current Inventory',  href: '/inventory/overview', icon: BarChart3 },
           { label: 'Inventory Reports',  href: '/inventory/counts',   icon: ClipboardList },
+          { label: 'Usage Forecast',     href: '/inventory/usage-forecast', icon: TrendingDown },
         ],
       },
       {
