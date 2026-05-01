@@ -73,15 +73,8 @@ const navGroups: NavGroup[] = [
   {
     label: 'DATA',
     items: [
-      { label: 'Suppliers', href: '/suppliers',         icon: Store,          permKey: 'suppliers' },
-      { label: 'Menus',     href: '/products/menus',    icon: UtensilsCrossed, permKey: 'products' },
-      { label: 'Machines',  href: '/coming-soon/machines', icon: Wrench,      adminOnly: true },
-      { label: 'Team',      href: '/settings/users',    icon: Users,          adminOnly: true },
-    ],
-  },
-  {
-    label: 'SUPPLY CHAIN',
-    items: [
+      { label: 'Suppliers', href: '/suppliers',            icon: Store,           permKey: 'suppliers' },
+      { label: 'Menus',     href: '/products/menus',      icon: UtensilsCrossed, permKey: 'products' },
       {
         label: 'Products', href: '/products', icon: Package, permKey: 'products',
         children: [
@@ -90,6 +83,13 @@ const navGroups: NavGroup[] = [
           { label: 'Finished',      href: '/products/finished',      icon: Utensils },
         ],
       },
+      { label: 'Machines',  href: '/coming-soon/machines', icon: Wrench,        adminOnly: true },
+      { label: 'Team',      href: '/settings/users',       icon: Users,         adminOnly: true },
+    ],
+  },
+  {
+    label: 'SUPPLY CHAIN',
+    items: [
       {
         label: 'Inventory', href: '/inventory', icon: ClipboardList, permKey: 'inventory',
         children: [
