@@ -319,7 +319,7 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
 
   /* ── Process into table data ── */
   const { tableData, sections, itemUnit } = useMemo<{ tableData: WeekTableData; sections: WeekSectionGroup[]; itemUnit: Record<string, string> }>(() => {
-    if (!data) return { tableData: {}, sections: [] };
+    if (!data) return { tableData: {}, sections: [], itemUnit: {} };
     const { submissions, lines, runDateMap } = data;
 
     // Group submissions by local date; sorted ascending so last = latest
