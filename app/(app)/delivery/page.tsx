@@ -574,6 +574,8 @@ function StoreManagerView({ run, lines, targetDate, myStore }: {
   const qc = useQueryClient();
   const [activeTab, setActiveTab] = useState<Store>(myStore ?? 'Eschborn');
   const [notes, setNotes] = useState('');
+  const [itemComplete, setItemComplete] = useState<Record<string, boolean>>({});
+  const [itemActualQty, setItemActualQty] = useState<Record<string, string>>({});
 
   const currentStore = myStore ?? activeTab;
   const storeLines = lines.filter(l => l.location_name === currentStore && (l.delivery_qty > 0 || l.packed_qty !== null));
@@ -674,18 +676,21 @@ function StoreManagerView({ run, lines, targetDate, myStore }: {
                   <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Item</th>
                   <th className="px-3 py-2.5 text-left text-xs font-semibold text-gray-400 uppercase tracking-wide hidden sm:table-cell">Unit</th>
                   <th className="px-4 py-2.5 text-center text-xs font-semibold text-[#1B5E20] uppercase tracking-wide">Qty Packed</th>
+                  <th className="px-4 py-2.5 text-center text-xs font-semibold text-gray-500 uppercase tracking-wide">Received Qty</th>
+                  <th className="px-4 py-2.5 text-center text-xs font-semibold text-gray-500 uppercase tracking-wide">Complete?</th>
                 </tr>
               </thead>
               <tbody>
                 {sections.map(section => (
                   <React.Fragment key={section}>
                     <tr className="bg-gray-50">
-                      <td colSpan={3} className="px-4 py-1.5">
+                      <td colSpan={5} className="px-4 py-1.5">
                         <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">{section}</span>
                       </td>
                     </tr>
                     {storeLines.filter(l => l.section === section).map(line => {
                       const qty = line.packed_qty ?? line.delivery_qty;
+                      const isComplete = !!itemComplete[line.id];
                       return (
                         <tr key={line.id} className="border-t border-gray-50 hover:bg-gray-50/50">
                           <td className="px-4 py-2.5 font-medium text-gray-800">{line.item_name}</td>
@@ -694,6 +699,32 @@ function StoreManagerView({ run, lines, targetDate, myStore }: {
                             <span className="inline-flex items-center justify-center min-w-[2rem] px-2 py-0.5 rounded-md bg-[#1B5E20]/10 text-[#1B5E20] font-bold text-sm">
                               {qty}
                             </span>
+                          </td>
+                          <td className="px-4 py-2.5 text-center">
+                            {!isComplete ? (
+                              <input
+                                type="number"
+                                min={0}
+                                value={itemActualQty[line.id] ?? ''}
+                                onChange={e => setItemActualQty(prev => ({ ...prev, [line.id]: e.target.value }))}
+                                placeholder={String(qty)}
+                                className="w-16 text-center text-sm border border-gray-200 rounded-md px-2 py-1 focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20]/40"
+                              />
+                            ) : (
+                              <span className="text-sm text-gray-400">—</span>
+                            )}
+                          </td>
+                          <td className="px-4 py-2.5 text-center">
+                            <button
+                              onClick={() => setItemComplete(prev => ({ ...prev, [line.id]: !prev[line.id] }))}
+                              className={`px-3 py-1 rounded-full text-xs font-bold transition-colors ${
+                                isComplete
+                                  ? 'bg-green-100 text-green-700 hover:bg-green-200'
+                                  : 'bg-red-100 text-red-600 hover:bg-red-200'
+                              }`}
+                            >
+                              {isComplete ? '✓ Yes' : '✗ No'}
+                            </button>
                           </td>
                         </tr>
                       );
