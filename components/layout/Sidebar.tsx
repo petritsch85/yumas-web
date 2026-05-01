@@ -99,6 +99,14 @@ const navGroups: NavGroup[] = [
         ],
       },
       {
+        label: 'Delivery', href: '/delivery', icon: Truck, permKey: 'delivery',
+        children: [
+          { label: 'Packing',           href: '/delivery',          icon: Truck },
+          { label: 'Sales Forecast',    href: '/delivery/forecast', icon: TrendingUp },
+          { label: 'Delivery Reports',  href: '/delivery/reports',  icon: ClipboardList },
+        ],
+      },
+      {
         label: 'Production', href: '/production', icon: Factory, permKey: 'production',
         children: [
           { label: 'Batches', href: '/production',         icon: Factory },
@@ -108,14 +116,6 @@ const navGroups: NavGroup[] = [
       { label: 'Buying',      href: '/purchase-orders',         icon: ShoppingCart, permKey: 'buying' },
       { label: 'Controlling', href: '/coming-soon/controlling', icon: TrendingUp,   adminOnly: true },
       { label: 'Waste Log',   href: '/waste',                   icon: Trash2,       permKey: 'waste_log' },
-      {
-        label: 'Delivery', href: '/delivery', icon: Truck, permKey: 'delivery',
-        children: [
-          { label: 'Packing',           href: '/delivery',          icon: Truck },
-          { label: 'Sales Forecast',    href: '/delivery/forecast', icon: TrendingUp },
-          { label: 'Delivery Reports',  href: '/delivery/reports',  icon: ClipboardList },
-        ],
-      },
       {
         label: 'Analysis', href: '/analysis', icon: BarChart3, permKey: 'analysis',
         children: [
