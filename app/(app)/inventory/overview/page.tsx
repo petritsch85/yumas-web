@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useMemo } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
 import { RefreshCw, ChevronLeft, ChevronRight } from 'lucide-react';
 
@@ -616,14 +616,28 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
 
 /* ─── Main page ─────────────────────────────────────────────────────────────── */
 export default function InventoryOverviewPage() {
+  const qc = useQueryClient();
   const [activeTab, setActiveTab] = useState<TabView>('group');
   const [weekOffset, setWeekOffset] = useState(0);
+  const [refreshedAt, setRefreshedAt] = useState<number>(Date.now());
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
-  const { isFetching: groupFetching, dataUpdatedAt, refetch } = useQuery({
-    queryKey: ['inventory-overview'],
-    enabled: activeTab === 'group',
-    staleTime: 0,
-  });
+  // Compute weekStart here so main page can build the correct store query key
+  const weekStart = useMemo(() => toLocalDateStr(getWeekDays(weekOffset)[0]), [weekOffset]);
+
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    try {
+      if (activeTab === 'group') {
+        await qc.refetchQueries({ queryKey: ['inventory-overview'] });
+      } else {
+        await qc.refetchQueries({ queryKey: ['inventory-weekly', activeTab, weekStart] });
+      }
+      setRefreshedAt(Date.now());
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
 
   return (
     <div>
@@ -638,23 +652,17 @@ export default function InventoryOverviewPage() {
         </div>
         <div className="flex items-center gap-3 flex-wrap">
           <TabBar active={activeTab} onChange={(v) => { setActiveTab(v); }} />
-          {activeTab === 'group' && (
-            <>
-              {dataUpdatedAt > 0 && !groupFetching && (
-                <span className="text-xs text-gray-400">
-                  Updated {new Date(dataUpdatedAt).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-                </span>
-              )}
-              <button
-                onClick={() => refetch()}
-                disabled={groupFetching}
-                className="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 bg-white text-sm text-gray-600 hover:bg-gray-50 transition-colors shadow-sm disabled:opacity-50"
-              >
-                <RefreshCw size={14} className={groupFetching ? 'animate-spin text-[#1B5E20]' : ''} />
-                {groupFetching ? 'Refreshing…' : 'Refresh'}
-              </button>
-            </>
-          )}
+          <span className="text-xs text-gray-400 whitespace-nowrap">
+            Updated {new Date(refreshedAt).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+          </span>
+          <button
+            onClick={handleRefresh}
+            disabled={isRefreshing}
+            className="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 bg-white text-sm text-gray-600 hover:bg-gray-50 transition-colors shadow-sm disabled:opacity-50"
+          >
+            <RefreshCw size={14} className={isRefreshing ? 'animate-spin text-[#1B5E20]' : ''} />
+            {isRefreshing ? 'Refreshing…' : 'Refresh'}
+          </button>
         </div>
       </div>
 
