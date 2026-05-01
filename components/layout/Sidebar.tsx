@@ -83,6 +83,7 @@ const navGroups: NavGroup[] = [
           { label: 'Finished',      href: '/products/finished',      icon: Utensils },
         ],
       },
+      { label: 'Locations', href: '/settings/locations',   icon: MapPin,        adminOnly: true },
       { label: 'Machines',  href: '/coming-soon/machines', icon: Wrench,        adminOnly: true },
       { label: 'Team',      href: '/settings/users',       icon: Users,         adminOnly: true },
     ],
@@ -194,7 +195,6 @@ const navGroups: NavGroup[] = [
     adminOnly: true,
     items: [
       { label: 'Users',      href: '/settings/users',      icon: Users },
-      { label: 'Locations',  href: '/settings/locations',  icon: MapPin },
       { label: 'Categories', href: '/settings/categories', icon: FolderOpen },
     ],
   },
