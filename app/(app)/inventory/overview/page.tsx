@@ -318,7 +318,7 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
   });
 
   /* ── Process into table data ── */
-  const { tableData, sections } = useMemo<{ tableData: WeekTableData; sections: WeekSectionGroup[] }>(() => {
+  const { tableData, sections, itemUnit } = useMemo<{ tableData: WeekTableData; sections: WeekSectionGroup[]; itemUnit: Record<string, string> }>(() => {
     if (!data) return { tableData: {}, sections: [] };
     const { submissions, lines, runDateMap } = data;
 
@@ -407,7 +407,11 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([title, items]) => ({ title, items: items.sort() }));
 
-    return { tableData, sections };
+    // Unit lookup map (itemName → unit string)
+    const itemUnit: Record<string, string> = {};
+    for (const [name, { unit }] of allItems) itemUnit[name] = unit;
+
+    return { tableData, sections, itemUnit };
   }, [data, weekDays]);
 
   const isEmpty = sections.length === 0 && !isLoading;
@@ -490,8 +494,7 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
             <table className="text-xs border-collapse">
               {/* ── Column groups for visual separation ── */}
               <colgroup>
-                <col style={{ minWidth: 180 }} />  {/* Item */}
-                <col style={{ minWidth: 48 }} />   {/* Unit */}
+                <col style={{ minWidth: 200 }} />  {/* Item + unit subtitle */}
                 {weekDays.map((_, di) => (
                   <>
                     <col key={`c-s-${di}`}  style={{ minWidth: 52 }} />
@@ -508,9 +511,6 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
                 <tr className="bg-gray-50 border-b border-gray-200">
                   <th className="sticky left-0 z-20 bg-gray-50 px-4 py-2.5 text-left text-xs font-semibold text-gray-600 uppercase tracking-wide" rowSpan={2}>
                     Item
-                  </th>
-                  <th className="px-2 py-2.5 text-left text-xs font-semibold text-gray-400 uppercase tracking-wide" rowSpan={2}>
-                    Unit
                   </th>
                   {weekDays.map((day, di) => (
                     <th
@@ -554,7 +554,7 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
                     {/* Section header */}
                     <tr key={`s-${section.title}`} className="bg-[#F1F8E9] border-y border-green-100">
                       <td
-                        colSpan={2 + weekDays.length * 5}
+                        colSpan={1 + weekDays.length * 5}
                         className="sticky left-0 px-4 py-1.5 text-xs font-bold text-[#2E7D32] uppercase tracking-wider bg-[#F1F8E9]"
                       >
                         {section.title}
@@ -565,31 +565,18 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
                     {section.items.map((itemName, idx) => {
                       const isEven = idx % 2 === 0;
                       const rowBg = isEven ? 'bg-white' : 'bg-gray-50/40';
-                      const unit = Object.values(data?.submissions ?? []).length > 0
-                        ? (() => {
-                            for (const sub of (data?.submissions ?? [])) {
-                              for (const it of (sub.data ?? []) as { name: string; unit: string }[]) {
-                                if (it.name === itemName) return it.unit;
-                              }
-                            }
-                            for (const line of (data?.lines ?? [])) {
-                              if (line.item_name === itemName) return line.unit;
-                            }
-                            return '';
-                          })()
-                        : '';
+                      const unit = itemUnit[itemName] ?? '';
 
                       return (
                         <tr key={itemName} className={`border-b border-gray-50 hover:bg-blue-50/20 transition-colors ${rowBg}`}>
-                          <td className={`sticky left-0 px-4 py-2 font-medium text-gray-800 z-10 ${rowBg}`}>
-                            {itemName}
+                          <td className={`sticky left-0 px-4 py-2 z-10 ${rowBg}`}>
+                            <span className="font-medium text-gray-800">{itemName}</span>
+                            {unit && <span className="block text-gray-400 text-[10px] leading-tight mt-0.5">{unit}</span>}
                           </td>
-                          <td className="px-2 py-2 text-gray-400">{unit}</td>
 
                           {weekDays.map((day, di) => {
                             const dk = toLocalDateStr(day);
                             const d  = tableData[itemName]?.[dk];
-                            const isFirst = true; // for border-left on Start col
                             const isToday = dk === toLocalDateStr(new Date());
                             const dayBg   = isToday ? 'bg-[#F1F8E9]/60' : '';
 
