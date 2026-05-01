@@ -205,8 +205,9 @@ function fmtEur(n: number): string {
 /* ─── Packing status indicator ───────────────────────────────────────────── */
 function PackingStatus({ packedQty, deliveryQty }: { packedQty: number | null; deliveryQty: number }) {
   if (packedQty === null) return <span className="text-gray-200 text-xs select-none">—</span>;
-  if (packedQty >= deliveryQty) return <CheckCircle2 size={17} className="text-green-600 mx-auto" />;
-  if (packedQty > 0)            return <CheckCircle2 size={17} className="text-orange-400 mx-auto" />;
+  if (packedQty === deliveryQty) return <CheckCircle2 size={17} className="text-green-600 mx-auto" />;
+  if (packedQty > deliveryQty)   return <CheckCircle2 size={17} className="text-orange-400 mx-auto" />;
+  if (packedQty > 0)             return <CheckCircle2 size={17} className="text-orange-400 mx-auto" />;
   return <XCircle size={17} className="text-red-400 mx-auto" />;
 }
 
