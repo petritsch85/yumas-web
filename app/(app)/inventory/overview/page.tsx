@@ -259,25 +259,42 @@ type WeekSectionGroup = { title: string; items: string[] };
 
 const DAY_COLS = ['Start', 'Req', 'Act', 'Usage', 'End'] as const;
 
+/* ─── Usage-forecast helpers (mirrors usage-forecast/page.tsx) ─────────────── */
+const NO_DELIVERY_DAYS = new Set(['saturday', 'sunday']);
+const STORE_INDICES: Partial<Record<LocationName, number>> = { Westend: 0, Eschborn: 1, Taunus: 2 };
+
+function forecastUsage(itemName: string, day: Date, storeIdx: number): number {
+  let h = 0;
+  for (let i = 0; i < itemName.length; i++) h = (h * 31 + itemName.charCodeAt(i)) & 0xffff;
+  const dow = (day.getDay() + 6) % 7; // 0=Mon … 6=Sun
+  const raw = ((h + dow * 37 + storeIdx * 19) % 18) + 1;
+  return dow >= 5 ? Math.ceil(raw * 1.3) : raw;
+}
+
 function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
   location: LocationName;
   weekOffset: number;
   onOffsetChange: (o: number) => void;
 }) {
-  const weekDays = useMemo(() => getWeekDays(weekOffset), [weekOffset]);
+  // Always show current week + next week (14 days)
+  const weekDays    = useMemo(() => getWeekDays(weekOffset),     [weekOffset]);
+  const extendedDays = useMemo(() => [
+    ...getWeekDays(weekOffset),
+    ...getWeekDays(weekOffset + 1),
+  ], [weekOffset]);
 
-  const weekStart = toLocalDateStr(weekDays[0]);
-  const weekEnd   = toLocalDateStr(weekDays[6]);
+  const weekStart = toLocalDateStr(extendedDays[0]);
+  const weekEnd   = toLocalDateStr(extendedDays[13]);
 
-  // Extended query range: day before Mon → Sun (for Mon's Starting Inventory)
+  // Extended query range: day before Mon → Sun of next week (for Mon's Starting Inventory)
   const queryRangeStart = useMemo(() => {
-    const d = new Date(weekDays[0]);
+    const d = new Date(extendedDays[0]);
     d.setDate(d.getDate() - 1);
     return toLocalDateStr(d);
-  }, [weekDays]);
+  }, [extendedDays]);
 
   const { data, isLoading } = useQuery({
-    queryKey: ['inventory-weekly', location, weekStart],
+    queryKey: ['inventory-weekly', location, weekStart, weekEnd],
     staleTime: 60_000,
     queryFn: async () => {
       // 1. Inventory submissions for this location in extended range
@@ -371,17 +388,23 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
       }
     }
 
-    // Build per-item per-day data
+    const todayStr  = toLocalDateStr(new Date());
+    const storeIdx  = STORE_INDICES[location] ?? 0;
+
+    // Build per-item per-day data (using extendedDays = 14 days)
     const tableData: WeekTableData = {};
     for (const [itemName] of allItems) {
       tableData[itemName] = {};
-      for (const day of weekDays) {
+      for (const day of extendedDays) {
         const dk     = toLocalDateStr(day);
         const prevDk = toLocalDateStr(new Date(day.getTime() - 86_400_000));
+        const dayName = day.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase();
+        const isNoDelivery   = NO_DELIVERY_DAYS.has(dayName);
+        const isFutureOrToday = dk >= todayStr;
 
         const start  = getInventory(prevDk)?.[itemName] ?? null;
         const ending = getInventory(dk)?.[itemName]    ?? null;
-        const del    = deliveryByDate[dk]?.[itemName]  ?? null;
+        const del    = isNoDelivery ? null : (deliveryByDate[dk]?.[itemName] ?? null);
 
         const requested  = del?.requested  ?? null;
         const actual     = del?.actual     ?? null;
@@ -393,7 +416,43 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
           usage = start + (actual ?? 0) - ending;
         }
 
+        // For today/future: fill usage from forecast when not calculable
+        if (isFutureOrToday && usage === null) {
+          usage = forecastUsage(itemName, day, storeIdx);
+        }
+
         tableData[itemName][dk] = { start, requested, actual, ending, usage, isPartial };
+      }
+
+      // ── Second pass: chain forward-forecasted START/END for future days ──
+      // Saturday/Sunday have no real inventory submission → derive from previous day's ending
+      for (let i = 1; i < extendedDays.length; i++) {
+        const day    = extendedDays[i];
+        const dk     = toLocalDateStr(day);
+        const prevDk = toLocalDateStr(extendedDays[i - 1]);
+        const dayName = day.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase();
+        const isNoDelivery    = NO_DELIVERY_DAYS.has(dayName);
+        const isFutureOrToday = dk >= todayStr;
+
+        if (!isFutureOrToday || !isNoDelivery) continue;
+
+        const d    = tableData[itemName][dk];
+        const prev = tableData[itemName][prevDk];
+        if (!d || !prev) continue;
+
+        // If no real start, derive from previous day's computed ending
+        const effectiveStart = d.start !== null ? d.start : (prev.ending ?? null);
+        const fUsage = forecastUsage(itemName, day, storeIdx);
+        const forecastEnding = effectiveStart !== null ? Math.max(0, effectiveStart - fUsage) : null;
+
+        tableData[itemName][dk] = {
+          start:     effectiveStart,
+          requested: null,
+          actual:    null,
+          ending:    d.ending ?? forecastEnding,
+          usage:     fUsage,
+          isPartial: false,
+        };
       }
     }
 
@@ -412,9 +471,12 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
     for (const [name, { unit }] of allItems) itemUnit[name] = unit;
 
     return { tableData, sections, itemUnit };
-  }, [data, weekDays]);
+  }, [data, extendedDays, location]);
 
   const isEmpty = sections.length === 0 && !isLoading;
+  const todayStr = toLocalDateStr(new Date());
+  // First day of "next week" within the 14-day view
+  const nextWeekStart = toLocalDateStr(extendedDays[7]);
 
   /* ── Cell renderers ── */
   function InvCell({ v }: { v: number | null }) {
@@ -440,6 +502,13 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
     return <span className="text-[#2E7D32] font-semibold">{v}</span>;
   }
 
+  // Forecast cells: italic purple-ish tint to signal "estimated"
+  function ForecastCell({ v, dim }: { v: number | null; dim?: boolean }) {
+    if (v === null) return <span className="text-gray-200">—</span>;
+    if (v === 0)    return <span className="text-gray-300 italic">0</span>;
+    return <span className={`italic ${dim ? 'text-gray-400' : 'text-violet-500 font-semibold'}`}>{v}</span>;
+  }
+
   return (
     <>
       {/* Week navigation */}
@@ -450,13 +519,12 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
         >
           <ChevronLeft size={15} />
         </button>
-        <span className="text-sm font-semibold text-gray-700 min-w-[160px] text-center">
-          {fmtWeekRange(weekDays)}
+        <span className="text-sm font-semibold text-gray-700 min-w-[190px] text-center">
+          {fmtWeekRange(extendedDays)}
         </span>
         <button
           onClick={() => onOffsetChange(weekOffset + 1)}
-          disabled={weekOffset >= 0}
-          className="p-1.5 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 transition-colors text-gray-500 disabled:opacity-30"
+          className="p-1.5 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 transition-colors text-gray-500"
         >
           <ChevronRight size={15} />
         </button>
@@ -475,6 +543,7 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
           <span><span className="text-blue-600 font-semibold">5</span> Delivery</span>
           <span><span className="text-amber-600 font-semibold">3</span> Partial delivery</span>
           <span><span className="text-[#2E7D32] font-semibold">10</span> Usage</span>
+          <span><span className="text-violet-500 font-semibold italic">8</span> Forecast</span>
         </div>
       </div>
 
@@ -494,8 +563,8 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
             <table className="text-xs border-collapse">
               {/* ── Column groups for visual separation ── */}
               <colgroup>
-                <col style={{ minWidth: 200 }} />  {/* Item + unit subtitle */}
-                {weekDays.map((_, di) => (
+                <col style={{ minWidth: 200 }} />
+                {extendedDays.map((_, di) => (
                   <>
                     <col key={`c-s-${di}`}  style={{ minWidth: 52 }} />
                     <col key={`c-rq-${di}`} style={{ minWidth: 52 }} />
@@ -512,39 +581,52 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
                   <th className="sticky left-0 z-20 bg-gray-50 px-4 py-2.5 text-left text-xs font-semibold text-gray-600 uppercase tracking-wide" rowSpan={2}>
                     Item
                   </th>
-                  {weekDays.map((day, di) => (
-                    <th
-                      key={di}
-                      colSpan={5}
-                      className={`px-2 py-2 text-center text-xs font-bold tracking-wide border-l-2 ${
-                        toLocalDateStr(day) === toLocalDateStr(new Date())
-                          ? 'text-[#1B5E20] border-[#1B5E20] bg-[#F1F8E9]'
-                          : 'text-gray-600 border-gray-300'
-                      }`}
-                    >
-                      {fmtDayLabel(day)}
-                    </th>
-                  ))}
+                  {extendedDays.map((day, di) => {
+                    const dk = toLocalDateStr(day);
+                    const isToday    = dk === todayStr;
+                    const isNextWeek = dk >= nextWeekStart;
+                    const isWeekBoundary = di === 7; // first day of next week
+                    return (
+                      <th
+                        key={di}
+                        colSpan={5}
+                        className={`px-2 py-2 text-center text-xs font-bold tracking-wide border-l-2 ${
+                          isToday
+                            ? 'text-[#1B5E20] border-[#1B5E20] bg-[#F1F8E9]'
+                            : isWeekBoundary
+                            ? 'text-gray-500 border-gray-400 bg-gray-100'
+                            : isNextWeek
+                            ? 'text-gray-500 border-gray-200 bg-gray-50'
+                            : 'text-gray-600 border-gray-300'
+                        }`}
+                      >
+                        {fmtDayLabel(day)}
+                        {isNextWeek && !isWeekBoundary ? null : null}
+                      </th>
+                    );
+                  })}
                 </tr>
 
                 {/* Row 2: Sub-column headers */}
                 <tr className="bg-gray-50 border-b border-gray-200">
-                  {weekDays.map((day, di) => (
-                    DAY_COLS.map((col, ci) => {
-                      const isToday = toLocalDateStr(day) === toLocalDateStr(new Date());
+                  {extendedDays.map((day, di) => {
+                    const dk = toLocalDateStr(day);
+                    const isToday    = dk === todayStr;
+                    const isNextWeek = dk >= nextWeekStart;
+                    return DAY_COLS.map((col, ci) => {
                       const isFirst = ci === 0;
                       return (
                         <th
                           key={`${di}-${col}`}
-                          className={`px-1 py-1.5 text-center font-medium text-gray-400 uppercase tracking-wide whitespace-nowrap ${
+                          className={`px-1 py-1.5 text-center font-medium uppercase tracking-wide whitespace-nowrap ${
                             isFirst ? 'border-l-2 border-gray-300' : ''
-                          } ${isToday ? 'bg-[#F1F8E9]' : ''}`}
+                          } ${isToday ? 'bg-[#F1F8E9] text-gray-400' : isNextWeek ? 'bg-gray-50 text-gray-300' : 'text-gray-400'}`}
                         >
                           {col}
                         </th>
                       );
-                    })
-                  ))}
+                    });
+                  })}
                 </tr>
               </thead>
 
@@ -554,7 +636,7 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
                     {/* Section header */}
                     <tr key={`s-${section.title}`} className="bg-[#F1F8E9] border-y border-green-100">
                       <td
-                        colSpan={1 + weekDays.length * 5}
+                        colSpan={1 + extendedDays.length * 5}
                         className="sticky left-0 px-4 py-1.5 text-xs font-bold text-[#2E7D32] uppercase tracking-wider bg-[#F1F8E9]"
                       >
                         {section.title}
@@ -574,15 +656,18 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
                             {unit && <span className="block text-gray-400 text-[10px] leading-tight mt-0.5">{unit}</span>}
                           </td>
 
-                          {weekDays.map((day, di) => {
+                          {extendedDays.map((day, di) => {
                             const dk = toLocalDateStr(day);
                             const d  = tableData[itemName]?.[dk];
-                            const isToday = dk === toLocalDateStr(new Date());
-                            const dayBg   = isToday ? 'bg-[#F1F8E9]/60' : '';
+                            const isToday    = dk === todayStr;
+                            const isNextWeek = dk >= nextWeekStart;
+                            const isForecast = dk >= todayStr;
+                            const dayBg = isToday ? 'bg-[#F1F8E9]/60' : isNextWeek ? 'bg-gray-50/50' : '';
+                            const borderL = di === 7 ? 'border-l-4 border-gray-300' : 'border-l-2 border-gray-200';
 
                             return (
                               <>
-                                <td key={`${di}-s`}  className={`px-1 py-2 text-right tabular-nums border-l-2 border-gray-200 ${dayBg}`}>
+                                <td key={`${di}-s`}  className={`px-1 py-2 text-right tabular-nums ${borderL} ${dayBg}`}>
                                   <InvCell v={d?.start ?? null} />
                                 </td>
                                 <td key={`${di}-rq`} className={`px-1 py-2 text-right tabular-nums ${dayBg}`}>
@@ -592,10 +677,14 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
                                   <DelivCell v={d?.actual ?? null} isPartial={d?.isPartial} />
                                 </td>
                                 <td key={`${di}-us`} className={`px-1 py-2 text-right tabular-nums ${dayBg}`}>
-                                  <UsageCell v={d?.usage ?? null} />
+                                  {isForecast
+                                    ? <ForecastCell v={d?.usage ?? null} />
+                                    : <UsageCell v={d?.usage ?? null} />}
                                 </td>
                                 <td key={`${di}-e`}  className={`px-1 py-2 text-right tabular-nums ${dayBg}`}>
-                                  <InvCell v={d?.ending ?? null} />
+                                  {isForecast && d?.ending !== null
+                                    ? <ForecastCell v={d?.ending ?? null} dim />
+                                    : <InvCell v={d?.ending ?? null} />}
                                 </td>
                               </>
                             );
@@ -631,7 +720,7 @@ export default function InventoryOverviewPage() {
       if (activeTab === 'group') {
         await qc.refetchQueries({ queryKey: ['inventory-overview'] });
       } else {
-        await qc.refetchQueries({ queryKey: ['inventory-weekly', activeTab, weekStart] });
+        await qc.refetchQueries({ queryKey: ['inventory-weekly', activeTab] });
       }
       setRefreshedAt(Date.now());
     } finally {
