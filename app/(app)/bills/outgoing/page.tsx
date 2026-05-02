@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
 import {
@@ -71,7 +71,10 @@ const STATUS_STYLES: Record<string, string> = {
 };
 
 const DEFAULT_INTRO_MONTHLY = 'Wir bedanken uns für Ihren Auftrag und stellen Ihnen für die Bestellungen wie folgt eine Rechnung:';
-const DEFAULT_INTRO_DINNER  = 'Wir bedanken uns für Ihren Auftrag und stellen Ihnen für das Abendessen wie folgt eine Rechnung:';
+const makeIntroDinner = (eventDate: string) =>
+  eventDate
+    ? `Wir bedanken uns für Ihren Auftrag und stellen Ihnen für das Abendessen am ${eventDate} wie folgt eine Rechnung:`
+    : 'Wir bedanken uns für Ihren Auftrag und stellen Ihnen für das Abendessen wie folgt eine Rechnung:';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -111,27 +114,37 @@ export default function OutgoingBillsPage() {
 
   // ── Create Bill state ─────────────────────────────────────────────────────
 
-  const [billType,        setBillType]        = useState<'monthly' | 'dinner'>('dinner');
-  const [invoiceNumber,   setInvoiceNumber]   = useState('');
-  const [billDate,        setBillDate]        = useState(today());
-  const [company,         setCompany]         = useState('');
-  const [extra,           setExtra]           = useState('');
-  const [contactName,     setContactName]     = useState('');
-  const [street,          setStreet]          = useState('');
-  const [postcode,        setPostcode]        = useState('');
-  const [city,            setCity]            = useState('');
-  const [poNumber,        setPoNumber]        = useState('');
-  const [att,             setAtt]             = useState('');
-  const [introText,       setIntroText]       = useState(DEFAULT_INTRO_DINNER);
-  const [essenNetto,      setEssenNetto]      = useState('');
-  const [getraenkeNetto,  setGetraenkeNetto]  = useState('');
-  const [trinkgeld,       setTrinkgeld]       = useState('');
-  const [lineItems,       setLineItems]       = useState<LineItem[]>([{ qty: 1, item: '', unitPrice: 0 }]);
-  const [generating,      setGenerating]      = useState(false);
+  const [billType,          setBillType]          = useState<'monthly' | 'dinner'>('dinner');
+  const [invoiceNumber,     setInvoiceNumber]     = useState('');
+  const [billDate,          setBillDate]          = useState(today());
+  const [billEventDate,     setBillEventDate]     = useState('');
+  const [billIssuingLoc,    setBillIssuingLoc]    = useState('');
+  const [company,           setCompany]           = useState('');
+  const [extra,             setExtra]             = useState('');
+  const [contactName,       setContactName]       = useState('');
+  const [street,            setStreet]            = useState('');
+  const [postcode,          setPostcode]          = useState('');
+  const [city,              setCity]              = useState('');
+  const [poNumber,          setPoNumber]          = useState('');
+  const [att,               setAtt]               = useState('');
+  const [introText,         setIntroText]         = useState(makeIntroDinner(''));
+  const [essenNetto,        setEssenNetto]        = useState('');
+  const [getraenkeNetto,    setGetraenkeNetto]    = useState('');
+  const [trinkgeld,         setTrinkgeld]         = useState('');
+  const [lineItems,         setLineItems]         = useState<LineItem[]>([{ qty: 1, item: '', unitPrice: 0 }]);
+  const [generating,        setGenerating]        = useState(false);
+
+  // Auto-update intro text when event date or bill type changes
+  useEffect(() => {
+    if (billType === 'dinner') {
+      setIntroText(makeIntroDinner(billEventDate));
+    } else {
+      setIntroText(DEFAULT_INTRO_MONTHLY);
+    }
+  }, [billType, billEventDate]);
 
   const handleBillTypeChange = (t: 'monthly' | 'dinner') => {
     setBillType(t);
-    setIntroText(t === 'monthly' ? DEFAULT_INTRO_MONTHLY : DEFAULT_INTRO_DINNER);
   };
 
   const addLineItem = () =>
@@ -150,16 +163,19 @@ export default function OutgoingBillsPage() {
 
   const buildBillData = useCallback((): BillData => ({
     invoiceNumber,
-    date: billDate,
-    type: billType,
+    date:            billDate,
+    eventDate:       billEventDate || undefined,
+    issuingLocation: billIssuingLoc || undefined,
+    type:            billType,
     recipient: { company, extra, contact: contactName, street, postcode, city, poNumber, att },
     introText,
     lineItems:      billType === 'monthly' ? lineItems   : undefined,
     essenNetto:     billType === 'dinner'  ? parseFloat(essenNetto)     || 0 : undefined,
     getraenkeNetto: billType === 'dinner'  ? parseFloat(getraenkeNetto) || 0 : undefined,
     trinkgeld:      billType === 'dinner'  ? parseFloat(trinkgeld)      || 0 : undefined,
-  }), [invoiceNumber, billDate, billType, company, extra, contactName, street, postcode, city,
-       poNumber, att, introText, lineItems, essenNetto, getraenkeNetto, trinkgeld]);
+  }), [invoiceNumber, billDate, billEventDate, billIssuingLoc, billType, company, extra,
+       contactName, street, postcode, city, poNumber, att, introText, lineItems,
+       essenNetto, getraenkeNetto, trinkgeld]);
 
   const handleGenerate = async () => {
     setGenerating(true);
@@ -644,9 +660,28 @@ export default function OutgoingBillsPage() {
                   value={invoiceNumber} onChange={(e) => setInvoiceNumber(e.target.value)} />
               </div>
               <div>
-                <label className={labelCls}>Date (DD.MM.YYYY)</label>
+                <label className={labelCls}>Invoice Date (DD.MM.YYYY)</label>
                 <input className={inputCls} placeholder={today()}
                   value={billDate} onChange={(e) => setBillDate(e.target.value)} />
+              </div>
+              <div>
+                <label className={labelCls}>Event Date (DD.MM.YYYY)</label>
+                <input className={inputCls} placeholder="e.g. 27.01.2026"
+                  value={billEventDate} onChange={(e) => setBillEventDate(e.target.value)} />
+              </div>
+              <div>
+                <label className={labelCls}>Event Location</label>
+                <div className="relative">
+                  <select
+                    className={`${inputCls} appearance-none pr-8`}
+                    value={billIssuingLoc}
+                    onChange={(e) => setBillIssuingLoc(e.target.value)}
+                  >
+                    <option value="">— Select location —</option>
+                    {LOCATIONS.map((l) => <option key={l}>{l}</option>)}
+                  </select>
+                  <ChevronDown size={14} className="absolute right-3 top-2.5 text-gray-400 pointer-events-none" />
+                </div>
               </div>
             </div>
           </div>

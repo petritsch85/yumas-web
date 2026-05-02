@@ -1,9 +1,22 @@
 import { Document, Page, View, Text, Image, StyleSheet } from '@react-pdf/renderer';
 import { YUMAS_LOGO } from './yumasLogo';
 
-// ── Fixed sender / footer text ────────────────────────────────────────────────
-const SENDER  = ['Yumas GmbH', 'Feuerbachstraße 46', '60325 Frankfurt'];
-const FOOTER_1 = 'Yumas GmbH │ Feuerbachstraße 46│ 60325 Frankfurt';
+// ── Location-specific sender addresses ───────────────────────────────────────
+const LOCATION_DATA: Record<string, { sender: string[]; footer1: string }> = {
+  Westend: {
+    sender:  ['Yumas GmbH', 'Feuerbachstraße 46', '60325 Frankfurt'],
+    footer1: 'Yumas GmbH │ Feuerbachstraße 46│ 60325 Frankfurt',
+  },
+  Eschborn: {
+    sender:  ['Yumas GmbH', 'Rahmannstraße 11', '65760 Eschborn'],
+    footer1: 'Yumas GmbH │ Rahmannstraße 11│ 65760 Eschborn',
+  },
+  Taunus: {
+    sender:  ['Yumas GmbH', 'Taunusstraße 43', '60329 Frankfurt'],
+    footer1: 'Yumas GmbH │ Taunusstraße 43│ 60329 Frankfurt',
+  },
+};
+const DEFAULT_LOCATION = LOCATION_DATA['Westend'];
 const FOOTER_2 = 'Sparkasse Rhein-Nahe│ IBAN DE98 5605 0180 0017 1489 25│ Steuernummer: 014 249 10458';
 const PAYMENT  = 'Die Rechnung ist zahlbar innerhalb von 7 Tagen nach Rechnungseingang.';
 
@@ -11,10 +24,12 @@ const PAYMENT  = 'Die Rechnung ist zahlbar innerhalb von 7 Tagen nach Rechnungse
 export type LineItem = { qty: number; item: string; unitPrice: number };
 
 export type BillData = {
-  invoiceNumber  : string;
-  date           : string;   // DD.MM.YYYY
-  type           : 'monthly' | 'dinner';
-  recipient      : {
+  invoiceNumber   : string;
+  date            : string;    // DD.MM.YYYY  — invoice date
+  eventDate?      : string;    // DD.MM.YYYY  — date of the event
+  issuingLocation?: string;    // 'Westend' | 'Eschborn' | 'Taunus'
+  type            : 'monthly' | 'dinner';
+  recipient       : {
     company  : string;
     extra?   : string;
     contact? : string;
@@ -116,6 +131,9 @@ function AmtRow({ label, value }: { label: string; value: number }) {
 // ── PDF Component ─────────────────────────────────────────────────────────────
 export function BillDocument({ data }: { data: BillData }) {
   const isMonthly = data.type === 'monthly';
+  const loc = (data.issuingLocation && LOCATION_DATA[data.issuingLocation])
+    ? LOCATION_DATA[data.issuingLocation]
+    : DEFAULT_LOCATION;
 
   // Derived totals
   const essen     = data.essenNetto     ?? 0;
@@ -152,7 +170,7 @@ export function BillDocument({ data }: { data: BillData }) {
             <Image style={s.logo} src={YUMAS_LOGO} />
           </View>
           <View style={s.senderBlock}>
-            {SENDER.map((line) => <Text key={line}>{line}</Text>)}
+            {loc.sender.map((line) => <Text key={line}>{line}</Text>)}
           </View>
         </View>
 
@@ -266,7 +284,7 @@ export function BillDocument({ data }: { data: BillData }) {
 
         {/* ── Footer (fixed at bottom of every page) ───────────────── */}
         <View style={s.footer} fixed>
-          <Text style={s.footerText}>{FOOTER_1}</Text>
+          <Text style={s.footerText}>{loc.footer1}</Text>
           <Text style={s.footerText}>{FOOTER_2}</Text>
         </View>
 
