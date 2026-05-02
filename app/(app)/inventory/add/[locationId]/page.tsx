@@ -234,7 +234,9 @@ function UploadInventoryModal({
           if (!Array.isArray(row) || row.length < 2) continue;
           // Find first string cell (item name) and first numeric cell (quantity)
           const nameCandidates = row.filter(c => typeof c === 'string' && (c as string).trim().length > 1);
-          const numCandidates  = row.filter(c => typeof c === 'number' || (typeof c === 'string' && !isNaN(parseFloat(c as string)) && (c as string).trim() !== ''));
+          // Only accept true numeric cells (typeof number) — avoids false matches on
+          // unit strings like "1/6 GN groß" where parseFloat would return 1.
+          const numCandidates  = row.filter(c => typeof c === 'number');
           if (!nameCandidates.length || !numCandidates.length) continue;
 
           const rawName = String(nameCandidates[0]).trim();
