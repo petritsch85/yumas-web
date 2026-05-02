@@ -104,38 +104,56 @@ export default function StatsPage() {
 
   // ── Aggregation ───────────────────────────────────────────────────────────
 
-  const { lunchMap, dinnerMap, cols } = useMemo(() => {
-    const lunchMap:  Record<string, number> = {};
-    const dinnerMap: Record<string, number> = {};
+  const { lunchMap, dinnerMap, lunchDays, dinnerDays, cols } = useMemo(() => {
+    const lunchMap:  Record<string, number>      = {};
+    const dinnerMap: Record<string, number>      = {};
+    // distinct date sets per period key, per shift type
+    const lunchDates:  Record<string, Set<string>> = {};
+    const dinnerDates: Record<string, Set<string>> = {};
 
     const key = (date: string) =>
       view === 'monthly'
         ? date.slice(0, 7)
         : `${weekYear(date)}-W${String(isoWeek(date)).padStart(2, '0')}`;
 
+    const addLunch = (k: string, date: string, v: number) => {
+      lunchMap[k] = (lunchMap[k] ?? 0) + v;
+      (lunchDates[k] ??= new Set()).add(date);
+    };
+    const addDinner = (k: string, date: string, v: number) => {
+      dinnerMap[k] = (dinnerMap[k] ?? 0) + v;
+      (dinnerDates[k] ??= new Set()).add(date);
+    };
+
     // POS (Orderbird)
     for (const s of shifts) {
       const k = key(s.report_date);
-      if (s.shift_type === 'lunch') lunchMap[k]  = (lunchMap[k]  ?? 0) + s.net_total;
-      else                          dinnerMap[k] = (dinnerMap[k] ?? 0) + s.net_total;
+      if (s.shift_type === 'lunch') addLunch(k,  s.report_date, s.net_total);
+      else                          addDinner(k, s.report_date, s.net_total);
     }
 
     // Delivery (Simply)
     for (const d of deliveries) {
       const k = key(d.report_date);
       if (d.shift_type === 'lunch' || d.shift_type == null)
-        lunchMap[k]  = (lunchMap[k]  ?? 0) + d.net_revenue;
+        addLunch(k,  d.report_date, d.net_revenue);
       else
-        dinnerMap[k] = (dinnerMap[k] ?? 0) + d.net_revenue;
+        addDinner(k, d.report_date, d.net_revenue);
     }
 
     // Bills
     for (const b of bills) {
       if (!b.event_date) continue;
       const k = key(b.event_date);
-      if (b.shift_type === 'lunch')  lunchMap[k]  = (lunchMap[k]  ?? 0) + b.net_total;
-      if (b.shift_type === 'dinner') dinnerMap[k] = (dinnerMap[k] ?? 0) + b.net_total;
+      if (b.shift_type === 'lunch')  addLunch(k,  b.event_date, b.net_total);
+      if (b.shift_type === 'dinner') addDinner(k, b.event_date, b.net_total);
     }
+
+    // Collapse date sets → counts
+    const lunchDays:  Record<string, number> = {};
+    const dinnerDays: Record<string, number> = {};
+    for (const [k, s] of Object.entries(lunchDates))  lunchDays[k]  = s.size;
+    for (const [k, s] of Object.entries(dinnerDates)) dinnerDays[k] = s.size;
 
     // Build ordered column list
     let cols: { key: string; label: string }[];
@@ -166,12 +184,17 @@ export default function StatsPage() {
       cols = ordered;
     }
 
-    return { lunchMap, dinnerMap, cols };
+    return { lunchMap, dinnerMap, lunchDays, dinnerDays, cols };
   }, [shifts, deliveries, bills, view, year]);
 
   const lunchTotal  = Object.values(lunchMap).reduce( (s, v) => s + v, 0);
   const dinnerTotal = Object.values(dinnerMap).reduce((s, v) => s + v, 0);
   const grandTotal  = lunchTotal + dinnerTotal;
+
+  // Sales/Day — total days across all periods (union of lunch + dinner dates per period)
+  const totalLunchDays  = Object.values(lunchDays).reduce( (s, v) => s + v, 0);
+  const totalDinnerDays = Object.values(dinnerDays).reduce((s, v) => s + v, 0);
+  const totalDays       = totalLunchDays + totalDinnerDays;
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -184,6 +207,16 @@ export default function StatsPage() {
     value > 0
       ? <span className="font-bold" style={{ color: '#1B5E20' }}>{fmt(value)}</span>
       : <span className="text-gray-300">—</span>;
+
+  const AvgCell = ({ revenue, days }: { revenue: number; days: number }) => {
+    if (!revenue || !days) return <span className="text-gray-300">—</span>;
+    return <span className="font-semibold" style={{ color: '#1B5E20' }}>{fmt(Math.round(revenue / days))}</span>;
+  };
+
+  const AvgTotalCell = ({ revenue, days }: { revenue: number; days: number }) => {
+    if (!revenue || !days) return <span className="text-gray-300">—</span>;
+    return <span className="font-bold" style={{ color: '#1B5E20' }}>{fmt(Math.round(revenue / days))}</span>;
+  };
 
   return (
     <div>
@@ -249,8 +282,8 @@ export default function StatsPage() {
           <p className="text-sm text-gray-400">Select a location to view stats</p>
         </div>
       ) : (
-
-        /* Table */
+        <>
+        {/* ── Net Revenue table ── */}
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-sm border-collapse">
@@ -345,6 +378,104 @@ export default function StatsPage() {
             </table>
           </div>
         </div>
+
+        {/* ── Sales / Day table ── */}
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden mt-6">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm border-collapse">
+
+              <thead>
+                <tr style={{ backgroundColor: '#0f172a' }}>
+                  <th
+                    className="sticky left-0 z-10 px-4 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider whitespace-nowrap"
+                    style={{ backgroundColor: '#0f172a', minWidth: 180 }}
+                  >
+                    Sales / Day · {year}
+                  </th>
+                  {cols.map(col => (
+                    <th
+                      key={col.key}
+                      className="px-2 py-3 text-right text-xs font-semibold text-gray-400 uppercase tracking-wider whitespace-nowrap"
+                      style={{ minWidth: view === 'weekly' ? 64 : 72 }}
+                    >
+                      {col.label}
+                    </th>
+                  ))}
+                  <th
+                    className="px-3 py-3 text-right text-xs font-semibold text-amber-400 uppercase tracking-wider whitespace-nowrap border-l border-white/10"
+                    style={{ minWidth: 80 }}
+                  >
+                    Avg
+                  </th>
+                </tr>
+              </thead>
+
+              <tbody className="divide-y divide-gray-100">
+
+                {/* Lunch / Day */}
+                <tr className="hover:bg-green-50/40 transition-colors" style={{ backgroundColor: '#f0fdf4' }}>
+                  <td
+                    className="sticky left-0 z-10 px-4 py-3 font-bold whitespace-nowrap border-r border-gray-100"
+                    style={{ backgroundColor: '#f0fdf4', color: '#1B5E20' }}
+                  >
+                    ☀️ Lunch
+                  </td>
+                  {cols.map(col => (
+                    <td key={col.key} className="px-2 py-3 text-right tabular-nums">
+                      <AvgCell revenue={lunchMap[col.key] ?? 0} days={lunchDays[col.key] ?? 0} />
+                    </td>
+                  ))}
+                  <td className="px-3 py-3 text-right tabular-nums border-l border-gray-200">
+                    <AvgTotalCell revenue={lunchTotal} days={totalLunchDays} />
+                  </td>
+                </tr>
+
+                {/* Dinner / Day */}
+                <tr className="hover:bg-green-50/40 transition-colors" style={{ backgroundColor: '#f0fdf4' }}>
+                  <td
+                    className="sticky left-0 z-10 px-4 py-3 font-bold whitespace-nowrap border-r border-gray-100"
+                    style={{ backgroundColor: '#f0fdf4', color: '#1B5E20' }}
+                  >
+                    🌙 Dinner
+                  </td>
+                  {cols.map(col => (
+                    <td key={col.key} className="px-2 py-3 text-right tabular-nums">
+                      <AvgCell revenue={dinnerMap[col.key] ?? 0} days={dinnerDays[col.key] ?? 0} />
+                    </td>
+                  ))}
+                  <td className="px-3 py-3 text-right tabular-nums border-l border-gray-200">
+                    <AvgTotalCell revenue={dinnerTotal} days={totalDinnerDays} />
+                  </td>
+                </tr>
+
+                {/* Total / Day */}
+                <tr style={{ backgroundColor: '#f0fdf4' }} className="border-t-2 border-gray-200">
+                  <td
+                    className="sticky left-0 z-10 px-4 py-3 font-bold whitespace-nowrap border-r border-gray-200"
+                    style={{ backgroundColor: '#f0fdf4', color: '#1B5E20' }}
+                  >
+                    ∑ Total
+                  </td>
+                  {cols.map(col => {
+                    const rev  = (lunchMap[col.key] ?? 0) + (dinnerMap[col.key] ?? 0);
+                    const days = (lunchDays[col.key] ?? 0) + (dinnerDays[col.key] ?? 0);
+                    return (
+                      <td key={col.key} className="px-2 py-3 text-right tabular-nums">
+                        <AvgCell revenue={rev} days={days} />
+                      </td>
+                    );
+                  })}
+                  <td className="px-3 py-3 text-right tabular-nums border-l border-gray-200">
+                    <AvgTotalCell revenue={grandTotal} days={totalDays} />
+                  </td>
+                </tr>
+
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        </>
       )}
     </div>
   );
