@@ -1254,6 +1254,13 @@ export default function SalesReportsPage() {
     return m;
   }, [deliveryReports]);
 
+  const deliveryTotalMap = useMemo<Record<string, number>>(() => {
+    const m: Record<string, number> = {};
+    for (const [k, v] of Object.entries(deliveryLunchMap))  m[k] = (m[k] ?? 0) + v;
+    for (const [k, v] of Object.entries(deliveryDinnerMap)) m[k] = (m[k] ?? 0) + v;
+    return m;
+  }, [deliveryLunchMap, deliveryDinnerMap]);
+
   // O(1) lookup set for closed shifts: "lunch:2026-05-01", "dinner:2026-05-01"
   const closureSet = useMemo(() => {
     const s = new Set<string>();
@@ -3019,121 +3026,144 @@ export default function SalesReportsPage() {
                         Summary
                       </td>
                     </tr>
-                    {[
-                      { label:'☀️  Lunch · Net Revenue',  map: lunchMap,  qTotal: lunchQtrTotal,  fcastMap: lunchForecastMap,  field:'netTotal' as const, bold:false },
-                      { label:'🌙  Dinner · Net Revenue', map: dinnerMap, qTotal: dinnerQtrTotal, fcastMap: dinnerForecastMap, field:'netTotal' as const, bold:false },
-                      { label:'∑   Total · Net Revenue',  map: totalMap,  qTotal: totalQtrTotal,  fcastMap: totalForecastMap,  field:'netTotal' as const, bold:true  },
-                    ].map((row, i) => {
-                      const todayKey   = `${todayYear}-${String(todayMonth).padStart(2,'0')}-${String(todayDay).padStart(2,'0')}`;
-                      const hasFcast   = Object.keys(row.fcastMap).length > 0;
-                      const bg = row.bold ? '#f0fdf4' : '#ffffff';
-                      // Quarter total: actuals to date + forecast for remaining days
-                      const qActualSum = row.qTotal?.[row.field] ?? 0;
-                      const qFcastRem  = hasFcast
-                        ? dailyCols.filter((c): c is DayCol => c.type === 'day' && c.dateKey >= todayKey && !row.map[c.dateKey])
-                            .reduce((s, c) => s + (row.fcastMap[c.dateKey] ?? 0), 0)
-                        : 0;
-                      const qDisplayVal = qActualSum + qFcastRem;
-                      const qHasMix     = qActualSum > 0 && qFcastRem > 0;
-                      return (
-                        <tr key={i} className="border-b border-gray-100 hover:bg-gray-50/60 group" style={{ backgroundColor: bg }}>
-                          <td className={`sticky left-0 z-10 px-4 py-2 whitespace-nowrap border-r border-gray-100 group-hover:bg-gray-50/60 transition-colors ${row.bold ? 'font-bold text-gray-900' : 'text-gray-700'}`}
-                            style={{ backgroundColor: bg }}>
-                            {row.label}
-                          </td>
-                          {dailyCols.map((col, ci) => {
-                            if (col.type === 'day') {
-                              const isCurDay  = col.dateKey === todayKey;
-                              const isFuture  = col.dateKey >= todayKey;
-                              const actual    = (row.map[col.dateKey]?.[row.field] ?? 0);
-                              const fcast     = row.fcastMap[col.dateKey] ?? null;
-                              const hasActual = actual > 0;
-                              const showFcast = !hasActual && isFuture && fcast !== null && fcast > 0;
-                              return (
-                                <td key={ci} className={`py-2 text-right tabular-nums ${row.bold ? 'font-bold' : ''}`}
-                                  style={{ paddingLeft:4, paddingRight:8, backgroundColor: isCurDay ? 'rgba(59,130,246,0.04)' : undefined }}>
-                                  {hasActual
-                                    ? <span className={row.bold ? 'text-[#1B5E20]' : 'text-blue-700'}>{fmtNum(actual)}</span>
-                                    : showFcast
-                                      ? <span className="text-amber-500 italic text-[10px]">{fmtNum(fcast!)}</span>
+                    {(() => {
+                      const todayKey = `${todayYear}-${String(todayMonth).padStart(2,'0')}-${String(todayDay).padStart(2,'0')}`;
+
+                      // Render a standard POS net-revenue row (with forecast support)
+                      const posRow = (label: string, posMap: typeof lunchMap, fcastMap: Record<string,number>, qTotal: typeof lunchQtrTotal) => {
+                        const hasFcast    = Object.keys(fcastMap).length > 0;
+                        const qActualSum  = qTotal?.netTotal ?? 0;
+                        const qFcastRem   = hasFcast ? dailyCols.filter(c => c.type === 'day' && c.dateKey >= todayKey && !(posMap as any)[c.dateKey]).reduce((s, c) => s + (fcastMap[(c as any).dateKey] ?? 0), 0) : 0;
+                        const qDisplayVal = qActualSum + qFcastRem;
+                        const qHasMix     = qActualSum > 0 && qFcastRem > 0;
+                        return (
+                          <tr key={label} className="border-b border-gray-100 hover:bg-gray-50/60 group" style={{ backgroundColor:'#ffffff' }}>
+                            <td className="sticky left-0 z-10 px-4 py-2 whitespace-nowrap border-r border-gray-100 group-hover:bg-gray-50/60 transition-colors text-gray-700" style={{ backgroundColor:'#ffffff' }}>{label}</td>
+                            {dailyCols.map((col, ci) => {
+                              if (col.type === 'day') {
+                                const isCurDay = col.dateKey === todayKey;
+                                const isFuture = col.dateKey >= todayKey;
+                                const actual   = posMap[col.dateKey]?.netTotal ?? 0;
+                                const fcast    = fcastMap[col.dateKey] ?? null;
+                                const hasActual = actual > 0;
+                                const showFcast = !hasActual && isFuture && fcast !== null && fcast > 0;
+                                return (
+                                  <td key={ci} className="py-2 text-right tabular-nums" style={{ paddingLeft:4, paddingRight:8, backgroundColor: isCurDay ? 'rgba(59,130,246,0.04)' : undefined }}>
+                                    {hasActual ? <span className="text-blue-700">{fmtNum(actual)}</span>
+                                      : showFcast ? <span className="text-amber-500 italic text-[10px]">{fmtNum(fcast!)}</span>
                                       : <span className="text-gray-300">—</span>}
-                                </td>
-                              );
-                            } else {
-                              const present = col.wDateKeys.filter(k => (row.map[k]?.[row.field] ?? 0) > 0);
-                              const wActual = present.length > 0
-                                ? present.reduce((s, k) => s + (row.map[k][row.field] ?? 0), 0) : 0;
-                              const wFcast  = hasFcast
-                                ? col.wDateKeys.filter(k => !row.map[k] && k >= todayKey)
-                                    .reduce((s, k) => s + (row.fcastMap[k] ?? 0), 0) : 0;
-                              const wTotal  = wActual + wFcast;
-                              const wMix    = wActual > 0 && wFcast > 0;
-                              return (
-                                <td key={ci} className={`py-2 text-right tabular-nums ${row.bold ? 'font-bold' : ''}`}
-                                  style={{ paddingLeft:4, paddingRight:6, backgroundColor:'#fffbeb', borderLeft:'1px solid #fde68a', borderRight:'1px solid #fde68a' }}>
-                                  {wTotal > 0
-                                    ? <span className={wMix ? 'text-amber-600' : row.bold ? 'text-gray-900' : 'text-blue-700'}>{fmtNum(wTotal)}</span>
-                                    : <span className="text-gray-300">—</span>}
-                                </td>
-                              );
-                            }
-                          })}
-                          <td className={`py-2 text-right tabular-nums border-l border-gray-200 ${row.bold ? 'font-bold' : ''}`}
-                            style={{ paddingLeft:4, paddingRight:8 }}>
-                            {qDisplayVal > 0
-                              ? <span className={qHasMix ? 'text-amber-600' : row.bold ? 'text-[#1B5E20]' : 'text-blue-700'}>{fmtNum(qDisplayVal)}</span>
-                              : <span className="text-gray-300">—</span>}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                    {/* Simply delivery rows — Lunch + Dinner */}
-                    {(['lunch', 'dinner'] as const).map((shift) => {
-                      const map       = shift === 'lunch' ? deliveryLunchMap : deliveryDinnerMap;
-                      const todayKey  = `${todayYear}-${String(todayMonth).padStart(2,'0')}-${String(todayDay).padStart(2,'0')}`;
-                      const qDelivery = Object.entries(map)
-                        .filter(([k]) => dailyCols.some(c => c.type === 'day' && c.dateKey === k))
-                        .reduce((s, [, v]) => s + v, 0);
-                      const label = shift === 'lunch' ? '🛵 Simply · Lunch' : '🛵 Simply · Dinner';
+                                  </td>
+                                );
+                              } else {
+                                const wActual = col.wDateKeys.filter(k => (posMap[k]?.netTotal ?? 0) > 0).reduce((s, k) => s + (posMap[k].netTotal ?? 0), 0);
+                                const wFcast  = hasFcast ? col.wDateKeys.filter(k => !posMap[k] && k >= todayKey).reduce((s, k) => s + (fcastMap[k] ?? 0), 0) : 0;
+                                const wTotal  = wActual + wFcast;
+                                const wMix    = wActual > 0 && wFcast > 0;
+                                return (
+                                  <td key={ci} className="py-2 text-right tabular-nums" style={{ paddingLeft:4, paddingRight:6, backgroundColor:'#fffbeb', borderLeft:'1px solid #fde68a', borderRight:'1px solid #fde68a' }}>
+                                    {wTotal > 0 ? <span className={wMix ? 'text-amber-600' : 'text-blue-700'}>{fmtNum(wTotal)}</span> : <span className="text-gray-300">—</span>}
+                                  </td>
+                                );
+                              }
+                            })}
+                            <td className="py-2 text-right tabular-nums border-l border-gray-200" style={{ paddingLeft:4, paddingRight:8 }}>
+                              {qDisplayVal > 0 ? <span className={qHasMix ? 'text-amber-600' : 'text-blue-700'}>{fmtNum(qDisplayVal)}</span> : <span className="text-gray-300">—</span>}
+                            </td>
+                          </tr>
+                        );
+                      };
+
+                      // Render a Simply delivery row (no forecasts)
+                      const simplyRow = (label: string, delivMap: Record<string,number>) => {
+                        const qDel = Object.entries(delivMap).filter(([k]) => dailyCols.some(c => c.type === 'day' && (c as any).dateKey === k)).reduce((s, [,v]) => s + v, 0);
+                        return (
+                          <tr key={label} className="border-b border-gray-100 hover:bg-gray-50/60 group" style={{ backgroundColor:'#eff6ff' }}>
+                            <td className="sticky left-0 z-10 px-4 py-2 whitespace-nowrap border-r border-gray-100 group-hover:bg-gray-50/60 transition-colors text-blue-800" style={{ backgroundColor:'#eff6ff' }}>{label}</td>
+                            {dailyCols.map((col, ci) => {
+                              if (col.type === 'day') {
+                                const isCurDay = col.dateKey === todayKey;
+                                const val = delivMap[col.dateKey] ?? 0;
+                                return (
+                                  <td key={ci} className="py-2 text-right tabular-nums" style={{ paddingLeft:4, paddingRight:8, backgroundColor: isCurDay ? 'rgba(59,130,246,0.04)' : undefined }}>
+                                    {val > 0 ? <span className="text-blue-700">{fmtNum(val)}</span> : <span className="text-gray-300">—</span>}
+                                  </td>
+                                );
+                              } else {
+                                const wTotal = col.wDateKeys.reduce((s, k) => s + (delivMap[k] ?? 0), 0);
+                                return (
+                                  <td key={ci} className="py-2 text-right tabular-nums" style={{ paddingLeft:4, paddingRight:6, backgroundColor:'#fffbeb', borderLeft:'1px solid #fde68a', borderRight:'1px solid #fde68a' }}>
+                                    {wTotal > 0 ? <span className="text-blue-700">{fmtNum(wTotal)}</span> : <span className="text-gray-300">—</span>}
+                                  </td>
+                                );
+                              }
+                            })}
+                            <td className="py-2 text-right tabular-nums border-l border-gray-200" style={{ paddingLeft:4, paddingRight:8 }}>
+                              {qDel > 0 ? <span className="text-blue-700 font-bold">{fmtNum(qDel)}</span> : <span className="text-gray-300">—</span>}
+                            </td>
+                          </tr>
+                        );
+                      };
+
+                      // Render a bold combined total row (POS actual/forecast + Simply actual)
+                      const totalRow = (label: string, posMap: typeof lunchMap, fcastMap: Record<string,number>, delivMap: Record<string,number>, qTotal: typeof lunchQtrTotal, bg: string, color: string) => {
+                        const hasFcast   = Object.keys(fcastMap).length > 0;
+                        const qPosActual = qTotal?.netTotal ?? 0;
+                        const qDel       = Object.entries(delivMap).filter(([k]) => dailyCols.some(c => c.type === 'day' && (c as any).dateKey === k)).reduce((s, [,v]) => s + v, 0);
+                        const qFcastRem  = hasFcast ? dailyCols.filter(c => c.type === 'day' && c.dateKey >= todayKey && !(posMap as any)[c.dateKey]).reduce((s, c) => s + (fcastMap[(c as any).dateKey] ?? 0), 0) : 0;
+                        const qDisplayVal = qPosActual + qDel + qFcastRem;
+                        const qHasMix    = (qPosActual + qDel) > 0 && qFcastRem > 0;
+                        return (
+                          <tr key={label} className="border-b border-gray-100 hover:bg-gray-50/60 group" style={{ backgroundColor: bg }}>
+                            <td className="sticky left-0 z-10 px-4 py-2 whitespace-nowrap border-r border-gray-100 group-hover:bg-gray-50/60 transition-colors font-bold" style={{ backgroundColor: bg, color }}>{label}</td>
+                            {dailyCols.map((col, ci) => {
+                              if (col.type === 'day') {
+                                const isCurDay  = col.dateKey === todayKey;
+                                const isFuture  = col.dateKey >= todayKey;
+                                const posActual = posMap[col.dateKey]?.netTotal ?? 0;
+                                const simply    = delivMap[col.dateKey] ?? 0;
+                                const fcast     = !posActual && isFuture ? (fcastMap[col.dateKey] ?? null) : null;
+                                const hasActual = posActual > 0 || simply > 0;
+                                const showFcast = !hasActual && fcast !== null && fcast > 0;
+                                const displayVal = hasActual ? posActual + simply : (showFcast ? fcast! : 0);
+                                return (
+                                  <td key={ci} className="py-2 text-right tabular-nums font-bold" style={{ paddingLeft:4, paddingRight:8, backgroundColor: isCurDay ? 'rgba(59,130,246,0.04)' : undefined }}>
+                                    {hasActual ? <span style={{ color }}>{fmtNum(displayVal)}</span>
+                                      : showFcast ? <span className="text-amber-500 italic text-[10px]">{fmtNum(displayVal)}</span>
+                                      : <span className="text-gray-300">—</span>}
+                                  </td>
+                                );
+                              } else {
+                                const wPosActual = col.wDateKeys.filter(k => (posMap[k]?.netTotal ?? 0) > 0).reduce((s, k) => s + (posMap[k].netTotal ?? 0), 0);
+                                const wSimply    = col.wDateKeys.reduce((s, k) => s + (delivMap[k] ?? 0), 0);
+                                const wFcast     = hasFcast ? col.wDateKeys.filter(k => !posMap[k] && k >= todayKey).reduce((s, k) => s + (fcastMap[k] ?? 0), 0) : 0;
+                                const wTotal     = wPosActual + wSimply + wFcast;
+                                const wMix       = (wPosActual + wSimply) > 0 && wFcast > 0;
+                                return (
+                                  <td key={ci} className="py-2 text-right tabular-nums font-bold" style={{ paddingLeft:4, paddingRight:6, backgroundColor:'#fffbeb', borderLeft:'1px solid #fde68a', borderRight:'1px solid #fde68a' }}>
+                                    {wTotal > 0 ? <span style={{ color: wMix ? '#d97706' : color }}>{fmtNum(wTotal)}</span> : <span className="text-gray-300">—</span>}
+                                  </td>
+                                );
+                              }
+                            })}
+                            <td className="py-2 text-right tabular-nums font-bold border-l border-gray-200" style={{ paddingLeft:4, paddingRight:8 }}>
+                              {qDisplayVal > 0 ? <span style={{ color: qHasMix ? '#d97706' : color }}>{fmtNum(qDisplayVal)}</span> : <span className="text-gray-300">—</span>}
+                            </td>
+                          </tr>
+                        );
+                      };
+
                       return (
-                        <tr key={shift} className="border-b border-gray-100 hover:bg-gray-50/60 group" style={{ backgroundColor: '#eff6ff' }}>
-                          <td className="sticky left-0 z-10 px-4 py-2 whitespace-nowrap border-r border-gray-100 group-hover:bg-gray-50/60 transition-colors text-blue-800"
-                            style={{ backgroundColor: '#eff6ff' }}>
-                            {label}
-                          </td>
-                          {dailyCols.map((col, ci) => {
-                            if (col.type === 'day') {
-                              const isCurDay = col.dateKey === todayKey;
-                              const val = map[col.dateKey] ?? 0;
-                              return (
-                                <td key={ci} className="py-2 text-right tabular-nums"
-                                  style={{ paddingLeft:4, paddingRight:8, backgroundColor: isCurDay ? 'rgba(59,130,246,0.04)' : undefined }}>
-                                  {val > 0
-                                    ? <span className="text-blue-700">{fmtNum(val)}</span>
-                                    : <span className="text-gray-300">—</span>}
-                                </td>
-                              );
-                            } else {
-                              const wTotal = col.wDateKeys.reduce((s, k) => s + (map[k] ?? 0), 0);
-                              return (
-                                <td key={ci} className="py-2 text-right tabular-nums"
-                                  style={{ paddingLeft:4, paddingRight:6, backgroundColor:'#fffbeb', borderLeft:'1px solid #fde68a', borderRight:'1px solid #fde68a' }}>
-                                  {wTotal > 0
-                                    ? <span className="text-blue-700">{fmtNum(wTotal)}</span>
-                                    : <span className="text-gray-300">—</span>}
-                                </td>
-                              );
-                            }
-                          })}
-                          <td className="py-2 text-right tabular-nums border-l border-gray-200"
-                            style={{ paddingLeft:4, paddingRight:8 }}>
-                            {qDelivery > 0
-                              ? <span className="text-blue-700 font-bold">{fmtNum(qDelivery)}</span>
-                              : <span className="text-gray-300">—</span>}
-                          </td>
-                        </tr>
+                        <>
+                          {posRow('☀️  Lunch · Net Revenue',  lunchMap,  lunchForecastMap,  lunchQtrTotal)}
+                          {simplyRow('🛵 Simply · Lunch', deliveryLunchMap)}
+                          {totalRow('☀️  Total Lunch',  lunchMap,  lunchForecastMap,  deliveryLunchMap,  lunchQtrTotal,  '#fffbeb', '#92400E')}
+                          {posRow('🌙  Dinner · Net Revenue', dinnerMap, dinnerForecastMap, dinnerQtrTotal)}
+                          {simplyRow('🛵 Simply · Dinner', deliveryDinnerMap)}
+                          {totalRow('🌙  Total Dinner', dinnerMap, dinnerForecastMap, deliveryDinnerMap, dinnerQtrTotal, '#eff6ff', '#1E3A5F')}
+                          {totalRow('∑   Grand Total',  totalMap,  totalForecastMap,  deliveryTotalMap,  totalQtrTotal,  '#f0fdf4', '#1B5E20')}
+                        </>
                       );
-                    })}
+                    })()}
                   </tbody>
 
                   <tbody><tr><td colSpan={totalCols} style={{ height: 12, backgroundColor:'#f9fafb' }} /></tr></tbody>
