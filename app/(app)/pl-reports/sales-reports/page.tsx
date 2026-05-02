@@ -1021,7 +1021,7 @@ export default function SalesReportsPage() {
 
   // Outgoing bills (large-group invoices) for current quarter
   const { data: outgoingBillsData = [] } = useQuery({
-    queryKey: ['outgoing-bills-pl', location?.name, year, quarter],
+    queryKey: ['outgoing-bills', 'pl', location?.name, year, quarter],
     enabled: !!location,
     queryFn: async () => {
       const [firstM, , lastM] = QUARTER_MONTHS[quarter - 1];
