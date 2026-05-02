@@ -3077,8 +3077,8 @@ export default function SalesReportsPage() {
                       const simplyRow = (label: string, delivMap: Record<string,number>) => {
                         const qDel = Object.entries(delivMap).filter(([k]) => dailyCols.some(c => c.type === 'day' && (c as any).dateKey === k)).reduce((s, [,v]) => s + v, 0);
                         return (
-                          <tr key={label} className="border-b border-gray-100 hover:bg-gray-50/60 group" style={{ backgroundColor:'#eff6ff' }}>
-                            <td className="sticky left-0 z-10 px-4 py-2 whitespace-nowrap border-r border-gray-100 group-hover:bg-gray-50/60 transition-colors text-blue-800" style={{ backgroundColor:'#eff6ff' }}>{label}</td>
+                          <tr key={label} className="border-b border-gray-100 hover:bg-gray-50/60 group">
+                            <td className="sticky left-0 z-10 px-4 py-2 whitespace-nowrap border-r border-gray-100 bg-white group-hover:bg-gray-50/60 transition-colors text-blue-800">{label}</td>
                             {dailyCols.map((col, ci) => {
                               if (col.type === 'day') {
                                 const isCurDay = col.dateKey === todayKey;
@@ -3108,8 +3108,8 @@ export default function SalesReportsPage() {
                       const billsRow = (label: string, billsMap: Record<string,number>) => {
                         const qBills = Object.entries(billsMap).filter(([k]) => dailyCols.some(c => c.type === 'day' && (c as any).dateKey === k)).reduce((s, [,v]) => s + v, 0);
                         return (
-                          <tr key={label} className="border-b border-gray-100 hover:bg-gray-50/60 group" style={{ backgroundColor:'#fdf4ff' }}>
-                            <td className="sticky left-0 z-10 px-4 py-2 whitespace-nowrap border-r border-gray-100 group-hover:bg-gray-50/60 transition-colors text-purple-800" style={{ backgroundColor:'#fdf4ff' }}>{label}</td>
+                          <tr key={label} className="border-b border-gray-100 hover:bg-gray-50/60 group">
+                            <td className="sticky left-0 z-10 px-4 py-2 whitespace-nowrap border-r border-gray-100 bg-white group-hover:bg-gray-50/60 transition-colors text-purple-800">{label}</td>
                             {dailyCols.map((col, ci) => {
                               if (col.type === 'day') {
                                 const isCurDay = col.dateKey === todayKey;
@@ -3185,15 +3185,15 @@ export default function SalesReportsPage() {
 
                       return (
                         <>
-                          {posRow('☀️  Lunch · Net Revenue',  lunchMap,  lunchForecastMap,  lunchQtrTotal)}
+                          {posRow('☀️  Orderbird · Lunch',  lunchMap,  lunchForecastMap,  lunchQtrTotal)}
                           {simplyRow('🛵 Simply · Lunch', deliveryLunchMap)}
                           {billsRow('🧾 Bills · Lunch', {})}
-                          {totalRow('☀️  Total Lunch',  lunchMap,  lunchForecastMap,  deliveryLunchMap,  lunchQtrTotal,  '#fffbeb', '#92400E')}
-                          {posRow('🌙  Dinner · Net Revenue', dinnerMap, dinnerForecastMap, dinnerQtrTotal)}
+                          {totalRow('☀️  Total Lunch',  lunchMap,  lunchForecastMap,  deliveryLunchMap,  lunchQtrTotal,  '#f0fdf4', '#1B5E20')}
+                          {posRow('🌙  Orderbird · Dinner', dinnerMap, dinnerForecastMap, dinnerQtrTotal)}
                           {simplyRow('🛵 Simply · Dinner', deliveryDinnerMap)}
                           {billsRow('🧾 Bills · Dinner', {})}
-                          {totalRow('🌙  Total Dinner', dinnerMap, dinnerForecastMap, deliveryDinnerMap, dinnerQtrTotal, '#eff6ff', '#1E3A5F')}
-                          {totalRow('∑   Grand Total',  totalMap,  totalForecastMap,  deliveryTotalMap,  totalQtrTotal,  '#f0fdf4', '#1B5E20')}
+                          {totalRow('🌙  Total Dinner', dinnerMap, dinnerForecastMap, deliveryDinnerMap, dinnerQtrTotal, '#f0fdf4', '#1B5E20')}
+                          {totalRow('∑   Daily Total',  totalMap,  totalForecastMap,  deliveryTotalMap,  totalQtrTotal,  '#f0fdf4', '#1B5E20')}
                         </>
                       );
                     })()}
