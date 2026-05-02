@@ -874,6 +874,9 @@ export default function SalesReportsPage() {
   const [editDraft,          setEditDraft]          = useState<Record<string, string>>({});
   const [savingEdit,         setSavingEdit]         = useState(false);
   const [confirmDeleteId,    setConfirmDeleteId]    = useState<string | null>(null);
+  const [reassignId,         setReassignId]         = useState<string | null>(null);
+  const [reassignDate,       setReassignDate]       = useState('');
+  const [savingReassign,     setSavingReassign]     = useState(false);
   const [confirmDelDelivery,    setConfirmDelDelivery]    = useState(false);
   const [editingForecastKey,    setEditingForecastKey]    = useState<string | null>(null); // "lunch:dateKey" | "dinner:dateKey"
   const [forecastDraft,         setForecastDraft]         = useState<{ netRevenue: string; note: string }>({ netRevenue: '', note: '' });
@@ -1816,6 +1819,25 @@ export default function SalesReportsPage() {
     } catch (e: any) { alert(`Save failed: ${e.message}`); }
     finally { setSavingEdit(false); }
   }, [editingShiftId, editDraft, queryClient]);
+
+  const handleReassignDate = useCallback(async () => {
+    if (!reassignId || !reassignDate) return;
+    setSavingReassign(true);
+    try {
+      const { error } = await supabase
+        .from('shift_reports')
+        .update({ report_date: reassignDate })
+        .eq('id', reassignId);
+      if (error) throw error;
+      queryClient.invalidateQueries({ queryKey: ['shift-reports'] });
+      queryClient.invalidateQueries({ queryKey: ['shift-reports-year'] });
+      setReassignId(null);
+      setReassignDate('');
+      // Navigate the modal to the new date so it stays open and shows the moved shift
+      setActiveDayKey(reassignDate);
+    } catch (e: any) { alert(`Move failed: ${e.message}`); }
+    finally { setSavingReassign(false); }
+  }, [reassignId, reassignDate, queryClient]);
 
   const handleDeleteDelivery = useCallback(async (id: string) => {
     try {
@@ -3331,9 +3353,10 @@ export default function SalesReportsPage() {
 
                   {/* ── Shift cards ── */}
                   {dayShifts.map(shift => {
-                    const isLunch    = (editingShiftId === shift.id ? editDraft.shift_type : shift.shift_type) === 'lunch';
-                    const isEditing  = editingShiftId === shift.id;
-                    const isDeleting = confirmDeleteId === shift.id;
+                    const isLunch      = (editingShiftId === shift.id ? editDraft.shift_type : shift.shift_type) === 'lunch';
+                    const isEditing    = editingShiftId === shift.id;
+                    const isDeleting   = confirmDeleteId === shift.id;
+                    const isReassigning = reassignId === shift.id;
                     return (
                       <div key={shift.id} className="border border-gray-200 rounded-xl overflow-hidden">
                         {/* Card header */}
@@ -3355,14 +3378,38 @@ export default function SalesReportsPage() {
                             )}
                             <span className="text-xs text-gray-400">Z-{shift.z_report_number || '?'}</span>
                           </div>
-                          <div className="flex items-center gap-2">
-                            {!isEditing && !isDeleting && (
+                          <div className="flex items-center gap-2 flex-wrap justify-end">
+                            {/* Reassign date UI */}
+                            {isReassigning ? (
+                              <span className="flex items-center gap-1.5">
+                                <input
+                                  type="date"
+                                  value={reassignDate}
+                                  onChange={e => setReassignDate(e.target.value)}
+                                  className="text-xs border border-violet-300 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-violet-400"
+                                />
+                                <button
+                                  onClick={handleReassignDate}
+                                  disabled={!reassignDate || savingReassign}
+                                  className="text-xs px-2.5 py-1 bg-violet-600 text-white rounded-lg font-bold hover:bg-violet-700 transition-colors disabled:opacity-40">
+                                  {savingReassign ? '…' : 'Move'}
+                                </button>
+                                <button onClick={() => { setReassignId(null); setReassignDate(''); }}
+                                  className="text-xs px-2 py-1 border border-gray-200 rounded-lg text-gray-500 hover:bg-gray-50 transition-colors">✕</button>
+                              </span>
+                            ) : !isEditing && !isDeleting && (
+                              <button onClick={() => { setReassignId(shift.id); setReassignDate(shift.report_date); setEditingShiftId(null); setConfirmDeleteId(null); }}
+                                className="text-xs px-2.5 py-1 rounded-lg border border-violet-200 text-violet-600 hover:bg-violet-50 transition-colors font-semibold">
+                                📅 Move
+                              </button>
+                            )}
+                            {!isEditing && !isDeleting && !isReassigning && (
                               <button onClick={() => startEditShift(shift)}
                                 className="text-xs px-2.5 py-1 rounded-lg border border-gray-200 text-gray-500 hover:border-indigo-400 hover:text-indigo-600 transition-colors font-semibold">
                                 ✏️ Edit
                               </button>
                             )}
-                            {!isEditing && (
+                            {!isEditing && !isReassigning && (
                               isDeleting ? (
                                 <span className="flex items-center gap-1.5">
                                   <span className="text-xs text-red-600 font-semibold">Delete?</span>
