@@ -64,6 +64,7 @@ export default function CurrentInventoryPage() {
   const [locationFilter, setLocationFilter] = useState('all');
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<Record<string, number>>({});
 
@@ -77,6 +78,10 @@ export default function CurrentInventoryPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['inventory-submissions'] });
       setConfirmDeleteId(null);
+      setDeleteError(null);
+    },
+    onError: (err: any) => {
+      setDeleteError(err?.message ?? 'Delete failed — you may not have permission.');
     },
   });
 
@@ -318,15 +323,20 @@ export default function CurrentInventoryPage() {
 
                               {isConfirmingDelete ? (
                                 <>
+                                  {deleteError && confirmDeleteId === sub.id && (
+                                    <span className="text-xs text-red-500 mr-1 max-w-[180px] truncate" title={deleteError}>
+                                      {deleteError}
+                                    </span>
+                                  )}
                                   <button
-                                    onClick={() => deleteMutation.mutate(sub.id)}
+                                    onClick={() => { setDeleteError(null); deleteMutation.mutate(sub.id); }}
                                     disabled={deleteMutation.isPending}
                                     className="px-2.5 py-1 text-xs font-semibold text-white bg-red-500 rounded-lg hover:bg-red-600 disabled:opacity-50 transition-colors"
                                   >
-                                    Yes, delete
+                                    {deleteMutation.isPending ? 'Deleting…' : 'Yes, delete'}
                                   </button>
                                   <button
-                                    onClick={() => setConfirmDeleteId(null)}
+                                    onClick={() => { setConfirmDeleteId(null); setDeleteError(null); }}
                                     className="px-2.5 py-1 text-xs font-semibold text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
                                   >
                                     Cancel
