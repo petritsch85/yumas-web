@@ -159,8 +159,7 @@ const navGroups: NavGroup[] = [
   {
     label: 'P&L REPORTS',
     items: [
-      { label: 'Sales Reports', href: '/pl-reports/sales-reports', icon: LineChart,       permKey: 'pl_reports' },
-      { label: 'Monthly P&L',   href: '/pl-reports/sales-reports', icon: TableProperties, permKey: 'pl_reports' },
+      { label: 'Sales Reports', href: '/pl-reports/sales-reports', icon: LineChart, permKey: 'pl_reports' },
     ],
   },
   {
