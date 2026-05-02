@@ -175,8 +175,13 @@ const navGroups: NavGroup[] = [
     label: 'ADMIN',
     items: [
       { label: 'Accounts',      href: '/coming-soon/accounts',      icon: Building2, adminOnly: true },
-      { label: 'Bills',         href: '/bills',                     icon: FilePlus,  permKey: 'bills' },
-      { label: 'Create Bills',  href: '/bills/new',                 icon: FileCheck, permKey: 'bills' },
+      {
+        label: 'Bills', href: '/bills', icon: FilePlus, permKey: 'bills',
+        children: [
+          { label: 'Incoming', href: '/bills',          icon: FilePlus },
+          { label: 'Outgoing', href: '/bills/outgoing', icon: FileCheck },
+        ],
+      },
       { label: 'Approve Bills', href: '/coming-soon/approve-bills', icon: FileCheck, adminOnly: true },
     ],
   },
