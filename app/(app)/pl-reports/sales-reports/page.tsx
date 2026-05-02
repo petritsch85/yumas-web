@@ -2270,6 +2270,22 @@ export default function SalesReportsPage() {
                   >
                     + Add to queue
                   </button>
+
+                  {/* Save All button — shown once there are queued entries */}
+                  {shiftBatch.some(i => i.status === 'pending') && (
+                    <button
+                      onClick={handleImportShift}
+                      disabled={!canImportShift || importing}
+                      className={`mt-1 w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-bold transition-colors ${
+                        canImportShift && !importing
+                          ? 'bg-indigo-600 text-white hover:bg-indigo-700'
+                          : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                      }`}
+                    >
+                      {importing ? <Loader2 size={16} className="animate-spin" /> : <DatabaseZap size={16} />}
+                      {importing ? 'Saving…' : !location ? 'Select a location first' : `Save ${shiftBatch.filter(i => i.status === 'pending').length} entr${shiftBatch.filter(i => i.status === 'pending').length === 1 ? 'y' : 'ies'}`}
+                    </button>
+                  )}
                 </div>
               )}
 
