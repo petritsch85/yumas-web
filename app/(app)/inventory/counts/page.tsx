@@ -56,9 +56,19 @@ function dayLabel(iso: string): string {
   return d.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' });
 }
 
+function toLocalDateStr(d: Date) {
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+
 export default function CurrentInventoryPage() {
   const [locationFilter, setLocationFilter] = useState('all');
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+
+  // Date range — default: last 90 days (catches backdated Excel uploads)
+  const defaultFrom = toLocalDateStr(new Date(Date.now() - 90 * 86_400_000));
+  const defaultTo   = toLocalDateStr(new Date());
+  const [fromDate, setFromDate] = useState(() => toLocalDateStr(new Date(Date.now() - 90 * 86_400_000)));
+  const [toDate,   setToDate]   = useState(() => toLocalDateStr(new Date()));
 
   const { data: locations } = useQuery({
     queryKey: ['locations-list'],
@@ -69,12 +79,15 @@ export default function CurrentInventoryPage() {
   });
 
   const { data: submissions, isLoading } = useQuery({
-    queryKey: ['inventory-submissions', locationFilter],
+    queryKey: ['inventory-submissions', locationFilter, fromDate, toDate],
     queryFn: async () => {
       let q = supabase
         .from('inventory_submissions')
         .select('id, location_name, submitted_at, submitted_by, duration_seconds, data, comment')
-        .order('submitted_at', { ascending: false });
+        .gte('submitted_at', `${fromDate}T00:00:00`)
+        .lte('submitted_at', `${toDate}T23:59:59`)
+        .order('submitted_at', { ascending: false })
+        .limit(2000);
       if (locationFilter !== 'all') q = q.eq('location_name', locationFilter);
       const { data, error } = await q;
       if (error) throw error;
@@ -115,19 +128,40 @@ export default function CurrentInventoryPage() {
         <h1 className="text-2xl font-bold text-gray-900">Inventory Reports</h1>
       </div>
 
-      {/* Location filter */}
-      <div className="mb-4 flex items-center gap-3">
-        <label className="text-sm font-medium text-gray-700">Location:</label>
-        <select
-          value={locationFilter}
-          onChange={(e) => setLocationFilter(e.target.value)}
-          className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]"
+      {/* Filters */}
+      <div className="mb-5 flex flex-wrap items-center gap-4">
+        <div className="flex items-center gap-2">
+          <label className="text-sm font-medium text-gray-700 whitespace-nowrap">Location:</label>
+          <select
+            value={locationFilter}
+            onChange={(e) => setLocationFilter(e.target.value)}
+            className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]"
+          >
+            <option value="all">All Locations</option>
+            {locationNames.map((name) => (
+              <option key={name} value={name}>{name}</option>
+            ))}
+          </select>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <label className="text-sm font-medium text-gray-700 whitespace-nowrap">From:</label>
+          <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)}
+            className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]" />
+        </div>
+
+        <div className="flex items-center gap-2">
+          <label className="text-sm font-medium text-gray-700 whitespace-nowrap">To:</label>
+          <input type="date" value={toDate} onChange={e => setToDate(e.target.value)}
+            className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]" />
+        </div>
+
+        <button
+          onClick={() => { setFromDate(defaultFrom); setToDate(defaultTo); }}
+          className="text-xs text-[#1B5E20] hover:underline font-medium"
         >
-          <option value="all">All Locations</option>
-          {locationNames.map((name) => (
-            <option key={name} value={name}>{name}</option>
-          ))}
-        </select>
+          Reset to 90 days
+        </button>
       </div>
 
       {isLoading ? (
