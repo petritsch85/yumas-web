@@ -9,9 +9,9 @@ import { MapPin, BarChart3, Loader2 } from 'lucide-react';
 
 type Location = { id: string; name: string };
 
-type ShiftRow     = { report_date: string; shift_type: 'lunch' | 'dinner' | null; net_total: number };
-type DeliveryRow  = { report_date: string; shift_type: 'lunch' | 'dinner' | null; net_revenue: number };
-type BillRow      = { event_date: string | null; shift_type: 'lunch' | 'dinner' | null; net_total: number };
+type ShiftRow     = { report_date: string; shift_type: 'lunch' | 'dinner' | null; net_total: number; gross_total: number };
+type DeliveryRow  = { report_date: string; shift_type: 'lunch' | 'dinner' | null; net_revenue: number; gross_revenue: number };
+type BillRow      = { event_date: string | null; shift_type: 'lunch' | 'dinner' | null; net_total: number; gross_total: number };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -64,7 +64,7 @@ export default function StatsPage() {
     queryFn: async () => {
       const { data } = await supabase
         .from('shift_reports')
-        .select('report_date,shift_type,net_total')
+        .select('report_date,shift_type,net_total,gross_total')
         .eq('location_id', locationId)
         .gte('report_date', `${year}-01-01`)
         .lte('report_date', `${year}-12-31`);
@@ -78,7 +78,7 @@ export default function StatsPage() {
     queryFn: async () => {
       const { data } = await supabase
         .from('delivery_reports')
-        .select('report_date,shift_type,net_revenue')
+        .select('report_date,shift_type,net_revenue,gross_revenue')
         .eq('location_id', locationId)
         .gte('report_date', `${year}-01-01`)
         .lte('report_date', `${year}-12-31`);
@@ -92,7 +92,7 @@ export default function StatsPage() {
     queryFn: async () => {
       const { data } = await supabase
         .from('outgoing_bills')
-        .select('event_date,shift_type,net_total')
+        .select('event_date,shift_type,net_total,gross_total')
         .eq('issuing_location', location!.name)
         .gte('event_date', `${year}-01-01`)
         .lte('event_date', `${year}-12-31`);
@@ -104,10 +104,23 @@ export default function StatsPage() {
 
   // ── Aggregation ───────────────────────────────────────────────────────────
 
-  const { lunchMap, dinnerMap, lunchDays, dinnerDays, cols } = useMemo(() => {
-    const lunchMap:  Record<string, number>      = {};
-    const dinnerMap: Record<string, number>      = {};
-    // distinct date sets per period key, per shift type
+  const {
+    lunchMap, dinnerMap,
+    lunchDays, dinnerDays,
+    simplyGrossLunchMap, simplyGrossDinnerMap,
+    totalGrossLunchMap, totalGrossDinnerMap,
+    cols,
+  } = useMemo(() => {
+    const lunchMap:  Record<string, number> = {};
+    const dinnerMap: Record<string, number> = {};
+
+    // Gross maps for Simply as % of total
+    const simplyGrossLunchMap:  Record<string, number> = {};
+    const simplyGrossDinnerMap: Record<string, number> = {};
+    const totalGrossLunchMap:   Record<string, number> = {};
+    const totalGrossDinnerMap:  Record<string, number> = {};
+
+    // Distinct date sets per period key, per shift type
     const lunchDates:  Record<string, Set<string>> = {};
     const dinnerDates: Record<string, Set<string>> = {};
 
@@ -125,28 +138,44 @@ export default function StatsPage() {
       (dinnerDates[k] ??= new Set()).add(date);
     };
 
-    // POS (Orderbird)
+    // POS (Orderbird) — net revenue + gross to total
     for (const s of shifts) {
       const k = key(s.report_date);
-      if (s.shift_type === 'lunch') addLunch(k,  s.report_date, s.net_total);
-      else                          addDinner(k, s.report_date, s.net_total);
+      if (s.shift_type === 'lunch') {
+        addLunch(k, s.report_date, s.net_total);
+        totalGrossLunchMap[k] = (totalGrossLunchMap[k] ?? 0) + (s.gross_total ?? 0);
+      } else {
+        addDinner(k, s.report_date, s.net_total);
+        totalGrossDinnerMap[k] = (totalGrossDinnerMap[k] ?? 0) + (s.gross_total ?? 0);
+      }
     }
 
-    // Delivery (Simply)
+    // Delivery (Simply) — net + gross tracked separately
     for (const d of deliveries) {
       const k = key(d.report_date);
-      if (d.shift_type === 'lunch' || d.shift_type == null)
-        addLunch(k,  d.report_date, d.net_revenue);
-      else
+      const isLunch = d.shift_type === 'lunch' || d.shift_type == null;
+      if (isLunch) {
+        addLunch(k, d.report_date, d.net_revenue);
+        simplyGrossLunchMap[k] = (simplyGrossLunchMap[k] ?? 0) + (d.gross_revenue ?? 0);
+        totalGrossLunchMap[k]  = (totalGrossLunchMap[k]  ?? 0) + (d.gross_revenue ?? 0);
+      } else {
         addDinner(k, d.report_date, d.net_revenue);
+        simplyGrossDinnerMap[k] = (simplyGrossDinnerMap[k] ?? 0) + (d.gross_revenue ?? 0);
+        totalGrossDinnerMap[k]  = (totalGrossDinnerMap[k]  ?? 0) + (d.gross_revenue ?? 0);
+      }
     }
 
-    // Bills
+    // Bills — net + gross to total
     for (const b of bills) {
       if (!b.event_date) continue;
       const k = key(b.event_date);
-      if (b.shift_type === 'lunch')  addLunch(k,  b.event_date, b.net_total);
-      if (b.shift_type === 'dinner') addDinner(k, b.event_date, b.net_total);
+      if (b.shift_type === 'lunch') {
+        addLunch(k, b.event_date, b.net_total);
+        totalGrossLunchMap[k] = (totalGrossLunchMap[k] ?? 0) + (b.gross_total ?? 0);
+      } else if (b.shift_type === 'dinner') {
+        addDinner(k, b.event_date, b.net_total);
+        totalGrossDinnerMap[k] = (totalGrossDinnerMap[k] ?? 0) + (b.gross_total ?? 0);
+      }
     }
 
     // Collapse date sets → counts
@@ -164,7 +193,6 @@ export default function StatsPage() {
         label: m,
       }));
     } else {
-      // Collect all ISO weeks belonging to `year`
       const seen = new Set<string>();
       const ordered: { key: string; label: string }[] = [];
       const d = new Date(Date.UTC(year, 0, 1));
@@ -184,19 +212,31 @@ export default function StatsPage() {
       cols = ordered;
     }
 
-    return { lunchMap, dinnerMap, lunchDays, dinnerDays, cols };
+    return {
+      lunchMap, dinnerMap,
+      lunchDays, dinnerDays,
+      simplyGrossLunchMap, simplyGrossDinnerMap,
+      totalGrossLunchMap, totalGrossDinnerMap,
+      cols,
+    };
   }, [shifts, deliveries, bills, view, year]);
 
   const lunchTotal  = Object.values(lunchMap).reduce( (s, v) => s + v, 0);
   const dinnerTotal = Object.values(dinnerMap).reduce((s, v) => s + v, 0);
   const grandTotal  = lunchTotal + dinnerTotal;
 
-  // Sales/Day — total days across all periods (union of lunch + dinner dates per period)
+  // Sales/Day totals
   const totalLunchDays  = Object.values(lunchDays).reduce( (s, v) => s + v, 0);
   const totalDinnerDays = Object.values(dinnerDays).reduce((s, v) => s + v, 0);
   const totalDays       = totalLunchDays + totalDinnerDays;
 
-  // ── Render ────────────────────────────────────────────────────────────────
+  // Simply as % of total — full-year totals
+  const simplyGrossLunchTotal  = Object.values(simplyGrossLunchMap).reduce( (s, v) => s + v, 0);
+  const simplyGrossDinnerTotal = Object.values(simplyGrossDinnerMap).reduce((s, v) => s + v, 0);
+  const totalGrossLunchTotal   = Object.values(totalGrossLunchMap).reduce(  (s, v) => s + v, 0);
+  const totalGrossDinnerTotal  = Object.values(totalGrossDinnerMap).reduce( (s, v) => s + v, 0);
+
+  // ── Render helpers ────────────────────────────────────────────────────────
 
   const Cell = ({ value }: { value: number }) =>
     value > 0
@@ -217,6 +257,47 @@ export default function StatsPage() {
     if (!revenue || !days) return <span className="text-gray-300">—</span>;
     return <span className="font-bold" style={{ color: '#1B5E20' }}>{fmt(Math.round(revenue / days))}</span>;
   };
+
+  const PctCell = ({ simply, total }: { simply: number; total: number }) => {
+    if (!simply || !total) return <span className="text-gray-300">—</span>;
+    const pct = (simply / total * 100).toFixed(1);
+    return <span className="font-semibold" style={{ color: '#1B5E20' }}>{pct}%</span>;
+  };
+
+  const PctTotalCell = ({ simply, total }: { simply: number; total: number }) => {
+    if (!simply || !total) return <span className="text-gray-300">—</span>;
+    const pct = (simply / total * 100).toFixed(1);
+    return <span className="font-bold" style={{ color: '#1B5E20' }}>{pct}%</span>;
+  };
+
+  // Shared table header
+  const TableHeader = ({ title, lastColLabel }: { title: string; lastColLabel: string }) => (
+    <thead>
+      <tr style={{ backgroundColor: '#0f172a' }}>
+        <th
+          className="sticky left-0 z-10 px-4 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider whitespace-nowrap"
+          style={{ backgroundColor: '#0f172a', minWidth: 180 }}
+        >
+          {title}
+        </th>
+        {cols.map(col => (
+          <th
+            key={col.key}
+            className="px-2 py-3 text-right text-xs font-semibold text-gray-400 uppercase tracking-wider whitespace-nowrap"
+            style={{ minWidth: view === 'weekly' ? 64 : 72 }}
+          >
+            {col.label}
+          </th>
+        ))}
+        <th
+          className="px-3 py-3 text-right text-xs font-semibold text-amber-400 uppercase tracking-wider whitespace-nowrap border-l border-white/10"
+          style={{ minWidth: 80 }}
+        >
+          {lastColLabel}
+        </th>
+      </tr>
+    </thead>
+  );
 
   return (
     <div>
@@ -287,34 +368,7 @@ export default function StatsPage() {
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-sm border-collapse">
-
-              {/* Header row */}
-              <thead>
-                <tr style={{ backgroundColor: '#0f172a' }}>
-                  <th
-                    className="sticky left-0 z-10 px-4 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider whitespace-nowrap"
-                    style={{ backgroundColor: '#0f172a', minWidth: 180 }}
-                  >
-                    Metric / {view === 'weekly' ? 'Week' : 'Month'} · {year}
-                  </th>
-                  {cols.map(col => (
-                    <th
-                      key={col.key}
-                      className="px-2 py-3 text-right text-xs font-semibold text-gray-400 uppercase tracking-wider whitespace-nowrap"
-                      style={{ minWidth: view === 'weekly' ? 64 : 72 }}
-                    >
-                      {col.label}
-                    </th>
-                  ))}
-                  <th
-                    className="px-3 py-3 text-right text-xs font-semibold text-amber-400 uppercase tracking-wider whitespace-nowrap border-l border-white/10"
-                    style={{ minWidth: 80 }}
-                  >
-                    Total
-                  </th>
-                </tr>
-              </thead>
-
+              <TableHeader title={`Metric / ${view === 'weekly' ? 'Week' : 'Month'} · ${year}`} lastColLabel="Total" />
               <tbody className="divide-y divide-gray-100">
 
                 {/* Total Lunch */}
@@ -383,33 +437,7 @@ export default function StatsPage() {
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden mt-6">
           <div className="overflow-x-auto">
             <table className="w-full text-sm border-collapse">
-
-              <thead>
-                <tr style={{ backgroundColor: '#0f172a' }}>
-                  <th
-                    className="sticky left-0 z-10 px-4 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider whitespace-nowrap"
-                    style={{ backgroundColor: '#0f172a', minWidth: 180 }}
-                  >
-                    Sales / Day · {year}
-                  </th>
-                  {cols.map(col => (
-                    <th
-                      key={col.key}
-                      className="px-2 py-3 text-right text-xs font-semibold text-gray-400 uppercase tracking-wider whitespace-nowrap"
-                      style={{ minWidth: view === 'weekly' ? 64 : 72 }}
-                    >
-                      {col.label}
-                    </th>
-                  ))}
-                  <th
-                    className="px-3 py-3 text-right text-xs font-semibold text-amber-400 uppercase tracking-wider whitespace-nowrap border-l border-white/10"
-                    style={{ minWidth: 80 }}
-                  >
-                    Avg
-                  </th>
-                </tr>
-              </thead>
-
+              <TableHeader title={`Sales / Day · ${year}`} lastColLabel="Avg" />
               <tbody className="divide-y divide-gray-100">
 
                 {/* Lunch / Day */}
@@ -467,6 +495,85 @@ export default function StatsPage() {
                   })}
                   <td className="px-3 py-3 text-right tabular-nums border-l border-gray-200">
                     <AvgTotalCell revenue={grandTotal} days={totalDays} />
+                  </td>
+                </tr>
+
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* ── Simply as % of Total table ── */}
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden mt-6">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm border-collapse">
+              <TableHeader title={`Simply as % of Total · ${year}`} lastColLabel="%" />
+              <tbody className="divide-y divide-gray-100">
+
+                {/* Lunch % */}
+                <tr className="hover:bg-green-50/40 transition-colors" style={{ backgroundColor: '#f0fdf4' }}>
+                  <td
+                    className="sticky left-0 z-10 px-4 py-3 font-bold whitespace-nowrap border-r border-gray-100"
+                    style={{ backgroundColor: '#f0fdf4', color: '#1B5E20' }}
+                  >
+                    ☀️ Lunch
+                  </td>
+                  {cols.map(col => (
+                    <td key={col.key} className="px-2 py-3 text-right tabular-nums">
+                      <PctCell
+                        simply={simplyGrossLunchMap[col.key] ?? 0}
+                        total={totalGrossLunchMap[col.key] ?? 0}
+                      />
+                    </td>
+                  ))}
+                  <td className="px-3 py-3 text-right tabular-nums border-l border-gray-200">
+                    <PctTotalCell simply={simplyGrossLunchTotal} total={totalGrossLunchTotal} />
+                  </td>
+                </tr>
+
+                {/* Dinner % */}
+                <tr className="hover:bg-green-50/40 transition-colors" style={{ backgroundColor: '#f0fdf4' }}>
+                  <td
+                    className="sticky left-0 z-10 px-4 py-3 font-bold whitespace-nowrap border-r border-gray-100"
+                    style={{ backgroundColor: '#f0fdf4', color: '#1B5E20' }}
+                  >
+                    🌙 Dinner
+                  </td>
+                  {cols.map(col => (
+                    <td key={col.key} className="px-2 py-3 text-right tabular-nums">
+                      <PctCell
+                        simply={simplyGrossDinnerMap[col.key] ?? 0}
+                        total={totalGrossDinnerMap[col.key] ?? 0}
+                      />
+                    </td>
+                  ))}
+                  <td className="px-3 py-3 text-right tabular-nums border-l border-gray-200">
+                    <PctTotalCell simply={simplyGrossDinnerTotal} total={totalGrossDinnerTotal} />
+                  </td>
+                </tr>
+
+                {/* Total % */}
+                <tr style={{ backgroundColor: '#f0fdf4' }} className="border-t-2 border-gray-200">
+                  <td
+                    className="sticky left-0 z-10 px-4 py-3 font-bold whitespace-nowrap border-r border-gray-200"
+                    style={{ backgroundColor: '#f0fdf4', color: '#1B5E20' }}
+                  >
+                    ∑ Total
+                  </td>
+                  {cols.map(col => {
+                    const sg = (simplyGrossLunchMap[col.key] ?? 0) + (simplyGrossDinnerMap[col.key] ?? 0);
+                    const tg = (totalGrossLunchMap[col.key]  ?? 0) + (totalGrossDinnerMap[col.key]  ?? 0);
+                    return (
+                      <td key={col.key} className="px-2 py-3 text-right tabular-nums">
+                        <PctCell simply={sg} total={tg} />
+                      </td>
+                    );
+                  })}
+                  <td className="px-3 py-3 text-right tabular-nums border-l border-gray-200">
+                    <PctTotalCell
+                      simply={simplyGrossLunchTotal + simplyGrossDinnerTotal}
+                      total={totalGrossLunchTotal + totalGrossDinnerTotal}
+                    />
                   </td>
                 </tr>
 
