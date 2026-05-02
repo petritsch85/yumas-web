@@ -2307,28 +2307,32 @@ export default function SalesReportsPage() {
                               <p className="text-xs text-red-500 truncate">{item.errorMsg}</p>
                             )}
                           </div>
-                          {/* Shift type badge — click to toggle */}
+                          {/* Shift type toggle */}
                           {item.status === 'pending' && (
-                            <button
-                              title={`${isOverridden ? 'Manually set' : 'Auto-detected'} · ${item.confidence} confidence (${confDots})\nClick to flip`}
-                              onClick={() => setShiftBatch(prev => prev.map((it, i) =>
-                                i !== idx ? it : { ...it, manualOverride: effectiveType === 'lunch' ? 'dinner' : 'lunch' }
-                              ))}
-                              className={`flex-shrink-0 flex items-center gap-0.5 px-2 py-0.5 rounded-full text-xs font-bold border transition-colors ${
-                                isLunch
-                                  ? 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100'
-                                  : 'bg-blue-50 text-blue-800 border-blue-200 hover:bg-blue-100'
-                              } ${isOverridden ? 'ring-1 ring-offset-1 ring-gray-400' : ''}`}
-                            >
-                              {isLunch ? '☀️' : '🌙'}
-                              <span className="ml-0.5">{isLunch ? 'L' : 'D'}</span>
-                              <span className={`ml-1 text-[8px] tracking-tighter ${isLunch ? 'text-amber-400' : 'text-blue-300'}`}>{confDots}</span>
-                            </button>
+                            <div className="flex-shrink-0 flex flex-col items-center gap-0.5">
+                              <button
+                                title={`${isOverridden ? 'Manually overridden' : `Auto-detected (${item.confidence} confidence)`} — click to switch`}
+                                onClick={() => setShiftBatch(prev => prev.map((it, i) =>
+                                  i !== idx ? it : { ...it, manualOverride: effectiveType === 'lunch' ? 'dinner' : 'lunch' }
+                                ))}
+                                className={`flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold border-2 transition-all hover:scale-105 active:scale-95 ${
+                                  isLunch
+                                    ? 'bg-amber-50 text-amber-700 border-amber-300 hover:bg-amber-100'
+                                    : 'bg-blue-50 text-blue-800 border-blue-300 hover:bg-blue-100'
+                                } ${isOverridden ? 'ring-2 ring-offset-1 ring-indigo-400' : ''}`}
+                              >
+                                <span>{isLunch ? '☀️' : '🌙'}</span>
+                                <span>{isLunch ? 'Lunch' : 'Dinner'}</span>
+                              </button>
+                              <span className="text-[9px] text-gray-400 leading-none">
+                                {isOverridden ? '✎ changed' : `auto · ${confDots}`}
+                              </span>
+                            </div>
                           )}
                           {item.status === 'saved' && (
-                            <span className={`flex-shrink-0 text-xs font-semibold px-1.5 py-0.5 rounded-full ${
-                              isLunch ? 'bg-amber-50 text-amber-600' : 'bg-blue-50 text-blue-700'
-                            }`}>{isLunch ? '☀️' : '🌙'}</span>
+                            <span className={`flex-shrink-0 text-xs font-semibold px-2 py-1 rounded-lg border ${
+                              isLunch ? 'bg-amber-50 text-amber-600 border-amber-200' : 'bg-blue-50 text-blue-700 border-blue-200'
+                            }`}>{isLunch ? '☀️ Lunch' : '🌙 Dinner'}</span>
                           )}
                           {item.status === 'pending' && (
                             <button
