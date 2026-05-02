@@ -3104,6 +3104,37 @@ export default function SalesReportsPage() {
                         );
                       };
 
+                      // Render a Bills row (large-group invoices, no forecast)
+                      const billsRow = (label: string, billsMap: Record<string,number>) => {
+                        const qBills = Object.entries(billsMap).filter(([k]) => dailyCols.some(c => c.type === 'day' && (c as any).dateKey === k)).reduce((s, [,v]) => s + v, 0);
+                        return (
+                          <tr key={label} className="border-b border-gray-100 hover:bg-gray-50/60 group" style={{ backgroundColor:'#fdf4ff' }}>
+                            <td className="sticky left-0 z-10 px-4 py-2 whitespace-nowrap border-r border-gray-100 group-hover:bg-gray-50/60 transition-colors text-purple-800" style={{ backgroundColor:'#fdf4ff' }}>{label}</td>
+                            {dailyCols.map((col, ci) => {
+                              if (col.type === 'day') {
+                                const isCurDay = col.dateKey === todayKey;
+                                const val = billsMap[col.dateKey] ?? 0;
+                                return (
+                                  <td key={ci} className="py-2 text-right tabular-nums" style={{ paddingLeft:4, paddingRight:8, backgroundColor: isCurDay ? 'rgba(59,130,246,0.04)' : undefined }}>
+                                    {val > 0 ? <span className="text-purple-700">{fmtNum(val)}</span> : <span className="text-gray-300">—</span>}
+                                  </td>
+                                );
+                              } else {
+                                const wTotal = col.wDateKeys.reduce((s, k) => s + (billsMap[k] ?? 0), 0);
+                                return (
+                                  <td key={ci} className="py-2 text-right tabular-nums" style={{ paddingLeft:4, paddingRight:6, backgroundColor:'#fffbeb', borderLeft:'1px solid #fde68a', borderRight:'1px solid #fde68a' }}>
+                                    {wTotal > 0 ? <span className="text-purple-700">{fmtNum(wTotal)}</span> : <span className="text-gray-300">—</span>}
+                                  </td>
+                                );
+                              }
+                            })}
+                            <td className="py-2 text-right tabular-nums border-l border-gray-200" style={{ paddingLeft:4, paddingRight:8 }}>
+                              {qBills > 0 ? <span className="text-purple-700 font-bold">{fmtNum(qBills)}</span> : <span className="text-gray-300">—</span>}
+                            </td>
+                          </tr>
+                        );
+                      };
+
                       // Render a bold combined total row (POS actual/forecast + Simply actual)
                       const totalRow = (label: string, posMap: typeof lunchMap, fcastMap: Record<string,number>, delivMap: Record<string,number>, qTotal: typeof lunchQtrTotal, bg: string, color: string) => {
                         const hasFcast   = Object.keys(fcastMap).length > 0;
@@ -3156,9 +3187,11 @@ export default function SalesReportsPage() {
                         <>
                           {posRow('☀️  Lunch · Net Revenue',  lunchMap,  lunchForecastMap,  lunchQtrTotal)}
                           {simplyRow('🛵 Simply · Lunch', deliveryLunchMap)}
+                          {billsRow('🧾 Bills · Lunch', {})}
                           {totalRow('☀️  Total Lunch',  lunchMap,  lunchForecastMap,  deliveryLunchMap,  lunchQtrTotal,  '#fffbeb', '#92400E')}
                           {posRow('🌙  Dinner · Net Revenue', dinnerMap, dinnerForecastMap, dinnerQtrTotal)}
                           {simplyRow('🛵 Simply · Dinner', deliveryDinnerMap)}
+                          {billsRow('🧾 Bills · Dinner', {})}
                           {totalRow('🌙  Total Dinner', dinnerMap, dinnerForecastMap, deliveryDinnerMap, dinnerQtrTotal, '#eff6ff', '#1E3A5F')}
                           {totalRow('∑   Grand Total',  totalMap,  totalForecastMap,  deliveryTotalMap,  totalQtrTotal,  '#f0fdf4', '#1B5E20')}
                         </>
