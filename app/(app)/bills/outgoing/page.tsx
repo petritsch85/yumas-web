@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useState, useCallback, useRef } from 'react';
-import dynamic from 'next/dynamic';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
 import {
@@ -11,12 +10,6 @@ import {
   FilePlus, Plus, FileDown,
 } from 'lucide-react';
 import type { BillData, LineItem } from '@/components/bills/BillDocument';
-
-// Must be loaded dynamically (no SSR) due to @react-pdf/renderer
-const BillDocument = dynamic(
-  () => import('@/components/bills/BillDocument').then((m) => m.BillDocument),
-  { ssr: false }
-);
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -171,15 +164,21 @@ export default function OutgoingBillsPage() {
   const handleGenerate = async () => {
     setGenerating(true);
     try {
-      const { pdf } = await import('@react-pdf/renderer');
+      const [{ pdf }, { BillDocument: BillDoc }] = await Promise.all([
+        import('@react-pdf/renderer'),
+        import('@/components/bills/BillDocument'),
+      ]);
       const data = buildBillData();
-      const blob = await pdf(<BillDocument data={data} />).toBlob();
+      const blob = await pdf(<BillDoc data={data} />).toBlob();
       const url  = URL.createObjectURL(blob);
       const a    = document.createElement('a');
       a.href     = url;
       a.download = `${invoiceNumber || 'Rechnung'}.pdf`;
       a.click();
       URL.revokeObjectURL(url);
+    } catch (err: any) {
+      console.error('PDF generation failed:', err);
+      alert(`Could not generate PDF: ${err?.message ?? 'Unknown error'}`);
     } finally {
       setGenerating(false);
     }
