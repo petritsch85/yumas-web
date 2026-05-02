@@ -424,7 +424,7 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
         tableData[itemName][dk] = { start, requested, actual, ending, usage, isPartial };
       }
 
-      // ── Second pass: chain START = prev END for ALL future days with no real inventory ──
+      // ── Second pass: for every future day, chain START and always compute END ──
       for (let i = 1; i < extendedDays.length; i++) {
         const day    = extendedDays[i];
         const dk     = toLocalDateStr(day);
@@ -437,18 +437,17 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
         const prev = tableData[itemName][prevDk];
         if (!d || !prev) continue;
 
-        // Chain START from previous day's END whenever there's no real inventory submission
-        const effectiveStart = d.start !== null ? d.start : (prev.ending ?? null);
-        if (effectiveStart === d.start && d.start !== null) continue; // nothing to update
-
-        const dayName   = day.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase();
+        const dayName      = day.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase();
         const isNoDelivery = NO_DELIVERY_DAYS.has(dayName);
-        const fUsage    = forecastUsage(itemName, day, storeIdx);
-        const req       = isNoDelivery ? null : d.requested;
-        const act       = isNoDelivery ? null : d.actual;
-        const usage     = d.usage ?? fUsage;
-        // END = START + delivery_actual - USAGE  (actual = 0 on no-delivery days)
-        const forecastEnding = effectiveStart !== null
+
+        // Chain START: use real value if available, otherwise carry forward prev END
+        const effectiveStart = d.start !== null ? d.start : (prev.ending ?? null);
+        const req   = isNoDelivery ? null : d.requested;
+        const act   = isNoDelivery ? null : d.actual;
+        const usage = d.usage ?? forecastUsage(itemName, day, storeIdx);
+
+        // END = START + actual_delivery - USAGE (always compute for future days)
+        const computedEnding = effectiveStart !== null
           ? effectiveStart + (act ?? 0) - usage
           : null;
 
@@ -456,7 +455,7 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
           start:     effectiveStart,
           requested: req,
           actual:    act,
-          ending:    d.ending ?? forecastEnding,
+          ending:    d.ending ?? computedEnding,
           usage,
           isPartial: isNoDelivery ? false : d.isPartial,
         };
