@@ -1,9 +1,9 @@
 'use client';
 
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
 import { useState } from 'react';
-import { ChevronDown, ChevronRight } from 'lucide-react';
+import { ChevronDown, ChevronRight, Trash2, Pencil, X, Check } from 'lucide-react';
 
 type SubmissionRow = {
   id: string;
@@ -63,6 +63,34 @@ function toLocalDateStr(d: Date) {
 export default function CurrentInventoryPage() {
   const [locationFilter, setLocationFilter] = useState('all');
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState<Record<string, number>>({});
+
+  const queryClient = useQueryClient();
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from('inventory_submissions').delete().eq('id', id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['inventory-submissions'] });
+      setConfirmDeleteId(null);
+    },
+  });
+
+  const editMutation = useMutation({
+    mutationFn: async ({ id, data }: { id: string; data: { section: string; name: string; unit: string; quantity: number }[] }) => {
+      const { error } = await supabase.from('inventory_submissions').update({ data }).eq('id', id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['inventory-submissions'] });
+      setEditingId(null);
+      setEditDraft({});
+    },
+  });
 
   // Date range — default: last 90 days (catches backdated Excel uploads)
   const defaultFrom = toLocalDateStr(new Date(Date.now() - 90 * 86_400_000));
@@ -117,6 +145,23 @@ export default function CurrentInventoryPage() {
       next.has(id) ? next.delete(id) : next.add(id);
       return next;
     });
+  };
+
+  const startEdit = (sub: { id: string; data: { section: string; name: string; unit: string; quantity: number }[] }) => {
+    const draft: Record<string, number> = {};
+    for (const item of sub.data ?? []) draft[item.name] = item.quantity;
+    setEditDraft(draft);
+    setEditingId(sub.id);
+    // Make sure the card is expanded when editing
+    setExpandedIds((prev) => { const next = new Set(prev); next.add(sub.id); return next; });
+  };
+
+  const saveEdit = (sub: { id: string; data: { section: string; name: string; unit: string; quantity: number }[] }) => {
+    const updatedData = (sub.data ?? []).map((item) => ({
+      ...item,
+      quantity: editDraft[item.name] ?? item.quantity,
+    }));
+    editMutation.mutate({ id: sub.id, data: updatedData });
   };
 
   // Unique location names for filter
@@ -208,40 +253,105 @@ export default function CurrentInventoryPage() {
                       const totalFilled = (sub.data ?? []).filter((i: { quantity: number }) => i.quantity > 0).length;
                       const totalItems = (sub.data ?? []).length;
 
+                        const isEditing = editingId === sub.id;
+                      const isConfirmingDelete = confirmDeleteId === sub.id;
+
                       return (
                         <div key={sub.id} className="bg-white rounded-lg shadow-sm border border-gray-100 overflow-hidden">
                           {/* Card header */}
-                          <button
-                            onClick={() => toggleExpand(sub.id)}
-                            className="w-full flex items-center gap-4 px-4 py-3.5 hover:bg-gray-50 transition-colors text-left"
-                          >
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2">
-                                <span className="font-semibold text-gray-900 text-sm">{sub.location_name}</span>
-                                <span className="text-xs text-gray-400">·</span>
-                                <span className="text-xs text-gray-500">{sub.submitterName}</span>
+                          <div className="flex items-center gap-2 px-4 py-3.5 hover:bg-gray-50 transition-colors">
+                            <button
+                              onClick={() => toggleExpand(sub.id)}
+                              className="flex-1 min-w-0 flex items-center gap-4 text-left"
+                            >
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2">
+                                  <span className="font-semibold text-gray-900 text-sm">{sub.location_name}</span>
+                                  <span className="text-xs text-gray-400">·</span>
+                                  <span className="text-xs text-gray-500">{sub.submitterName}</span>
+                                </div>
+                                <div className="text-xs text-gray-400 mt-0.5">
+                                  {new Date(sub.submitted_at).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}
+                                </div>
                               </div>
-                              <div className="text-xs text-gray-400 mt-0.5">
-                                {new Date(sub.submitted_at).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}
+                              <div className="flex items-center gap-3 flex-shrink-0">
+                                <span className="text-xs text-gray-500">{totalFilled}/{totalItems} filled</span>
+                                {formatDuration((sub as any).duration_seconds) && (
+                                  <span className="text-xs font-semibold text-[#2E7D32] bg-green-50 px-2 py-0.5 rounded-full">
+                                    ⏱ {formatDuration((sub as any).duration_seconds)}
+                                  </span>
+                                )}
                               </div>
-                            </div>
-                            <div className="flex items-center gap-3 flex-shrink-0">
-                              <span className="text-xs text-gray-500">{totalFilled}/{totalItems} filled</span>
-                              {formatDuration((sub as any).duration_seconds) && (
-                                <span className="text-xs font-semibold text-[#2E7D32] bg-green-50 px-2 py-0.5 rounded-full">
-                                  ⏱ {formatDuration((sub as any).duration_seconds)}
-                                </span>
+                              {isExpanded
+                                ? <ChevronDown size={16} className="text-gray-400 flex-shrink-0" />
+                                : <ChevronRight size={16} className="text-gray-400 flex-shrink-0" />
+                              }
+                            </button>
+
+                            {/* Action buttons */}
+                            <div className="flex items-center gap-1 flex-shrink-0 ml-2">
+                              {isEditing ? (
+                                <>
+                                  <button
+                                    onClick={() => saveEdit(sub)}
+                                    disabled={editMutation.isPending}
+                                    className="flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-white bg-[#2E7D32] rounded-lg hover:bg-[#1B5E20] disabled:opacity-50 transition-colors"
+                                  >
+                                    <Check size={12} /> Save
+                                  </button>
+                                  <button
+                                    onClick={() => { setEditingId(null); setEditDraft({}); }}
+                                    className="flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
+                                  >
+                                    <X size={12} /> Cancel
+                                  </button>
+                                </>
+                              ) : (
+                                <button
+                                  onClick={() => startEdit(sub)}
+                                  className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                                  title="Edit report"
+                                >
+                                  <Pencil size={14} />
+                                </button>
+                              )}
+
+                              {isConfirmingDelete ? (
+                                <>
+                                  <button
+                                    onClick={() => deleteMutation.mutate(sub.id)}
+                                    disabled={deleteMutation.isPending}
+                                    className="px-2.5 py-1 text-xs font-semibold text-white bg-red-500 rounded-lg hover:bg-red-600 disabled:opacity-50 transition-colors"
+                                  >
+                                    Yes, delete
+                                  </button>
+                                  <button
+                                    onClick={() => setConfirmDeleteId(null)}
+                                    className="px-2.5 py-1 text-xs font-semibold text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
+                                  >
+                                    Cancel
+                                  </button>
+                                </>
+                              ) : (
+                                <button
+                                  onClick={() => setConfirmDeleteId(sub.id)}
+                                  className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                                  title="Delete report"
+                                >
+                                  <Trash2 size={14} />
+                                </button>
                               )}
                             </div>
-                            {isExpanded
-                              ? <ChevronDown size={16} className="text-gray-400 flex-shrink-0" />
-                              : <ChevronRight size={16} className="text-gray-400 flex-shrink-0" />
-                            }
-                          </button>
+                          </div>
 
                           {/* Expanded detail */}
                           {isExpanded && (
                             <div className="border-t border-gray-100">
+                              {isEditing && (
+                                <div className="px-4 py-2 bg-blue-50 border-b border-blue-100">
+                                  <p className="text-xs font-semibold text-blue-700">Editing — update quantities below, then click Save</p>
+                                </div>
+                              )}
                               {Object.entries(sections).map(([sectionTitle, items]) => (
                                 <div key={sectionTitle}>
                                   <div className="px-4 py-2 bg-gray-50 border-b border-gray-100">
@@ -256,9 +366,20 @@ export default function CurrentInventoryPage() {
                                         <span className="text-sm text-gray-800">{item.name}</span>
                                         <span className="text-xs text-gray-400 ml-2">{item.unit}</span>
                                       </div>
-                                      <span className={`text-sm font-semibold tabular-nums ${item.quantity > 0 ? 'text-[#2E7D32]' : 'text-gray-300'}`}>
-                                        {item.quantity}
-                                      </span>
+                                      {isEditing ? (
+                                        <input
+                                          type="number"
+                                          min="0"
+                                          step="0.01"
+                                          value={editDraft[item.name] ?? item.quantity}
+                                          onChange={(e) => setEditDraft((prev) => ({ ...prev, [item.name]: parseFloat(e.target.value) || 0 }))}
+                                          className="w-24 text-right text-sm font-semibold border border-blue-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-blue-400 tabular-nums"
+                                        />
+                                      ) : (
+                                        <span className={`text-sm font-semibold tabular-nums ${item.quantity > 0 ? 'text-[#2E7D32]' : 'text-gray-300'}`}>
+                                          {item.quantity}
+                                        </span>
+                                      )}
                                     </div>
                                   ))}
                                 </div>
@@ -267,6 +388,23 @@ export default function CurrentInventoryPage() {
                                 <div className="px-4 py-3 bg-amber-50 border-t border-amber-100">
                                   <p className="text-xs font-bold text-amber-700 uppercase tracking-wider mb-1">Comment</p>
                                   <p className="text-sm text-gray-700 whitespace-pre-wrap">{(sub as any).comment}</p>
+                                </div>
+                              )}
+                              {isEditing && (
+                                <div className="px-4 py-3 border-t border-blue-100 bg-blue-50 flex gap-2 justify-end">
+                                  <button
+                                    onClick={() => { setEditingId(null); setEditDraft({}); }}
+                                    className="px-3 py-1.5 text-xs font-semibold text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+                                  >
+                                    Cancel
+                                  </button>
+                                  <button
+                                    onClick={() => saveEdit(sub)}
+                                    disabled={editMutation.isPending}
+                                    className="px-3 py-1.5 text-xs font-semibold text-white bg-[#2E7D32] rounded-lg hover:bg-[#1B5E20] disabled:opacity-50 transition-colors"
+                                  >
+                                    {editMutation.isPending ? 'Saving…' : 'Save Changes'}
+                                  </button>
                                 </div>
                               )}
                             </div>
