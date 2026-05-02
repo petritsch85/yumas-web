@@ -5,7 +5,8 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase-browser';
 import { saveDraft, loadDraft, clearDraft } from '@/lib/draft-store';
 import { enqueue, dequeueAll, removeFromQueue, pendingCount } from '@/lib/offline-queue';
-import { ChevronLeft, Send, WifiOff, Wifi, RefreshCw, CheckCircle2, Timer, Play, Pause } from 'lucide-react';
+import { ChevronLeft, Send, WifiOff, Wifi, RefreshCw, CheckCircle2, Timer, Play, Pause, Upload, X, FileSpreadsheet, AlertCircle } from 'lucide-react';
+import * as XLSX from 'xlsx';
 
 function formatTimer(seconds: number): string {
   const m = Math.floor(seconds / 60);
@@ -180,6 +181,254 @@ async function syncPendingQueue(): Promise<number> {
   return synced;
 }
 
+/* ─── All known items (flat) for matching ────────────────────────────────── */
+const ALL_ITEMS = SECTIONS.flatMap(s => s.data.map(i => ({ ...i, section: s.title })));
+
+function normalise(s: string) {
+  return s.toLowerCase().replace(/[\s\-_().]/g, '').trim();
+}
+
+/* ─── Upload Inventory Modal ─────────────────────────────────────────────── */
+function UploadInventoryModal({
+  locationId, locationName, onClose, onUploaded,
+}: {
+  locationId: string;
+  locationName: string;
+  onClose: () => void;
+  onUploaded: () => void;
+}) {
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  // Default date: today at 22:00
+  const defaultDate = () => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  };
+
+  const [inventoryDate, setInventoryDate] = useState(defaultDate());
+  const [inventoryTime, setInventoryTime] = useState('22:00');
+  const [fileName, setFileName]           = useState('');
+  const [matched, setMatched]             = useState<{ section: string; name: string; unit: string; quantity: number }[]>([]);
+  const [unmatched, setUnmatched]         = useState<{ raw: string; qty: number }[]>([]);
+  const [submitting, setSubmitting]       = useState(false);
+  const [error, setError]                 = useState('');
+
+  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setFileName(file.name);
+    setError('');
+
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const data    = new Uint8Array(ev.target!.result as ArrayBuffer);
+        const wb      = XLSX.read(data, { type: 'array' });
+        const ws      = wb.Sheets[wb.SheetNames[0]];
+        const rows    = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, defval: '' });
+
+        const matchedItems: typeof matched = [];
+        const unmatchedItems: typeof unmatched = [];
+
+        for (const row of rows) {
+          if (!Array.isArray(row) || row.length < 2) continue;
+          // Find first string cell (item name) and first numeric cell (quantity)
+          const nameCandidates = row.filter(c => typeof c === 'string' && (c as string).trim().length > 1);
+          const numCandidates  = row.filter(c => typeof c === 'number' || (typeof c === 'string' && !isNaN(parseFloat(c as string)) && (c as string).trim() !== ''));
+          if (!nameCandidates.length || !numCandidates.length) continue;
+
+          const rawName = String(nameCandidates[0]).trim();
+          const qty     = parseFloat(String(numCandidates[0]));
+          if (isNaN(qty) || rawName.length < 2) continue;
+
+          // Try exact then fuzzy match against known items
+          const normRaw = normalise(rawName);
+          const found   = ALL_ITEMS.find(it => normalise(it.name) === normRaw)
+                       ?? ALL_ITEMS.find(it => normalise(it.name).includes(normRaw) || normRaw.includes(normalise(it.name)));
+
+          if (found) {
+            // Avoid duplicates – keep last value
+            const existing = matchedItems.findIndex(m => m.name === found.name);
+            if (existing >= 0) matchedItems[existing].quantity = qty;
+            else matchedItems.push({ section: found.section, name: found.name, unit: found.unit, quantity: qty });
+          } else {
+            unmatchedItems.push({ raw: rawName, qty });
+          }
+        }
+
+        setMatched(matchedItems);
+        setUnmatched(unmatchedItems);
+        if (!matchedItems.length) setError('No items could be matched. Check the file format.');
+      } catch {
+        setError('Could not read the file. Please use .xls or .xlsx format.');
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
+  const handleSubmit = async () => {
+    if (!matched.length) return;
+    setSubmitting(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) { setError('Not logged in.'); setSubmitting(false); return; }
+
+      // Build submitted_at from the chosen date + time
+      const submittedAt = new Date(`${inventoryDate}T${inventoryTime}:00`).toISOString();
+
+      // Merge matched items back into full SECTIONS structure (unmatched items get qty 0)
+      const qtyMap: Record<string, number> = {};
+      for (const m of matched) qtyMap[m.name] = m.quantity;
+
+      const data = SECTIONS.flatMap(section =>
+        section.data.map(item => ({
+          section:  section.title,
+          name:     item.name,
+          unit:     item.unit,
+          quantity: qtyMap[item.name] ?? 0,
+        }))
+      );
+
+      const { error: insertError } = await supabase.from('inventory_submissions').insert({
+        location_id:   locationId,
+        location_name: locationName,
+        submitted_by:  user.id,
+        submitted_at:  submittedAt,
+        data,
+        comment:       `Uploaded from Excel: ${fileName}`,
+      });
+
+      if (insertError) { setError(insertError.message); setSubmitting(false); return; }
+      onUploaded();
+      onClose();
+    } catch (e: unknown) {
+      setError((e as Error)?.message ?? 'Unexpected error');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col">
+
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+          <div>
+            <h2 className="text-base font-bold text-gray-900">Upload Inventory from Excel</h2>
+            <p className="text-xs text-gray-400 mt-0.5">{locationName}</p>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 transition-colors">
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="overflow-y-auto flex-1 p-5 space-y-5">
+
+          {/* Date + Time */}
+          <div>
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Inventory Date &amp; Time</p>
+            <div className="flex gap-3">
+              <div className="flex-1">
+                <label className="text-xs text-gray-400 mb-1 block">Date</label>
+                <input type="date" value={inventoryDate} onChange={e => setInventoryDate(e.target.value)}
+                  className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30" />
+              </div>
+              <div>
+                <label className="text-xs text-gray-400 mb-1 block">Time</label>
+                <input type="time" value={inventoryTime} onChange={e => setInventoryTime(e.target.value)}
+                  className="text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30" />
+              </div>
+            </div>
+            <p className="text-[10px] text-gray-400 mt-1.5">
+              ⚠ Set this to the actual date of the inventory — e.g. 25 April, 22:00 for last week's closing count.
+            </p>
+          </div>
+
+          {/* File picker */}
+          <div>
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Excel File</p>
+            <input ref={fileRef} type="file" accept=".xls,.xlsx" onChange={handleFile} className="hidden" />
+            <button onClick={() => fileRef.current?.click()}
+              className="w-full flex items-center justify-center gap-2 border-2 border-dashed border-gray-200 rounded-xl py-6 text-sm text-gray-400 hover:border-[#1B5E20]/40 hover:text-[#1B5E20] transition-colors">
+              <FileSpreadsheet size={20} />
+              {fileName ? fileName : 'Click to choose .xls / .xlsx file'}
+            </button>
+          </div>
+
+          {/* Error */}
+          {error && (
+            <div className="flex items-start gap-2 bg-red-50 border border-red-100 rounded-lg px-3 py-2.5 text-xs text-red-600">
+              <AlertCircle size={14} className="flex-shrink-0 mt-0.5" />
+              {error}
+            </div>
+          )}
+
+          {/* Matched items preview */}
+          {matched.length > 0 && (
+            <div>
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+                ✓ {matched.length} items matched
+              </p>
+              <div className="rounded-xl border border-gray-100 overflow-hidden max-h-52 overflow-y-auto">
+                <table className="w-full text-xs">
+                  <thead className="bg-gray-50 border-b border-gray-100 sticky top-0">
+                    <tr>
+                      <th className="px-3 py-2 text-left text-gray-400 font-medium">Item</th>
+                      <th className="px-3 py-2 text-right text-gray-400 font-medium">Qty</th>
+                      <th className="px-3 py-2 text-left text-gray-400 font-medium">Unit</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {matched.map(m => (
+                      <tr key={m.name} className="border-t border-gray-50">
+                        <td className="px-3 py-1.5 text-gray-700 font-medium">{m.name}</td>
+                        <td className="px-3 py-1.5 text-right font-bold text-[#1B5E20]">{m.quantity}</td>
+                        <td className="px-3 py-1.5 text-gray-400">{m.unit}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* Unmatched items */}
+          {unmatched.length > 0 && (
+            <div>
+              <p className="text-xs font-semibold text-amber-600 uppercase tracking-wide mb-2">
+                ⚠ {unmatched.length} items not matched (will be skipped)
+              </p>
+              <div className="rounded-xl border border-amber-100 bg-amber-50 px-3 py-2 max-h-28 overflow-y-auto">
+                {unmatched.map(u => (
+                  <div key={u.raw} className="text-xs text-amber-700 py-0.5">
+                    {u.raw} <span className="text-amber-400 ml-1">(qty: {u.qty})</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="px-5 py-4 border-t border-gray-100 flex items-center justify-between gap-3">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-500 hover:text-gray-700 font-medium transition-colors">
+            Cancel
+          </button>
+          <button
+            onClick={handleSubmit}
+            disabled={submitting || !matched.length}
+            className="flex items-center gap-2 bg-[#1B5E20] text-white px-5 py-2 rounded-lg text-sm font-semibold hover:bg-[#2E7D32] transition-colors disabled:opacity-40"
+          >
+            <Upload size={15} />
+            {submitting ? 'Uploading…' : `Upload ${matched.length} items`}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function LocationInventoryFormPage({
   params,
 }: {
@@ -192,6 +441,7 @@ export default function LocationInventoryFormPage({
   const [counts, setCounts]         = useState<Record<string, string>>({});
   const [comment, setComment]       = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [showUpload, setShowUpload] = useState(false);
   const [submitted, setSubmitted]   = useState(false);
   const [savedOffline, setSavedOffline] = useState(false);
   const [isOnline, setIsOnline]     = useState(true);
@@ -451,6 +701,19 @@ export default function LocationInventoryFormPage({
   /* ─── Main form ─── */
   return (
     <div className="flex flex-col h-full">
+
+      {/* Upload modal */}
+      {showUpload && (
+        <UploadInventoryModal
+          locationId={params.locationId}
+          locationName={locationName}
+          onClose={() => setShowUpload(false)}
+          onUploaded={() => {
+            setShowUpload(false);
+          }}
+        />
+      )}
+
       {/* Header */}
       <div className="mb-5">
         {/* Back link */}
@@ -466,11 +729,21 @@ export default function LocationInventoryFormPage({
         <div className="flex items-start justify-between gap-4">
           <h1 className="text-2xl font-bold text-gray-900">{locationName} — Inventory</h1>
 
+          <div className="flex items-center gap-2 flex-shrink-0">
+            {/* Upload button — always visible */}
+            <button
+              onClick={() => setShowUpload(true)}
+              className="flex items-center gap-1.5 border border-[#1B5E20] text-[#1B5E20] px-3 py-2 rounded-lg text-sm font-semibold hover:bg-[#1B5E20]/5 transition-colors"
+            >
+              <Upload size={14} />
+              Upload Inventory
+            </button>
+
           {/* Timer */}
           {!timerStarted ? (
             <button
               onClick={startTimer}
-              className="flex-shrink-0 flex items-center gap-2 bg-[#1B5E20] text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-[#2E7D32] transition-colors"
+              className="flex items-center gap-2 bg-[#1B5E20] text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-[#2E7D32] transition-colors"
             >
               <Play size={14} />
               Start Inventory
@@ -500,6 +773,7 @@ export default function LocationInventoryFormPage({
               )}
             </div>
           )}
+          </div>  {/* end flex gap-2 */}
         </div>
       </div>
 
