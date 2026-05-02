@@ -667,21 +667,21 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
 
                             return (
                               <>
-                                <td key={`${di}-s`}  className={`px-1 py-2 text-right tabular-nums ${borderL} ${dayBg}`}>
+                                <td key={`${di}-s`}  className={`px-1 py-2 text-center tabular-nums ${borderL} ${dayBg}`}>
                                   <InvCell v={d?.start ?? null} />
                                 </td>
-                                <td key={`${di}-rq`} className={`px-1 py-2 text-right tabular-nums ${dayBg}`}>
+                                <td key={`${di}-rq`} className={`px-1 py-2 text-center tabular-nums ${dayBg}`}>
                                   <DelivCell v={d?.requested ?? null} />
                                 </td>
-                                <td key={`${di}-ac`} className={`px-1 py-2 text-right tabular-nums ${dayBg}`}>
+                                <td key={`${di}-ac`} className={`px-1 py-2 text-center tabular-nums ${dayBg}`}>
                                   <DelivCell v={d?.actual ?? null} isPartial={d?.isPartial} />
                                 </td>
-                                <td key={`${di}-us`} className={`px-1 py-2 text-right tabular-nums ${dayBg}`}>
+                                <td key={`${di}-us`} className={`px-1 py-2 text-center tabular-nums ${dayBg}`}>
                                   {isForecast
                                     ? <ForecastCell v={d?.usage ?? null} />
                                     : <UsageCell v={d?.usage ?? null} />}
                                 </td>
-                                <td key={`${di}-e`}  className={`px-1 py-2 text-right tabular-nums ${dayBg}`}>
+                                <td key={`${di}-e`}  className={`px-1 py-2 text-center tabular-nums ${dayBg}`}>
                                   {isForecast && d?.ending !== null
                                     ? <ForecastCell v={d?.ending ?? null} dim />
                                     : <InvCell v={d?.ending ?? null} />}
