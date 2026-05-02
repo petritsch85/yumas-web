@@ -424,34 +424,41 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
         tableData[itemName][dk] = { start, requested, actual, ending, usage, isPartial };
       }
 
-      // ── Second pass: chain forward-forecasted START/END for future days ──
-      // Saturday/Sunday have no real inventory submission → derive from previous day's ending
+      // ── Second pass: chain START = prev END for ALL future days with no real inventory ──
       for (let i = 1; i < extendedDays.length; i++) {
         const day    = extendedDays[i];
         const dk     = toLocalDateStr(day);
         const prevDk = toLocalDateStr(extendedDays[i - 1]);
-        const dayName = day.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase();
-        const isNoDelivery    = NO_DELIVERY_DAYS.has(dayName);
         const isFutureOrToday = dk >= todayStr;
 
-        if (!isFutureOrToday || !isNoDelivery) continue;
+        if (!isFutureOrToday) continue;
 
         const d    = tableData[itemName][dk];
         const prev = tableData[itemName][prevDk];
         if (!d || !prev) continue;
 
-        // If no real start, derive from previous day's computed ending
+        // Chain START from previous day's END whenever there's no real inventory submission
         const effectiveStart = d.start !== null ? d.start : (prev.ending ?? null);
-        const fUsage = forecastUsage(itemName, day, storeIdx);
-        const forecastEnding = effectiveStart !== null ? effectiveStart - fUsage : null;
+        if (effectiveStart === d.start && d.start !== null) continue; // nothing to update
+
+        const dayName   = day.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase();
+        const isNoDelivery = NO_DELIVERY_DAYS.has(dayName);
+        const fUsage    = forecastUsage(itemName, day, storeIdx);
+        const req       = isNoDelivery ? null : d.requested;
+        const act       = isNoDelivery ? null : d.actual;
+        const usage     = d.usage ?? fUsage;
+        // END = START + delivery_actual - USAGE  (actual = 0 on no-delivery days)
+        const forecastEnding = effectiveStart !== null
+          ? effectiveStart + (act ?? 0) - usage
+          : null;
 
         tableData[itemName][dk] = {
           start:     effectiveStart,
-          requested: null,
-          actual:    null,
+          requested: req,
+          actual:    act,
           ending:    d.ending ?? forecastEnding,
-          usage:     fUsage,
-          isPartial: false,
+          usage,
+          isPartial: isNoDelivery ? false : d.isPartial,
         };
       }
     }
