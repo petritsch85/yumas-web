@@ -850,7 +850,49 @@ export default function SalesReportsPage() {
   // Tab / sub-tab
   const [activeTab,   setActiveTab]   = useState<'upload'|'daily'>('daily');
   const [subTab,      setSubTab]      = useState<'daily'|'weekly'|'monthly'>('daily');
-  const [reportType,  setReportType]  = useState<'weekly'|'shift'|'monthly'|'delivery'>('shift');
+  const [reportType,  setReportType]  = useState<'weekly'|'shift'|'monthly'|'delivery'|'manual'>('shift');
+
+  // Manual entry form state
+  const blankManual = () => ({
+    date: new Date().toISOString().slice(0, 10),
+    shiftType: 'dinner' as 'lunch' | 'dinner',
+    zNumber: '',
+    grossTotal: '', grossFood: '', grossDrinks: '',
+    netTotal: '', vatTotal: '', tips: '',
+    inhouseTotal: '', takeawayTotal: '',
+    cancellationsCount: '', cancellationsTotal: '',
+  });
+  const [manualForm, setManualForm] = useState(blankManual);
+  const setMF = (k: string, v: string) => setManualForm(p => ({ ...p, [k]: v }));
+
+  const handleAddManual = useCallback(() => {
+    const f = manualForm;
+    if (!f.date) return;
+    const result: ShiftParseResult = {
+      date:               f.date,
+      zReportNumber:      f.zNumber,
+      grossTotal:         parseFloat(f.grossTotal)         || 0,
+      grossFood:          parseFloat(f.grossFood)          || 0,
+      grossDrinks:        parseFloat(f.grossDrinks)        || 0,
+      netTotal:           parseFloat(f.netTotal)           || 0,
+      vatTotal:           parseFloat(f.vatTotal)           || 0,
+      tips:               parseFloat(f.tips)               || 0,
+      inhouseTotal:       parseFloat(f.inhouseTotal)       || 0,
+      takeawayTotal:      parseFloat(f.takeawayTotal)      || 0,
+      cancellationsCount: parseInt(f.cancellationsCount)   || 0,
+      cancellationsTotal: parseFloat(f.cancellationsTotal) || 0,
+      categories: [],
+    };
+    setShiftBatch(prev => [...prev, {
+      fileName:     `Manual entry · ${f.date}`,
+      result,
+      detectedType: f.shiftType,
+      confidence:   'high',
+      manualOverride: f.shiftType,
+      status:       'pending',
+    }]);
+    setManualForm(blankManual());
+  }, [manualForm]);
 
   // Shared controls
   const [location, setLocation] = useState<Location | null>(null);
@@ -2117,6 +2159,7 @@ export default function SalesReportsPage() {
               ['monthly',  '📅', 'Monthly Report',  'Full-month Z-report aggregate'],
               ['weekly',   '📋', 'Weekly Report',   'KW report covering a full week'],
               ['delivery', '🛵', 'Delivery Report', 'Simplydelivery daily XLSX (one file per day)'],
+              ['manual',   '✏️', 'Manual Entry',    'Type in shift figures directly — no CSV needed'],
             ] as const).map(([t, emoji, label, desc]) => (
               <button key={t} onClick={() => { setReportType(t); resetUpload(); }}
                 className={`flex-1 py-3 px-4 rounded-xl border-2 text-left transition-colors ${
@@ -2150,8 +2193,88 @@ export default function SalesReportsPage() {
                 </div>
               </div>
 
+              {/* Manual entry form */}
+              {reportType === 'manual' && (
+                <div className="space-y-3">
+                  <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider">Manual Shift Entry</label>
+
+                  {/* Date + Shift type */}
+                  <div className="flex gap-2">
+                    <div className="flex-1">
+                      <p className="text-[10px] text-gray-400 mb-1">Date</p>
+                      <input type="date" value={manualForm.date} onChange={e => setMF('date', e.target.value)}
+                        className="w-full text-sm border border-gray-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30" />
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-gray-400 mb-1">Shift</p>
+                      <div className="flex rounded-lg border border-gray-200 overflow-hidden">
+                        {(['lunch','dinner'] as const).map(t => (
+                          <button key={t} onClick={() => setMF('shiftType', t)}
+                            className={`px-3 py-1.5 text-xs font-bold transition-colors ${manualForm.shiftType === t ? (t === 'lunch' ? 'bg-amber-400 text-white' : 'bg-blue-600 text-white') : 'text-gray-400 hover:bg-gray-50'}`}>
+                            {t === 'lunch' ? '☀️' : '🌙'}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Z-report number */}
+                  <div>
+                    <p className="text-[10px] text-gray-400 mb-1">Z-Report # (optional)</p>
+                    <input type="text" value={manualForm.zNumber} onChange={e => setMF('zNumber', e.target.value)}
+                      placeholder="e.g. 371"
+                      className="w-full text-sm border border-gray-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30" />
+                  </div>
+
+                  {/* Numeric fields */}
+                  {([
+                    ['grossTotal',         'Gross Total'],
+                    ['grossFood',          'Gross Food (7%)'],
+                    ['grossDrinks',        'Gross Drinks (19%)'],
+                    ['netTotal',           'Net Revenue'],
+                    ['vatTotal',           'VAT'],
+                    ['tips',               'Tips'],
+                    ['inhouseTotal',       'In-house'],
+                    ['takeawayTotal',      'Takeaway'],
+                    ['cancellationsCount', 'Cancels (count)'],
+                    ['cancellationsTotal', 'Cancels (value)'],
+                  ] as const).reduce<React.ReactNode[]>((acc, [key, label], i, arr) => {
+                    if (i % 2 === 0) {
+                      const next = arr[i + 1];
+                      acc.push(
+                        <div key={key} className="grid grid-cols-2 gap-2">
+                          <div>
+                            <p className="text-[10px] text-gray-400 mb-1">{label}</p>
+                            <input type="number" min="0" step="0.01"
+                              value={manualForm[key]} onChange={e => setMF(key, e.target.value)}
+                              className="w-full text-sm text-right border border-gray-200 rounded-lg px-2 py-1.5 tabular-nums focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30" />
+                          </div>
+                          {next && (
+                            <div>
+                              <p className="text-[10px] text-gray-400 mb-1">{next[1]}</p>
+                              <input type="number" min="0" step={next[0] === 'cancellationsCount' ? '1' : '0.01'}
+                                value={manualForm[next[0]]} onChange={e => setMF(next[0], e.target.value)}
+                                className="w-full text-sm text-right border border-gray-200 rounded-lg px-2 py-1.5 tabular-nums focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30" />
+                            </div>
+                          )}
+                        </div>
+                      );
+                    }
+                    return acc;
+                  }, [])}
+
+                  <button
+                    onClick={handleAddManual}
+                    disabled={!manualForm.date || !manualForm.grossTotal}
+                    className="w-full py-2 bg-[#1B5E20] text-white text-sm font-bold rounded-lg hover:bg-[#2E7D32] transition-colors disabled:opacity-40"
+                  >
+                    + Add to queue
+                  </button>
+                </div>
+              )}
+
               {/* Drop zone */}
-              <div>
+              {reportType !== 'manual' && <div>
                 <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">
                   {reportType === 'delivery'
                     ? 'Simplydelivery XLSX — Daily Report'
@@ -2222,13 +2345,13 @@ export default function SalesReportsPage() {
                     reportType === 'weekly'   ? handleImportWeekly   :
                     reportType === 'monthly'  ? handleImportMonthly  :
                     reportType === 'delivery' ? handleImportDelivery :
-                    handleImportShift
+                    handleImportShift  // covers both 'shift' and 'manual'
                   }
                   disabled={
                     reportType === 'weekly'   ? !canImportWeekly   :
                     reportType === 'monthly'  ? !canImportMonthly  :
                     reportType === 'delivery' ? !canImportDelivery :
-                    !canImportShift
+                    !canImportShift  // covers both 'shift' and 'manual'
                   }
                   className={`mt-3 w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-bold transition-colors ${
                     (reportType === 'weekly' ? canImportWeekly : reportType === 'monthly' ? canImportMonthly : reportType === 'delivery' ? canImportDelivery : canImportShift)
@@ -2266,7 +2389,7 @@ export default function SalesReportsPage() {
                          return `Save ${parts.join(' · ')}`;
                        })()}
                 </button>
-              </div>
+              </div>}
 
               {/* ── Weekly batch list ── */}
               {reportType === 'weekly' && weeklyBatch.length > 0 && (
@@ -2306,8 +2429,8 @@ export default function SalesReportsPage() {
                 </div>
               )}
 
-              {/* ── Shift batch list ── */}
-              {reportType === 'shift' && shiftBatch.length > 0 && (
+              {/* ── Shift batch list (also shown for manual entries) ── */}
+              {(reportType === 'shift' || reportType === 'manual') && shiftBatch.length > 0 && (
                 <div>
                   <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">
                     Queued shifts
@@ -2634,7 +2757,7 @@ export default function SalesReportsPage() {
               )}
 
               {/* Shift: batch summary table */}
-              {reportType === 'shift' && shiftBatch.length > 0 && (
+              {(reportType === 'shift' || reportType === 'manual') && shiftBatch.length > 0 && (
                 <div className="bg-white border border-gray-100 rounded-xl overflow-hidden shadow-sm">
                   <div className="px-4 py-3 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
                     <p className="text-xs font-bold text-gray-500 uppercase tracking-wider">
