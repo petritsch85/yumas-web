@@ -722,7 +722,7 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
 
                       return (
                         <tr key={itemName} className={`border-b border-gray-50 hover:bg-blue-50/20 transition-colors ${rowBg}`}>
-                          <td className={`sticky left-0 px-4 py-2 z-10 ${rowBg}`}>
+                          <td className={`sticky left-0 px-4 py-2 z-10 ${isEven ? 'bg-white' : 'bg-gray-50'}`}>
                             <span className="font-medium text-gray-800">{itemName}</span>
                             {unit && <span className="block text-gray-400 text-[10px] leading-tight mt-0.5">{unit}</span>}
                           </td>
