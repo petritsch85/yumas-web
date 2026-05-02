@@ -1,13 +1,22 @@
 'use client';
 
 import React, { useState, useCallback, useRef } from 'react';
+import dynamic from 'next/dynamic';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
 import {
   Upload, FileCheck, AlertCircle, Loader2,
   CheckCircle2, Clock, Banknote, Trash2,
   ChevronDown, Eye, X, Save, Pencil,
+  FilePlus, Plus, FileDown,
 } from 'lucide-react';
+import type { BillData, LineItem } from '@/components/bills/BillDocument';
+
+// Must be loaded dynamically (no SSR) due to @react-pdf/renderer
+const BillDocument = dynamic(
+  () => import('@/components/bills/BillDocument').then((m) => m.BillDocument),
+  { ssr: false }
+);
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -68,6 +77,9 @@ const STATUS_STYLES: Record<string, string> = {
   paid:    'bg-green-50 text-green-700 border-green-200',
 };
 
+const DEFAULT_INTRO_MONTHLY = 'Wir bedanken uns für Ihren Auftrag und stellen Ihnen für die Bestellungen wie folgt eine Rechnung:';
+const DEFAULT_INTRO_DINNER  = 'Wir bedanken uns für Ihren Auftrag und stellen Ihnen für das Abendessen wie folgt eine Rechnung:';
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 const fmt = (n: number) =>
@@ -75,6 +87,11 @@ const fmt = (n: number) =>
 
 const fmtDate = (d: string | null) =>
   d ? new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
+
+const today = () => {
+  const d = new Date();
+  return `${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')}.${d.getFullYear()}`;
+};
 
 function uid() { return Math.random().toString(36).slice(2); }
 
@@ -84,7 +101,7 @@ export default function OutgoingBillsPage() {
   const queryClient  = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const [tab, setTab]               = useState<'bills' | 'upload'>('bills');
+  const [tab, setTab]               = useState<'bills' | 'upload' | 'create'>('bills');
   const [isDragging, setIsDragging] = useState(false);
   const [queue, setQueue]           = useState<QueueItem[]>([]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -98,6 +115,89 @@ export default function OutgoingBillsPage() {
   const [editingId,  setEditingId]  = useState<string | null>(null);
   const [editDraft,  setEditDraft]  = useState<Partial<OutgoingBill> | null>(null);
   const [savingEdit, setSavingEdit] = useState(false);
+
+  // ── Create Bill state ─────────────────────────────────────────────────────
+
+  const [billType,        setBillType]        = useState<'monthly' | 'dinner'>('dinner');
+  const [invoiceNumber,   setInvoiceNumber]   = useState('');
+  const [billDate,        setBillDate]        = useState(today());
+  const [company,         setCompany]         = useState('');
+  const [extra,           setExtra]           = useState('');
+  const [contactName,     setContactName]     = useState('');
+  const [street,          setStreet]          = useState('');
+  const [postcode,        setPostcode]        = useState('');
+  const [city,            setCity]            = useState('');
+  const [poNumber,        setPoNumber]        = useState('');
+  const [att,             setAtt]             = useState('');
+  const [introText,       setIntroText]       = useState(DEFAULT_INTRO_DINNER);
+  const [essenNetto,      setEssenNetto]      = useState('');
+  const [getraenkeNetto,  setGetraenkeNetto]  = useState('');
+  const [trinkgeld,       setTrinkgeld]       = useState('');
+  const [lineItems,       setLineItems]       = useState<LineItem[]>([{ qty: 1, item: '', unitPrice: 0 }]);
+  const [generating,      setGenerating]      = useState(false);
+
+  const handleBillTypeChange = (t: 'monthly' | 'dinner') => {
+    setBillType(t);
+    setIntroText(t === 'monthly' ? DEFAULT_INTRO_MONTHLY : DEFAULT_INTRO_DINNER);
+  };
+
+  const addLineItem = () =>
+    setLineItems((prev) => [...prev, { qty: 1, item: '', unitPrice: 0 }]);
+
+  const updateLineItem = (i: number, field: keyof LineItem, value: string) => {
+    setLineItems((prev) =>
+      prev.map((row, idx) =>
+        idx === i ? { ...row, [field]: field === 'item' ? value : parseFloat(value) || 0 } : row
+      )
+    );
+  };
+
+  const removeLineItem = (i: number) =>
+    setLineItems((prev) => prev.filter((_, idx) => idx !== i));
+
+  const buildBillData = useCallback((): BillData => ({
+    invoiceNumber,
+    date: billDate,
+    type: billType,
+    recipient: { company, extra, contact: contactName, street, postcode, city, poNumber, att },
+    introText,
+    lineItems:      billType === 'monthly' ? lineItems   : undefined,
+    essenNetto:     billType === 'dinner'  ? parseFloat(essenNetto)     || 0 : undefined,
+    getraenkeNetto: billType === 'dinner'  ? parseFloat(getraenkeNetto) || 0 : undefined,
+    trinkgeld:      billType === 'dinner'  ? parseFloat(trinkgeld)      || 0 : undefined,
+  }), [invoiceNumber, billDate, billType, company, extra, contactName, street, postcode, city,
+       poNumber, att, introText, lineItems, essenNetto, getraenkeNetto, trinkgeld]);
+
+  const handleGenerate = async () => {
+    setGenerating(true);
+    try {
+      const { pdf } = await import('@react-pdf/renderer');
+      const data = buildBillData();
+      const blob = await pdf(<BillDocument data={data} />).toBlob();
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement('a');
+      a.href     = url;
+      a.download = `${invoiceNumber || 'Rechnung'}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  // Live totals
+  const essenN     = parseFloat(essenNetto)     || 0;
+  const getraenkeN = parseFloat(getraenkeNetto) || 0;
+  const trinkgeldN = parseFloat(trinkgeld)      || 0;
+  const linesTotal = lineItems.reduce((s, i) => s + i.qty * i.unitPrice, 0);
+  const netto      = billType === 'monthly' ? linesTotal : essenN + getraenkeN;
+  const mwst7      = billType === 'monthly' ? netto * 0.07 : essenN * 0.07;
+  const mwst19     = billType === 'dinner'  ? getraenkeN * 0.19 : 0;
+  const brutto     = netto + mwst7 + mwst19;
+  const billTotal  = brutto + (billType === 'dinner' ? trinkgeldN : 0);
+
+  const fmtEur = (n: number) =>
+    n.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €';
 
   // ── Queries ───────────────────────────────────────────────────────────────
 
@@ -193,14 +293,11 @@ export default function OutgoingBillsPage() {
       const { data: { user } } = await supabase.auth.getUser();
       for (const item of toSave) {
         const d = item.data!;
-
-        // Upload PDF
         const bytes    = Uint8Array.from(atob(item.base64), (c) => c.charCodeAt(0));
         const blob     = new Blob([bytes], { type: 'application/pdf' });
         const path     = `outgoing-bills/${Date.now()}_${item.fileName}`;
         const { error: upErr } = await supabase.storage.from('bills').upload(path, blob);
         if (upErr) throw new Error(`PDF upload failed: ${upErr.message}`);
-
         const { error } = await supabase.from('outgoing_bills').insert({
           invoice_number:   d.invoice_number   ?? null,
           invoice_date:     d.invoice_date     ?? null,
@@ -284,6 +381,9 @@ export default function OutgoingBillsPage() {
   const savedCount  = queue.filter((i) => i.saved).length;
   const activeCount = queue.filter((i) => !i.saved).length;
 
+  const inputCls = 'w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]';
+  const labelCls = 'block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1';
+
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
@@ -292,27 +392,40 @@ export default function OutgoingBillsPage() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Outgoing Bills</h1>
-          <p className="text-sm text-gray-500 mt-0.5">Invoices Yumas issues to corporate clients · AI extracts the data</p>
+          <p className="text-sm text-gray-500 mt-0.5">Invoices Yumas issues to corporate clients</p>
         </div>
-        <button
-          onClick={() => { setTab('upload'); setTimeout(() => fileInputRef.current?.click(), 100); }}
-          className="flex items-center gap-2 px-4 py-2 bg-[#1B5E20] text-white text-sm font-semibold rounded-xl hover:bg-[#2E7D32] transition-colors"
-        >
-          <Upload size={15} />
-          Upload Invoice
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setTab('create')}
+            className="flex items-center gap-2 px-4 py-2 bg-white text-[#1B5E20] border border-[#1B5E20] text-sm font-semibold rounded-xl hover:bg-green-50 transition-colors"
+          >
+            <FilePlus size={15} />
+            Create Bill
+          </button>
+          <button
+            onClick={() => { setTab('upload'); setTimeout(() => fileInputRef.current?.click(), 100); }}
+            className="flex items-center gap-2 px-4 py-2 bg-[#1B5E20] text-white text-sm font-semibold rounded-xl hover:bg-[#2E7D32] transition-colors"
+          >
+            <Upload size={15} />
+            Upload Invoice
+          </button>
+        </div>
       </div>
 
       {/* Tabs */}
       <div className="border-b border-gray-200 mb-6">
         <nav className="flex gap-6">
-          {([['bills', 'All Invoices'], ['upload', 'Upload']] as const).map(([t, label]) => (
+          {([
+            ['bills',  'All Invoices', <Banknote size={14} />],
+            ['upload', 'Upload',       <Upload   size={14} />],
+            ['create', 'Create Bill',  <FilePlus size={14} />],
+          ] as const).map(([t, label, icon]) => (
             <button key={t} onClick={() => setTab(t)}
               className={`flex items-center gap-2 pb-3 text-sm font-semibold border-b-2 transition-colors ${
                 tab === t ? 'border-[#1B5E20] text-[#1B5E20]' : 'border-transparent text-gray-500 hover:text-gray-700'
               }`}
             >
-              {t === 'upload' ? <Upload size={14} /> : <Banknote size={14} />}
+              {icon}
               {label}
               {t === 'bills' && bills.length > 0 && (
                 <span className="bg-gray-100 text-gray-600 text-xs font-bold px-1.5 py-0.5 rounded-full">{bills.length}</span>
@@ -418,13 +531,12 @@ export default function OutgoingBillsPage() {
                   {/* Review form */}
                   {expandedId === item.id && item.data && (
                     <div className="border-t border-gray-100 px-4 py-4 bg-gray-50 space-y-4">
-                      {/* Row 1: Customer + invoice info */}
                       <div className="grid grid-cols-4 gap-3">
                         {([
-                          { label: 'Customer',       field: 'customer_name'    as keyof Extracted, type: 'text' },
-                          { label: 'Invoice Number', field: 'invoice_number'   as keyof Extracted, type: 'text' },
-                          { label: 'Invoice Date',   field: 'invoice_date'     as keyof Extracted, type: 'date' },
-                          { label: 'Event Date',     field: 'event_date'       as keyof Extracted, type: 'date' },
+                          { label: 'Customer',       field: 'customer_name'  as keyof Extracted, type: 'text' },
+                          { label: 'Invoice Number', field: 'invoice_number' as keyof Extracted, type: 'text' },
+                          { label: 'Invoice Date',   field: 'invoice_date'   as keyof Extracted, type: 'date' },
+                          { label: 'Event Date',     field: 'event_date'     as keyof Extracted, type: 'date' },
                         ]).map(({ label, field, type }) => (
                           <div key={field}>
                             <label className="block text-xs font-semibold text-gray-500 mb-1">{label}</label>
@@ -434,8 +546,6 @@ export default function OutgoingBillsPage() {
                           </div>
                         ))}
                       </div>
-
-                      {/* Row 2: Amounts */}
                       <div className="grid grid-cols-4 gap-3">
                         {([
                           { label: 'Net Food (€)',    field: 'net_food'    as keyof Extracted },
@@ -451,13 +561,12 @@ export default function OutgoingBillsPage() {
                           </div>
                         ))}
                       </div>
-
                       <div className="grid grid-cols-4 gap-3">
                         {([
-                          { label: 'VAT 19% (€)',     field: 'vat_19'       as keyof Extracted },
-                          { label: 'Gross Total (€)', field: 'gross_total'  as keyof Extracted },
-                          { label: 'Tips (€)',        field: 'tips'         as keyof Extracted },
-                          { label: 'Total Payable (€)',field:'total_payable' as keyof Extracted },
+                          { label: 'VAT 19% (€)',      field: 'vat_19'       as keyof Extracted },
+                          { label: 'Gross Total (€)',   field: 'gross_total'  as keyof Extracted },
+                          { label: 'Tips (€)',          field: 'tips'         as keyof Extracted },
+                          { label: 'Total Payable (€)', field: 'total_payable'as keyof Extracted },
                         ]).map(({ label, field }) => (
                           <div key={field}>
                             <label className="block text-xs font-semibold text-gray-500 mb-1">{label}</label>
@@ -467,8 +576,6 @@ export default function OutgoingBillsPage() {
                           </div>
                         ))}
                       </div>
-
-                      {/* Row 3: Location */}
                       <div className="grid grid-cols-4 gap-3 pt-2 border-t border-gray-200">
                         <div>
                           <label className="block text-xs font-semibold text-gray-500 mb-1">Issuing Location</label>
@@ -501,6 +608,221 @@ export default function OutgoingBillsPage() {
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* ═══════ CREATE BILL TAB ═══════ */}
+      {tab === 'create' && (
+        <div className="max-w-3xl space-y-5">
+
+          {/* Bill type */}
+          <div className="bg-white rounded-lg border border-gray-100 shadow-sm p-5">
+            <p className={labelCls}>Bill Type</p>
+            <div className="flex gap-3">
+              {(['dinner', 'monthly'] as const).map((t) => (
+                <button
+                  key={t}
+                  onClick={() => handleBillTypeChange(t)}
+                  className={`flex-1 py-2.5 rounded-lg text-sm font-medium border transition-colors ${
+                    billType === t
+                      ? 'bg-[#1B5E20] text-white border-[#1B5E20]'
+                      : 'bg-white text-gray-600 border-gray-200 hover:border-[#1B5E20]'
+                  }`}
+                >
+                  {t === 'dinner' ? 'Dinner / Event' : 'Monthly Orders'}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Invoice details */}
+          <div className="bg-white rounded-lg border border-gray-100 shadow-sm p-5">
+            <p className="text-sm font-bold text-gray-700 mb-4">Invoice Details</p>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className={labelCls}>Invoice Number</label>
+                <input className={inputCls} placeholder="e.g. 75-26"
+                  value={invoiceNumber} onChange={(e) => setInvoiceNumber(e.target.value)} />
+              </div>
+              <div>
+                <label className={labelCls}>Date (DD.MM.YYYY)</label>
+                <input className={inputCls} placeholder={today()}
+                  value={billDate} onChange={(e) => setBillDate(e.target.value)} />
+              </div>
+            </div>
+          </div>
+
+          {/* Recipient */}
+          <div className="bg-white rounded-lg border border-gray-100 shadow-sm p-5">
+            <p className="text-sm font-bold text-gray-700 mb-4">Recipient</p>
+            <div className="space-y-3">
+              <div>
+                <label className={labelCls}>Company Name *</label>
+                <input className={inputCls} placeholder="e.g. KIA Europe GmbH"
+                  value={company} onChange={(e) => setCompany(e.target.value)} />
+              </div>
+              <div>
+                <label className={labelCls}>Extra line (e.g. branch name — optional)</label>
+                <input className={inputCls} placeholder="e.g. Zweigniederlassung Deutschland"
+                  value={extra} onChange={(e) => setExtra(e.target.value)} />
+              </div>
+              <div>
+                <label className={labelCls}>Contact Name (optional)</label>
+                <input className={inputCls} placeholder="e.g. Bimal Sahoo"
+                  value={contactName} onChange={(e) => setContactName(e.target.value)} />
+              </div>
+              <div>
+                <label className={labelCls}>Street Address *</label>
+                <input className={inputCls} placeholder="e.g. Theodor-Heuss-Allee 11"
+                  value={street} onChange={(e) => setStreet(e.target.value)} />
+              </div>
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className={labelCls}>Postcode *</label>
+                  <input className={inputCls} placeholder="60486"
+                    value={postcode} onChange={(e) => setPostcode(e.target.value)} />
+                </div>
+                <div className="col-span-2">
+                  <label className={labelCls}>City *</label>
+                  <input className={inputCls} placeholder="Frankfurt am Main"
+                    value={city} onChange={(e) => setCity(e.target.value)} />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className={labelCls}>PO Number (optional)</label>
+                  <input className={inputCls} placeholder="e.g. 2700061132"
+                    value={poNumber} onChange={(e) => setPoNumber(e.target.value)} />
+                </div>
+                <div>
+                  <label className={labelCls}>Att: (optional)</label>
+                  <input className={inputCls} placeholder="e.g. Zara Hajiali"
+                    value={att} onChange={(e) => setAtt(e.target.value)} />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Intro text */}
+          <div className="bg-white rounded-lg border border-gray-100 shadow-sm p-5">
+            <label className={labelCls}>Intro Text</label>
+            <textarea
+              className={`${inputCls} resize-none`}
+              rows={3}
+              value={introText}
+              onChange={(e) => setIntroText(e.target.value)}
+            />
+          </div>
+
+          {/* Monthly: line items */}
+          {billType === 'monthly' && (
+            <div className="bg-white rounded-lg border border-gray-100 shadow-sm p-5">
+              <div className="flex items-center justify-between mb-4">
+                <p className="text-sm font-bold text-gray-700">Line Items</p>
+                <button onClick={addLineItem}
+                  className="flex items-center gap-1.5 text-sm text-[#1B5E20] font-medium hover:underline">
+                  <Plus size={14} /> Add row
+                </button>
+              </div>
+              <div className="grid grid-cols-[50px_1fr_120px_90px_32px] gap-2 mb-2">
+                {['Qty','Item','Unit Price €','Total',''].map((h) => (
+                  <p key={h} className="text-xs font-semibold text-gray-400 uppercase">{h}</p>
+                ))}
+              </div>
+              {lineItems.map((row, i) => (
+                <div key={i} className="grid grid-cols-[50px_1fr_120px_90px_32px] gap-2 mb-2 items-center">
+                  <input type="number" min="1" className={inputCls} value={row.qty}
+                    onChange={(e) => updateLineItem(i, 'qty', e.target.value)} />
+                  <input type="text" className={inputCls} placeholder="e.g. Chicken Burrito"
+                    value={row.item} onChange={(e) => updateLineItem(i, 'item', e.target.value)} />
+                  <input type="number" step="0.01" className={inputCls} placeholder="12.62"
+                    value={row.unitPrice || ''} onChange={(e) => updateLineItem(i, 'unitPrice', e.target.value)} />
+                  <div className={`${inputCls} bg-gray-50 text-right text-gray-700`}>
+                    {fmtEur(row.qty * row.unitPrice)}
+                  </div>
+                  <button onClick={() => removeLineItem(i)} className="text-gray-300 hover:text-red-400">
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Dinner: amounts */}
+          {billType === 'dinner' && (
+            <div className="bg-white rounded-lg border border-gray-100 shadow-sm p-5">
+              <p className="text-sm font-bold text-gray-700 mb-4">Amounts</p>
+              <div className="grid grid-cols-3 gap-4">
+                <div>
+                  <label className={labelCls}>Essen Netto (€)</label>
+                  <input type="number" step="0.01" className={inputCls} placeholder="0.00"
+                    value={essenNetto} onChange={(e) => setEssenNetto(e.target.value)} />
+                </div>
+                <div>
+                  <label className={labelCls}>Getränke Netto (€)</label>
+                  <input type="number" step="0.01" className={inputCls} placeholder="0.00"
+                    value={getraenkeNetto} onChange={(e) => setGetraenkeNetto(e.target.value)} />
+                </div>
+                <div>
+                  <label className={labelCls}>Trinkgeld (€) — optional</label>
+                  <input type="number" step="0.01" className={inputCls} placeholder="0.00"
+                    value={trinkgeld} onChange={(e) => setTrinkgeld(e.target.value)} />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Live totals */}
+          <div className="bg-white rounded-lg border border-gray-100 shadow-sm p-5">
+            <p className="text-sm font-bold text-gray-700 mb-3">Totals Preview</p>
+            <div className="space-y-1 text-sm max-w-xs ml-auto">
+              {billType === 'dinner' && (
+                <>
+                  <div className="flex justify-between text-gray-600">
+                    <span>Gesamt Essen netto</span><span>{fmtEur(essenN)}</span>
+                  </div>
+                  <div className="flex justify-between text-gray-600">
+                    <span>Gesamt Getränke netto</span><span>{fmtEur(getraenkeN)}</span>
+                  </div>
+                </>
+              )}
+              <div className="flex justify-between text-gray-600">
+                <span>Gesamt Netto</span><span>{fmtEur(netto)}</span>
+              </div>
+              <div className="flex justify-between text-gray-600">
+                <span>Mwst (7%)</span><span>{fmtEur(mwst7)}</span>
+              </div>
+              {billType === 'dinner' && (
+                <div className="flex justify-between text-gray-600">
+                  <span>Mwst (19%)</span><span>{fmtEur(mwst19)}</span>
+                </div>
+              )}
+              <div className="border-t border-gray-100 my-1" />
+              <div className="flex justify-between text-gray-600">
+                <span>Gesamt Brutto</span><span>{fmtEur(brutto)}</span>
+              </div>
+              {billType === 'dinner' && trinkgeldN > 0 && (
+                <div className="flex justify-between text-gray-600">
+                  <span>Trinkgeld</span><span>{fmtEur(trinkgeldN)}</span>
+                </div>
+              )}
+              <div className="border-t border-gray-200 my-1" />
+              <div className="flex justify-between font-bold text-gray-900">
+                <span>Gesamtbetrag</span><span>{fmtEur(billTotal)}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Generate button */}
+          <button
+            onClick={handleGenerate}
+            disabled={generating}
+            className="w-full flex items-center justify-center gap-2 bg-[#1B5E20] text-white py-3 rounded-lg text-sm font-bold hover:bg-[#2E7D32] transition-colors disabled:opacity-50"
+          >
+            <FileDown size={16} />
+            {generating ? 'Generating PDF…' : 'Generate & Download PDF'}
+          </button>
+
         </div>
       )}
 
@@ -553,11 +875,17 @@ export default function OutgoingBillsPage() {
           ) : filtered.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-48 border border-dashed border-gray-200 rounded-xl gap-3">
               <Banknote size={36} className="text-gray-200" />
-              <p className="text-sm text-gray-400">No outgoing invoices yet — upload your first</p>
-              <button onClick={() => setTab('upload')}
-                className="px-4 py-2 bg-[#1B5E20] text-white text-xs font-bold rounded-lg hover:bg-[#2E7D32] transition-colors">
-                Upload Invoice
-              </button>
+              <p className="text-sm text-gray-400">No outgoing invoices yet</p>
+              <div className="flex gap-2">
+                <button onClick={() => setTab('create')}
+                  className="px-4 py-2 bg-white text-[#1B5E20] border border-[#1B5E20] text-xs font-bold rounded-lg hover:bg-green-50 transition-colors">
+                  Create Bill
+                </button>
+                <button onClick={() => setTab('upload')}
+                  className="px-4 py-2 bg-[#1B5E20] text-white text-xs font-bold rounded-lg hover:bg-[#2E7D32] transition-colors">
+                  Upload Invoice
+                </button>
+              </div>
             </div>
           ) : (
             <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
@@ -645,10 +973,10 @@ export default function OutgoingBillsPage() {
                             </div>
                             <div className="grid grid-cols-4 gap-3 mb-3">
                               {([
-                                { label: 'Net Food (€)',     field: 'net_food'     as keyof OutgoingBill },
-                                { label: 'Net Drinks (€)',   field: 'net_drinks'   as keyof OutgoingBill },
-                                { label: 'Net Total (€)',    field: 'net_total'    as keyof OutgoingBill },
-                                { label: 'Gross Total (€)',  field: 'gross_total'  as keyof OutgoingBill },
+                                { label: 'Net Food (€)',    field: 'net_food'    as keyof OutgoingBill },
+                                { label: 'Net Drinks (€)',  field: 'net_drinks'  as keyof OutgoingBill },
+                                { label: 'Net Total (€)',   field: 'net_total'   as keyof OutgoingBill },
+                                { label: 'Gross Total (€)', field: 'gross_total' as keyof OutgoingBill },
                               ]).map(({ label, field }) => (
                                 <div key={field}>
                                   <label className="block text-xs font-semibold text-gray-500 mb-1">{label}</label>
@@ -660,10 +988,10 @@ export default function OutgoingBillsPage() {
                             </div>
                             <div className="grid grid-cols-4 gap-3 mb-3">
                               {([
-                                { label: 'VAT 7% (€)',       field: 'vat_7'        as keyof OutgoingBill },
-                                { label: 'VAT 19% (€)',      field: 'vat_19'       as keyof OutgoingBill },
-                                { label: 'Tips (€)',         field: 'tips'         as keyof OutgoingBill },
-                                { label: 'Total Payable (€)',field: 'total_payable'as keyof OutgoingBill },
+                                { label: 'VAT 7% (€)',        field: 'vat_7'         as keyof OutgoingBill },
+                                { label: 'VAT 19% (€)',       field: 'vat_19'        as keyof OutgoingBill },
+                                { label: 'Tips (€)',          field: 'tips'          as keyof OutgoingBill },
+                                { label: 'Total Payable (€)', field: 'total_payable' as keyof OutgoingBill },
                               ]).map(({ label, field }) => (
                                 <div key={field}>
                                   <label className="block text-xs font-semibold text-gray-500 mb-1">{label}</label>
