@@ -443,7 +443,7 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
         // If no real start, derive from previous day's computed ending
         const effectiveStart = d.start !== null ? d.start : (prev.ending ?? null);
         const fUsage = forecastUsage(itemName, day, storeIdx);
-        const forecastEnding = effectiveStart !== null ? Math.max(0, effectiveStart - fUsage) : null;
+        const forecastEnding = effectiveStart !== null ? effectiveStart - fUsage : null;
 
         tableData[itemName][dk] = {
           start:     effectiveStart,
