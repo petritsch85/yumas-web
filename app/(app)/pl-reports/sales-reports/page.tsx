@@ -1621,6 +1621,7 @@ export default function SalesReportsPage() {
     queryClient.invalidateQueries({ queryKey: ['sales-imports'] });
     queryClient.invalidateQueries({ queryKey: ['weekly-sales'] });
     setImporting(false);
+    setWeeklyBatch(prev => prev.filter(i => i.status !== 'saved'));
   }, [location, weeklyBatch, weeklyWarnings, queryClient]);
 
   const handleImportShift = useCallback(async () => {
@@ -1670,7 +1671,9 @@ export default function SalesReportsPage() {
       const d = new Date(lastDate + 'T12:00:00Z');
       setYear(d.getUTCFullYear()); setQuarter(Math.ceil((d.getUTCMonth() + 1) / 3));
     }
-    // Only switch tab if all saved (no errors)
+    // Remove successfully saved items; keep only errors so the user can see what failed
+    setShiftBatch(prev => prev.filter(i => i.status !== 'saved'));
+    // Switch to daily view if nothing errored
     if (shiftBatch.every(i => i.status === 'saved' || i.status === 'error')) {
       setActiveTab('daily');
     }
@@ -1734,6 +1737,7 @@ export default function SalesReportsPage() {
     }
     queryClient.invalidateQueries({ queryKey: ['delivery-reports'] });
     setImporting(false);
+    setDeliveryBatch(prev => prev.filter(i => i.status !== 'saved'));
   }, [location, deliveryBatch, deliveryWarnings, queryClient]);
 
   const closeModal = useCallback(() => {
