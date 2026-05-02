@@ -1019,6 +1019,24 @@ export default function SalesReportsPage() {
     },
   });
 
+  // Outgoing bills (large-group invoices) for current quarter
+  const { data: outgoingBillsData = [] } = useQuery({
+    queryKey: ['outgoing-bills-pl', location?.name, year, quarter],
+    enabled: !!location,
+    queryFn: async () => {
+      const [firstM, , lastM] = QUARTER_MONTHS[quarter - 1];
+      const qStart = `${year}-${String(firstM).padStart(2,'0')}-01`;
+      const qEnd   = `${year}-${String(lastM).padStart(2,'0')}-${String(daysInMonth(year, lastM)).padStart(2,'0')}`;
+      const { data } = await supabase
+        .from('outgoing_bills')
+        .select('id,event_date,shift_type,net_total,issuing_location')
+        .eq('issuing_location', location!.name)
+        .gte('event_date', qStart)
+        .lte('event_date', qEnd);
+      return (data ?? []) as { id: string; event_date: string | null; shift_type: 'lunch' | 'dinner' | null; net_total: number }[];
+    },
+  });
+
   // Closure days — fetch all for this location (across all years)
   const { data: closureDays = [], refetch: refetchClosures } = useQuery({
     queryKey: ['closure-days', location?.id],
@@ -1260,6 +1278,32 @@ export default function SalesReportsPage() {
     for (const [k, v] of Object.entries(deliveryDinnerMap)) m[k] = (m[k] ?? 0) + v;
     return m;
   }, [deliveryLunchMap, deliveryDinnerMap]);
+
+  // Outgoing bills maps (dateKey → net_total) split by shift type
+  const billsLunchMap = useMemo<Record<string, number>>(() => {
+    const m: Record<string, number> = {};
+    for (const b of outgoingBillsData) {
+      if (!b.event_date || b.shift_type !== 'lunch') continue;
+      m[b.event_date] = (m[b.event_date] ?? 0) + b.net_total;
+    }
+    return m;
+  }, [outgoingBillsData]);
+
+  const billsDinnerMap = useMemo<Record<string, number>>(() => {
+    const m: Record<string, number> = {};
+    for (const b of outgoingBillsData) {
+      if (!b.event_date || b.shift_type !== 'dinner') continue;
+      m[b.event_date] = (m[b.event_date] ?? 0) + b.net_total;
+    }
+    return m;
+  }, [outgoingBillsData]);
+
+  const billsTotalMap = useMemo<Record<string, number>>(() => {
+    const m: Record<string, number> = {};
+    for (const [k, v] of Object.entries(billsLunchMap))  m[k] = (m[k] ?? 0) + v;
+    for (const [k, v] of Object.entries(billsDinnerMap)) m[k] = (m[k] ?? 0) + v;
+    return m;
+  }, [billsLunchMap, billsDinnerMap]);
 
   // O(1) lookup set for closed shifts: "lunch:2026-05-01", "dinner:2026-05-01"
   const closureSet = useMemo(() => {
@@ -3135,14 +3179,15 @@ export default function SalesReportsPage() {
                         );
                       };
 
-                      // Render a bold combined total row (POS actual/forecast + Simply actual)
-                      const totalRow = (label: string, posMap: typeof lunchMap, fcastMap: Record<string,number>, delivMap: Record<string,number>, qTotal: typeof lunchQtrTotal, bg: string, color: string) => {
+                      // Render a bold combined total row (POS actual/forecast + Simply actual + Bills)
+                      const totalRow = (label: string, posMap: typeof lunchMap, fcastMap: Record<string,number>, delivMap: Record<string,number>, qTotal: typeof lunchQtrTotal, bg: string, color: string, billsMap: Record<string,number> = {}) => {
                         const hasFcast   = Object.keys(fcastMap).length > 0;
                         const qPosActual = qTotal?.netTotal ?? 0;
                         const qDel       = Object.entries(delivMap).filter(([k]) => dailyCols.some(c => c.type === 'day' && (c as any).dateKey === k)).reduce((s, [,v]) => s + v, 0);
+                        const qBills     = Object.entries(billsMap).filter(([k]) => dailyCols.some(c => c.type === 'day' && (c as any).dateKey === k)).reduce((s, [,v]) => s + v, 0);
                         const qFcastRem  = hasFcast ? dailyCols.filter(c => c.type === 'day' && c.dateKey >= todayKey && !(posMap as any)[c.dateKey]).reduce((s, c) => s + (fcastMap[(c as any).dateKey] ?? 0), 0) : 0;
-                        const qDisplayVal = qPosActual + qDel + qFcastRem;
-                        const qHasMix    = (qPosActual + qDel) > 0 && qFcastRem > 0;
+                        const qDisplayVal = qPosActual + qDel + qBills + qFcastRem;
+                        const qHasMix    = (qPosActual + qDel + qBills) > 0 && qFcastRem > 0;
                         return (
                           <tr key={label} className="border-b border-gray-100 hover:bg-gray-50/60 group" style={{ backgroundColor: bg }}>
                             <td className="sticky left-0 z-10 px-4 py-2 whitespace-nowrap border-r border-gray-100 group-hover:bg-gray-50/60 transition-colors font-bold" style={{ backgroundColor: bg, color }}>{label}</td>
@@ -3152,10 +3197,11 @@ export default function SalesReportsPage() {
                                 const isFuture  = col.dateKey >= todayKey;
                                 const posActual = posMap[col.dateKey]?.netTotal ?? 0;
                                 const simply    = delivMap[col.dateKey] ?? 0;
+                                const bills     = billsMap[col.dateKey] ?? 0;
                                 const fcast     = !posActual && isFuture ? (fcastMap[col.dateKey] ?? null) : null;
-                                const hasActual = posActual > 0 || simply > 0;
+                                const hasActual = posActual > 0 || simply > 0 || bills > 0;
                                 const showFcast = !hasActual && fcast !== null && fcast > 0;
-                                const displayVal = hasActual ? posActual + simply : (showFcast ? fcast! : 0);
+                                const displayVal = hasActual ? posActual + simply + bills : (showFcast ? fcast! : 0);
                                 return (
                                   <td key={ci} className="py-2 text-right tabular-nums font-bold" style={{ paddingLeft:4, paddingRight:8, backgroundColor: isCurDay ? 'rgba(59,130,246,0.04)' : undefined }}>
                                     {hasActual ? <span style={{ color }}>{fmtNum(displayVal)}</span>
@@ -3166,9 +3212,10 @@ export default function SalesReportsPage() {
                               } else {
                                 const wPosActual = col.wDateKeys.filter(k => (posMap[k]?.netTotal ?? 0) > 0).reduce((s, k) => s + (posMap[k].netTotal ?? 0), 0);
                                 const wSimply    = col.wDateKeys.reduce((s, k) => s + (delivMap[k] ?? 0), 0);
+                                const wBills     = col.wDateKeys.reduce((s, k) => s + (billsMap[k] ?? 0), 0);
                                 const wFcast     = hasFcast ? col.wDateKeys.filter(k => !posMap[k] && k >= todayKey).reduce((s, k) => s + (fcastMap[k] ?? 0), 0) : 0;
-                                const wTotal     = wPosActual + wSimply + wFcast;
-                                const wMix       = (wPosActual + wSimply) > 0 && wFcast > 0;
+                                const wTotal     = wPosActual + wSimply + wBills + wFcast;
+                                const wMix       = (wPosActual + wSimply + wBills) > 0 && wFcast > 0;
                                 return (
                                   <td key={ci} className="py-2 text-right tabular-nums font-bold" style={{ paddingLeft:4, paddingRight:6, backgroundColor:'#fffbeb', borderLeft:'1px solid #fde68a', borderRight:'1px solid #fde68a' }}>
                                     {wTotal > 0 ? <span style={{ color: wMix ? '#d97706' : color }}>{fmtNum(wTotal)}</span> : <span className="text-gray-300">—</span>}
@@ -3187,13 +3234,13 @@ export default function SalesReportsPage() {
                         <>
                           {posRow('☀️  Orderbird · Lunch',  lunchMap,  lunchForecastMap,  lunchQtrTotal)}
                           {simplyRow('🛵 Simply · Lunch', deliveryLunchMap)}
-                          {billsRow('🧾 Bills · Lunch', {})}
-                          {totalRow('☀️  Total Lunch',  lunchMap,  lunchForecastMap,  deliveryLunchMap,  lunchQtrTotal,  '#f0fdf4', '#1B5E20')}
+                          {billsRow('🧾 Bills · Lunch', billsLunchMap)}
+                          {totalRow('☀️  Total Lunch',  lunchMap,  lunchForecastMap,  deliveryLunchMap,  lunchQtrTotal,  '#f0fdf4', '#1B5E20', billsLunchMap)}
                           {posRow('🌙  Orderbird · Dinner', dinnerMap, dinnerForecastMap, dinnerQtrTotal)}
                           {simplyRow('🛵 Simply · Dinner', deliveryDinnerMap)}
-                          {billsRow('🧾 Bills · Dinner', {})}
-                          {totalRow('🌙  Total Dinner', dinnerMap, dinnerForecastMap, deliveryDinnerMap, dinnerQtrTotal, '#f0fdf4', '#1B5E20')}
-                          {totalRow('∑   Daily Total',  totalMap,  totalForecastMap,  deliveryTotalMap,  totalQtrTotal,  '#f0fdf4', '#1B5E20')}
+                          {billsRow('🧾 Bills · Dinner', billsDinnerMap)}
+                          {totalRow('🌙  Total Dinner', dinnerMap, dinnerForecastMap, deliveryDinnerMap, dinnerQtrTotal, '#f0fdf4', '#1B5E20', billsDinnerMap)}
+                          {totalRow('∑   Daily Total',  totalMap,  totalForecastMap,  deliveryTotalMap,  totalQtrTotal,  '#f0fdf4', '#1B5E20', billsTotalMap)}
                         </>
                       );
                     })()}
