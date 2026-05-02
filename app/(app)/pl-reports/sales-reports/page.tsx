@@ -3078,27 +3078,27 @@ export default function SalesReportsPage() {
                         const qDel = Object.entries(delivMap).filter(([k]) => dailyCols.some(c => c.type === 'day' && (c as any).dateKey === k)).reduce((s, [,v]) => s + v, 0);
                         return (
                           <tr key={label} className="border-b border-gray-100 hover:bg-gray-50/60 group">
-                            <td className="sticky left-0 z-10 px-4 py-2 whitespace-nowrap border-r border-gray-100 bg-white group-hover:bg-gray-50/60 transition-colors text-blue-800">{label}</td>
+                            <td className="sticky left-0 z-10 px-4 py-2 whitespace-nowrap border-r border-gray-100 bg-white group-hover:bg-gray-50/60 transition-colors text-gray-700">{label}</td>
                             {dailyCols.map((col, ci) => {
                               if (col.type === 'day') {
                                 const isCurDay = col.dateKey === todayKey;
                                 const val = delivMap[col.dateKey] ?? 0;
                                 return (
                                   <td key={ci} className="py-2 text-right tabular-nums" style={{ paddingLeft:4, paddingRight:8, backgroundColor: isCurDay ? 'rgba(59,130,246,0.04)' : undefined }}>
-                                    {val > 0 ? <span className="text-blue-700">{fmtNum(val)}</span> : <span className="text-gray-300">—</span>}
+                                    {val > 0 ? <span className="text-gray-700">{fmtNum(val)}</span> : <span className="text-gray-300">—</span>}
                                   </td>
                                 );
                               } else {
                                 const wTotal = col.wDateKeys.reduce((s, k) => s + (delivMap[k] ?? 0), 0);
                                 return (
                                   <td key={ci} className="py-2 text-right tabular-nums" style={{ paddingLeft:4, paddingRight:6, backgroundColor:'#fffbeb', borderLeft:'1px solid #fde68a', borderRight:'1px solid #fde68a' }}>
-                                    {wTotal > 0 ? <span className="text-blue-700">{fmtNum(wTotal)}</span> : <span className="text-gray-300">—</span>}
+                                    {wTotal > 0 ? <span className="text-gray-700">{fmtNum(wTotal)}</span> : <span className="text-gray-300">—</span>}
                                   </td>
                                 );
                               }
                             })}
                             <td className="py-2 text-right tabular-nums border-l border-gray-200" style={{ paddingLeft:4, paddingRight:8 }}>
-                              {qDel > 0 ? <span className="text-blue-700 font-bold">{fmtNum(qDel)}</span> : <span className="text-gray-300">—</span>}
+                              {qDel > 0 ? <span className="text-gray-700 font-bold">{fmtNum(qDel)}</span> : <span className="text-gray-300">—</span>}
                             </td>
                           </tr>
                         );
@@ -3109,27 +3109,27 @@ export default function SalesReportsPage() {
                         const qBills = Object.entries(billsMap).filter(([k]) => dailyCols.some(c => c.type === 'day' && (c as any).dateKey === k)).reduce((s, [,v]) => s + v, 0);
                         return (
                           <tr key={label} className="border-b border-gray-100 hover:bg-gray-50/60 group">
-                            <td className="sticky left-0 z-10 px-4 py-2 whitespace-nowrap border-r border-gray-100 bg-white group-hover:bg-gray-50/60 transition-colors text-purple-800">{label}</td>
+                            <td className="sticky left-0 z-10 px-4 py-2 whitespace-nowrap border-r border-gray-100 bg-white group-hover:bg-gray-50/60 transition-colors text-gray-700">{label}</td>
                             {dailyCols.map((col, ci) => {
                               if (col.type === 'day') {
                                 const isCurDay = col.dateKey === todayKey;
                                 const val = billsMap[col.dateKey] ?? 0;
                                 return (
                                   <td key={ci} className="py-2 text-right tabular-nums" style={{ paddingLeft:4, paddingRight:8, backgroundColor: isCurDay ? 'rgba(59,130,246,0.04)' : undefined }}>
-                                    {val > 0 ? <span className="text-purple-700">{fmtNum(val)}</span> : <span className="text-gray-300">—</span>}
+                                    {val > 0 ? <span className="text-gray-700">{fmtNum(val)}</span> : <span className="text-gray-300">—</span>}
                                   </td>
                                 );
                               } else {
                                 const wTotal = col.wDateKeys.reduce((s, k) => s + (billsMap[k] ?? 0), 0);
                                 return (
                                   <td key={ci} className="py-2 text-right tabular-nums" style={{ paddingLeft:4, paddingRight:6, backgroundColor:'#fffbeb', borderLeft:'1px solid #fde68a', borderRight:'1px solid #fde68a' }}>
-                                    {wTotal > 0 ? <span className="text-purple-700">{fmtNum(wTotal)}</span> : <span className="text-gray-300">—</span>}
+                                    {wTotal > 0 ? <span className="text-gray-700">{fmtNum(wTotal)}</span> : <span className="text-gray-300">—</span>}
                                   </td>
                                 );
                               }
                             })}
                             <td className="py-2 text-right tabular-nums border-l border-gray-200" style={{ paddingLeft:4, paddingRight:8 }}>
-                              {qBills > 0 ? <span className="text-purple-700 font-bold">{fmtNum(qBills)}</span> : <span className="text-gray-300">—</span>}
+                              {qBills > 0 ? <span className="text-gray-700 font-bold">{fmtNum(qBills)}</span> : <span className="text-gray-300">—</span>}
                             </td>
                           </tr>
                         );
