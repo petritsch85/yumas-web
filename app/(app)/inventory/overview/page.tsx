@@ -6,6 +6,63 @@ import { supabase } from '@/lib/supabase-browser';
 import { RefreshCw, ChevronLeft, ChevronRight } from 'lucide-react';
 
 const LOCATIONS = ['Eschborn', 'Taunus', 'Westend', 'ZK'] as const;
+
+/* ─── Canonical item order (mirrors inventory form SECTIONS) ────────────────── */
+const SECTION_ORDER = ['Kühlhaus', 'Tiefkühler', 'Trockenware', 'Regale', 'Lager'];
+
+const CANONICAL_ITEMS: string[] = [
+  // Kühlhaus
+  'Guacamole','Schärfemix','Maissalsa','Tomatensalsa','Sour Cream','Marinade Chicken',
+  'Pico de Gallo','Crema Nogada','Käse Gouda','Gouda Scheiben Gringa','Ciabatta','Brownie',
+  'Carlota de Limon','Schoko- Avocado Mousse','Mole','Marinade Al Pastor','Barbacoa',
+  'Chili con Carne','Cochinita','Kartoffel Würfel','Vinaigrette','Honig Sesam / Senf',
+  'Pozole','Zwiebeln karamellisiert','Karotten karamellisiert','Bohnencreme',
+  'Alambre - Zwiebel','Weizen Tortillas 12cm','Tortillas 30cm','Frische Habaneros',
+  'Salsa Habanero','Salsa Verde','Chipotle SourCream','Salsa de Jamaica','Salsa Torta',
+  'Humo Salsa','Fuego Salsa','Oliven entkernt','Chiles Poblanos','Salsa Pitaya',
+  'Mais Tortillas 12cm','Blau Mais Tortillas 15cm','Queso Cotija','Queso Oaxaca',
+  'Queso Chihuahua','Rinderfilet Steak','Filetspitzen','Hähnchenkeule (ganz)','Mole Rojo',
+  'Chorizo','Carne Vegetal','Costilla de Res','Salsa für Costilla de Res',
+  'Rote Zwiebeln eingelegt','Pulpo (Chipulpotle)','Salsa Pulpo','Birria','Salsa Birria',
+  'Füllung Nogada','H-Milch 3,5%',
+  // Tiefkühler
+  'Alambre - Paprika Streifen','Gambas','Weizentortillas 20cm',
+  // Trockenware
+  'Reis','Schwarze Bohnen','Salz','Zucker','Brauner Zucker','Pfeffer','Pfeffer geschrotet',
+  'Rapsöl','Tajin','Limettensaft (750ml Metro)',
+  // Regale
+  'Große Bowl togo Schale','Große Bowl togo Deckel','Kleine Bowl togo Schale',
+  'Kleine Bowl togo Deckel','Dressingsbecher Schale','Dressingsbecher Deckel','Alufolie',
+  'Backpapier','Trayliner Papier','Weiße Serviette','Zig-Zag Papier','Müllbeutel Blau 120L',
+  'Handschuhe M','Handschuhe L','Mehrwegbowl',
+  // Lager
+  'Große Togo Tüte','Kleine Togo Tüte','Schwarze Serviette','Nachos','Spüli','Essigessenz',
+  'Topfschwamm','Edelstahlschwamm','Reinigungshandschuhe','Blaue Rolle','Toilettenpapier',
+  'Glasreiniger','WC Reiniger','Desinfektionsreiniger','Gastro Universal Reiniger',
+  'Kalkreiniger','Laminat - Parkett-Reiniger','B100N','B200S','F8500','F420E',
+  'Spülmaschine Salz - Etolit',
+];
+
+const ITEM_RANK: Record<string, number> = Object.fromEntries(
+  CANONICAL_ITEMS.map((name, i) => [name, i])
+);
+
+function sortSections<T extends { title: string; items: unknown[] }>(sections: T[]): T[] {
+  return sections
+    .sort((a, b) => {
+      const ia = SECTION_ORDER.indexOf(a.title);
+      const ib = SECTION_ORDER.indexOf(b.title);
+      return (ia < 0 ? 999 : ia) - (ib < 0 ? 999 : ib);
+    });
+}
+
+function sortItemNames(names: string[]): string[] {
+  return names.slice().sort((a, b) => {
+    const ia = ITEM_RANK[a] ?? 9999;
+    const ib = ITEM_RANK[b] ?? 9999;
+    return ia !== ib ? ia - ib : a.localeCompare(b);
+  });
+}
 type LocationName = (typeof LOCATIONS)[number];
 type TabView = 'group' | LocationName;
 
@@ -139,13 +196,18 @@ function GroupView() {
         }
       }
 
-      const sections: SectionGroup[] = Object.entries(sectionMap).map(([title, items]) => ({
-        title,
-        items: Object.entries(items).map(([name, { unit, quantities }]) => ({
-          section: title, name, unit, quantities,
-          total: Object.values(quantities).reduce((s, q) => s + (q ?? 0), 0),
-        })),
-      }));
+      const sections: SectionGroup[] = sortSections(
+        Object.entries(sectionMap).map(([title, items]) => ({
+          title,
+          items: sortItemNames(Object.keys(items)).map((name) => {
+            const { unit, quantities } = items[name];
+            return {
+              section: title, name, unit, quantities,
+              total: Object.values(quantities).reduce((s, q) => s + (q ?? 0), 0),
+            };
+          }),
+        }))
+      );
 
       return { sections, latestByLocation };
     },
@@ -468,9 +530,12 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
       if (!sectionMap[section]) sectionMap[section] = [];
       sectionMap[section].push(name);
     }
-    const sections: WeekSectionGroup[] = Object.entries(sectionMap)
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([title, items]) => ({ title, items: items.sort() }));
+    const sections: WeekSectionGroup[] = sortSections(
+      Object.entries(sectionMap).map(([title, items]) => ({
+        title,
+        items: sortItemNames(items),
+      }))
+    );
 
     // Unit lookup map (itemName → unit string)
     const itemUnit: Record<string, string> = {};
