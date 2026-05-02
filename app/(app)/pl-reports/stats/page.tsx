@@ -368,7 +368,7 @@ export default function StatsPage() {
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-sm border-collapse">
-              <TableHeader title={`Metric / ${view === 'weekly' ? 'Week' : 'Month'} · ${year}`} lastColLabel="Total" />
+              <TableHeader title={`Net Sales · ${year}`} lastColLabel="Total" />
               <tbody className="divide-y divide-gray-100">
 
                 {/* Total Lunch */}
