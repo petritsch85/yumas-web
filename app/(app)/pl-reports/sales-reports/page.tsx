@@ -167,6 +167,7 @@ type ShiftBatchItem = {
   detectedType:      'lunch' | 'dinner';
   confidence:        ShiftConfidence;
   manualOverride?:   'lunch' | 'dinner';
+  dateOverride?:     string; // YYYY-MM-DD — overrides parsed date before saving
   status:            'pending' | 'saving' | 'saved' | 'error';
   errorMsg?:         string;
 };
@@ -1485,12 +1486,13 @@ export default function SalesReportsPage() {
     shiftBatch.forEach((item, idx) => {
       if (item.result.error) return;
       const type = item.manualOverride ?? item.detectedType;
-      const key  = `${item.result.date}:${type}`;
+      const effectiveDate = item.dateOverride ?? item.result.date;
+      const key  = `${effectiveDate}:${type}`;
       if (seen.has(key)) {
         w[idx] = { kind: 'batch', msg: 'Duplicate — same date & shift type already in this batch' };
       } else {
         seen.set(key, idx);
-        if (location && shiftRows.some(s => s.report_date === item.result.date && s.shift_type === type)) {
+        if (location && shiftRows.some(s => s.report_date === effectiveDate && s.shift_type === type)) {
           w[idx] = { kind: 'db', msg: 'Already in DB for this location — delete the existing record first if you want to replace it' };
         }
       }
@@ -1644,8 +1646,9 @@ export default function SalesReportsPage() {
       try {
         const sr = item.result;
         const effectiveType = item.manualOverride ?? item.detectedType;
+        const effectiveDate = item.dateOverride ?? sr.date;
         const { data: inserted, error: srErr } = await supabase.from('shift_reports').insert({
-          location_id: location.id, report_date: sr.date,
+          location_id: location.id, report_date: effectiveDate,
           z_report_number: sr.zReportNumber,
           shift_type: effectiveType,
           gross_total: sr.grossTotal, gross_food: sr.grossFood,
@@ -1668,7 +1671,7 @@ export default function SalesReportsPage() {
           );
           if (catErr) throw catErr;
         }
-        lastDate = sr.date;
+        lastDate = effectiveDate;
         setShiftBatch(prev => prev.map(i => i === item ? { ...i, status: 'saved' } : i));
       } catch (e: any) {
         setShiftBatch(prev => prev.map(i => i === item ? { ...i, status: 'error', errorMsg: e.message } : i));
@@ -2333,7 +2336,31 @@ export default function SalesReportsPage() {
                         <div key={idx} className={`bg-white border rounded-lg px-3 py-2 flex items-center gap-2 shadow-sm ${warn?.kind === 'batch' ? 'border-red-200' : warn?.kind === 'db' ? 'border-amber-200' : 'border-gray-100'}`}>
                           <span className={`text-sm font-bold flex-shrink-0 w-4 text-center ${statusColor}`}>{statusIcon}</span>
                           <div className="flex-1 min-w-0">
-                            <p className="text-xs font-semibold text-gray-800 truncate">{fmtDate(item.result.date)}</p>
+                            {item.status === 'pending' ? (
+                              <div className="flex items-center gap-1">
+                                <input
+                                  type="date"
+                                  value={item.dateOverride ?? item.result.date}
+                                  onChange={e => setShiftBatch(prev => prev.map((it, i) =>
+                                    i !== idx ? it : { ...it, dateOverride: e.target.value }
+                                  ))}
+                                  className={`text-xs font-semibold border rounded px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-indigo-400 ${item.dateOverride ? 'border-indigo-300 text-indigo-700 bg-indigo-50' : 'border-transparent text-gray-800 bg-transparent hover:border-gray-200'}`}
+                                />
+                                {item.dateOverride && (
+                                  <button
+                                    onClick={() => setShiftBatch(prev => prev.map((it, i) =>
+                                      i !== idx ? it : { ...it, dateOverride: undefined }
+                                    ))}
+                                    className="text-[10px] text-indigo-400 hover:text-indigo-600"
+                                    title="Reset to parsed date"
+                                  >↩</button>
+                                )}
+                              </div>
+                            ) : (
+                              <p className="text-xs font-semibold text-gray-800 truncate">
+                                {fmtDate(item.dateOverride ?? item.result.date)}
+                              </p>
+                            )}
                             <p className="text-xs text-gray-400">
                               Z-{item.result.zReportNumber || '?'} · {fmt(item.result.grossTotal)}
                             </p>
