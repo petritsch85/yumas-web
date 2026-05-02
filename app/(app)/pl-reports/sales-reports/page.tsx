@@ -1621,8 +1621,14 @@ export default function SalesReportsPage() {
     queryClient.invalidateQueries({ queryKey: ['sales-imports'] });
     queryClient.invalidateQueries({ queryKey: ['weekly-sales'] });
     setImporting(false);
-    setWeeklyBatch(prev => prev.filter(i => i.status !== 'saved'));
-  }, [location, weeklyBatch, weeklyWarnings, queryClient]);
+    const hadErrors = weeklyBatch.some(i => i.status === 'error');
+    if (hadErrors) {
+      setWeeklyBatch(prev => prev.filter(i => i.status !== 'saved'));
+    } else {
+      resetUpload();
+      setActiveTab('daily');
+    }
+  }, [location, weeklyBatch, weeklyWarnings, queryClient, resetUpload]);
 
   const handleImportShift = useCallback(async () => {
     const pending = shiftBatch.filter((i, idx) => i.status === 'pending' && !i.result.error && shiftWarnings[idx]?.kind !== 'batch');
@@ -1671,13 +1677,14 @@ export default function SalesReportsPage() {
       const d = new Date(lastDate + 'T12:00:00Z');
       setYear(d.getUTCFullYear()); setQuarter(Math.ceil((d.getUTCMonth() + 1) / 3));
     }
-    // Remove successfully saved items; keep only errors so the user can see what failed
-    setShiftBatch(prev => prev.filter(i => i.status !== 'saved'));
-    // Switch to daily view if nothing errored
-    if (shiftBatch.every(i => i.status === 'saved' || i.status === 'error')) {
+    const hadErrors = shiftBatch.some(i => i.status === 'error');
+    if (hadErrors) {
+      setShiftBatch(prev => prev.filter(i => i.status !== 'saved'));
+    } else {
+      resetUpload();
       setActiveTab('daily');
     }
-  }, [location, shiftBatch, shiftWarnings, queryClient]);
+  }, [location, shiftBatch, shiftWarnings, queryClient, resetUpload]);
 
   const handleImportMonthly = useCallback(async () => {
     if (!location || !monthlyResult || monthlyResult.year === 0) return;
@@ -1737,8 +1744,14 @@ export default function SalesReportsPage() {
     }
     queryClient.invalidateQueries({ queryKey: ['delivery-reports'] });
     setImporting(false);
-    setDeliveryBatch(prev => prev.filter(i => i.status !== 'saved'));
-  }, [location, deliveryBatch, deliveryWarnings, queryClient]);
+    const hadErrors = deliveryBatch.some(i => i.status === 'error');
+    if (hadErrors) {
+      setDeliveryBatch(prev => prev.filter(i => i.status !== 'saved'));
+    } else {
+      resetUpload();
+      setActiveTab('daily');
+    }
+  }, [location, deliveryBatch, deliveryWarnings, queryClient, resetUpload]);
 
   const closeModal = useCallback(() => {
     setActiveDayKey(null);
