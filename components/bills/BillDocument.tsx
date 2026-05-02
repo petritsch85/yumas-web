@@ -1,132 +1,132 @@
-import { Document, Page, View, Text, StyleSheet } from '@react-pdf/renderer';
+import { Document, Page, View, Text, Image, StyleSheet } from '@react-pdf/renderer';
+import { YUMAS_LOGO } from './yumasLogo';
 
-// ── Fixed sender details ──────────────────────────────────────────────────────
-const SENDER_LINE = 'Yumas GmbH · Feuerbachstraße 46 · 60325 Frankfurt /M';
-const FOOTER_1    = 'Yumas GmbH │ Feuerbachstraße 46 │ 60325 Frankfurt';
-const FOOTER_2    = 'Sparkasse Rhein-Nahe │ IBAN DE98 5605 0180 0017 1489 25 │ Steuernummer: 014 249 10458';
-const PAYMENT     = 'Die Rechnung ist zahlbar innerhalb von 7 Tagen nach Rechnungseingang.';
+// ── Fixed sender / footer text ────────────────────────────────────────────────
+const SENDER  = ['Yumas GmbH', 'Feuerbachstraße 46', '60325 Frankfurt'];
+const FOOTER_1 = 'Yumas GmbH │ Feuerbachstraße 46│ 60325 Frankfurt';
+const FOOTER_2 = 'Sparkasse Rhein-Nahe│ IBAN DE98 5605 0180 0017 1489 25│ Steuernummer: 014 249 10458';
+const PAYMENT  = 'Die Rechnung ist zahlbar innerhalb von 7 Tagen nach Rechnungseingang.';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 export type LineItem = { qty: number; item: string; unitPrice: number };
 
 export type BillData = {
-  invoiceNumber : string;
-  date          : string;          // DD.MM.YYYY
-  recipient     : {
-    company     : string;
-    extra?      : string;          // e.g. "Zweigniederlassung Deutschland"
-    contact?    : string;          // contact name on its own line
-    street      : string;
-    postcode    : string;
-    city        : string;
-    poNumber?   : string;
-    att?        : string;
+  invoiceNumber  : string;
+  date           : string;   // DD.MM.YYYY
+  type           : 'monthly' | 'dinner';
+  recipient      : {
+    company  : string;
+    extra?   : string;
+    contact? : string;
+    street   : string;
+    postcode : string;
+    city     : string;
+    poNumber?: string;
+    att?     : string;
   };
-  introText     : string;
-  type          : 'monthly' | 'dinner';
-  // Type A – monthly
-  lineItems?    : LineItem[];
-  // Type B – dinner
-  essenNetto?   : number;
+  introText      : string;
+  // Type A – monthly orders
+  lineItems?     : LineItem[];
+  // Type B – dinner / event
+  essenNetto?    : number;
   getraenkeNetto?: number;
-  trinkgeld?    : number;
+  trinkgeld?     : number;
 };
 
-// ── German number formatter ───────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 const fmt = (n: number) =>
   n.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €';
 
 // ── Styles ────────────────────────────────────────────────────────────────────
 const s = StyleSheet.create({
   page: {
-    fontFamily   : 'Helvetica',
+    fontFamily   : 'Courier',
     fontSize     : 10,
-    paddingTop   : 45,
-    paddingBottom: 55,
+    paddingTop   : 36,
+    paddingBottom: 70,
     paddingLeft  : 55,
     paddingRight : 55,
-    color        : '#111',
+    color        : '#000',
   },
 
-  // Return-address line (tiny, underlined, above recipient block)
-  returnLine: {
-    fontSize          : 7,
-    color             : '#555',
-    borderBottomWidth : 0.5,
-    borderBottomColor : '#999',
-    paddingBottom     : 2,
-    marginBottom      : 6,
+  // Header: [spacer] [logo centred] [sender address right-aligned]
+  headerRow: {
+    flexDirection: 'row',
+    alignItems   : 'flex-start',
+    marginBottom : 22,
+  },
+  headerSpacer: { width: 110 },
+  headerLogoWrap: {
+    flex       : 1,
+    alignItems : 'center',
+  },
+  logo: { width: 88, height: 88 },
+  senderBlock: {
+    width     : 110,
+    textAlign : 'right',
+    lineHeight: 1.55,
+    fontSize  : 10,
   },
 
   // Recipient block
-  recipient     : { fontSize: 10, lineHeight: 1.5, marginBottom: 28 },
-  recipientBold : { fontFamily: 'Helvetica-Bold' },
+  recipient: {
+    lineHeight  : 1.55,
+    marginBottom: 26,
+  },
 
-  // Meta (date + invoice) — right-aligned block
-  metaContainer : { alignItems: 'flex-end', marginBottom: 22 },
-  metaRow       : { flexDirection: 'row', gap: 6, marginBottom: 2 },
-  metaLabel     : { fontSize: 10, color: '#555', width: 110, textAlign: 'right' },
-  metaValue     : { fontSize: 10, width: 100, textAlign: 'right' },
-
-  // PO / Att block (left-aligned, appears below recipient)
-  optionalMeta  : { marginBottom: 14, lineHeight: 1.5 },
+  // Date + invoice number — right-aligned
+  metaWrap: {
+    alignItems  : 'flex-end',
+    marginBottom: 18,
+    lineHeight  : 1.55,
+  },
 
   // Intro paragraph
-  intro         : { lineHeight: 1.5, marginBottom: 16 },
+  intro: { lineHeight: 1.55, marginBottom: 16 },
 
-  // ── Type A table ─────────────────────────────────────────────────────────
-  tableHeaderRow: {
-    flexDirection   : 'row',
-    borderBottomWidth: 0.75,
-    borderBottomColor: '#333',
-    paddingBottom   : 4,
-    marginBottom    : 4,
-    fontFamily      : 'Helvetica-Bold',
+  // Amount rows — label left, value right
+  amountRow: {
+    flexDirection : 'row',
+    justifyContent: 'space-between',
+    marginBottom  : 1.5,
   },
-  tableRow : { flexDirection: 'row', marginBottom: 2.5 },
-  colQty   : { width: 34, textAlign: 'right', paddingRight: 6 },
-  colItem  : { flex: 1 },
-  colUnit  : { width: 80, textAlign: 'right' },
-  colTotal : { width: 72, textAlign: 'right' },
+  // Spacing between logical groups
+  groupGap: { marginBottom: 7 },
 
-  // ── Totals section ───────────────────────────────────────────────────────
-  totalsWrap  : { alignItems: 'flex-end', marginTop: 14 },
-  totalRow    : { flexDirection: 'row', width: 230, justifyContent: 'space-between', marginBottom: 2 },
-  totalBold   : {
-    flexDirection   : 'row',
-    width           : 230,
-    justifyContent  : 'space-between',
-    marginBottom    : 2,
-    fontFamily      : 'Helvetica-Bold',
+  // Footer fixed at bottom
+  footer: {
+    position: 'absolute',
+    bottom  : 22,
+    left    : 55,
+    right   : 55,
   },
-  divider     : { width: 230, borderTopWidth: 0.5, borderTopColor: '#555', marginVertical: 3 },
-
-  // Sign-off
-  signOff     : { marginTop: 24 },
-
-  // Footer (fixed at bottom of every page)
-  footer      : {
-    position    : 'absolute',
-    bottom      : 20,
-    left        : 55,
-    right       : 55,
-    borderTopWidth : 0.5,
-    borderTopColor : '#aaa',
-    paddingTop  : 5,
-  },
-  footerText  : { fontSize: 7.5, color: '#666', textAlign: 'center', lineHeight: 1.6 },
+  footerText: { fontSize: 9, textAlign: 'center', lineHeight: 1.55 },
 });
+
+// ── Amount row helper ─────────────────────────────────────────────────────────
+function AmtRow({ label, value }: { label: string; value: number }) {
+  return (
+    <View style={s.amountRow}>
+      <Text>{label}</Text>
+      <Text>{fmt(value)}</Text>
+    </View>
+  );
+}
 
 // ── PDF Component ─────────────────────────────────────────────────────────────
 export function BillDocument({ data }: { data: BillData }) {
-  // Derived calculations
   const isMonthly = data.type === 'monthly';
 
-  let gesamtNetto   = 0;
-  let mwst7         = 0;
-  let mwst19        = 0;
-  let brutto        = 0;
-  let gesamtBetrag  = 0;
+  // Derived totals
+  const essen     = data.essenNetto     ?? 0;
+  const getraenke = data.getraenkeNetto ?? 0;
+  const tip       = data.trinkgeld      ?? 0;
+
+  let gesamtNetto  = 0;
+  let mwst7        = 0;
+  let mwst19       = 0;
+  let brutto       = 0;
+  let gesamtBetrag = 0;
 
   if (isMonthly && data.lineItems) {
     gesamtNetto  = data.lineItems.reduce((s, i) => s + i.qty * i.unitPrice, 0);
@@ -134,131 +134,137 @@ export function BillDocument({ data }: { data: BillData }) {
     brutto       = gesamtNetto + mwst7;
     gesamtBetrag = brutto;
   } else {
-    const essen     = data.essenNetto     ?? 0;
-    const getraenke = data.getraenkeNetto ?? 0;
     gesamtNetto  = essen + getraenke;
     mwst7        = essen * 0.07;
     mwst19       = getraenke * 0.19;
     brutto       = gesamtNetto + mwst7 + mwst19;
-    gesamtBetrag = brutto + (data.trinkgeld ?? 0);
+    gesamtBetrag = brutto + tip;
   }
 
   return (
     <Document>
       <Page size="A4" style={s.page}>
 
-        {/* Return-address line */}
-        <Text style={s.returnLine}>{SENDER_LINE}</Text>
+        {/* ── Header: logo + sender ────────────────────────────────── */}
+        <View style={s.headerRow}>
+          <View style={s.headerSpacer} />
+          <View style={s.headerLogoWrap}>
+            <Image style={s.logo} src={YUMAS_LOGO} />
+          </View>
+          <View style={s.senderBlock}>
+            {SENDER.map((line) => <Text key={line}>{line}</Text>)}
+          </View>
+        </View>
 
-        {/* Recipient block */}
+        {/* ── Recipient ────────────────────────────────────────────── */}
         <View style={s.recipient}>
-          <Text style={s.recipientBold}>{data.recipient.company}</Text>
+          <Text>{data.recipient.company}</Text>
           {data.recipient.extra   && <Text>{data.recipient.extra}</Text>}
           {data.recipient.contact && <Text>{data.recipient.contact}</Text>}
           <Text>{data.recipient.street}</Text>
           <Text>{data.recipient.postcode} {data.recipient.city}</Text>
         </View>
 
-        {/* Date + Invoice number (right-aligned) */}
-        <View style={s.metaContainer}>
-          <View style={s.metaRow}>
-            <Text style={s.metaLabel}>Frankfurt, den</Text>
-            <Text style={s.metaValue}>{data.date}</Text>
-          </View>
-          <View style={s.metaRow}>
-            <Text style={s.metaLabel}>Rechnungsnummer</Text>
-            <Text style={s.metaValue}>{data.invoiceNumber}</Text>
-          </View>
+        {/* ── Date + invoice number ────────────────────────────────── */}
+        <View style={s.metaWrap}>
+          <Text>Frankfurt, den {data.date}</Text>
+          <Text>Rechnungsnummer {data.invoiceNumber}</Text>
         </View>
 
-        {/* Optional PO / Att */}
+        {/* ── Optional PO / Att ────────────────────────────────────── */}
         {(data.recipient.poNumber || data.recipient.att) && (
-          <View style={s.optionalMeta}>
+          <View style={{ marginBottom: 12, lineHeight: 1.55 }}>
             {data.recipient.poNumber && <Text>PO {data.recipient.poNumber}</Text>}
             {data.recipient.att      && <Text>Att: {data.recipient.att}</Text>}
           </View>
         )}
 
-        {/* Intro paragraph */}
+        {/* ── Intro text ───────────────────────────────────────────── */}
         <Text style={s.intro}>{data.introText}</Text>
 
-        {/* ── TYPE A: line items table ───────────────────────────── */}
+        {/* ── TYPE A: line items table ─────────────────────────────── */}
         {isMonthly && data.lineItems && (
-          <View>
-            <View style={s.tableHeaderRow}>
-              <Text style={s.colQty}>Anz.</Text>
-              <Text style={s.colItem}>Artikel</Text>
-              <Text style={s.colUnit}>Einzelpreis</Text>
-              <Text style={s.colTotal}>Gesamt</Text>
+          <View style={{ marginBottom: 10 }}>
+            <View style={[s.amountRow, {
+              borderBottomWidth: 0.5,
+              borderBottomColor: '#000',
+              paddingBottom: 3,
+              marginBottom: 4,
+            }]}>
+              <Text style={{ width: 28 }}>Anz.</Text>
+              <Text style={{ flex: 1 }}>Artikel</Text>
+              <Text style={{ width: 85, textAlign: 'right' }}>Einzelpreis</Text>
+              <Text style={{ width: 75, textAlign: 'right' }}>Gesamt</Text>
             </View>
             {data.lineItems.map((item, i) => (
-              <View key={i} style={s.tableRow}>
-                <Text style={s.colQty}>{item.qty}x</Text>
-                <Text style={s.colItem}>{item.item}</Text>
-                <Text style={s.colUnit}>à {fmt(item.unitPrice)}</Text>
-                <Text style={s.colTotal}>{fmt(item.qty * item.unitPrice)}</Text>
+              <View key={i} style={s.amountRow}>
+                <Text style={{ width: 28 }}>{item.qty}x</Text>
+                <Text style={{ flex: 1 }}>{item.item}</Text>
+                <Text style={{ width: 85, textAlign: 'right' }}>à {fmt(item.unitPrice)}</Text>
+                <Text style={{ width: 75, textAlign: 'right' }}>{fmt(item.qty * item.unitPrice)}</Text>
               </View>
             ))}
           </View>
         )}
 
-        {/* ── Totals ────────────────────────────────────────────── */}
-        <View style={s.totalsWrap}>
-          {!isMonthly && (
-            <>
-              <View style={s.totalRow}>
-                <Text>Gesamt Essen netto</Text>
-                <Text>{fmt(data.essenNetto ?? 0)}</Text>
-              </View>
-              <View style={s.totalRow}>
-                <Text>Gesamt Getränke netto</Text>
-                <Text>{fmt(data.getraenkeNetto ?? 0)}</Text>
-              </View>
-            </>
-          )}
-
-          <View style={s.divider} />
-          <View style={s.totalRow}>
-            <Text>Gesamt Netto</Text>
-            <Text>{fmt(gesamtNetto)}</Text>
-          </View>
-          <View style={s.totalRow}>
-            <Text>Mwst (7%)</Text>
-            <Text>{fmt(mwst7)}</Text>
-          </View>
-          {!isMonthly && (
-            <View style={s.totalRow}>
-              <Text>Mwst (19%)</Text>
-              <Text>{fmt(mwst19)}</Text>
+        {/* ── TYPE B: dinner amounts ───────────────────────────────── */}
+        {!isMonthly && (
+          <View>
+            {/* Group 1: Essen + Getränke netto */}
+            <View style={s.groupGap}>
+              <AmtRow label="Gesamt Essen netto"    value={essen} />
+              <AmtRow label="Gesamt Getränke netto" value={getraenke} />
             </View>
-          )}
-          <View style={s.divider} />
-          <View style={s.totalRow}>
-            <Text>Brutto (inkl. Mwst)</Text>
-            <Text>{fmt(brutto)}</Text>
-          </View>
-          <View style={s.totalRow}>
-            <Text>Gesamt Brutto</Text>
-            <Text>{fmt(brutto)}</Text>
-          </View>
-          {!isMonthly && (data.trinkgeld ?? 0) > 0 && (
-            <View style={s.totalRow}>
-              <Text>Trinkgeld</Text>
-              <Text>{fmt(data.trinkgeld!)}</Text>
+
+            {/* Group 2: Gesamt Netto */}
+            <View style={s.groupGap}>
+              <AmtRow label="Gesamt Netto" value={gesamtNetto} />
             </View>
-          )}
-          <View style={s.divider} />
-          <View style={s.totalBold}>
-            <Text>Gesamtbetrag (zu zahlen)</Text>
-            <Text>{fmt(gesamtBetrag)}</Text>
+
+            {/* Group 3: MwSt */}
+            <View style={s.groupGap}>
+              <AmtRow label="Mwst 7%"  value={mwst7} />
+              <AmtRow label="Mwst 19%" value={mwst19} />
+            </View>
+
+            {/* Group 4: Brutto */}
+            <View style={s.groupGap}>
+              <AmtRow label="Brutto (19% Mwst)" value={brutto} />
+              <AmtRow label="Gesamt Brutto"      value={brutto} />
+            </View>
+
+            {/* Group 5: Trinkgeld (only if > 0) */}
+            {tip > 0 && (
+              <View style={s.groupGap}>
+                <AmtRow label="Trinkgeld" value={tip} />
+              </View>
+            )}
+
+            {/* Final: Gesamtbetrag */}
+            <AmtRow label="Gesamtbetrag (zu zahlen)" value={gesamtBetrag} />
           </View>
-        </View>
+        )}
 
-        {/* Payment terms + sign-off */}
-        <Text style={[s.signOff, { marginTop: 20 }]}>{PAYMENT}</Text>
-        <Text style={[s.signOff, { marginTop: 12 }]}>Vielen Dank!</Text>
+        {/* ── TYPE A totals ────────────────────────────────────────── */}
+        {isMonthly && (
+          <View style={{ marginTop: 6 }}>
+            <View style={s.groupGap}>
+              <AmtRow label="Gesamt Netto" value={gesamtNetto} />
+            </View>
+            <View style={s.groupGap}>
+              <AmtRow label="Mwst 7%" value={mwst7} />
+            </View>
+            <AmtRow label="Gesamtbetrag (zu zahlen)" value={gesamtBetrag} />
+          </View>
+        )}
 
-        {/* Fixed footer */}
+        {/* ── Payment terms ─────────────────────────────────────────── */}
+        <Text style={{ marginTop: 20, lineHeight: 1.55 }}>{PAYMENT}</Text>
+
+        {/* ── Vielen Dank! ──────────────────────────────────────────── */}
+        <Text style={{ marginTop: 18, textAlign: 'center' }}>Vielen Dank!</Text>
+
+        {/* ── Footer (fixed at bottom of every page) ───────────────── */}
         <View style={s.footer} fixed>
           <Text style={s.footerText}>{FOOTER_1}</Text>
           <Text style={s.footerText}>{FOOTER_2}</Text>
