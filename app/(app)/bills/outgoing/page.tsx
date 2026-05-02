@@ -20,6 +20,7 @@ type Extracted = {
   invoice_date:     string | null;
   event_date:       string | null;
   issuing_location: string | null;
+  shift_type:       'lunch' | 'dinner' | null;
   net_food:         number;
   net_drinks:       number;
   net_total:        number;
@@ -49,6 +50,7 @@ type OutgoingBill = {
   customer_name:    string;
   customer_address: string | null;
   issuing_location: string | null;
+  shift_type:       'lunch' | 'dinner' | null;
   net_food:         number;
   net_drinks:       number;
   net_total:        number;
@@ -64,6 +66,10 @@ type OutgoingBill = {
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const LOCATIONS = ['Westend', 'Eschborn', 'Taunus'];
+
+const isItemReady = (item: { status: string; saved?: boolean; data?: Extracted }) =>
+  item.status === 'done' && !item.saved &&
+  !!item.data?.issuing_location && !!item.data?.shift_type;
 
 const STATUS_STYLES: Record<string, string> = {
   pending: 'bg-amber-50 text-amber-700 border-amber-200',
@@ -301,8 +307,13 @@ export default function OutgoingBillsPage() {
   // ── Save all ──────────────────────────────────────────────────────────────
 
   const saveAll = useCallback(async () => {
-    const toSave = queue.filter((i) => i.status === 'done' && !i.saved);
+    const toSave = queue.filter(isItemReady);
     if (!toSave.length) return;
+    // Auto-expand blocked items so the user can fill in the missing fields
+    const blocked = queue.filter((i) => i.status === 'done' && !i.saved && !isItemReady(i));
+    if (blocked.length > 0) {
+      setExpandedId(blocked[0].id);
+    }
     setSavingAll(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -319,7 +330,8 @@ export default function OutgoingBillsPage() {
           event_date:       d.event_date       ?? null,
           customer_name:    d.customer_name,
           customer_address: d.customer_address ?? null,
-          issuing_location: d.issuing_location ?? null,
+          issuing_location: d.issuing_location,
+          shift_type:       d.shift_type,
           net_food:         d.net_food         ?? 0,
           net_drinks:       d.net_drinks       ?? 0,
           net_total:        d.net_total        ?? 0,
@@ -373,6 +385,7 @@ export default function OutgoingBillsPage() {
         invoice_date:     editDraft.invoice_date     ?? null,
         event_date:       editDraft.event_date       ?? null,
         issuing_location: editDraft.issuing_location ?? null,
+        shift_type:       editDraft.shift_type       ?? null,
         net_food:         editDraft.net_food         ?? 0,
         net_drinks:       editDraft.net_drinks       ?? 0,
         net_total:        editDraft.net_total        ?? 0,
@@ -392,9 +405,11 @@ export default function OutgoingBillsPage() {
     }
   };
 
-  const doneCount   = queue.filter((i) => i.status === 'done' && !i.saved).length;
-  const savedCount  = queue.filter((i) => i.saved).length;
-  const activeCount = queue.filter((i) => !i.saved).length;
+  const doneCount    = queue.filter((i) => i.status === 'done' && !i.saved).length;
+  const readyCount   = queue.filter(isItemReady).length;
+  const blockedCount = queue.filter((i) => i.status === 'done' && !i.saved && !isItemReady(i)).length;
+  const savedCount   = queue.filter((i) => i.saved).length;
+  const activeCount  = queue.filter((i) => !i.saved).length;
 
   const inputCls = 'w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]';
   const labelCls = 'block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1';
@@ -487,27 +502,54 @@ export default function OutgoingBillsPage() {
           {queue.length > 0 && (
             <div className="space-y-3">
               {doneCount > 0 && (
-                <div className="flex items-center justify-between bg-green-50 border border-green-200 rounded-xl px-4 py-3">
-                  <p className="text-sm font-semibold text-green-800">
-                    {doneCount} invoice{doneCount !== 1 ? 's' : ''} ready to save
-                    {savedCount > 0 && <span className="text-green-600 font-normal"> · {savedCount} already saved</span>}
-                  </p>
-                  <button onClick={saveAll} disabled={savingAll}
-                    className="flex items-center gap-2 px-4 py-2 bg-[#1B5E20] text-white text-sm font-bold rounded-lg hover:bg-[#2E7D32] disabled:opacity-50 transition-colors">
-                    {savingAll ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-                    {savingAll ? 'Saving…' : `Save All ${doneCount}`}
-                  </button>
+                <div className="space-y-2">
+                  {blockedCount > 0 && (
+                    <div className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-xl px-4 py-2.5 text-sm text-red-700">
+                      <AlertCircle size={15} className="flex-shrink-0" />
+                      <span>
+                        <span className="font-bold">{blockedCount} invoice{blockedCount !== 1 ? 's' : ''}</span>
+                        {' '}missing <span className="font-semibold">Location</span> and/or <span className="font-semibold">Shift Type</span> — click Review to complete them before saving.
+                      </span>
+                    </div>
+                  )}
+                  <div className={`flex items-center justify-between rounded-xl px-4 py-3 border ${readyCount > 0 ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-200'}`}>
+                    <p className="text-sm font-semibold text-green-800">
+                      {readyCount > 0
+                        ? <>{readyCount} invoice{readyCount !== 1 ? 's' : ''} ready to save</>
+                        : <span className="text-gray-500">No invoices ready yet — fill in required fields above</span>
+                      }
+                      {savedCount > 0 && <span className="text-green-600 font-normal"> · {savedCount} already saved</span>}
+                    </p>
+                    <button onClick={saveAll} disabled={savingAll || readyCount === 0}
+                      className="flex items-center gap-2 px-4 py-2 bg-[#1B5E20] text-white text-sm font-bold rounded-lg hover:bg-[#2E7D32] disabled:opacity-50 transition-colors">
+                      {savingAll ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+                      {savingAll ? 'Saving…' : `Save ${readyCount > 0 ? readyCount : 'All'}`}
+                    </button>
+                  </div>
                 </div>
               )}
 
-              {queue.map((item) => (
+              {queue.map((item) => {
+                const missingFields = item.status === 'done' && !item.saved && (
+                  !item.data?.issuing_location || !item.data?.shift_type
+                );
+                const missingList = item.status === 'done' && !item.saved ? [
+                  !item.data?.issuing_location && 'Location',
+                  !item.data?.shift_type       && 'Shift Type',
+                ].filter(Boolean).join(' & ') : '';
+                return (
                 <div key={item.id}
-                  className={`bg-white border rounded-xl overflow-hidden shadow-sm ${item.saved ? 'border-green-200 opacity-60' : 'border-gray-200'}`}>
+                  className={`bg-white border rounded-xl overflow-hidden shadow-sm ${
+                    item.saved        ? 'border-green-200 opacity-60' :
+                    missingFields     ? 'border-red-200' :
+                    'border-gray-200'
+                  }`}>
                   <div className="flex items-center gap-3 px-4 py-3">
                     <div className="flex-shrink-0">
                       {item.status === 'waiting'    && <Clock        size={18} className="text-gray-300" />}
                       {item.status === 'extracting' && <Loader2      size={18} className="text-blue-500 animate-spin" />}
-                      {item.status === 'done' && !item.saved && <FileCheck    size={18} className="text-green-500" />}
+                      {item.status === 'done' && !item.saved && !missingFields && <FileCheck    size={18} className="text-green-500" />}
+                      {item.status === 'done' && !item.saved &&  missingFields && <AlertCircle  size={18} className="text-red-400" />}
                       {item.status === 'done' &&  item.saved && <CheckCircle2 size={18} className="text-green-400" />}
                       {item.status === 'error'      && <AlertCircle  size={18} className="text-red-400" />}
                     </div>
@@ -516,14 +558,25 @@ export default function OutgoingBillsPage() {
                       {item.status === 'extracting' && <p className="text-sm font-semibold text-blue-600">Claude is reading…</p>}
                       {item.status === 'waiting'    && <p className="text-sm text-gray-400">Waiting…</p>}
                       {item.status === 'done' && item.data && (
-                        <p className="text-sm font-semibold text-gray-900">
-                          {item.data.customer_name}
-                          {item.data.invoice_number && <span className="ml-2 text-xs font-mono text-gray-400">#{item.data.invoice_number}</span>}
-                          <span className="ml-2 text-[#1B5E20] font-bold">{fmt(item.data.total_payable)}</span>
-                          {item.data.event_date && <span className="ml-2 text-xs font-normal text-gray-400">Event: {fmtDate(item.data.event_date)}</span>}
-                          {item.data.issuing_location && <span className="ml-2 text-xs font-normal text-indigo-500">· {item.data.issuing_location}</span>}
-                          {item.saved && <span className="ml-2 text-xs text-green-500">✓ Saved</span>}
-                        </p>
+                        <div className="flex items-center flex-wrap gap-x-2 gap-y-0.5">
+                          <p className="text-sm font-semibold text-gray-900">
+                            {item.data.customer_name}
+                            {item.data.invoice_number && <span className="ml-2 text-xs font-mono text-gray-400">#{item.data.invoice_number}</span>}
+                            <span className="ml-2 text-[#1B5E20] font-bold">{fmt(item.data.total_payable)}</span>
+                          </p>
+                          {item.data.event_date && <span className="text-xs text-gray-400">Event: {fmtDate(item.data.event_date)}</span>}
+                          {item.data.issuing_location
+                            ? <span className="text-xs text-indigo-500">· {item.data.issuing_location}</span>
+                            : !item.saved && <span className="text-xs font-semibold text-red-500 bg-red-50 px-1.5 py-0.5 rounded">No Location</span>
+                          }
+                          {item.data.shift_type
+                            ? <span className={`text-xs font-semibold px-1.5 py-0.5 rounded ${item.data.shift_type === 'lunch' ? 'bg-amber-50 text-amber-700' : 'bg-blue-50 text-blue-700'}`}>
+                                {item.data.shift_type === 'lunch' ? '☀️ Lunch' : '🌙 Dinner'}
+                              </span>
+                            : !item.saved && <span className="text-xs font-semibold text-red-500 bg-red-50 px-1.5 py-0.5 rounded">No Shift Type</span>
+                          }
+                          {item.saved && <span className="text-xs text-green-500">✓ Saved</span>}
+                        </div>
                       )}
                       {item.status === 'error' && <p className="text-sm text-red-500">{item.error}</p>}
                     </div>
@@ -531,9 +584,13 @@ export default function OutgoingBillsPage() {
                       {item.status === 'done' && !item.saved && (
                         <button
                           onClick={() => setExpandedId(expandedId === item.id ? null : item.id)}
-                          className="flex items-center gap-1 text-xs font-semibold text-gray-500 hover:text-gray-700 px-2 py-1 border border-gray-200 rounded-lg"
+                          className={`flex items-center gap-1 text-xs font-semibold px-2 py-1 border rounded-lg transition-colors ${
+                            missingFields
+                              ? 'text-red-600 border-red-300 bg-red-50 hover:bg-red-100'
+                              : 'text-gray-500 border-gray-200 hover:text-gray-700'
+                          }`}
                         >
-                          {expandedId === item.id ? 'Hide' : 'Review'}
+                          {expandedId === item.id ? 'Hide' : missingFields ? `⚠ Fill ${missingList}` : 'Review'}
                           <ChevronDown size={12} className={`transition-transform ${expandedId === item.id ? 'rotate-180' : ''}`} />
                         </button>
                       )}
@@ -546,6 +603,65 @@ export default function OutgoingBillsPage() {
                   {/* Review form */}
                   {expandedId === item.id && item.data && (
                     <div className="border-t border-gray-100 px-4 py-4 bg-gray-50 space-y-4">
+
+                      {/* ── REQUIRED FIELDS (top, prominent) ── */}
+                      <div className={`rounded-lg border-2 p-3 space-y-3 ${
+                        !item.data.issuing_location || !item.data.shift_type
+                          ? 'border-red-300 bg-red-50'
+                          : 'border-green-300 bg-green-50'
+                      }`}>
+                        <p className={`text-xs font-bold uppercase tracking-wide ${
+                          !item.data.issuing_location || !item.data.shift_type ? 'text-red-600' : 'text-green-700'
+                        }`}>
+                          {!item.data.issuing_location || !item.data.shift_type
+                            ? '⚠ Required — fill in before saving'
+                            : '✓ Required fields complete'}
+                        </p>
+                        <div className="grid grid-cols-2 gap-3">
+                          {/* Location */}
+                          <div>
+                            <label className="block text-xs font-semibold text-gray-600 mb-1">
+                              Issuing Location <span className="text-red-500">*</span>
+                            </label>
+                            <div className="relative">
+                              <select value={item.data.issuing_location ?? ''}
+                                onChange={(e) => updateField(item.id, 'issuing_location', e.target.value || null)}
+                                className={`w-full border rounded-lg px-2.5 py-1.5 text-xs text-gray-900 bg-white focus:outline-none focus:ring-2 appearance-none pr-6 ${
+                                  !item.data.issuing_location
+                                    ? 'border-red-300 focus:ring-red-300'
+                                    : 'border-gray-200 focus:ring-[#1B5E20]/30'
+                                }`}>
+                                <option value="">— Select location —</option>
+                                {LOCATIONS.map((l) => <option key={l}>{l}</option>)}
+                              </select>
+                              <ChevronDown size={12} className="absolute right-2 top-2 text-gray-400 pointer-events-none" />
+                            </div>
+                          </div>
+                          {/* Shift Type */}
+                          <div>
+                            <label className="block text-xs font-semibold text-gray-600 mb-1">
+                              Shift Type <span className="text-red-500">*</span>
+                            </label>
+                            <div className="flex gap-2">
+                              {(['lunch', 'dinner'] as const).map((s) => (
+                                <button key={s}
+                                  onClick={() => updateField(item.id, 'shift_type', item.data!.shift_type === s ? null : s)}
+                                  className={`flex-1 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
+                                    item.data!.shift_type === s
+                                      ? s === 'lunch'
+                                        ? 'bg-amber-500 text-white border-amber-500'
+                                        : 'bg-blue-600 text-white border-blue-600'
+                                      : 'bg-white text-gray-500 border-gray-200 hover:border-gray-400'
+                                  }`}>
+                                  {s === 'lunch' ? '☀️ Lunch' : '🌙 Dinner'}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* ── Standard fields ── */}
                       <div className="grid grid-cols-4 gap-3">
                         {([
                           { label: 'Customer',       field: 'customer_name'  as keyof Extracted, type: 'text' },
@@ -592,19 +708,7 @@ export default function OutgoingBillsPage() {
                         ))}
                       </div>
                       <div className="grid grid-cols-4 gap-3 pt-2 border-t border-gray-200">
-                        <div>
-                          <label className="block text-xs font-semibold text-gray-500 mb-1">Issuing Location</label>
-                          <div className="relative">
-                            <select value={item.data.issuing_location ?? ''}
-                              onChange={(e) => updateField(item.id, 'issuing_location', e.target.value || null)}
-                              className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 appearance-none pr-6">
-                              <option value="">— Select location —</option>
-                              {LOCATIONS.map((l) => <option key={l}>{l}</option>)}
-                            </select>
-                            <ChevronDown size={12} className="absolute right-2 top-2 text-gray-400 pointer-events-none" />
-                          </div>
-                        </div>
-                        <div className="col-span-3">
+                        <div className="col-span-4">
                           <label className="block text-xs font-semibold text-gray-500 mb-1">Customer Address</label>
                           <input type="text" value={item.data.customer_address ?? ''}
                             onChange={(e) => updateField(item.id, 'customer_address', e.target.value || null)}
@@ -614,7 +718,8 @@ export default function OutgoingBillsPage() {
                     </div>
                   )}
                 </div>
-              ))}
+              );
+              })}
 
               <div className="flex justify-end pt-1">
                 <button onClick={() => setQueue([])} className="text-xs text-gray-400 hover:text-red-500 transition-colors underline underline-offset-2">
@@ -930,6 +1035,7 @@ export default function OutgoingBillsPage() {
                     <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Invoice #</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Event Date</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Location</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Shift</th>
                     <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Net</th>
                     <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Gross</th>
                     <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Tips</th>
@@ -946,11 +1052,18 @@ export default function OutgoingBillsPage() {
                         <td className="px-4 py-3 text-gray-500 font-mono text-xs">{bill.invoice_number ?? '—'}</td>
                         <td className="px-4 py-3 text-gray-600 whitespace-nowrap text-xs">{fmtDate(bill.event_date)}</td>
                         <td className="px-4 py-3">
-                          {bill.issuing_location && (
-                            <span className="inline-flex items-center px-2 py-0.5 bg-indigo-50 text-indigo-700 text-xs rounded-full">
-                              {bill.issuing_location}
-                            </span>
-                          )}
+                          {bill.issuing_location
+                            ? <span className="inline-flex items-center px-2 py-0.5 bg-indigo-50 text-indigo-700 text-xs rounded-full">{bill.issuing_location}</span>
+                            : <span className="text-xs text-red-400">—</span>
+                          }
+                        </td>
+                        <td className="px-4 py-3">
+                          {bill.shift_type
+                            ? <span className={`inline-flex items-center px-2 py-0.5 text-xs rounded-full font-semibold ${bill.shift_type === 'lunch' ? 'bg-amber-50 text-amber-700' : 'bg-blue-50 text-blue-700'}`}>
+                                {bill.shift_type === 'lunch' ? '☀️ Lunch' : '🌙 Dinner'}
+                              </span>
+                            : <span className="text-xs text-red-400">—</span>
+                          }
                         </td>
                         <td className="px-4 py-3 text-right tabular-nums text-gray-700">{fmt(bill.net_total)}</td>
                         <td className="px-4 py-3 text-right tabular-nums text-gray-900">{fmt(bill.gross_total)}</td>
@@ -989,7 +1102,7 @@ export default function OutgoingBillsPage() {
                       {/* Inline edit row */}
                       {editingId === bill.id && editDraft && (
                         <tr className="bg-indigo-50/60">
-                          <td colSpan={10} className="px-4 py-4">
+                          <td colSpan={11} className="px-4 py-4">
                             <div className="grid grid-cols-4 gap-3 mb-3">
                               {([
                                 { label: 'Customer',       field: 'customer_name'  as keyof OutgoingBill, type: 'text' },
@@ -1048,6 +1161,22 @@ export default function OutgoingBillsPage() {
                                   <ChevronDown size={12} className="absolute right-2 top-2 text-gray-400 pointer-events-none" />
                                 </div>
                               </div>
+                              <div>
+                                <label className="block text-xs font-semibold text-gray-500 mb-1">Shift Type</label>
+                                <div className="flex gap-2">
+                                  {(['lunch', 'dinner'] as const).map((s) => (
+                                    <button key={s}
+                                      onClick={() => setEditDraft((d) => d ? { ...d, shift_type: d.shift_type === s ? null : s } : d)}
+                                      className={`flex-1 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
+                                        editDraft.shift_type === s
+                                          ? s === 'lunch' ? 'bg-amber-500 text-white border-amber-500' : 'bg-blue-600 text-white border-blue-600'
+                                          : 'bg-white text-gray-500 border-gray-200 hover:border-gray-400'
+                                      }`}>
+                                      {s === 'lunch' ? '☀️ Lunch' : '🌙 Dinner'}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
                             </div>
                             <div className="flex items-center gap-2">
                               <button onClick={saveEdit} disabled={savingEdit}
@@ -1068,7 +1197,7 @@ export default function OutgoingBillsPage() {
                 </tbody>
                 <tfoot>
                   <tr className="bg-gray-50 border-t-2 border-gray-200">
-                    <td colSpan={4} className="px-4 py-3 text-xs font-semibold text-gray-500">{filtered.length} invoices</td>
+                    <td colSpan={5} className="px-4 py-3 text-xs font-semibold text-gray-500">{filtered.length} invoices</td>
                     <td className="px-4 py-3 text-right font-bold text-gray-700 tabular-nums">{fmt(totals.net)}</td>
                     <td className="px-4 py-3 text-right font-bold text-gray-900 tabular-nums">{fmt(totals.gross)}</td>
                     <td className="px-4 py-3 text-right font-bold text-amber-700 tabular-nums">{fmt(totals.tips)}</td>
