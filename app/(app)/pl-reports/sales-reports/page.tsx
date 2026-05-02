@@ -145,6 +145,7 @@ type WeeklyBatchItem = {
 type DeliveryParseResult = {
   date:         string;
   storeName:    string;
+  shiftType:    'lunch' | 'dinner';
   ordersCount:  number;
   netRevenue:   number;
   grossRevenue: number;
@@ -670,19 +671,28 @@ function draftToPayload(d: DraftSettings, type: 'lunch'|'dinner', locationId: st
 }
 
 function parseDeliveryXLSX(buffer: ArrayBuffer): DeliveryParseResult {
-  const empty: DeliveryParseResult = { date: '', storeName: '', ordersCount: 0, netRevenue: 0, grossRevenue: 0 };
+  const empty: DeliveryParseResult = { date: '', storeName: '', shiftType: 'lunch', ordersCount: 0, netRevenue: 0, grossRevenue: 0 };
   try {
     const wb   = XLSX.read(buffer, { type: 'array' });
     const ws   = wb.Sheets[wb.SheetNames[0]];
     const rows = XLSX.utils.sheet_to_json<any[]>(ws, { header: 1, defval: '' });
 
-    // Date: row index 1, col 1 ("Datum von: DD.MM.YYYY")
-    let date = '';
+    // Row 1: "Datum von:" [1]  "Datum bis:" [3]  "Zeit von:" [5]  "Zeit bis:" [7]
     const dateRow = rows[1];
+    let date = '';
+    let shiftType: 'lunch' | 'dinner' = 'lunch';
     if (dateRow) {
       const raw = String(dateRow[1] ?? dateRow[3] ?? '').trim();
       const m   = raw.match(/(\d{1,2})\.(\d{1,2})\.(\d{4})/);
       if (m) date = `${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`;
+
+      // "Zeit bis:" is at col index 7 (e.g. "16:00")
+      const zeitBis = String(dateRow[7] ?? '').trim();
+      if (zeitBis) {
+        const [hStr, mStr] = zeitBis.split(':');
+        const totalMins = (parseInt(hStr, 10) || 0) * 60 + (parseInt(mStr, 10) || 0);
+        shiftType = totalMins <= 16 * 60 ? 'lunch' : 'dinner';
+      }
     }
 
     // Store name: row index 3, col 1
@@ -701,7 +711,7 @@ function parseDeliveryXLSX(buffer: ArrayBuffer): DeliveryParseResult {
 
     if (!date) return { ...empty, error: 'Could not find date in Simplydelivery report.' };
     if (netRevenue === 0 && grossRevenue === 0) return { ...empty, error: 'Could not find revenue totals (Summe: row missing).' };
-    return { date, storeName, ordersCount, netRevenue, grossRevenue };
+    return { date, storeName, shiftType, ordersCount, netRevenue, grossRevenue };
   } catch (e: any) {
     return { ...empty, error: `Failed to parse file: ${e.message}` };
   }
@@ -1001,11 +1011,11 @@ export default function SalesReportsPage() {
       const qEnd   = `${year}-${String(lastM).padStart(2,'0')}-${String(daysInMonth(year, lastM)).padStart(2,'0')}`;
       const { data } = await supabase
         .from('delivery_reports')
-        .select('id,report_date,net_revenue,gross_revenue,orders_count,store_name')
+        .select('id,report_date,net_revenue,gross_revenue,orders_count,store_name,shift_type')
         .eq('location_id', location!.id)
         .gte('report_date', qStart)
         .lte('report_date', qEnd);
-      return (data ?? []) as { id: string; report_date: string; net_revenue: number; gross_revenue: number; orders_count: number; store_name: string }[];
+      return (data ?? []) as { id: string; report_date: string; net_revenue: number; gross_revenue: number; orders_count: number; store_name: string; shift_type: 'lunch' | 'dinner' | null }[];
     },
   });
 
@@ -1227,10 +1237,20 @@ export default function SalesReportsPage() {
     return result;
   }, [quarter, year]);
 
-  // Delivery revenue map: dateKey → net_revenue
-  const deliveryMap = useMemo<Record<string, number>>(() => {
+  // Delivery revenue maps split by shift
+  const deliveryLunchMap = useMemo<Record<string, number>>(() => {
     const m: Record<string, number> = {};
-    for (const r of deliveryReports) m[r.report_date] = r.net_revenue ?? 0;
+    for (const r of deliveryReports) {
+      if (r.shift_type === 'lunch' || r.shift_type == null) m[r.report_date] = r.net_revenue ?? 0;
+    }
+    return m;
+  }, [deliveryReports]);
+
+  const deliveryDinnerMap = useMemo<Record<string, number>>(() => {
+    const m: Record<string, number> = {};
+    for (const r of deliveryReports) {
+      if (r.shift_type === 'dinner') m[r.report_date] = r.net_revenue ?? 0;
+    }
     return m;
   }, [deliveryReports]);
 
@@ -1447,13 +1467,13 @@ export default function SalesReportsPage() {
     const seen = new Set<string>();
     deliveryBatch.forEach((item, idx) => {
       if (item.result.error || !item.result.date) return;
-      const key = item.result.date;
+      const key = `${item.result.date}__${item.result.shiftType}`;
       if (seen.has(key)) {
-        w[idx] = { kind: 'batch', msg: 'Duplicate — same date already in this batch' };
+        w[idx] = { kind: 'batch', msg: `Duplicate — same date + ${item.result.shiftType} already in this batch` };
       } else {
         seen.add(key);
-        if (deliveryReports.some(dr => dr.report_date === key)) {
-          w[idx] = { kind: 'db', msg: 'This date is already imported — saving will overwrite the existing record' };
+        if (deliveryReports.some(dr => dr.report_date === item.result.date && dr.shift_type === item.result.shiftType)) {
+          w[idx] = { kind: 'db', msg: `This ${item.result.shiftType} report for this date is already imported — saving will overwrite` };
         }
       }
     });
@@ -1647,13 +1667,14 @@ export default function SalesReportsPage() {
         const { error } = await supabase.from('delivery_reports').upsert({
           location_id:   location.id,
           report_date:   r.date,
+          shift_type:    r.shiftType,
           store_name:    r.storeName,
           orders_count:  r.ordersCount,
           net_revenue:   r.netRevenue,
           gross_revenue: r.grossRevenue,
           file_name:     item.fileName,
           imported_by:   user?.id ?? null,
-        }, { onConflict: 'location_id,report_date' });
+        }, { onConflict: 'location_id,report_date,shift_type' });
         if (error) throw error;
         setDeliveryBatch(prev => prev.map(i => i === item ? { ...i, status: 'saved' } : i));
       } catch (e: any) {
@@ -2282,8 +2303,13 @@ export default function SalesReportsPage() {
                         <div key={idx} className={`bg-white border rounded-lg px-3 py-2 flex items-center gap-2 shadow-sm ${warn?.kind === 'batch' ? 'border-red-200' : warn?.kind === 'db' ? 'border-amber-200' : 'border-gray-100'}`}>
                           <span className={`text-sm font-bold flex-shrink-0 w-4 text-center ${statusColor}`}>{statusIcon}</span>
                           <div className="flex-1 min-w-0">
-                            <p className="text-xs font-semibold text-gray-800 truncate">
+                            <p className="text-xs font-semibold text-gray-800 truncate flex items-center gap-1.5">
                               {r.date ? fmtDate(r.date) : item.fileName}
+                              {!r.error && (
+                                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${r.shiftType === 'lunch' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'}`}>
+                                  {r.shiftType === 'lunch' ? '☀️ Lunch' : '🌙 Dinner'}
+                                </span>
+                              )}
                             </p>
                             <p className="text-xs text-gray-400">
                               {r.error ? r.error : `Net ${fmt(r.netRevenue)} · ${r.ordersCount} orders`}
@@ -3061,22 +3087,24 @@ export default function SalesReportsPage() {
                         </tr>
                       );
                     })}
-                    {/* Simply delivery row */}
-                    {(() => {
+                    {/* Simply delivery rows — Lunch + Dinner */}
+                    {(['lunch', 'dinner'] as const).map((shift) => {
+                      const map       = shift === 'lunch' ? deliveryLunchMap : deliveryDinnerMap;
                       const todayKey  = `${todayYear}-${String(todayMonth).padStart(2,'0')}-${String(todayDay).padStart(2,'0')}`;
-                      const qDelivery = Object.entries(deliveryMap)
+                      const qDelivery = Object.entries(map)
                         .filter(([k]) => dailyCols.some(c => c.type === 'day' && c.dateKey === k))
                         .reduce((s, [, v]) => s + v, 0);
+                      const label = shift === 'lunch' ? '🛵 Simply · Lunch' : '🛵 Simply · Dinner';
                       return (
-                        <tr className="border-b border-gray-100 hover:bg-gray-50/60 group" style={{ backgroundColor: '#eff6ff' }}>
+                        <tr key={shift} className="border-b border-gray-100 hover:bg-gray-50/60 group" style={{ backgroundColor: '#eff6ff' }}>
                           <td className="sticky left-0 z-10 px-4 py-2 whitespace-nowrap border-r border-gray-100 group-hover:bg-gray-50/60 transition-colors text-blue-800"
                             style={{ backgroundColor: '#eff6ff' }}>
-                            🛵 Simply · Net Revenue
+                            {label}
                           </td>
                           {dailyCols.map((col, ci) => {
                             if (col.type === 'day') {
                               const isCurDay = col.dateKey === todayKey;
-                              const val = deliveryMap[col.dateKey] ?? 0;
+                              const val = map[col.dateKey] ?? 0;
                               return (
                                 <td key={ci} className="py-2 text-right tabular-nums"
                                   style={{ paddingLeft:4, paddingRight:8, backgroundColor: isCurDay ? 'rgba(59,130,246,0.04)' : undefined }}>
@@ -3086,7 +3114,7 @@ export default function SalesReportsPage() {
                                 </td>
                               );
                             } else {
-                              const wTotal = col.wDateKeys.reduce((s, k) => s + (deliveryMap[k] ?? 0), 0);
+                              const wTotal = col.wDateKeys.reduce((s, k) => s + (map[k] ?? 0), 0);
                               return (
                                 <td key={ci} className="py-2 text-right tabular-nums"
                                   style={{ paddingLeft:4, paddingRight:6, backgroundColor:'#fffbeb', borderLeft:'1px solid #fde68a', borderRight:'1px solid #fde68a' }}>
@@ -3105,7 +3133,7 @@ export default function SalesReportsPage() {
                           </td>
                         </tr>
                       );
-                    })()}
+                    })}
                   </tbody>
 
                   <tbody><tr><td colSpan={totalCols} style={{ height: 12, backgroundColor:'#f9fafb' }} /></tr></tbody>
@@ -3135,7 +3163,8 @@ export default function SalesReportsPage() {
         {/* ── Day edit/delete modal ── */}
         {activeDayKey && (() => {
           const dayShifts   = shiftRows.filter(s => s.report_date === activeDayKey);
-          const dayDelivery = deliveryReports.find(r => r.report_date === activeDayKey) ?? null;
+          const dayDeliveries = deliveryReports.filter(r => r.report_date === activeDayKey);
+          const dayDelivery = dayDeliveries[0] ?? null;
           const dowLabel    = new Date(activeDayKey + 'T12:00:00Z').toLocaleDateString('en-GB', { weekday:'long' });
           const numFields: { key: string; label: string; isInt?: boolean }[] = [
             { key:'gross_total',         label:'Gross Total'         },
@@ -3403,16 +3432,18 @@ export default function SalesReportsPage() {
                     );
                   })()}
 
-                  {/* ── Delivery card ── */}
-                  {dayDelivery && (
-                    <div className="border border-orange-200 rounded-xl overflow-hidden">
+                  {/* ── Delivery cards (one per shift) ── */}
+                  {dayDeliveries.map((dr) => (
+                    <div key={dr.id} className="border border-orange-200 rounded-xl overflow-hidden">
                       <div className="px-4 py-3 bg-orange-50 border-b border-orange-100 flex items-center justify-between">
-                        <span className="text-sm font-bold text-orange-700">🛵 Simply Delivery</span>
+                        <span className="text-sm font-bold text-orange-700">
+                          🛵 Simply · {dr.shift_type === 'dinner' ? '🌙 Dinner' : '☀️ Lunch'}
+                        </span>
                         <div className="flex items-center gap-2">
                           {confirmDelDelivery ? (
                             <span className="flex items-center gap-1.5">
                               <span className="text-xs text-red-600 font-semibold">Delete?</span>
-                              <button onClick={() => handleDeleteDelivery(dayDelivery.id)}
+                              <button onClick={() => handleDeleteDelivery(dr.id)}
                                 className="text-xs px-2.5 py-1 bg-red-600 text-white rounded-lg font-bold hover:bg-red-700 transition-colors">Yes</button>
                               <button onClick={() => setConfirmDelDelivery(false)}
                                 className="text-xs px-2.5 py-1 border border-gray-200 rounded-lg text-gray-500 hover:bg-gray-50 transition-colors">No</button>
@@ -3428,10 +3459,10 @@ export default function SalesReportsPage() {
                       <div className="px-4 py-3">
                         <div className="grid grid-cols-3 gap-x-3 gap-y-1.5 text-xs">
                           {[
-                            { label:'Store',   val: dayDelivery.store_name,   isText: true },
-                            { label:'Orders',  val: String(dayDelivery.orders_count), isText: true },
-                            { label:'Net',     val: fmt(dayDelivery.net_revenue),   isText: true },
-                            { label:'Gross',   val: fmt(dayDelivery.gross_revenue), isText: true },
+                            { label:'Store',  val: dr.store_name },
+                            { label:'Orders', val: String(dr.orders_count) },
+                            { label:'Net',    val: fmt(dr.net_revenue) },
+                            { label:'Gross',  val: fmt(dr.gross_revenue) },
                           ].map(({ label, val }) => (
                             <div key={label} className="flex items-center justify-between gap-1">
                               <span className="text-gray-400">{label}</span>
@@ -3441,7 +3472,7 @@ export default function SalesReportsPage() {
                         </div>
                       </div>
                     </div>
-                  )}
+                  ))}
                 </div>
               </div>
             </div>
