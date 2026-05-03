@@ -149,9 +149,38 @@ export default function UsageForecastPage() {
     },
   });
 
-  /* Fetch closure days — keyed as "locationId:dateKey" for fast lookup */
   const weekStart = weekDays[0] ? dateKey(weekDays[0]) : '';
   const weekEnd   = weekDays[6] ? dateKey(weekDays[6]) : '';
+
+  /* Fetch actual Orderbird shift_reports for the week — all locations at once */
+  const { data: weekShiftRows = [] } = useQuery({
+    queryKey: ['shift-reports-week', weekStart, weekEnd],
+    enabled: !!weekStart,
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('shift_reports')
+        .select('location_id, report_date, net_total')
+        .gte('report_date', weekStart)
+        .lte('report_date', weekEnd);
+      return (data ?? []) as { location_id: string; report_date: string; net_total: number }[];
+    },
+  });
+
+  /* Fetch actual Simply delivery_reports for the week — all locations at once */
+  const { data: weekDeliveryRows = [] } = useQuery({
+    queryKey: ['delivery-reports-week', weekStart, weekEnd],
+    enabled: !!weekStart,
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('delivery_reports')
+        .select('location_id, report_date, net_revenue')
+        .gte('report_date', weekStart)
+        .lte('report_date', weekEnd);
+      return (data ?? []) as { location_id: string; report_date: string; net_revenue: number }[];
+    },
+  });
+
+  /* Fetch closure days — keyed as "locationId:dateKey" for fast lookup */
   const { data: closureDays = [] } = useQuery({
     queryKey: ['closure-days-usage', weekStart, weekEnd],
     enabled: !!weekStart,
@@ -225,9 +254,18 @@ export default function UsageForecastPage() {
     return m;
   }, [locations]);
 
-  /* Compute daily sales forecast per store per dateKey — zero if closed */
+  /* Actual net sales per location+date from shift_reports + delivery_reports */
+  const actualSalesByLocDate = useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const r of weekShiftRows)   m[`${r.location_id}:${r.report_date}`] = (m[`${r.location_id}:${r.report_date}`] ?? 0) + (r.net_total ?? 0);
+    for (const r of weekDeliveryRows) m[`${r.location_id}:${r.report_date}`] = (m[`${r.location_id}:${r.report_date}`] ?? 0) + (r.net_revenue ?? 0);
+    return m;
+  }, [weekShiftRows, weekDeliveryRows]);
+
+  /* Per store+day: null=closed, { val, isActual } otherwise */
+  type DaySales = { val: number; isActual: boolean } | null;
   const dailySalesByStore = useMemo(() => {
-    const result: Record<Store, Record<string, number | null>> = {
+    const result: Record<Store, Record<string, DaySales>> = {
       Westend: {}, Eschborn: {}, Taunus: {},
     };
     for (const store of STORES) {
@@ -237,18 +275,21 @@ export default function UsageForecastPage() {
       const dinnerS = allForecastSettings.find(s => s.location_id === locId && s.shift_type === 'dinner');
       for (const day of weekDays) {
         const dk = dateKey(day);
-        // null = store is closed that day (show —)
-        if (closedSet.has(`${locId}:${dk}`)) {
-          result[store][dk] = null;
-          continue;
+        if (closedSet.has(`${locId}:${dk}`)) { result[store][dk] = null; continue; }
+        const actualKey = `${locId}:${dk}`;
+        if (actualKey in actualSalesByLocDate) {
+          // Uploaded data exists — show it as actual
+          result[store][dk] = { val: actualSalesByLocDate[actualKey], isActual: true };
+        } else {
+          // No actuals — use forecast
+          const l = lunchS  ? computeDailyForecast(dk, lunchS)  : 0;
+          const d = dinnerS ? computeDailyForecast(dk, dinnerS) : 0;
+          result[store][dk] = { val: l + d, isActual: false };
         }
-        const l = lunchS  ? computeDailyForecast(dk, lunchS)  : 0;
-        const d = dinnerS ? computeDailyForecast(dk, dinnerS) : 0;
-        result[store][dk] = l + d;
       }
     }
     return result;
-  }, [locationIdByName, allForecastSettings, weekDays, closedSet]);
+  }, [locationIdByName, allForecastSettings, weekDays, closedSet, actualSalesByLocDate]);
 
   /* Group items by section in canonical order */
   const sections = useMemo(() => {
@@ -299,14 +340,17 @@ export default function UsageForecastPage() {
         </div>
 
         <div className="flex items-center gap-4 text-xs font-medium">
-          <span className="flex items-center gap-1.5">
-            <span className="w-3 h-3 rounded-full bg-[#1B5E20]" /> Usage forecast
+          <span className="flex items-center gap-1.5 text-blue-600 font-semibold">
+            <span className="w-3 h-3 rounded-full bg-blue-500" /> Actual (uploaded)
+          </span>
+          <span className="flex items-center gap-1.5 text-[#1B5E20] font-semibold">
+            <span className="w-3 h-3 rounded-full bg-[#1B5E20]" /> Forecast
           </span>
           <span className="flex items-center gap-1.5 text-gray-400">
             — No data / closed
           </span>
-          <span className="text-gray-400 italic">
-            Click a sales cell to toggle open/closed
+          <span className="text-gray-400 italic text-[10px]">
+            Click a sales cell to toggle closed
           </span>
         </div>
       </div>
@@ -356,10 +400,12 @@ export default function UsageForecastPage() {
                     const today = isToday(day);
                     const dk = dateKey(day);
                     return STORES.map((store, si) => {
-                      const locId  = locationIdByName[store];
-                      const sales  = dailySalesByStore[store][dk];
-                      const isClosed   = sales === null;
-                      const hasForecast = !isClosed && (sales ?? 0) > 0;
+                      const locId   = locationIdByName[store];
+                      const entry   = dailySalesByStore[store][dk];
+                      const isClosed   = entry === null;
+                      const isActual   = !isClosed && entry?.isActual === true;
+                      const salesVal   = entry?.val ?? 0;
+                      const hasVal     = !isClosed && salesVal > 0;
                       return (
                         <th
                           key={`${di}-${si}`}
@@ -369,14 +415,20 @@ export default function UsageForecastPage() {
                           } ${today ? 'bg-green-50/60' : ''} ${
                             isClosed
                               ? 'bg-red-50 text-red-400 hover:bg-red-100'
-                              : hasForecast
-                                ? 'text-[#1B5E20] hover:bg-green-50'
-                                : 'text-gray-300 hover:bg-gray-50'
+                              : isActual
+                                ? 'text-blue-600 hover:bg-blue-50'
+                                : hasVal
+                                  ? 'text-[#1B5E20] hover:bg-green-50'
+                                  : 'text-gray-300 hover:bg-gray-50'
                           }`}
                           style={{ minWidth: COL_W }}
-                          title={isClosed ? `${store} is closed — click to reopen` : `Click to mark ${store} as closed`}
+                          title={
+                            isClosed   ? `${store} is closed — click to reopen` :
+                            isActual   ? `${store}: actual net sales — click to mark closed` :
+                                         `${store}: forecasted net sales — click to mark closed`
+                          }
                         >
-                          {isClosed ? '🚫 closed' : hasForecast ? `€${((sales as number) / 1000).toFixed(1)}k` : '—'}
+                          {isClosed ? '🚫' : hasVal ? `€${(salesVal / 1000).toFixed(1)}k` : '—'}
                         </th>
                       );
                     });
@@ -434,9 +486,10 @@ export default function UsageForecastPage() {
                           const today = isToday(day);
                           const dk = dateKey(day);
                           return STORES.map((store, si) => {
-                            const sales = dailySalesByStore[store][dk];
-                            const usage = (sales !== null && sales !== undefined && sales > 0)
-                              ? forecastUsage(item.item_name, si, sales) : null;
+                            const entry = dailySalesByStore[store][dk];
+                            const salesVal = entry?.val ?? 0;
+                            const usage = (entry !== null && entry !== undefined && salesVal > 0)
+                              ? forecastUsage(item.item_name, si, salesVal) : null;
                             return (
                               <td
                                 key={`${di}-${si}`}
