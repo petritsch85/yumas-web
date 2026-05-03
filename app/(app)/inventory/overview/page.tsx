@@ -331,7 +331,7 @@ function DayEditModal({
   const [error, setError] = useState<string | null>(null);
 
   // ── Edit items state ──────────────────────────────────────────────────────
-  const [edits, setEdits] = useState<Record<string, { req: string; act: string }>>({});
+  const [edits, setEdits] = useState<Record<string, { req: string; act: string; assumed: boolean }>>({});
   const [saving, setSaving] = useState(false);
   const [saveOk, setSaveOk] = useState(false);
 
@@ -358,14 +358,18 @@ function DayEditModal({
     enabled: tab === 'items',
   });
 
-  // Initialise edit state when lines load
+  // Initialise edit state when lines load.
+  // ACT defaults to delivery_qty when packed_qty is null (mirrors the overview's fallback).
+  // We track `assumed` to style assumed values differently from confirmed ones.
   const initEdits = () => {
-    const init: Record<string, { req: string; act: string }> = {};
+    const init: Record<string, { req: string; act: string; assumed: boolean }> = {};
     for (const l of deliveryLines) {
       if (!edits[l.id]) {
+        const assumed = l.packed_qty === null;
         init[l.id] = {
-          req: String(l.delivery_qty),
-          act: l.packed_qty !== null ? String(l.packed_qty) : '',
+          req:     String(l.delivery_qty),
+          act:     String(l.packed_qty ?? l.delivery_qty),
+          assumed,
         };
       }
     }
@@ -384,7 +388,8 @@ function DayEditModal({
         const e = edits[line.id];
         if (!e) continue;
         const newReq = Math.max(0, parseInt(e.req) || 0);
-        const newAct = e.act.trim() === '' ? null : Math.max(0, parseInt(e.act) || 0);
+        // If still assumed (user never touched ACT), keep packed_qty as null
+        const newAct = e.assumed ? null : (e.act.trim() === '' ? null : Math.max(0, parseInt(e.act) || 0));
         if (newReq === line.delivery_qty && newAct === line.packed_qty) continue;
         const { error: err } = await supabase
           .from('delivery_run_lines')
@@ -499,7 +504,7 @@ function DayEditModal({
                   </thead>
                   <tbody className="divide-y divide-gray-50">
                     {deliveryLines.map(line => {
-                      const e = edits[line.id] ?? { req: String(line.delivery_qty), act: line.packed_qty !== null ? String(line.packed_qty) : '' };
+                      const e = edits[line.id] ?? { req: String(line.delivery_qty), act: String(line.packed_qty ?? line.delivery_qty), assumed: line.packed_qty === null };
                       return (
                         <tr key={line.id} className="hover:bg-gray-50/50">
                           <td className="py-2 font-medium text-gray-800 pr-2">{line.item_name}</td>
@@ -515,10 +520,17 @@ function DayEditModal({
                           <td className="py-2 text-center">
                             <input
                               type="number" min="0"
-                              placeholder="—"
                               value={e.act}
-                              onChange={ev => setEdits(prev => ({ ...prev, [line.id]: { ...e, act: ev.target.value } }))}
-                              className="w-16 text-center border border-gray-200 rounded-md px-1.5 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400/40 bg-white tabular-nums placeholder-gray-300"
+                              onChange={ev => setEdits(prev => ({
+                                ...prev,
+                                [line.id]: { ...e, act: ev.target.value, assumed: false },
+                              }))}
+                              title={e.assumed ? 'Assumed = REQ (not confirmed). Edit to set actual.' : 'Confirmed actual delivery'}
+                              className={`w-16 text-center border rounded-md px-1.5 py-1 text-sm focus:outline-none focus:ring-2 bg-white tabular-nums ${
+                                e.assumed
+                                  ? 'border-dashed border-gray-300 text-gray-400 italic focus:ring-gray-300'
+                                  : 'border-gray-200 text-gray-800 focus:ring-blue-400/40'
+                              }`}
                             />
                           </td>
                         </tr>
@@ -530,7 +542,7 @@ function DayEditModal({
             </div>
             {deliveryLines.length > 0 && (
               <div className="px-5 py-3 border-t border-gray-100 flex items-center justify-between gap-3">
-                <p className="text-xs text-gray-400">REQ = requested, ACT = actually delivered</p>
+                <p className="text-xs text-gray-400">REQ = requested · ACT: <span className="italic border-b border-dashed border-gray-400">grey dashed</span> = assumed (= REQ), solid = confirmed</p>
                 <button
                   onClick={handleSave}
                   disabled={saving}
