@@ -1,9 +1,9 @@
 'use client';
 
 import { useState, useMemo } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
-import { RefreshCw, ChevronLeft, ChevronRight } from 'lucide-react';
+import { RefreshCw, ChevronLeft, ChevronRight, Trash2, X } from 'lucide-react';
 
 const LOCATIONS = ['Eschborn', 'Taunus', 'Westend', 'ZK'] as const;
 
@@ -306,6 +306,122 @@ function GroupView() {
   );
 }
 
+/* ─── Day Edit Modal ─────────────────────────────────────────────────────────── */
+type DayEditTarget = { dateKey: string; location: LocationName };
+
+function DayEditModal({
+  target, onClose, onDeleted,
+}: {
+  target: DayEditTarget;
+  onClose: () => void;
+  onDeleted: () => void;
+}) {
+  const [deleting, setDeleting] = useState<'delivery' | 'inventory' | 'both' | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleDelete = async (what: 'delivery' | 'inventory' | 'both') => {
+    setDeleting(what);
+    setError(null);
+    try {
+      if (what === 'delivery' || what === 'both') {
+        // Find run(s) for this date, delete lines for this location
+        const { data: runs } = await supabase
+          .from('delivery_runs')
+          .select('id')
+          .eq('delivery_date', target.dateKey);
+        const runIds = (runs ?? []).map((r: { id: string }) => r.id);
+        if (runIds.length > 0) {
+          const { error: err } = await supabase
+            .from('delivery_run_lines')
+            .delete()
+            .in('run_id', runIds)
+            .eq('location_name', target.location);
+          if (err) throw new Error(err.message);
+        }
+      }
+      if (what === 'inventory' || what === 'both') {
+        const dayStart = `${target.dateKey}T00:00:00`;
+        const dayEnd   = `${target.dateKey}T23:59:59`;
+        const { error: err } = await supabase
+          .from('inventory_submissions')
+          .delete()
+          .eq('location_name', target.location)
+          .gte('submitted_at', dayStart)
+          .lte('submitted_at', dayEnd);
+        if (err) throw new Error(err.message);
+      }
+      onDeleted();
+      onClose();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Delete failed');
+    } finally {
+      setDeleting(null);
+    }
+  };
+
+  const d = new Date(target.dateKey + 'T12:00:00Z');
+  const label = d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30" onClick={onClose}>
+      <div
+        className="bg-white rounded-xl shadow-xl border border-gray-200 w-80 p-5"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between mb-1">
+          <h3 className="font-semibold text-gray-900 text-sm">Edit Day Data</h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition-colors">
+            <X size={16} />
+          </button>
+        </div>
+        <p className="text-xs text-gray-500 mb-4">
+          <span className="font-medium text-gray-700">{target.location}</span> · {label}
+        </p>
+
+        {error && (
+          <div className="mb-3 text-xs text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
+            {error}
+          </div>
+        )}
+
+        <div className="space-y-2">
+          <button
+            disabled={!!deleting}
+            onClick={() => handleDelete('delivery')}
+            className="w-full flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 hover:bg-red-50 hover:border-red-200 hover:text-red-700 transition-colors disabled:opacity-50 text-left"
+          >
+            <Trash2 size={14} />
+            {deleting === 'delivery' ? 'Deleting…' : 'Delete delivery data (REQ / ACT)'}
+          </button>
+          <button
+            disabled={!!deleting}
+            onClick={() => handleDelete('inventory')}
+            className="w-full flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 hover:bg-red-50 hover:border-red-200 hover:text-red-700 transition-colors disabled:opacity-50 text-left"
+          >
+            <Trash2 size={14} />
+            {deleting === 'inventory' ? 'Deleting…' : 'Delete inventory count (START / END)'}
+          </button>
+          <button
+            disabled={!!deleting}
+            onClick={() => handleDelete('both')}
+            className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-red-50 border border-red-200 text-sm text-red-700 font-medium hover:bg-red-100 transition-colors disabled:opacity-50 text-left"
+          >
+            <Trash2 size={14} />
+            {deleting === 'both' ? 'Deleting…' : 'Delete all data for this day'}
+          </button>
+        </div>
+
+        <button
+          onClick={onClose}
+          className="mt-3 w-full text-center text-xs text-gray-400 hover:text-gray-600 transition-colors py-1"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /* ─── Store Weekly View ─────────────────────────────────────────────────────── */
 type DayData = {
   start:     number | null; // Starting Inventory
@@ -338,6 +454,9 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
   weekOffset: number;
   onOffsetChange: (o: number) => void;
 }) {
+  const qc = useQueryClient();
+  const [editDay, setEditDay] = useState<DayEditTarget | null>(null);
+
   // Always show current week + next week (14 days)
   const weekDays    = useMemo(() => getWeekDays(weekOffset),     [weekOffset]);
   const extendedDays = useMemo(() => [
@@ -661,18 +780,24 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
                       <th
                         key={di}
                         colSpan={5}
-                        className={`px-2 py-2 text-center text-xs font-bold tracking-wide border-l-2 ${
+                        onClick={() => setEditDay({ dateKey: dk, location })}
+                        className={`px-2 py-2 text-center text-xs font-bold tracking-wide border-l-2 cursor-pointer select-none group/dayhead ${
                           isToday
-                            ? 'text-[#1B5E20] border-[#1B5E20] bg-[#F1F8E9]'
+                            ? 'text-[#1B5E20] border-[#1B5E20] bg-[#F1F8E9] hover:bg-green-100'
                             : isWeekBoundary
-                            ? 'text-gray-500 border-gray-400 bg-gray-100'
+                            ? 'text-gray-500 border-gray-400 bg-gray-100 hover:bg-gray-200'
                             : isNextWeek
-                            ? 'text-gray-500 border-gray-200 bg-gray-50'
-                            : 'text-gray-600 border-gray-300'
+                            ? 'text-gray-500 border-gray-200 bg-gray-50 hover:bg-gray-100'
+                            : 'text-gray-600 border-gray-300 hover:bg-gray-100'
                         }`}
+                        title="Click to edit / delete data for this day"
                       >
-                        {fmtDayLabel(day)}
-                        {isNextWeek && !isWeekBoundary ? null : null}
+                        <span className="inline-flex items-center gap-1">
+                          {fmtDayLabel(day)}
+                          <span className="opacity-0 group-hover/dayhead:opacity-60 transition-opacity text-gray-400">
+                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                          </span>
+                        </span>
                       </th>
                     );
                   })}
@@ -769,6 +894,16 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
             </table>
           </div>
         </div>
+      )}
+
+      {editDay && (
+        <DayEditModal
+          target={editDay}
+          onClose={() => setEditDay(null)}
+          onDeleted={() => {
+            qc.invalidateQueries({ queryKey: ['inventory-weekly', location, weekStart, weekEnd] });
+          }}
+        />
       )}
     </>
   );
