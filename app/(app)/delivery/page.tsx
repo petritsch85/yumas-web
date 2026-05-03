@@ -332,12 +332,18 @@ function StoreDeliveryList({
   const getLiveInventory = (line: DeliveryLine): number =>
     storeInventory[line.item_name.trim().toLowerCase()] ?? line.reported_qty;
 
+  // Target Today computed live from the current forecast ratio so that
+  // changing the forecast multiplier updates the column without regenerating.
+  const currentRatio = (forecast && standard > 0) ? forecast.forecasted_sales_eur / standard : 1;
+  const computedTarget = (line: DeliveryLine): number =>
+    Math.max(0, Math.round(line.standard_target_qty * currentRatio));
+
   const liveDeliveryQty = (line: DeliveryLine): number => {
     if (!isManager) return line.delivery_qty;
     const raw = editingTargets[line.id];
     const target = raw !== undefined
-      ? Math.max(0, parseFloat(raw) || line.target_qty)
-      : line.target_qty;
+      ? Math.max(0, parseFloat(raw) || computedTarget(line))
+      : computedTarget(line);
     return Math.max(0, target - getLiveInventory(line));
   };
 
@@ -409,7 +415,7 @@ function StoreDeliveryList({
                     {sectionLines.map(line => {
                       const deliverQty = liveDeliveryQty(line);
                       const muted = deliverQty === 0;
-                      const targetVal = editingTargets[line.id] ?? String(line.target_qty);
+                      const targetVal = editingTargets[line.id] ?? String(computedTarget(line));
                       const packedVal = editingPackedQty[line.id] ?? (line.packed_qty !== null ? String(line.packed_qty) : '');
 
                       return (
@@ -432,14 +438,17 @@ function StoreDeliveryList({
                               })()}
                             </td>
                             <td className="px-3 md:px-4 py-2.5 text-center text-gray-400 tabular-nums">
-                              {line.standard_target_qty ?? line.target_qty}
-                              {line.standard_target_qty !== line.target_qty && line.standard_target_qty != null && (
-                                <span className="ml-1 text-xs text-blue-400" title="Adjusted by forecast">↗</span>
+                              {line.standard_target_qty}
+                              {currentRatio > 1.02 && line.standard_target_qty > 0 && (
+                                <span className="ml-1 text-xs text-blue-400" title="Scaled up by forecast">↗</span>
+                              )}
+                              {currentRatio < 0.98 && line.standard_target_qty > 0 && (
+                                <span className="ml-1 text-xs text-orange-400" title="Scaled down by forecast">↘</span>
                               )}
                             </td>
                             <td className="px-3 md:px-4 py-2.5 text-center">
                               {isPreview ? (
-                                <span className="tabular-nums text-gray-400">{line.target_qty}</span>
+                                <span className="tabular-nums text-gray-400">{computedTarget(line)}</span>
                               ) : (
                                 <input
                                   type="number" min="0"
