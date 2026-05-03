@@ -152,7 +152,7 @@ export default function UsageForecastPage() {
   const weekStart = weekDays[0] ? dateKey(weekDays[0]) : '';
   const weekEnd   = weekDays[6] ? dateKey(weekDays[6]) : '';
 
-  const qc = useQueryClient();
+  const qc = useQueryClient(); // eslint-disable-line @typescript-eslint/no-unused-vars
 
   /* Fetch actual Orderbird shift_reports for the week — always fresh */
   const { data: weekShiftRows = [], refetch: refetchShifts } = useQuery({
@@ -184,6 +184,23 @@ export default function UsageForecastPage() {
     },
   });
 
+  /* Fetch outgoing_bills (large-group invoices) — filtered by location names */
+  const locationNames = useMemo(() => locations.map(l => l.name), [locations]);
+  const { data: weekBillRows = [], refetch: refetchBills } = useQuery({
+    queryKey: ['outgoing-bills-week', weekStart, weekEnd, locationNames.join(',')],
+    enabled: !!weekStart && locationNames.length > 0,
+    staleTime: 0,
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('outgoing_bills')
+        .select('issuing_location, event_date, net_total')
+        .in('issuing_location', locationNames)
+        .gte('event_date', weekStart)
+        .lte('event_date', weekEnd);
+      return (data ?? []) as { issuing_location: string; event_date: string; net_total: number }[];
+    },
+  });
+
   /* Fetch closure days — always fresh */
   const { data: closureDays = [], refetch: refetchClosures } = useQuery({
     queryKey: ['closure-days-usage', weekStart, weekEnd],
@@ -202,41 +219,54 @@ export default function UsageForecastPage() {
   const [refreshing, setRefreshing] = useState(false);
   const handleRefresh = async () => {
     setRefreshing(true);
-    await Promise.all([refetchShifts(), refetchDeliveries(), refetchClosures()]);
+    await Promise.all([refetchShifts(), refetchDeliveries(), refetchBills(), refetchClosures()]);
     setRefreshing(false);
   };
 
-  /* Build a set of "locationId:dateKey" — ANY closure entry marks the day closed here */
+  /* Local closure overrides — toggled immediately on click; persisted async to DB.
+     Key = "locId:dateKey", value = true (closed) | false (open override) */
+  const [localClosures, setLocalClosures] = useState<Record<string, boolean>>({});
+
+  /* Build effective closed set: DB data UNION local overrides */
   const closedSet = useMemo(() => {
     const s = new Set<string>();
-    for (const c of closureDays) {
-      s.add(`${c.location_id}:${c.closure_date}`);
+    for (const c of closureDays) s.add(`${c.location_id}:${c.closure_date}`);
+    // Apply local overrides
+    for (const [key, closed] of Object.entries(localClosures)) {
+      if (closed) s.add(key); else s.delete(key);
     }
     return s;
-  }, [closureDays]);
+  }, [closureDays, localClosures]);
 
-  /* Toggle closure for a store+date — insert 'all' if not closed, delete if closed */
-  const toggleClosure = useMutation({
-    mutationFn: async ({ locId, dk, isClosed }: { locId: string; dk: string; isClosed: boolean }) => {
-      if (isClosed) {
+  /* Toggle closure — update local state immediately, persist to DB async */
+  const handleToggleClosure = async (locId: string, dk: string, currentlyClosed: boolean) => {
+    const key = `${locId}:${dk}`;
+    // Optimistic update
+    setLocalClosures(prev => ({ ...prev, [key]: !currentlyClosed }));
+    try {
+      if (currentlyClosed) {
         const { error } = await supabase.from('closure_days')
-          .delete()
-          .eq('location_id', locId)
-          .eq('closure_date', dk);
+          .delete().eq('location_id', locId).eq('closure_date', dk);
         if (error) throw new Error(error.message);
       } else {
-        const { error } = await supabase.from('closure_days').insert({
+        const { error } = await supabase.from('closure_days').upsert({
           location_id:  locId,
           closure_date: dk,
           shift_type:   'all',
           reason:       'Closed (set from Usage Forecast)',
-        });
+        }, { onConflict: 'location_id,closure_date,shift_type' });
         if (error) throw new Error(error.message);
       }
-    },
-    onSuccess: () => refetchClosures(),
-    onError: (e: Error) => alert(`Could not update closure: ${e.message}`),
-  });
+      // Sync DB state back
+      await refetchClosures();
+      // Clear local override (DB is now source of truth)
+      setLocalClosures(prev => { const n = { ...prev }; delete n[key]; return n; });
+    } catch (e: any) {
+      // Revert optimistic update
+      setLocalClosures(prev => { const n = { ...prev }; delete n[key]; return n; });
+      alert(`Could not update closure: ${e.message}`);
+    }
+  };
 
   /* Fetch distinct items from delivery_run_lines for the item list */
   const { data: rawItems = [], isLoading } = useQuery({
@@ -265,13 +295,28 @@ export default function UsageForecastPage() {
     return m;
   }, [locations]);
 
-  /* Actual net sales per location+date from shift_reports + delivery_reports */
+  /* Actual net sales per location+date: Orderbird + Simply + Bills */
+  const locationIdByName2 = useMemo(() => {
+    const m: Record<string, string> = {};
+    for (const loc of locations) m[loc.name] = loc.id;
+    return m;
+  }, [locations]);
+
   const actualSalesByLocDate = useMemo(() => {
     const m: Record<string, number> = {};
-    for (const r of weekShiftRows)   m[`${r.location_id}:${r.report_date}`] = (m[`${r.location_id}:${r.report_date}`] ?? 0) + (r.net_total ?? 0);
-    for (const r of weekDeliveryRows) m[`${r.location_id}:${r.report_date}`] = (m[`${r.location_id}:${r.report_date}`] ?? 0) + (r.net_revenue ?? 0);
+    for (const r of weekShiftRows)
+      m[`${r.location_id}:${r.report_date}`] = (m[`${r.location_id}:${r.report_date}`] ?? 0) + (r.net_total ?? 0);
+    for (const r of weekDeliveryRows)
+      m[`${r.location_id}:${r.report_date}`] = (m[`${r.location_id}:${r.report_date}`] ?? 0) + (r.net_revenue ?? 0);
+    // Bills: join issuing_location name → location_id
+    for (const b of weekBillRows) {
+      if (!b.event_date) continue;
+      const locId = locationIdByName2[b.issuing_location];
+      if (!locId) continue;
+      m[`${locId}:${b.event_date}`] = (m[`${locId}:${b.event_date}`] ?? 0) + (b.net_total ?? 0);
+    }
     return m;
-  }, [weekShiftRows, weekDeliveryRows]);
+  }, [weekShiftRows, weekDeliveryRows, weekBillRows, locationIdByName2]);
 
   /* Per store+day: null=closed, { val, isActual } otherwise */
   type DaySales = { val: number; isActual: boolean } | null;
@@ -428,7 +473,7 @@ export default function UsageForecastPage() {
                       return (
                         <th
                           key={`${di}-${si}`}
-                          onClick={() => locId && toggleClosure.mutate({ locId, dk, isClosed })}
+                          onClick={() => locId && handleToggleClosure(locId, dk, isClosed)}
                           className={`text-center py-1 px-1 border-l font-semibold text-[10px] cursor-pointer select-none transition-colors ${
                             si === 0 ? 'border-gray-200' : 'border-gray-50'
                           } ${today ? 'bg-green-50/60' : ''} ${
