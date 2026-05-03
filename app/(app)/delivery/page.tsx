@@ -26,6 +26,58 @@ function formatDuration(seconds: number): string {
   return `${m} min ${s}s`;
 }
 
+/* ─── Canonical sort order (mirrors inventory form) ──────────────────────── */
+const SECTION_ORDER = ['Kühlhaus', 'Tiefkühler', 'Trockenware', 'Regale', 'Lager'];
+const CANONICAL_ITEMS: string[] = [
+  // Kühlhaus
+  'Guacamole','Schärfemix','Maissalsa','Tomatensalsa','Sour Cream','Marinade Chicken',
+  'Pico de Gallo','Crema Nogada','Käse Gouda','Gouda Scheiben Gringa','Ciabatta','Brownie',
+  'Carlota de Limon','Schoko- Avocado Mousse','Mole','Marinade Al Pastor','Barbacoa',
+  'Chili con Carne','Cochinita','Kartoffel Würfel','Vinaigrette','Honig Sesam / Senf',
+  'Pozole','Zwiebeln karamellisiert','Karotten karamellisiert','Bohnencreme',
+  'Alambre - Zwiebel','Weizen Tortillas 12cm','Tortillas 30cm','Frische Habaneros',
+  'Salsa Habanero','Salsa Verde','Chipotle SourCream','Salsa de Jamaica','Salsa Torta',
+  'Humo Salsa','Fuego Salsa','Oliven entkernt','Chiles Poblanos','Salsa Pitaya',
+  'Mais Tortillas 12cm','Blau Mais Tortillas 15cm','Queso Cotija','Queso Oaxaca',
+  'Queso Chihuahua','Rinderfilet Steak','Filetspitzen','Hähnchenkeule (ganz)','Mole Rojo',
+  'Chorizo','Carne Vegetal','Costilla de Res','Salsa für Costilla de Res',
+  'Rote Zwiebeln eingelegt','Pulpo (Chipulpotle)','Salsa Pulpo','Birria','Salsa Birria',
+  'Füllung Nogada','H-Milch 3,5%',
+  // Tiefkühler
+  'Alambre - Paprika Streifen','Gambas','Weizentortillas 20cm',
+  // Trockenware
+  'Reis','Schwarze Bohnen','Salz','Zucker','Brauner Zucker','Pfeffer','Pfeffer geschrotet',
+  'Rapsöl','Tajin','Limettensaft (750ml Metro)',
+  // Regale
+  'Große Bowl togo Schale','Große Bowl togo Deckel','Kleine Bowl togo Schale',
+  'Kleine Bowl togo Deckel','Dressingsbecher Schale','Dressingsbecher Deckel','Alufolie',
+  'Backpapier','Trayliner Papier','Weiße Serviette','Zig-Zag Papier','Müllbeutel Blau 120L',
+  'Handschuhe M','Handschuhe L','Mehrwegbowl',
+  // Lager
+  'Große Togo Tüte','Kleine Togo Tüte','Schwarze Serviette','Nachos','Spüli','Essigessenz',
+  'Topfschwamm','Edelstahlschwamm','Reinigungshandschuhe','Blaue Rolle','Toilettenpapier',
+  'Glasreiniger','WC Reiniger','Desinfektionsreiniger','Gastro Universal Reiniger',
+  'Kalkreiniger','Laminat - Parkett-Reiniger','B100N','B200S','F8500','F420E',
+  'Spülmaschine Salz - Etolit',
+];
+const ITEM_RANK: Record<string, number> = Object.fromEntries(CANONICAL_ITEMS.map((n, i) => [n, i]));
+
+function canonicalSections(sectionNames: string[]): string[] {
+  return [...sectionNames].sort((a, b) => {
+    const ia = SECTION_ORDER.indexOf(a);
+    const ib = SECTION_ORDER.indexOf(b);
+    return (ia < 0 ? 999 : ia) - (ib < 0 ? 999 : ib);
+  });
+}
+
+function canonicalItems<T extends { item_name: string }>(items: T[]): T[] {
+  return [...items].sort((a, b) => {
+    const ia = ITEM_RANK[a.item_name] ?? 9999;
+    const ib = ITEM_RANK[b.item_name] ?? 9999;
+    return ia !== ib ? ia - ib : a.item_name.localeCompare(b.item_name);
+  });
+}
+
 /* ─── Types ─────────────────────────────────────────────────────────────── */
 type ViewMode = 'manager' | 'packer' | 'driver' | 'store';
 
@@ -290,7 +342,7 @@ function StoreDeliveryList({
   };
 
   const itemsToDeliver = lines.filter(l => liveDeliveryQty(l) > 0);
-  const sections = [...new Set(lines.map(l => l.section))].sort();
+  const sections = canonicalSections([...new Set(lines.map(l => l.section))]);
 
   const fullCount    = itemsToDeliver.filter(l => l.packed_qty !== null && l.packed_qty >= l.delivery_qty).length;
   const partialCount = itemsToDeliver.filter(l => l.packed_qty !== null && l.packed_qty > 0 && l.packed_qty < l.delivery_qty).length;
@@ -346,7 +398,7 @@ function StoreDeliveryList({
             </thead>
             <tbody>
               {sections.map(section => {
-                const sectionLines = lines.filter(l => l.section === section);
+                const sectionLines = canonicalItems(lines.filter(l => l.section === section));
                 return (
                   <React.Fragment key={section}>
                     <tr className="bg-gray-50">
@@ -618,7 +670,7 @@ function StoreManagerView({ run, lines, targetDate, myStore }: {
   });
 
   const isConfirmed = !!receipt?.received_at;
-  const sections = [...new Set(storeLines.map(l => l.section))].sort();
+  const sections = canonicalSections([...new Set(storeLines.map(l => l.section))]);
 
   return (
     <div className="space-y-4">
@@ -688,7 +740,7 @@ function StoreManagerView({ run, lines, targetDate, myStore }: {
                         <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">{section}</span>
                       </td>
                     </tr>
-                    {storeLines.filter(l => l.section === section).map(line => {
+                    {canonicalItems(storeLines.filter(l => l.section === section)).map(line => {
                       const qty = line.packed_qty ?? line.delivery_qty;
                       const isComplete = !!itemComplete[line.id];
                       return (
