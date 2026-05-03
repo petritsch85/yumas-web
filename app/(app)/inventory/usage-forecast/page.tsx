@@ -3,7 +3,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
 import { useState, useMemo } from 'react';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight, RefreshCw } from 'lucide-react';
 
 /* ── Canonical sort order (mirrors delivery + overview pages) ─────────────── */
 const SECTION_ORDER = ['Kühlhaus', 'Tiefkühler', 'Trockenware', 'Regale', 'Lager'];
@@ -152,10 +152,13 @@ export default function UsageForecastPage() {
   const weekStart = weekDays[0] ? dateKey(weekDays[0]) : '';
   const weekEnd   = weekDays[6] ? dateKey(weekDays[6]) : '';
 
-  /* Fetch actual Orderbird shift_reports for the week — all locations at once */
-  const { data: weekShiftRows = [] } = useQuery({
+  const qc = useQueryClient();
+
+  /* Fetch actual Orderbird shift_reports for the week — always fresh */
+  const { data: weekShiftRows = [], refetch: refetchShifts } = useQuery({
     queryKey: ['shift-reports-week', weekStart, weekEnd],
     enabled: !!weekStart,
+    staleTime: 0,
     queryFn: async () => {
       const { data } = await supabase
         .from('shift_reports')
@@ -166,10 +169,11 @@ export default function UsageForecastPage() {
     },
   });
 
-  /* Fetch actual Simply delivery_reports for the week — all locations at once */
-  const { data: weekDeliveryRows = [] } = useQuery({
+  /* Fetch actual Simply delivery_reports for the week — always fresh */
+  const { data: weekDeliveryRows = [], refetch: refetchDeliveries } = useQuery({
     queryKey: ['delivery-reports-week', weekStart, weekEnd],
     enabled: !!weekStart,
+    staleTime: 0,
     queryFn: async () => {
       const { data } = await supabase
         .from('delivery_reports')
@@ -180,10 +184,11 @@ export default function UsageForecastPage() {
     },
   });
 
-  /* Fetch closure days — keyed as "locationId:dateKey" for fast lookup */
-  const { data: closureDays = [] } = useQuery({
+  /* Fetch closure days — always fresh */
+  const { data: closureDays = [], refetch: refetchClosures } = useQuery({
     queryKey: ['closure-days-usage', weekStart, weekEnd],
     enabled: !!weekStart,
+    staleTime: 0,
     queryFn: async () => {
       const { data } = await supabase
         .from('closure_days')
@@ -194,6 +199,13 @@ export default function UsageForecastPage() {
     },
   });
 
+  const [refreshing, setRefreshing] = useState(false);
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    await Promise.all([refetchShifts(), refetchDeliveries(), refetchClosures()]);
+    setRefreshing(false);
+  };
+
   /* Build a set of "locationId:dateKey" — ANY closure entry marks the day closed here */
   const closedSet = useMemo(() => {
     const s = new Set<string>();
@@ -203,28 +215,27 @@ export default function UsageForecastPage() {
     return s;
   }, [closureDays]);
 
-  const qc = useQueryClient();
-
   /* Toggle closure for a store+date — insert 'all' if not closed, delete if closed */
   const toggleClosure = useMutation({
     mutationFn: async ({ locId, dk, isClosed }: { locId: string; dk: string; isClosed: boolean }) => {
       if (isClosed) {
-        // Remove all closures for this location+date
-        await supabase.from('closure_days')
+        const { error } = await supabase.from('closure_days')
           .delete()
           .eq('location_id', locId)
           .eq('closure_date', dk);
+        if (error) throw new Error(error.message);
       } else {
-        // Insert an 'all' closure
-        await supabase.from('closure_days').insert({
+        const { error } = await supabase.from('closure_days').insert({
           location_id:  locId,
           closure_date: dk,
           shift_type:   'all',
           reason:       'Closed (set from Usage Forecast)',
         });
+        if (error) throw new Error(error.message);
       }
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['closure-days-usage'] }),
+    onSuccess: () => refetchClosures(),
+    onError: (e: Error) => alert(`Could not update closure: ${e.message}`),
   });
 
   /* Fetch distinct items from delivery_run_lines for the item list */
@@ -337,6 +348,14 @@ export default function UsageForecastPage() {
               Today
             </button>
           )}
+          <button
+            onClick={handleRefresh}
+            disabled={refreshing}
+            title="Reload sales data"
+            className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500 transition-colors disabled:opacity-40"
+          >
+            <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
+          </button>
         </div>
 
         <div className="flex items-center gap-4 text-xs font-medium">
