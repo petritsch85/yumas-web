@@ -3245,9 +3245,9 @@ export default function SalesReportsPage() {
                                 borderLeft: col.day === 1 && col.month !== QUARTER_MONTHS[quarter-1][0] ? '2px solid #4b5563' : undefined,
                                 borderRight: isSun ? '1px solid #374151' : undefined }}>
                               <div style={{ fontSize:9, fontWeight:400, opacity:0.55, marginBottom:1 }}>
-                                {isClosed ? '🚫' : col.day === 1 ? MONTHS[col.month-1] : col.dow}
+                                {isClosed ? '🚫' : col.dow}
                               </div>
-                              <div>{col.day}</div>
+                              <div>{col.day} {MONTHS[col.month-1]}</div>
                             </th>
                           );
                         } else {
