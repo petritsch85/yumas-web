@@ -89,6 +89,13 @@ const navGroups: NavGroup[] = [
     ],
   },
   {
+    label: 'P&L REPORTS',
+    items: [
+      { label: 'Stats',         href: '/pl-reports/stats',         icon: BarChart3, permKey: 'pl_reports' },
+      { label: 'Sales Reports', href: '/pl-reports/sales-reports', icon: LineChart,  permKey: 'pl_reports' },
+    ],
+  },
+  {
     label: 'SUPPLY CHAIN',
     items: [
       {
@@ -154,13 +161,6 @@ const navGroups: NavGroup[] = [
       { label: 'Sick Days',       href: '/coming-soon/sick-days',     icon: CalendarDays },
       { label: 'Training',        href: '/coming-soon/training',      icon: Users },
       { label: 'Health & Safety', href: '/coming-soon/health-safety', icon: Users },
-    ],
-  },
-  {
-    label: 'P&L REPORTS',
-    items: [
-      { label: 'Stats',         href: '/pl-reports/stats',         icon: BarChart3, permKey: 'pl_reports' },
-      { label: 'Sales Reports', href: '/pl-reports/sales-reports', icon: LineChart,  permKey: 'pl_reports' },
     ],
   },
   {
