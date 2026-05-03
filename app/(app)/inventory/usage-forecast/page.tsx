@@ -149,6 +149,40 @@ export default function UsageForecastPage() {
     },
   });
 
+  /* Fetch closure days — keyed as "locationId:dateKey" for fast lookup */
+  const weekStart = weekDays[0] ? dateKey(weekDays[0]) : '';
+  const weekEnd   = weekDays[6] ? dateKey(weekDays[6]) : '';
+  const { data: closureDays = [] } = useQuery({
+    queryKey: ['closure-days-usage', weekStart, weekEnd],
+    enabled: !!weekStart,
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('closure_days')
+        .select('location_id, closure_date, shift_type')
+        .gte('closure_date', weekStart)
+        .lte('closure_date', weekEnd);
+      return (data ?? []) as { location_id: string; closure_date: string; shift_type: string }[];
+    },
+  });
+
+  /* Build a set of "locationId:dateKey" for fully-closed days */
+  const closedSet = useMemo(() => {
+    const s = new Set<string>();
+    // Group by location + date to check if all shifts are closed
+    const byLocDate: Record<string, Set<string>> = {};
+    for (const c of closureDays) {
+      const key = `${c.location_id}:${c.closure_date}`;
+      if (!byLocDate[key]) byLocDate[key] = new Set();
+      byLocDate[key].add(c.shift_type);
+    }
+    for (const [key, shifts] of Object.entries(byLocDate)) {
+      if (shifts.has('all') || (shifts.has('lunch') && shifts.has('dinner'))) {
+        s.add(key);
+      }
+    }
+    return s;
+  }, [closureDays]);
+
   /* Fetch distinct items from delivery_run_lines for the item list */
   const { data: rawItems = [], isLoading } = useQuery({
     queryKey: ['usage-forecast-items'],
@@ -176,9 +210,9 @@ export default function UsageForecastPage() {
     return m;
   }, [locations]);
 
-  /* Compute daily sales forecast per store per dateKey */
+  /* Compute daily sales forecast per store per dateKey — zero if closed */
   const dailySalesByStore = useMemo(() => {
-    const result: Record<Store, Record<string, number>> = {
+    const result: Record<Store, Record<string, number | null>> = {
       Westend: {}, Eschborn: {}, Taunus: {},
     };
     for (const store of STORES) {
@@ -188,13 +222,18 @@ export default function UsageForecastPage() {
       const dinnerS = allForecastSettings.find(s => s.location_id === locId && s.shift_type === 'dinner');
       for (const day of weekDays) {
         const dk = dateKey(day);
+        // null = store is closed that day (show —)
+        if (closedSet.has(`${locId}:${dk}`)) {
+          result[store][dk] = null;
+          continue;
+        }
         const l = lunchS  ? computeDailyForecast(dk, lunchS)  : 0;
         const d = dinnerS ? computeDailyForecast(dk, dinnerS) : 0;
         result[store][dk] = l + d;
       }
     }
     return result;
-  }, [locationIdByName, allForecastSettings, weekDays]);
+  }, [locationIdByName, allForecastSettings, weekDays, closedSet]);
 
   /* Group items by section in canonical order */
   const sections = useMemo(() => {
@@ -299,18 +338,19 @@ export default function UsageForecastPage() {
                     const today = isToday(day);
                     const dk = dateKey(day);
                     return STORES.map((store, si) => {
-                      const sales = dailySalesByStore[store][dk] ?? 0;
-                      const hasForecast = sales > 0;
+                      const sales = dailySalesByStore[store][dk];
+                      const isClosed = sales === null;
+                      const hasForecast = !isClosed && (sales ?? 0) > 0;
                       return (
                         <th
                           key={`${di}-${si}`}
                           className={`text-center py-1 px-1 border-l font-semibold text-[10px] ${
                             si === 0 ? 'border-gray-200' : 'border-gray-50'
-                          } ${today ? 'bg-green-50/60' : ''} ${hasForecast ? 'text-[#1B5E20]' : 'text-gray-300'}`}
+                          } ${today ? 'bg-green-50/60' : ''} ${isClosed ? 'text-red-300' : hasForecast ? 'text-[#1B5E20]' : 'text-gray-300'}`}
                           style={{ minWidth: COL_W }}
-                          title={`Forecasted net sales: ${store}`}
+                          title={isClosed ? `${store} — closed` : `Forecasted net sales: ${store}`}
                         >
-                          {hasForecast ? `€${(sales / 1000).toFixed(1)}k` : '—'}
+                          {isClosed ? '🚫' : hasForecast ? `€${((sales as number) / 1000).toFixed(1)}k` : '—'}
                         </th>
                       );
                     });
@@ -368,8 +408,9 @@ export default function UsageForecastPage() {
                           const today = isToday(day);
                           const dk = dateKey(day);
                           return STORES.map((store, si) => {
-                            const sales = dailySalesByStore[store][dk] ?? 0;
-                            const usage = sales > 0 ? forecastUsage(item.item_name, si, sales) : null;
+                            const sales = dailySalesByStore[store][dk];
+                            const usage = (sales !== null && sales !== undefined && sales > 0)
+                              ? forecastUsage(item.item_name, si, sales) : null;
                             return (
                               <td
                                 key={`${di}-${si}`}
