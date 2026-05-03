@@ -348,9 +348,12 @@ function DayEditModal({
         .from('delivery_run_lines')
         .select('id, item_name, section, unit, delivery_qty, packed_qty')
         .in('run_id', runIds)
-        .eq('location_name', target.location)
-        .order('item_name');
-      return (lines ?? []) as DeliveryLineEdit[];
+        .eq('location_name', target.location);
+      return ((lines ?? []) as DeliveryLineEdit[]).sort((a, b) => {
+        const ia = ITEM_RANK[a.item_name] ?? 9999;
+        const ib = ITEM_RANK[b.item_name] ?? 9999;
+        return ia !== ib ? ia - ib : a.item_name.localeCompare(b.item_name);
+      });
     },
     enabled: tab === 'items',
   });
