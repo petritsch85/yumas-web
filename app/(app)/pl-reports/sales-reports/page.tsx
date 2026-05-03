@@ -173,18 +173,20 @@ type ShiftBatchItem = {
 };
 
 type ForecastSettings = {
-  shift_type:    'lunch' | 'dinner';
-  week_base_net: number;
-  growth_rate:   number;
-  weight_mon:    number; weight_tue: number; weight_wed: number; weight_thu: number;
-  weight_fri:    number; weight_sat: number; weight_sun: number;
+  shift_type:       'lunch' | 'dinner';
+  week_base_net:    number;
+  growth_rate:      number;
+  weight_mon:       number; weight_tue: number; weight_wed: number; weight_thu: number;
+  weight_fri:       number; weight_sat: number; weight_sun: number;
+  closed_weekdays?: string[]; // e.g. ['mon', 'sun']
 };
 
-// Draft: weights stored as pct strings (Mon–Sat only; Sun auto-computed)
+// Draft: weights stored as pct strings; closedDays lists days the store is shut
 type DraftSettings = {
   weekBaseNet: string;
   growthRate:  string;
   mon: string; tue: string; wed: string; thu: string; fri: string; sat: string;
+  closedDays: string[]; // days of week the store is closed for this shift
 };
 
 type ClosureDay = {
@@ -205,6 +207,7 @@ type ForecastOverride = {
 const DEFAULT_DRAFT: DraftSettings = {
   weekBaseNet:'0', growthRate:'0',
   mon:'14.3', tue:'14.3', wed:'14.3', thu:'14.3', fri:'14.3', sat:'14.3',
+  closedDays: [],
 };
 
 type RowType   = 'section' | 'bold' | 'normal' | 'pct';
@@ -647,27 +650,30 @@ function settingsToDraft(s: ForecastSettings): DraftSettings {
     thu: (s.weight_thu * 100).toFixed(1),
     fri: (s.weight_fri * 100).toFixed(1),
     sat: (s.weight_sat * 100).toFixed(1),
+    closedDays: s.closed_weekdays ?? [],
   };
 }
 
 function draftToPayload(d: DraftSettings, type: 'lunch'|'dinner', locationId: string) {
-  const mon = Math.max(0, parseFloat(d.mon) || 0);
-  const tue = Math.max(0, parseFloat(d.tue) || 0);
-  const wed = Math.max(0, parseFloat(d.wed) || 0);
-  const thu = Math.max(0, parseFloat(d.thu) || 0);
-  const fri = Math.max(0, parseFloat(d.fri) || 0);
-  const sat = Math.max(0, parseFloat(d.sat) || 0);
-  const sun = Math.max(0, 100 - mon - tue - wed - thu - fri - sat);
+  const closed = new Set(d.closedDays);
+  const mon = closed.has('mon') ? 0 : Math.max(0, parseFloat(d.mon) || 0);
+  const tue = closed.has('tue') ? 0 : Math.max(0, parseFloat(d.tue) || 0);
+  const wed = closed.has('wed') ? 0 : Math.max(0, parseFloat(d.wed) || 0);
+  const thu = closed.has('thu') ? 0 : Math.max(0, parseFloat(d.thu) || 0);
+  const fri = closed.has('fri') ? 0 : Math.max(0, parseFloat(d.fri) || 0);
+  const sat = closed.has('sat') ? 0 : Math.max(0, parseFloat(d.sat) || 0);
+  const sun = closed.has('sun') ? 0 : Math.max(0, 100 - mon - tue - wed - thu - fri - sat);
   const total = mon + tue + wed + thu + fri + sat + sun || 100;
   return {
-    location_id:   locationId,
-    shift_type:    type,
-    week_base_net: parseFloat(d.weekBaseNet) || 0,
-    growth_rate:   parseFloat(d.growthRate)  || 0,
+    location_id:      locationId,
+    shift_type:       type,
+    week_base_net:    parseFloat(d.weekBaseNet) || 0,
+    growth_rate:      parseFloat(d.growthRate)  || 0,
     weight_mon: mon/total, weight_tue: tue/total, weight_wed: wed/total,
     weight_thu: thu/total, weight_fri: fri/total, weight_sat: sat/total,
     weight_sun: sun/total,
-    updated_at: new Date().toISOString(),
+    closed_weekdays:  [...closed],
+    updated_at:       new Date().toISOString(),
   };
 }
 
@@ -1041,7 +1047,7 @@ export default function SalesReportsPage() {
     queryFn: async () => {
       const { data } = await supabase
         .from('forecast_settings')
-        .select('shift_type,week_base_net,growth_rate,weight_mon,weight_tue,weight_wed,weight_thu,weight_fri,weight_sat,weight_sun')
+        .select('shift_type,week_base_net,growth_rate,weight_mon,weight_tue,weight_wed,weight_thu,weight_fri,weight_sat,weight_sun,closed_weekdays')
         .eq('location_id', location!.id);
       return (data ?? []) as ForecastSettings[];
     },
@@ -3111,11 +3117,24 @@ export default function SalesReportsPage() {
                   { label:'☀️  Lunch',  draft: lunchDraft,  setDraft: setLunchDraft  },
                   { label:'🌙  Dinner', draft: dinnerDraft, setDraft: setDinnerDraft },
                 ] as const).map(({ label, draft, setDraft }) => {
-                  const mon = parseFloat(draft.mon)||0, tue = parseFloat(draft.tue)||0,
-                        wed = parseFloat(draft.wed)||0, thu = parseFloat(draft.thu)||0,
-                        fri = parseFloat(draft.fri)||0, sat = parseFloat(draft.sat)||0;
-                  const sun = Math.max(0, 100 - mon - tue - wed - thu - fri - sat);
+                  const closed = new Set(draft.closedDays);
+                  const toggleClosed = (day: string) => {
+                    setDraft(d => {
+                      const next = new Set(d.closedDays);
+                      if (next.has(day)) next.delete(day);
+                      else { next.add(day); }
+                      return { ...d, closedDays: [...next] };
+                    });
+                  };
+                  const mon = closed.has('mon') ? 0 : parseFloat(draft.mon)||0;
+                  const tue = closed.has('tue') ? 0 : parseFloat(draft.tue)||0;
+                  const wed = closed.has('wed') ? 0 : parseFloat(draft.wed)||0;
+                  const thu = closed.has('thu') ? 0 : parseFloat(draft.thu)||0;
+                  const fri = closed.has('fri') ? 0 : parseFloat(draft.fri)||0;
+                  const sat = closed.has('sat') ? 0 : parseFloat(draft.sat)||0;
+                  const sun = closed.has('sun') ? 0 : Math.max(0, 100 - mon - tue - wed - thu - fri - sat);
                   const total = mon+tue+wed+thu+fri+sat+sun;
+                  const ALL_DAYS = ['mon','tue','wed','thu','fri','sat','sun'] as const;
                   return (
                     <div key={label} className="p-5 space-y-4">
                       <p className="text-xs font-bold text-gray-700 uppercase tracking-wider">{label}</p>
@@ -3136,24 +3155,43 @@ export default function SalesReportsPage() {
                       <div>
                         <p className="text-xs text-gray-400 uppercase tracking-wider mb-2">Day-of-week split (%)</p>
                         <div className="grid grid-cols-7 gap-1 text-center">
-                          {(['mon','tue','wed','thu','fri','sat'] as const).map(day => (
-                            <div key={day}>
-                              <p className="text-xs text-gray-400 mb-1">{day.charAt(0).toUpperCase()+day.slice(1)}</p>
-                              <input type="number" step="0.1" min="0" max="100"
-                                value={draft[day]}
-                                onChange={e => setDraft(d => ({...d, [day]: e.target.value}))}
-                                className="w-full text-center text-xs border border-gray-200 rounded px-0.5 py-1 tabular-nums focus:outline-none focus:border-[#1B5E20]" />
-                            </div>
-                          ))}
-                          <div>
-                            <p className="text-xs text-gray-400 mb-1">Sun</p>
-                            <div className="w-full text-center text-xs bg-gray-50 border border-gray-100 rounded px-0.5 py-1 text-gray-400 tabular-nums">
-                              {sun.toFixed(1)}
-                            </div>
-                          </div>
+                          {ALL_DAYS.map(day => {
+                            const isClosed = closed.has(day);
+                            const isSun = day === 'sun';
+                            const dayLabel = day.charAt(0).toUpperCase()+day.slice(1);
+                            const weightVal = day === 'mon' ? mon : day === 'tue' ? tue : day === 'wed' ? wed
+                              : day === 'thu' ? thu : day === 'fri' ? fri : day === 'sat' ? sat : sun;
+                            return (
+                              <div key={day} className="flex flex-col items-center gap-0.5">
+                                <p className={`text-xs mb-0.5 ${isClosed ? 'text-gray-300 line-through' : 'text-gray-400'}`}>{dayLabel}</p>
+                                {isClosed || isSun ? (
+                                  <div className={`w-full text-center text-xs rounded px-0.5 py-1 tabular-nums border ${isClosed ? 'bg-gray-50 border-gray-100 text-gray-300' : 'bg-gray-50 border-gray-100 text-gray-400'}`}>
+                                    {isClosed ? '—' : sun.toFixed(1)}
+                                  </div>
+                                ) : (
+                                  <input type="number" step="0.1" min="0" max="100"
+                                    value={draft[day as 'mon'|'tue'|'wed'|'thu'|'fri'|'sat']}
+                                    onChange={e => setDraft(d => ({...d, [day]: e.target.value}))}
+                                    className="w-full text-center text-xs border border-gray-200 rounded px-0.5 py-1 tabular-nums focus:outline-none focus:border-[#1B5E20]" />
+                                )}
+                                {/* Open/closed toggle */}
+                                <button
+                                  onClick={() => toggleClosed(day)}
+                                  title={isClosed ? `Mark ${dayLabel} as open` : `Mark ${dayLabel} as closed`}
+                                  className={`mt-0.5 text-[9px] px-1.5 py-0.5 rounded font-semibold transition-colors ${
+                                    isClosed
+                                      ? 'bg-red-50 text-red-400 border border-red-200 hover:bg-red-100'
+                                      : 'bg-green-50 text-green-600 border border-green-200 hover:bg-green-100'
+                                  }`}
+                                >
+                                  {isClosed ? 'CLOSED' : 'OPEN'}
+                                </button>
+                              </div>
+                            );
+                          })}
                         </div>
                         <p className={`text-xs mt-1.5 text-right ${Math.abs(total - 100) < 0.2 ? 'text-green-600' : 'text-amber-600'}`}>
-                          Total: {total.toFixed(1)}% {Math.abs(total - 100) < 0.2 ? '✓' : '⚠ Sun adjusted to balance'}
+                          Total: {total.toFixed(1)}% {Math.abs(total - 100) < 0.2 ? '✓' : '⚠ open days must sum to 100%'}
                         </p>
                       </div>
                     </div>
@@ -3161,7 +3199,7 @@ export default function SalesReportsPage() {
                 })}
               </div>
               <div className="border-t border-gray-100 px-5 py-3 flex items-center justify-between bg-gray-50">
-                <p className="text-xs text-gray-400">Sun weight auto-computed · weights normalise to 100% on save</p>
+                <p className="text-xs text-gray-400">Sun auto-computed · click OPEN/CLOSED to toggle a day · weights normalise on save</p>
                 <button onClick={handleSaveForecast} disabled={savingForecast || !location}
                   className="flex items-center gap-2 px-5 py-2 bg-[#1B5E20] text-white text-sm font-bold rounded-lg hover:bg-[#2E7D32] transition-colors disabled:opacity-50">
                   {savingForecast ? <Loader2 size={14} className="animate-spin" /> : <DatabaseZap size={14} />}
