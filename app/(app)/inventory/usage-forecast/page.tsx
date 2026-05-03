@@ -1,6 +1,6 @@
 'use client';
 
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
 import { useState, useMemo } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
@@ -165,23 +165,38 @@ export default function UsageForecastPage() {
     },
   });
 
-  /* Build a set of "locationId:dateKey" for fully-closed days */
+  /* Build a set of "locationId:dateKey" — ANY closure entry marks the day closed here */
   const closedSet = useMemo(() => {
     const s = new Set<string>();
-    // Group by location + date to check if all shifts are closed
-    const byLocDate: Record<string, Set<string>> = {};
     for (const c of closureDays) {
-      const key = `${c.location_id}:${c.closure_date}`;
-      if (!byLocDate[key]) byLocDate[key] = new Set();
-      byLocDate[key].add(c.shift_type);
-    }
-    for (const [key, shifts] of Object.entries(byLocDate)) {
-      if (shifts.has('all') || (shifts.has('lunch') && shifts.has('dinner'))) {
-        s.add(key);
-      }
+      s.add(`${c.location_id}:${c.closure_date}`);
     }
     return s;
   }, [closureDays]);
+
+  const qc = useQueryClient();
+
+  /* Toggle closure for a store+date — insert 'all' if not closed, delete if closed */
+  const toggleClosure = useMutation({
+    mutationFn: async ({ locId, dk, isClosed }: { locId: string; dk: string; isClosed: boolean }) => {
+      if (isClosed) {
+        // Remove all closures for this location+date
+        await supabase.from('closure_days')
+          .delete()
+          .eq('location_id', locId)
+          .eq('closure_date', dk);
+      } else {
+        // Insert an 'all' closure
+        await supabase.from('closure_days').insert({
+          location_id:  locId,
+          closure_date: dk,
+          shift_type:   'all',
+          reason:       'Closed (set from Usage Forecast)',
+        });
+      }
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['closure-days-usage'] }),
+  });
 
   /* Fetch distinct items from delivery_run_lines for the item list */
   const { data: rawItems = [], isLoading } = useQuery({
@@ -290,6 +305,9 @@ export default function UsageForecastPage() {
           <span className="flex items-center gap-1.5 text-gray-400">
             — No data / closed
           </span>
+          <span className="text-gray-400 italic">
+            Click a sales cell to toggle open/closed
+          </span>
         </div>
       </div>
 
@@ -338,19 +356,27 @@ export default function UsageForecastPage() {
                     const today = isToday(day);
                     const dk = dateKey(day);
                     return STORES.map((store, si) => {
-                      const sales = dailySalesByStore[store][dk];
-                      const isClosed = sales === null;
+                      const locId  = locationIdByName[store];
+                      const sales  = dailySalesByStore[store][dk];
+                      const isClosed   = sales === null;
                       const hasForecast = !isClosed && (sales ?? 0) > 0;
                       return (
                         <th
                           key={`${di}-${si}`}
-                          className={`text-center py-1 px-1 border-l font-semibold text-[10px] ${
+                          onClick={() => locId && toggleClosure.mutate({ locId, dk, isClosed })}
+                          className={`text-center py-1 px-1 border-l font-semibold text-[10px] cursor-pointer select-none transition-colors ${
                             si === 0 ? 'border-gray-200' : 'border-gray-50'
-                          } ${today ? 'bg-green-50/60' : ''} ${isClosed ? 'text-red-300' : hasForecast ? 'text-[#1B5E20]' : 'text-gray-300'}`}
+                          } ${today ? 'bg-green-50/60' : ''} ${
+                            isClosed
+                              ? 'bg-red-50 text-red-400 hover:bg-red-100'
+                              : hasForecast
+                                ? 'text-[#1B5E20] hover:bg-green-50'
+                                : 'text-gray-300 hover:bg-gray-50'
+                          }`}
                           style={{ minWidth: COL_W }}
-                          title={isClosed ? `${store} — closed` : `Forecasted net sales: ${store}`}
+                          title={isClosed ? `${store} is closed — click to reopen` : `Click to mark ${store} as closed`}
                         >
-                          {isClosed ? '🚫' : hasForecast ? `€${((sales as number) / 1000).toFixed(1)}k` : '—'}
+                          {isClosed ? '🚫 closed' : hasForecast ? `€${((sales as number) / 1000).toFixed(1)}k` : '—'}
                         </th>
                       );
                     });
