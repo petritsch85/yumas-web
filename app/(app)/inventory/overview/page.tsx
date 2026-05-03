@@ -308,6 +308,16 @@ function GroupView() {
 
 /* ─── Day Edit Modal ─────────────────────────────────────────────────────────── */
 type DayEditTarget = { dateKey: string; location: LocationName };
+type EditTab = 'items' | 'delete';
+
+type DeliveryLineEdit = {
+  id: string;
+  item_name: string;
+  section: string;
+  unit: string;
+  delivery_qty: number;   // REQ
+  packed_qty: number | null; // ACT
+};
 
 function DayEditModal({
   target, onClose, onDeleted,
@@ -316,38 +326,101 @@ function DayEditModal({
   onClose: () => void;
   onDeleted: () => void;
 }) {
+  const [tab, setTab] = useState<EditTab>('items');
   const [deleting, setDeleting] = useState<'delivery' | 'inventory' | 'both' | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // ── Edit items state ──────────────────────────────────────────────────────
+  const [edits, setEdits] = useState<Record<string, { req: string; act: string }>>({});
+  const [saving, setSaving] = useState(false);
+  const [saveOk, setSaveOk] = useState(false);
+
+  const { data: deliveryLines = [], isLoading: loadingLines } = useQuery({
+    queryKey: ['day-edit-lines', target.dateKey, target.location],
+    queryFn: async () => {
+      const { data: runs } = await supabase
+        .from('delivery_runs')
+        .select('id')
+        .eq('delivery_date', target.dateKey);
+      const runIds = (runs ?? []).map((r: { id: string }) => r.id);
+      if (runIds.length === 0) return [];
+      const { data: lines } = await supabase
+        .from('delivery_run_lines')
+        .select('id, item_name, section, unit, delivery_qty, packed_qty')
+        .in('run_id', runIds)
+        .eq('location_name', target.location)
+        .order('item_name');
+      return (lines ?? []) as DeliveryLineEdit[];
+    },
+    enabled: tab === 'items',
+  });
+
+  // Initialise edit state when lines load
+  const initEdits = () => {
+    const init: Record<string, { req: string; act: string }> = {};
+    for (const l of deliveryLines) {
+      if (!edits[l.id]) {
+        init[l.id] = {
+          req: String(l.delivery_qty),
+          act: l.packed_qty !== null ? String(l.packed_qty) : '',
+        };
+      }
+    }
+    if (Object.keys(init).length > 0) setEdits(prev => ({ ...init, ...prev }));
+  };
+
+  // Run init whenever lines arrive
+  useMemo(initEdits, [deliveryLines]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleSave = async () => {
+    setSaving(true);
+    setError(null);
+    setSaveOk(false);
+    try {
+      for (const line of deliveryLines) {
+        const e = edits[line.id];
+        if (!e) continue;
+        const newReq = Math.max(0, parseInt(e.req) || 0);
+        const newAct = e.act.trim() === '' ? null : Math.max(0, parseInt(e.act) || 0);
+        if (newReq === line.delivery_qty && newAct === line.packed_qty) continue;
+        const { error: err } = await supabase
+          .from('delivery_run_lines')
+          .update({ delivery_qty: newReq, packed_qty: newAct })
+          .eq('id', line.id);
+        if (err) throw new Error(err.message);
+      }
+      setSaveOk(true);
+      onDeleted(); // reuse to trigger table refresh
+      setTimeout(() => setSaveOk(false), 2000);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Save failed');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // ── Delete ────────────────────────────────────────────────────────────────
   const handleDelete = async (what: 'delivery' | 'inventory' | 'both') => {
     setDeleting(what);
     setError(null);
     try {
       if (what === 'delivery' || what === 'both') {
-        // Find run(s) for this date, delete lines for this location
         const { data: runs } = await supabase
-          .from('delivery_runs')
-          .select('id')
-          .eq('delivery_date', target.dateKey);
+          .from('delivery_runs').select('id').eq('delivery_date', target.dateKey);
         const runIds = (runs ?? []).map((r: { id: string }) => r.id);
         if (runIds.length > 0) {
           const { error: err } = await supabase
-            .from('delivery_run_lines')
-            .delete()
-            .in('run_id', runIds)
-            .eq('location_name', target.location);
+            .from('delivery_run_lines').delete()
+            .in('run_id', runIds).eq('location_name', target.location);
           if (err) throw new Error(err.message);
         }
       }
       if (what === 'inventory' || what === 'both') {
-        const dayStart = `${target.dateKey}T00:00:00`;
-        const dayEnd   = `${target.dateKey}T23:59:59`;
         const { error: err } = await supabase
-          .from('inventory_submissions')
-          .delete()
+          .from('inventory_submissions').delete()
           .eq('location_name', target.location)
-          .gte('submitted_at', dayStart)
-          .lte('submitted_at', dayEnd);
+          .gte('submitted_at', `${target.dateKey}T00:00:00`)
+          .lte('submitted_at', `${target.dateKey}T23:59:59`);
         if (err) throw new Error(err.message);
       }
       onDeleted();
@@ -363,60 +436,140 @@ function DayEditModal({
   const label = d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
       <div
-        className="bg-white rounded-xl shadow-xl border border-gray-200 w-80 p-5"
+        className="bg-white rounded-xl shadow-2xl border border-gray-200 w-full max-w-xl flex flex-col"
+        style={{ maxHeight: '85vh' }}
         onClick={e => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between mb-1">
-          <h3 className="font-semibold text-gray-900 text-sm">Edit Day Data</h3>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition-colors">
-            <X size={16} />
+        {/* Header */}
+        <div className="flex items-start justify-between px-5 pt-4 pb-3 border-b border-gray-100">
+          <div>
+            <h3 className="font-bold text-gray-900 text-base">Edit Day Data</h3>
+            <p className="text-xs text-gray-500 mt-0.5">
+              <span className="font-semibold text-gray-700">{target.location}</span> · {label}
+            </p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition-colors mt-0.5">
+            <X size={17} />
           </button>
         </div>
-        <p className="text-xs text-gray-500 mb-4">
-          <span className="font-medium text-gray-700">{target.location}</span> · {label}
-        </p>
+
+        {/* Tabs */}
+        <div className="flex border-b border-gray-100 px-5">
+          {([['items', 'Edit Items'], ['delete', 'Delete']] as [EditTab, string][]).map(([key, label]) => (
+            <button
+              key={key}
+              onClick={() => { setTab(key); setError(null); }}
+              className={`py-2.5 px-1 mr-5 text-sm font-medium border-b-2 -mb-px transition-colors ${
+                tab === key ? 'border-[#1B5E20] text-[#1B5E20]' : 'border-transparent text-gray-400 hover:text-gray-600'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
 
         {error && (
-          <div className="mb-3 text-xs text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
+          <div className="mx-5 mt-3 text-xs text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
             {error}
           </div>
         )}
 
-        <div className="space-y-2">
-          <button
-            disabled={!!deleting}
-            onClick={() => handleDelete('delivery')}
-            className="w-full flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 hover:bg-red-50 hover:border-red-200 hover:text-red-700 transition-colors disabled:opacity-50 text-left"
-          >
-            <Trash2 size={14} />
-            {deleting === 'delivery' ? 'Deleting…' : 'Delete delivery data (REQ / ACT)'}
-          </button>
-          <button
-            disabled={!!deleting}
-            onClick={() => handleDelete('inventory')}
-            className="w-full flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 hover:bg-red-50 hover:border-red-200 hover:text-red-700 transition-colors disabled:opacity-50 text-left"
-          >
-            <Trash2 size={14} />
-            {deleting === 'inventory' ? 'Deleting…' : 'Delete inventory count (START / END)'}
-          </button>
-          <button
-            disabled={!!deleting}
-            onClick={() => handleDelete('both')}
-            className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-red-50 border border-red-200 text-sm text-red-700 font-medium hover:bg-red-100 transition-colors disabled:opacity-50 text-left"
-          >
-            <Trash2 size={14} />
-            {deleting === 'both' ? 'Deleting…' : 'Delete all data for this day'}
-          </button>
-        </div>
+        {/* ── EDIT ITEMS TAB ── */}
+        {tab === 'items' && (
+          <>
+            <div className="flex-1 overflow-y-auto px-5 py-3">
+              {loadingLines ? (
+                <div className="py-8 text-center text-xs text-gray-400">Loading delivery data…</div>
+              ) : deliveryLines.length === 0 ? (
+                <div className="py-8 text-center text-xs text-gray-400">No delivery data found for this day.</div>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-xs text-gray-400 uppercase tracking-wide border-b border-gray-100">
+                      <th className="text-left py-2 font-medium">Item</th>
+                      <th className="text-left py-2 font-medium text-gray-300">Unit</th>
+                      <th className="text-center py-2 font-medium w-20">REQ</th>
+                      <th className="text-center py-2 font-medium w-20">ACT</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-50">
+                    {deliveryLines.map(line => {
+                      const e = edits[line.id] ?? { req: String(line.delivery_qty), act: line.packed_qty !== null ? String(line.packed_qty) : '' };
+                      return (
+                        <tr key={line.id} className="hover:bg-gray-50/50">
+                          <td className="py-2 font-medium text-gray-800 pr-2">{line.item_name}</td>
+                          <td className="py-2 text-xs text-gray-400 pr-3 whitespace-nowrap">{line.unit}</td>
+                          <td className="py-2 text-center">
+                            <input
+                              type="number" min="0"
+                              value={e.req}
+                              onChange={ev => setEdits(prev => ({ ...prev, [line.id]: { ...e, req: ev.target.value } }))}
+                              className="w-16 text-center border border-gray-200 rounded-md px-1.5 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/40 bg-white tabular-nums"
+                            />
+                          </td>
+                          <td className="py-2 text-center">
+                            <input
+                              type="number" min="0"
+                              placeholder="—"
+                              value={e.act}
+                              onChange={ev => setEdits(prev => ({ ...prev, [line.id]: { ...e, act: ev.target.value } }))}
+                              className="w-16 text-center border border-gray-200 rounded-md px-1.5 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400/40 bg-white tabular-nums placeholder-gray-300"
+                            />
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </div>
+            {deliveryLines.length > 0 && (
+              <div className="px-5 py-3 border-t border-gray-100 flex items-center justify-between gap-3">
+                <p className="text-xs text-gray-400">REQ = requested, ACT = actually delivered</p>
+                <button
+                  onClick={handleSave}
+                  disabled={saving}
+                  className="px-4 py-2 rounded-lg bg-[#1B5E20] text-white text-sm font-semibold hover:bg-[#2E7D32] transition-colors disabled:opacity-50 flex items-center gap-2"
+                >
+                  {saving ? 'Saving…' : saveOk ? '✓ Saved' : 'Save changes'}
+                </button>
+              </div>
+            )}
+          </>
+        )}
 
-        <button
-          onClick={onClose}
-          className="mt-3 w-full text-center text-xs text-gray-400 hover:text-gray-600 transition-colors py-1"
-        >
-          Cancel
-        </button>
+        {/* ── DELETE TAB ── */}
+        {tab === 'delete' && (
+          <div className="px-5 py-4 space-y-2">
+            <p className="text-xs text-gray-400 mb-3">Permanently remove data for this location and date.</p>
+            <button
+              disabled={!!deleting}
+              onClick={() => handleDelete('delivery')}
+              className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg border border-gray-200 text-sm text-gray-700 hover:bg-red-50 hover:border-red-200 hover:text-red-700 transition-colors disabled:opacity-50 text-left"
+            >
+              <Trash2 size={14} />
+              {deleting === 'delivery' ? 'Deleting…' : 'Delete delivery data (REQ / ACT)'}
+            </button>
+            <button
+              disabled={!!deleting}
+              onClick={() => handleDelete('inventory')}
+              className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg border border-gray-200 text-sm text-gray-700 hover:bg-red-50 hover:border-red-200 hover:text-red-700 transition-colors disabled:opacity-50 text-left"
+            >
+              <Trash2 size={14} />
+              {deleting === 'inventory' ? 'Deleting…' : 'Delete inventory count (START / END)'}
+            </button>
+            <button
+              disabled={!!deleting}
+              onClick={() => handleDelete('both')}
+              className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg bg-red-50 border border-red-200 text-sm text-red-700 font-semibold hover:bg-red-100 transition-colors disabled:opacity-50 text-left"
+            >
+              <Trash2 size={14} />
+              {deleting === 'both' ? 'Deleting…' : 'Delete ALL data for this day'}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -792,10 +945,10 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
                         }`}
                         title="Click to edit / delete data for this day"
                       >
-                        <span className="inline-flex items-center gap-1">
+                        <span className="inline-flex items-center gap-1.5">
                           {fmtDayLabel(day)}
-                          <span className="opacity-0 group-hover/dayhead:opacity-60 transition-opacity text-gray-400">
-                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                          <span className="opacity-40 group-hover/dayhead:opacity-80 transition-opacity text-gray-400">
+                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
                           </span>
                         </span>
                       </th>
