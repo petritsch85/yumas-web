@@ -154,6 +154,58 @@ export default function UsageForecastPage() {
 
   const qc = useQueryClient(); // eslint-disable-line @typescript-eslint/no-unused-vars
 
+  /* Historical Simply/OB ratio — past 90 days for all locations.
+     Used to scale the Orderbird forecast to include estimated delivery revenue. */
+  const histStart = useMemo(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 90);
+    return dateKey(d);
+  }, []);
+  const histEnd = useMemo(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 1); // up to yesterday (today has no actuals yet)
+    return dateKey(d);
+  }, []);
+
+  const { data: histShifts = [] } = useQuery({
+    queryKey: ['hist-shifts-ratio', histStart],
+    staleTime: 5 * 60 * 1000, // 5 min — doesn't change often
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('shift_reports')
+        .select('location_id, net_total')
+        .gte('report_date', histStart)
+        .lte('report_date', histEnd);
+      return (data ?? []) as { location_id: string; net_total: number }[];
+    },
+  });
+
+  const { data: histDeliveries = [] } = useQuery({
+    queryKey: ['hist-deliveries-ratio', histStart],
+    staleTime: 5 * 60 * 1000,
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('delivery_reports')
+        .select('location_id, net_revenue')
+        .gte('report_date', histStart)
+        .lte('report_date', histEnd);
+      return (data ?? []) as { location_id: string; net_revenue: number }[];
+    },
+  });
+
+  /* Simply/OB ratio per location_id — computed from 90-day history */
+  const simplyRatioByLocId = useMemo(() => {
+    const obByLoc:  Record<string, number> = {};
+    const simByLoc: Record<string, number> = {};
+    for (const r of histShifts)    obByLoc[r.location_id]  = (obByLoc[r.location_id]  ?? 0) + (r.net_total   ?? 0);
+    for (const r of histDeliveries) simByLoc[r.location_id] = (simByLoc[r.location_id] ?? 0) + (r.net_revenue ?? 0);
+    const out: Record<string, number> = {};
+    for (const locId of Object.keys(obByLoc)) {
+      if (obByLoc[locId] > 0) out[locId] = (simByLoc[locId] ?? 0) / obByLoc[locId];
+    }
+    return out;
+  }, [histShifts, histDeliveries]);
+
   /* Fetch actual Orderbird shift_reports for the week — always fresh */
   const { data: weekShiftRows = [], refetch: refetchShifts } = useQuery({
     queryKey: ['shift-reports-week', weekStart, weekEnd],
@@ -288,7 +340,7 @@ export default function UsageForecastPage() {
     },
   });
 
-  /* Build location name → forecast settings lookup */
+  /* Build location name → id lookup (single source) */
   const locationIdByName = useMemo(() => {
     const m: Record<string, string> = {};
     for (const loc of locations) m[loc.name] = loc.id;
@@ -296,27 +348,20 @@ export default function UsageForecastPage() {
   }, [locations]);
 
   /* Actual net sales per location+date: Orderbird + Simply + Bills */
-  const locationIdByName2 = useMemo(() => {
-    const m: Record<string, string> = {};
-    for (const loc of locations) m[loc.name] = loc.id;
-    return m;
-  }, [locations]);
-
   const actualSalesByLocDate = useMemo(() => {
     const m: Record<string, number> = {};
     for (const r of weekShiftRows)
       m[`${r.location_id}:${r.report_date}`] = (m[`${r.location_id}:${r.report_date}`] ?? 0) + (r.net_total ?? 0);
     for (const r of weekDeliveryRows)
       m[`${r.location_id}:${r.report_date}`] = (m[`${r.location_id}:${r.report_date}`] ?? 0) + (r.net_revenue ?? 0);
-    // Bills: join issuing_location name → location_id
     for (const b of weekBillRows) {
       if (!b.event_date) continue;
-      const locId = locationIdByName2[b.issuing_location];
+      const locId = locationIdByName[b.issuing_location];
       if (!locId) continue;
       m[`${locId}:${b.event_date}`] = (m[`${locId}:${b.event_date}`] ?? 0) + (b.net_total ?? 0);
     }
     return m;
-  }, [weekShiftRows, weekDeliveryRows, weekBillRows, locationIdByName2]);
+  }, [weekShiftRows, weekDeliveryRows, weekBillRows, locationIdByName]);
 
   /* Per store+day: null=closed, { val, isActual } otherwise */
   type DaySales = { val: number; isActual: boolean } | null;
@@ -337,15 +382,18 @@ export default function UsageForecastPage() {
           // Uploaded data exists — show it as actual
           result[store][dk] = { val: actualSalesByLocDate[actualKey], isActual: true };
         } else {
-          // No actuals — use forecast
+          // No actuals — use forecast (OB) scaled by historical Simply/OB ratio
           const l = lunchS  ? computeDailyForecast(dk, lunchS)  : 0;
           const d = dinnerS ? computeDailyForecast(dk, dinnerS) : 0;
-          result[store][dk] = { val: l + d, isActual: false };
+          const obForecast    = l + d;
+          const simplyRatio   = simplyRatioByLocId[locId] ?? 0;
+          const simplyForecast = Math.round(obForecast * simplyRatio);
+          result[store][dk] = { val: obForecast + simplyForecast, isActual: false };
         }
       }
     }
     return result;
-  }, [locationIdByName, allForecastSettings, weekDays, closedSet, actualSalesByLocDate]);
+  }, [locationIdByName, allForecastSettings, weekDays, closedSet, actualSalesByLocDate, simplyRatioByLocId]);
 
   /* Group items by section in canonical order */
   const sections = useMemo(() => {
