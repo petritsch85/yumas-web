@@ -79,6 +79,7 @@ export interface AppPermissions {
   pl_reports:   boolean;
   suppliers:    boolean;
   products:     boolean;
+  recipe_edit:  boolean;
 }
 
 export interface Profile {

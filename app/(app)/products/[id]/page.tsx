@@ -69,6 +69,18 @@ export default function RecipeDetailPage() {
 
   const [editing, setEditing] = useState(false);
   const [showVideoModal, setShowVideoModal] = useState(false);
+
+  /* ── Current user profile → permission check ── */
+  const { data: profile } = useQuery({
+    queryKey: ['my-profile'],
+    queryFn: async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return null;
+      const { data } = await supabase.from('profiles').select('role, permissions').eq('id', user.id).single();
+      return data as { role: string; permissions: Record<string, boolean> } | null;
+    },
+  });
+  const canEdit = profile?.role === 'admin' || !!profile?.permissions?.recipe_edit;
   const [videoInput, setVideoInput] = useState('');
   const [videoSaving, setVideoSaving] = useState(false);
   const [photoUploading, setPhotoUploading] = useState(false);
@@ -312,44 +324,46 @@ export default function RecipeDetailPage() {
           <h1 className="text-2xl font-bold text-gray-900 leading-tight">{item?.name ?? '…'}</h1>
         </div>
 
-        {/* Action buttons */}
-        <div className="flex items-center gap-2 flex-shrink-0">
-          {/* Add Photos */}
-          <button
-            onClick={() => photoInputRef.current?.click()}
-            disabled={photoUploading}
-            className="flex items-center gap-1.5 border border-gray-200 text-gray-700 px-3 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors disabled:opacity-50"
-          >
-            <ImagePlus size={14} />
-            {photoUploading ? 'Uploading…' : 'Add Photos'}
-          </button>
-          <input ref={photoInputRef} type="file" accept="image/*" multiple className="hidden" onChange={e => handlePhotoFiles(e.target.files)} />
-
-          {/* Add / Change Video */}
-          <button
-            onClick={() => { setVideoInput(recipe?.video_url ?? ''); setShowVideoModal(true); }}
-            className="flex items-center gap-1.5 border border-gray-200 text-gray-700 px-3 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors"
-          >
-            <Video size={14} />
-            {recipe?.video_url ? 'Change Video' : 'Add Video'}
-          </button>
-
-          {/* Edit recipe */}
-          {editing ? (
-            <>
-              <button onClick={handleCancel} className="flex items-center gap-1.5 border border-gray-200 text-gray-600 px-3 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors">
-                <X size={14} />Cancel
-              </button>
-              <button onClick={handleSave} disabled={saving} className="flex items-center gap-1.5 bg-[#1B5E20] text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-[#2E7D32] transition-colors disabled:opacity-60">
-                <Save size={14} />{saving ? 'Saving…' : 'Save'}
-              </button>
-            </>
-          ) : (
-            <button onClick={handleEdit} className="flex items-center gap-1.5 border border-gray-200 text-gray-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors">
-              <Pencil size={14} />Edit
+        {/* Action buttons — only shown to users with recipe_edit permission */}
+        {canEdit && (
+          <div className="flex items-center gap-2 flex-shrink-0">
+            {/* Add Photos */}
+            <button
+              onClick={() => photoInputRef.current?.click()}
+              disabled={photoUploading}
+              className="flex items-center gap-1.5 border border-gray-200 text-gray-700 px-3 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors disabled:opacity-50"
+            >
+              <ImagePlus size={14} />
+              {photoUploading ? 'Uploading…' : 'Add Photos'}
             </button>
-          )}
-        </div>
+            <input ref={photoInputRef} type="file" accept="image/*" multiple className="hidden" onChange={e => handlePhotoFiles(e.target.files)} />
+
+            {/* Add / Change Video */}
+            <button
+              onClick={() => { setVideoInput(recipe?.video_url ?? ''); setShowVideoModal(true); }}
+              className="flex items-center gap-1.5 border border-gray-200 text-gray-700 px-3 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors"
+            >
+              <Video size={14} />
+              {recipe?.video_url ? 'Change Video' : 'Add Video'}
+            </button>
+
+            {/* Edit recipe */}
+            {editing ? (
+              <>
+                <button onClick={handleCancel} className="flex items-center gap-1.5 border border-gray-200 text-gray-600 px-3 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors">
+                  <X size={14} />Cancel
+                </button>
+                <button onClick={handleSave} disabled={saving} className="flex items-center gap-1.5 bg-[#1B5E20] text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-[#2E7D32] transition-colors disabled:opacity-60">
+                  <Save size={14} />{saving ? 'Saving…' : 'Save'}
+                </button>
+              </>
+            ) : (
+              <button onClick={handleEdit} className="flex items-center gap-1.5 border border-gray-200 text-gray-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors">
+                <Pencil size={14} />Edit
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {saved && (
