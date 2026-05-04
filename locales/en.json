@@ -548,7 +548,10 @@
     "finishedGoodsDesc": "Final products ready for service",
     "noProducts": "No products found",
     "searchProducts": "Search products...",
-    "addProduct": "Add Product"
+    "addProduct": "Add Product",
+    "nameTranslations": "Item Name Translations",
+    "nameTranslationsDesc": "Set how this item appears in each language. Leave blank to fall back to the primary name.",
+    "namesSaved": "Names saved"
   },
   "menus": {
     "subtitle": "View and manage your restaurant menus",

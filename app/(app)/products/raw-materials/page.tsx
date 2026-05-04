@@ -7,12 +7,13 @@ import { useRouter } from 'next/navigation';
 import { Search, Plus } from 'lucide-react';
 import type { Item } from '@/types';
 import { useT } from '@/lib/i18n';
+import { localizedName } from '@/lib/localized-name';
 
 const FOOD_CATEGORIES = ['Meat & Fish', 'Dairy & Eggs', 'Fruit & Vegetables', 'Dry Goods', 'Prepared Items'];
 
 export default function RawMaterialsPage() {
   const router = useRouter();
-  const { t } = useT();
+  const { t, lang } = useT();
   const [search, setSearch]             = useState('');
   const [activeCategory, setActiveCategory] = useState<string>('All');
 
@@ -52,7 +53,8 @@ export default function RawMaterialsPage() {
   }, [items]);
 
   const filtered = (items ?? []).filter((i) => {
-    const matchesSearch   = i.name.toLowerCase().includes(search.toLowerCase());
+    const displayName     = localizedName(i, lang).toLowerCase();
+    const matchesSearch   = displayName.includes(search.toLowerCase()) || i.name.toLowerCase().includes(search.toLowerCase());
     const matchesCategory = activeCategory === 'All' || i.category?.name === activeCategory;
     return matchesSearch && matchesCategory;
   });
@@ -146,7 +148,7 @@ export default function RawMaterialsPage() {
                     onClick={() => router.push(`/products/${item.id}`)}
                   >
                     <td className="px-4 py-3 text-gray-500 font-mono text-xs">{skuMap[item.id] ?? '—'}</td>
-                    <td className="px-4 py-3 text-gray-900 font-medium">{item.name}</td>
+                    <td className="px-4 py-3 text-gray-900 font-medium">{localizedName(item, lang)}</td>
                     <td className="px-4 py-3">
                       {item.category ? (
                         <span className="inline-flex items-center gap-1.5">

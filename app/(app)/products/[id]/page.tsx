@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { useState, useEffect, useId, useRef } from 'react';
 import { useT } from '@/lib/i18n';
+import { localizedName } from '@/lib/localized-name';
 
 /* ─── Types ──────────────────────────────────────────────────────────────── */
 interface IngredientRow {
@@ -62,7 +63,7 @@ function getEmbedUrl(raw: string): string | null {
 
 /* ─── Component ──────────────────────────────────────────────────────────── */
 export default function RecipeDetailPage() {
-  const { t } = useT();
+  const { t, lang } = useT();
   const { id: itemId } = useParams<{ id: string }>();
   const router = useRouter();
   const qc = useQueryClient();
@@ -94,7 +95,7 @@ export default function RecipeDetailPage() {
     queryFn: async () => {
       const { data } = await supabase
         .from('items')
-        .select('id, name, product_type, category:categories(id, name, color_hex), unit:units_of_measure(id, name, abbreviation)')
+        .select('id, name, name_en, name_de, name_es, product_type, category:categories(id, name, color_hex), unit:units_of_measure(id, name, abbreviation)')
         .eq('id', itemId)
         .single();
       return data;
@@ -107,7 +108,7 @@ export default function RecipeDetailPage() {
     queryFn: async () => {
       const { data } = await supabase
         .from('items')
-        .select('id, name, product_type')
+        .select('id, name, name_en, name_de, name_es, product_type')
         .in('product_type', ['raw_material', 'semi_finished'])
         .eq('is_active', true)
         .order('name');
@@ -146,11 +147,11 @@ export default function RecipeDetailPage() {
     queryFn: async () => {
       const { data } = await supabase
         .from('recipe_ingredients')
-        .select('id, item_id, quantity, unit_id, notes, ingredient:items(name), unit:units_of_measure(name, abbreviation)')
+        .select('id, item_id, quantity, unit_id, notes, ingredient:items(name, name_en, name_de, name_es), unit:units_of_measure(name, abbreviation)')
         .eq('recipe_id', recipe!.id)
         .order('id');
       return (data ?? []) as unknown as (IngredientRow & {
-        ingredient?: { name: string } | null;
+        ingredient?: { name: string; name_en?: string | null; name_de?: string | null; name_es?: string | null } | null;
         unit?: { name: string; abbreviation: string | null } | null;
       })[];
     },
@@ -177,6 +178,11 @@ export default function RecipeDetailPage() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
+  /* ── Item name translations ── */
+  const [nameDraft, setNameDraft] = useState({ en: '', de: '', es: '' });
+  const [nameSaving, setNameSaving] = useState(false);
+  const [nameSaved, setNameSaved] = useState(false);
+
   const syncFromDb = () => {
     setOutputQty(recipe?.output_quantity != null ? String(recipe.output_quantity) : '');
     setYieldPct(recipe?.yield_percent != null ? String(recipe.yield_percent) : '');
@@ -189,6 +195,13 @@ export default function RecipeDetailPage() {
   };
 
   useEffect(() => { syncFromDb(); }, [recipe, savedIngredients]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (item) {
+      const i = item as { name_en?: string | null; name_de?: string | null; name_es?: string | null };
+      setNameDraft({ en: i.name_en ?? '', de: i.name_de ?? '', es: i.name_es ?? '' });
+    }
+  }, [item]);
 
   const handleEdit   = () => { syncFromDb(); setEditing(true); };
   const handleCancel = () => { syncFromDb(); setEditing(false); };
@@ -226,6 +239,31 @@ export default function RecipeDetailPage() {
       setTimeout(() => setSaved(false), 3000);
     } catch (err) { console.error(err); alert('Save failed: ' + (err instanceof Error ? err.message : String(err))); }
     finally { setSaving(false); }
+  };
+
+  /* ── Save item name translations ── */
+  const handleSaveNames = async () => {
+    setNameSaving(true);
+    try {
+      const { error } = await supabase
+        .from('items')
+        .update({
+          name_en: nameDraft.en.trim() || null,
+          name_de: nameDraft.de.trim() || null,
+          name_es: nameDraft.es.trim() || null,
+        })
+        .eq('id', itemId);
+      if (error) throw error;
+      await qc.invalidateQueries({ queryKey: ['item', itemId] });
+      await qc.invalidateQueries({ queryKey: ['items-for-select'] });
+      await qc.invalidateQueries({ queryKey: ['recipe-ingredients', itemId] });
+      setNameSaved(true);
+      setTimeout(() => setNameSaved(false), 3000);
+    } catch (err) {
+      alert('Save failed: ' + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setNameSaving(false);
+    }
   };
 
   /* ── Ensure recipe row exists (needed before adding photos/video) ── */
@@ -323,7 +361,7 @@ export default function RecipeDetailPage() {
             <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: catColor }} />
             <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">{catName}</span>
           </div>
-          <h1 className="text-2xl font-bold text-gray-900 leading-tight">{item?.name ?? '…'}</h1>
+          <h1 className="text-2xl font-bold text-gray-900 leading-tight">{item ? localizedName(item as { name: string; name_en?: string | null; name_de?: string | null; name_es?: string | null }, lang) : '…'}</h1>
         </div>
 
         {/* Action buttons — only shown to users with recipe_edit permission */}
@@ -371,6 +409,54 @@ export default function RecipeDetailPage() {
       {saved && (
         <div className="bg-green-50 border border-green-200 text-green-700 text-sm rounded-xl px-4 py-3">
           Recipe saved successfully.
+        </div>
+      )}
+
+      {/* ── Item Name Translations (admin only) ── */}
+      {profile?.role === 'admin' && (
+        <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5 space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="font-semibold text-gray-900 text-sm">{t('products.nameTranslations')}</h2>
+            {nameSaved && <span className="text-xs text-green-600 font-medium">✓ {t('products.namesSaved')}</span>}
+          </div>
+          <p className="text-xs text-gray-400">{t('products.nameTranslationsDesc')}</p>
+          <div className="space-y-3">
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">🇬🇧 {t('language.en')}</label>
+              <input
+                value={nameDraft.en}
+                onChange={e => setNameDraft(d => ({ ...d, en: e.target.value }))}
+                placeholder={item?.name}
+                className="w-full border-2 border-gray-300 bg-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20]"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">🇩🇪 {t('language.de')}</label>
+              <input
+                value={nameDraft.de}
+                onChange={e => setNameDraft(d => ({ ...d, de: e.target.value }))}
+                placeholder={item?.name}
+                className="w-full border-2 border-gray-300 bg-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20]"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">🇪🇸 {t('language.es')}</label>
+              <input
+                value={nameDraft.es}
+                onChange={e => setNameDraft(d => ({ ...d, es: e.target.value }))}
+                placeholder={item?.name}
+                className="w-full border-2 border-gray-300 bg-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20]"
+              />
+            </div>
+          </div>
+          <button
+            onClick={handleSaveNames}
+            disabled={nameSaving}
+            className="flex items-center gap-1.5 bg-[#1B5E20] text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-[#2E7D32] transition-colors disabled:opacity-60"
+          >
+            <Save size={14} />
+            {nameSaving ? t('common.saving') : t('common.save')}
+          </button>
         </div>
       )}
 
@@ -450,7 +536,7 @@ export default function RecipeDetailPage() {
                       <select value={row.item_id} onChange={e => updateRow(idx, { item_id: e.target.value })}
                         className="w-full appearance-none border-2 border-gray-300 rounded-lg pl-3 pr-7 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20] text-gray-900">
                         <option value="">Select…</option>
-                        {allItems.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}
+                        {allItems.map(i => <option key={i.id} value={i.id}>{localizedName(i as { name: string; name_en?: string | null; name_de?: string | null; name_es?: string | null }, lang)}</option>)}
                       </select>
                       <ChevronDown size={13} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
                     </div>
@@ -490,7 +576,7 @@ export default function RecipeDetailPage() {
                     return normalizeQty(b.quantity, unitB) - normalizeQty(a.quantity, unitA);
                   })
                   .map((row, idx) => {
-                    const ingredientName = (row as { ingredient?: { name: string } | null }).ingredient?.name ?? '—';
+                    const ingredientName = localizedName((row as { ingredient?: { name: string; name_en?: string | null; name_de?: string | null; name_es?: string | null } | null }).ingredient, lang);
                     const unitRow = (row as { unit?: { name: string; abbreviation: string | null } | null }).unit;
                     const unitName = unitRow?.abbreviation || unitRow?.name || '—';
                     return (

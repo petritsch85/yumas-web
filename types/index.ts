@@ -11,6 +11,7 @@ export interface Item {
   description: string | null; product_type: ProductType | null;
   product_group: string | null; is_purchasable: boolean;
   is_produced: boolean; is_active: boolean; image_url: string | null;
+  name_en?: string | null; name_de?: string | null; name_es?: string | null;
   category?: { id: string; name: string; color_hex: string | null };
   unit?: { id: string; name: string; abbreviation: string };
 }

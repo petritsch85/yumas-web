@@ -7,10 +7,11 @@ import { useRouter } from 'next/navigation';
 import { Search, Plus, ChevronRight } from 'lucide-react';
 import type { Item } from '@/types';
 import { useT } from '@/lib/i18n';
+import { localizedName } from '@/lib/localized-name';
 
 export default function RecipesListPage() {
   const router = useRouter();
-  const { t } = useT();
+  const { t, lang } = useT();
   const [search, setSearch] = useState('');
 
   const { data: items = [], isLoading } = useQuery({
@@ -26,9 +27,10 @@ export default function RecipesListPage() {
     },
   });
 
-  const filtered = items.filter(i =>
-    i.name.toLowerCase().includes(search.toLowerCase())
-  );
+  const filtered = items.filter(i => {
+    const display = localizedName(i, lang).toLowerCase();
+    return display.includes(search.toLowerCase()) || i.name.toLowerCase().includes(search.toLowerCase());
+  });
 
   /* Group by category */
   const grouped = filtered.reduce<Record<string, { color: string; items: Item[] }>>((acc, item) => {
@@ -107,7 +109,7 @@ export default function RecipesListPage() {
 
                     {/* Name + category */}
                     <div className="flex-1 min-w-0">
-                      <div className="font-semibold text-gray-900 text-sm leading-snug">{item.name}</div>
+                      <div className="font-semibold text-gray-900 text-sm leading-snug">{localizedName(item, lang)}</div>
                       <div className="text-xs text-gray-400 mt-0.5">{cat}</div>
                     </div>
 

@@ -7,10 +7,11 @@ import { useRouter } from 'next/navigation';
 import { Search, Plus } from 'lucide-react';
 import type { Item } from '@/types';
 import { useT } from '@/lib/i18n';
+import { localizedName } from '@/lib/localized-name';
 
 export default function FinishedGoodsPage() {
   const router = useRouter();
-  const { t } = useT();
+  const { t, lang } = useT();
   const [search, setSearch] = useState('');
 
   const { data: items, isLoading } = useQuery({
@@ -26,9 +27,10 @@ export default function FinishedGoodsPage() {
     },
   });
 
-  const filtered = (items ?? []).filter((i) =>
-    i.name.toLowerCase().includes(search.toLowerCase())
-  );
+  const filtered = (items ?? []).filter((i) => {
+    const display = localizedName(i, lang).toLowerCase();
+    return display.includes(search.toLowerCase()) || i.name.toLowerCase().includes(search.toLowerCase());
+  });
 
   return (
     <div>
@@ -77,7 +79,7 @@ export default function FinishedGoodsPage() {
                     className="border-t border-gray-100 hover:bg-gray-50 cursor-pointer"
                     onClick={() => router.push(`/products/${item.id}`)}
                   >
-                    <td className="px-4 py-3 text-gray-900 font-medium">{item.name}</td>
+                    <td className="px-4 py-3 text-gray-900 font-medium">{localizedName(item, lang)}</td>
                     <td className="px-4 py-3 text-gray-600">
                       {item.category ? (
                         <span className="inline-flex items-center gap-1.5">
