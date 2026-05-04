@@ -281,7 +281,7 @@ export default function RecipeDetailPage() {
                   value={outputQty}
                   onChange={e => setOutputQty(e.target.value)}
                   placeholder="e.g. 10"
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20]"
+                  className="w-full border-2 border-gray-300 bg-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20]"
                 />
               </div>
               <div>
@@ -291,7 +291,7 @@ export default function RecipeDetailPage() {
                   value={yieldPct}
                   onChange={e => setYieldPct(e.target.value)}
                   placeholder="e.g. 95"
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20]"
+                  className="w-full border-2 border-gray-300 bg-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20]"
                 />
               </div>
             </div>
@@ -302,7 +302,7 @@ export default function RecipeDetailPage() {
                 value={instructions}
                 onChange={e => setInstructions(e.target.value)}
                 placeholder="Add preparation notes…"
-                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20] resize-none"
+                className="w-full border-2 border-gray-300 bg-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20] resize-none"
               />
             </div>
           </>
@@ -363,7 +363,7 @@ export default function RecipeDetailPage() {
                       <select
                         value={row.item_id}
                         onChange={e => updateRow(idx, { item_id: e.target.value })}
-                        className="w-full appearance-none border border-gray-200 rounded-lg pl-3 pr-7 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20] text-gray-900"
+                        className="w-full appearance-none border-2 border-gray-300 rounded-lg pl-3 pr-7 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20] text-gray-900"
                       >
                         <option value="">Select…</option>
                         {allItems.map(i => (
@@ -377,13 +377,13 @@ export default function RecipeDetailPage() {
                       value={row.quantity}
                       onChange={e => updateRow(idx, { quantity: e.target.value })}
                       placeholder="0"
-                      className="w-full border border-gray-200 rounded-lg px-2 py-2 text-sm text-center focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20]"
+                      className="w-full border-2 border-gray-300 bg-white rounded-lg px-2 py-2 text-sm text-center focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20]"
                     />
                     <div className="relative">
                       <select
                         value={row.unit_id}
                         onChange={e => updateRow(idx, { unit_id: e.target.value })}
-                        className="w-full appearance-none border border-gray-200 rounded-lg pl-2 pr-6 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20] text-gray-900"
+                        className="w-full appearance-none border-2 border-gray-300 rounded-lg pl-2 pr-6 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20] text-gray-900"
                       >
                         <option value="">—</option>
                         {units.map(u => (
