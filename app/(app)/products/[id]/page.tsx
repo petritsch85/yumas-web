@@ -439,13 +439,6 @@ export default function RecipeDetailPage() {
             {/* Edit recipe */}
             {editing ? (
               <>
-                <button
-                  onClick={handleDeleteRecipe}
-                  disabled={deleting}
-                  className="flex items-center gap-1.5 border border-red-200 text-red-600 px-3 py-2 rounded-lg text-sm font-medium hover:bg-red-50 transition-colors disabled:opacity-60"
-                >
-                  <Trash2 size={14} />{deleting ? 'Deleting…' : 'Delete Recipe'}
-                </button>
                 <button onClick={handleCancel} className="flex items-center gap-1.5 border border-gray-200 text-gray-600 px-3 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors">
                   <X size={14} />Cancel
                 </button>
@@ -907,6 +900,19 @@ export default function RecipeDetailPage() {
           <img src={lightboxSrc} alt="" className="max-w-full max-h-full rounded-lg object-contain" onClick={e => e.stopPropagation()} />
           <button onClick={() => setLightboxSrc(null)} className="absolute top-4 right-4 text-white/70 hover:text-white">
             <X size={28} />
+          </button>
+        </div>
+      )}
+
+      {/* ── Delete Recipe (edit mode only) ── */}
+      {canEdit && editing && (
+        <div className="pt-2 pb-4">
+          <button
+            onClick={handleDeleteRecipe}
+            disabled={deleting}
+            className="w-full flex items-center justify-center gap-2 border border-red-200 text-red-600 px-4 py-3 rounded-xl text-sm font-medium hover:bg-red-50 transition-colors disabled:opacity-60"
+          >
+            <Trash2 size={15} />{deleting ? 'Deleting…' : 'Delete Recipe'}
           </button>
         </div>
       )}
