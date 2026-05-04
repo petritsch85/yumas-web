@@ -6,9 +6,11 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Search, Plus, ChevronRight } from 'lucide-react';
 import type { Item } from '@/types';
+import { useT } from '@/lib/i18n';
 
 export default function RecipesListPage() {
   const router = useRouter();
+  const { t } = useT();
   const [search, setSearch] = useState('');
 
   const { data: items = [], isLoading } = useQuery({
@@ -43,13 +45,13 @@ export default function RecipesListPage() {
     <div className="max-w-2xl mx-auto space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900">Recipes</h1>
+        <h1 className="text-2xl font-bold text-gray-900">{t('products.semiFinished')}</h1>
         <button
           onClick={() => router.push('/products/semi-finished/new')}
           className="bg-[#1B5E20] text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-[#2E7D32] transition-colors flex items-center gap-2"
         >
           <Plus size={16} />
-          New Recipe
+          {t('recipes.newRecipe')}
         </button>
       </div>
 

@@ -86,4 +86,5 @@ export interface Profile {
   id: string; full_name: string; role: UserRole;
   location_id: string | null; is_active: boolean;
   permissions?: Partial<AppPermissions>;
+  language?: 'en' | 'de' | 'es';
 }

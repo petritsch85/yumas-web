@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
 import { useState } from 'react';
 import { ChevronDown, ChevronRight, Trash2, Pencil, X, Check } from 'lucide-react';
+import { useT } from '@/lib/i18n';
 
 type SubmissionRow = {
   id: string;
@@ -45,14 +46,14 @@ function localDateKey(iso: string): string {
 }
 
 /** Human-readable day label: Today / Yesterday / Wednesday 28 Apr 2026 */
-function dayLabel(iso: string): string {
+function dayLabel(iso: string, t: (key: string) => string): string {
   const d = new Date(iso);
   const todayKey   = new Date().toLocaleDateString('en-CA');
   const yestDate   = new Date(); yestDate.setDate(yestDate.getDate() - 1);
   const yestKey    = yestDate.toLocaleDateString('en-CA');
   const key        = d.toLocaleDateString('en-CA');
-  if (key === todayKey) return 'Today';
-  if (key === yestKey)  return 'Yesterday';
+  if (key === todayKey) return t('inventory.counts.today');
+  if (key === yestKey)  return t('inventory.counts.yesterday');
   return d.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' });
 }
 
@@ -61,6 +62,7 @@ function toLocalDateStr(d: Date) {
 }
 
 export default function CurrentInventoryPage() {
+  const { t } = useT();
   const [locationFilter, setLocationFilter] = useState('all');
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
@@ -175,19 +177,19 @@ export default function CurrentInventoryPage() {
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Inventory Reports</h1>
+        <h1 className="text-2xl font-bold text-gray-900">{t('inventory.counts.title')}</h1>
       </div>
 
       {/* Filters */}
       <div className="mb-5 flex flex-wrap items-center gap-4">
         <div className="flex items-center gap-2">
-          <label className="text-sm font-medium text-gray-700 whitespace-nowrap">Location:</label>
+          <label className="text-sm font-medium text-gray-700 whitespace-nowrap">{t('inventory.counts.locationFilter')}</label>
           <select
             value={locationFilter}
             onChange={(e) => setLocationFilter(e.target.value)}
             className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]"
           >
-            <option value="all">All Locations</option>
+            <option value="all">{t('inventory.counts.allLocations')}</option>
             {locationNames.map((name) => (
               <option key={name} value={name}>{name}</option>
             ))}
@@ -195,13 +197,13 @@ export default function CurrentInventoryPage() {
         </div>
 
         <div className="flex items-center gap-2">
-          <label className="text-sm font-medium text-gray-700 whitespace-nowrap">From:</label>
+          <label className="text-sm font-medium text-gray-700 whitespace-nowrap">{t('inventory.counts.from')}</label>
           <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)}
             className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]" />
         </div>
 
         <div className="flex items-center gap-2">
-          <label className="text-sm font-medium text-gray-700 whitespace-nowrap">To:</label>
+          <label className="text-sm font-medium text-gray-700 whitespace-nowrap">{t('inventory.counts.to')}</label>
           <input type="date" value={toDate} onChange={e => setToDate(e.target.value)}
             className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]" />
         </div>
@@ -210,7 +212,7 @@ export default function CurrentInventoryPage() {
           onClick={() => { setFromDate(defaultFrom); setToDate(defaultTo); }}
           className="text-xs text-[#1B5E20] hover:underline font-medium"
         >
-          Reset to 90 days
+          {t('inventory.counts.resetDays')}
         </button>
       </div>
 
@@ -222,7 +224,7 @@ export default function CurrentInventoryPage() {
         </div>
       ) : !submissions || submissions.length === 0 ? (
         <div className="bg-white rounded-lg shadow-sm border border-gray-100 p-8 text-center text-gray-400 text-sm">
-          No inventory submissions found
+          {t('inventory.counts.noSubmissions')}
         </div>
       ) : (() => {
           // Group submissions by local date
@@ -231,7 +233,7 @@ export default function CurrentInventoryPage() {
             const key = localDateKey(sub.submitted_at);
             const last = groups[groups.length - 1];
             if (!last || last.key !== key) {
-              groups.push({ key, label: dayLabel(sub.submitted_at), subs: [sub] });
+              groups.push({ key, label: dayLabel(sub.submitted_at, t), subs: [sub] });
             } else {
               last.subs.push(sub);
             }
@@ -247,7 +249,7 @@ export default function CurrentInventoryPage() {
                       {label}
                     </span>
                     <div className="flex-1 h-px bg-gray-100" />
-                    <span className="text-xs text-gray-300">{subs.length} report{subs.length !== 1 ? 's' : ''}</span>
+                    <span className="text-xs text-gray-300">{subs.length} {subs.length !== 1 ? t('inventory.counts.reports') : t('inventory.counts.report')}</span>
                   </div>
 
                   {/* Cards for this day */}
@@ -280,7 +282,7 @@ export default function CurrentInventoryPage() {
                                 </div>
                               </div>
                               <div className="flex items-center gap-3 flex-shrink-0">
-                                <span className="text-xs text-gray-500">{totalFilled}/{totalItems} filled</span>
+                                <span className="text-xs text-gray-500">{totalFilled}/{totalItems} {t('inventory.counts.filled')}</span>
                                 {formatDuration((sub as any).duration_seconds) && (
                                   <span className="text-xs font-semibold text-[#2E7D32] bg-green-50 px-2 py-0.5 rounded-full">
                                     ⏱ {formatDuration((sub as any).duration_seconds)}
@@ -302,13 +304,13 @@ export default function CurrentInventoryPage() {
                                     disabled={editMutation.isPending}
                                     className="flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-white bg-[#2E7D32] rounded-lg hover:bg-[#1B5E20] disabled:opacity-50 transition-colors"
                                   >
-                                    <Check size={12} /> Save
+                                    <Check size={12} /> {t('common.save')}
                                   </button>
                                   <button
                                     onClick={() => { setEditingId(null); setEditDraft({}); }}
                                     className="flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
                                   >
-                                    <X size={12} /> Cancel
+                                    <X size={12} /> {t('common.cancel')}
                                   </button>
                                 </>
                               ) : (
@@ -333,13 +335,13 @@ export default function CurrentInventoryPage() {
                                     disabled={deleteMutation.isPending}
                                     className="px-2.5 py-1 text-xs font-semibold text-white bg-red-500 rounded-lg hover:bg-red-600 disabled:opacity-50 transition-colors"
                                   >
-                                    {deleteMutation.isPending ? 'Deleting…' : 'Yes, delete'}
+                                    {deleteMutation.isPending ? t('inventory.counts.deleting') : t('inventory.counts.yesDelete')}
                                   </button>
                                   <button
                                     onClick={() => { setConfirmDeleteId(null); setDeleteError(null); }}
                                     className="px-2.5 py-1 text-xs font-semibold text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
                                   >
-                                    Cancel
+                                    {t('common.cancel')}
                                   </button>
                                 </>
                               ) : (
@@ -359,7 +361,7 @@ export default function CurrentInventoryPage() {
                             <div className="border-t border-gray-100">
                               {isEditing && (
                                 <div className="px-4 py-2 bg-blue-50 border-b border-blue-100">
-                                  <p className="text-xs font-semibold text-blue-700">Editing — update quantities below, then click Save</p>
+                                  <p className="text-xs font-semibold text-blue-700">{t('inventory.counts.editing')}</p>
                                 </div>
                               )}
                               {Object.entries(sections).map(([sectionTitle, items]) => (
@@ -396,7 +398,7 @@ export default function CurrentInventoryPage() {
                               ))}
                               {(sub as any).comment && (
                                 <div className="px-4 py-3 bg-amber-50 border-t border-amber-100">
-                                  <p className="text-xs font-bold text-amber-700 uppercase tracking-wider mb-1">Comment</p>
+                                  <p className="text-xs font-bold text-amber-700 uppercase tracking-wider mb-1">{t('inventory.counts.comment')}</p>
                                   <p className="text-sm text-gray-700 whitespace-pre-wrap">{(sub as any).comment}</p>
                                 </div>
                               )}
@@ -406,14 +408,14 @@ export default function CurrentInventoryPage() {
                                     onClick={() => { setEditingId(null); setEditDraft({}); }}
                                     className="px-3 py-1.5 text-xs font-semibold text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
                                   >
-                                    Cancel
+                                    {t('common.cancel')}
                                   </button>
                                   <button
                                     onClick={() => saveEdit(sub)}
                                     disabled={editMutation.isPending}
                                     className="px-3 py-1.5 text-xs font-semibold text-white bg-[#2E7D32] rounded-lg hover:bg-[#1B5E20] disabled:opacity-50 transition-colors"
                                   >
-                                    {editMutation.isPending ? 'Saving…' : 'Save Changes'}
+                                    {editMutation.isPending ? t('common.saving') : t('inventory.counts.saveChanges')}
                                   </button>
                                 </div>
                               )}

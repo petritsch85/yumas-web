@@ -5,8 +5,10 @@ import { supabase } from '@/lib/supabase-browser';
 import { useParams, useRouter } from 'next/navigation';
 import { ArrowLeft } from 'lucide-react';
 import { formatCurrency } from '@/lib/utils';
+import { useT } from '@/lib/i18n';
 
 export default function SupplierDetailPage() {
+  const { t } = useT();
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
 

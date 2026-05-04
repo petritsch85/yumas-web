@@ -4,6 +4,7 @@ import React, { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
 import { TrendingDown, Calendar, CalendarDays, ChevronUp, ChevronDown as ChevronDownIcon } from 'lucide-react';
+import { useT } from '@/lib/i18n';
 
 /* ─── Types ──────────────────────────────────────────────────────────────── */
 type BillLine = {
@@ -121,6 +122,7 @@ function fmtEur(n: number) {
 
 /* ─── Page ───────────────────────────────────────────────────────────────── */
 export default function COGSPage() {
+  const { t } = useT();
   const [primaryCat]  = useState<string>('Food Cost');
   const [subCat, setSubCat]     = useState<SubCategory>('All');
   const [timeMode, setTimeMode] = useState<'week' | 'month'>('month');
@@ -255,7 +257,7 @@ export default function COGSPage() {
       {/* Page header */}
       <div className="flex items-center gap-2 mb-6">
         <TrendingDown size={20} className="text-[#1B5E20]" />
-        <h1 className="text-2xl font-bold text-gray-900">COGS Analysis</h1>
+        <h1 className="text-2xl font-bold text-gray-900">{t('analysis.cogsAnalysis')}</h1>
       </div>
 
       {/* Primary category tabs */}
@@ -269,7 +271,7 @@ export default function COGSPage() {
           </div>
         ))}
         <div className="px-4 py-2 rounded-lg text-sm font-medium text-gray-400 border border-dashed border-gray-200 cursor-default">
-          + More coming soon
+          {t('analysis.moreComing')}
         </div>
       </div>
 
@@ -305,7 +307,7 @@ export default function COGSPage() {
               timeMode === 'month' ? 'bg-white text-[#1B5E20] shadow-sm' : 'text-gray-500 hover:text-gray-700'
             }`}
           >
-            <Calendar size={12} /> By Month
+            <Calendar size={12} /> {t('analysis.byMonth')}
           </button>
           <button
             onClick={() => setTimeMode('week')}
@@ -313,7 +315,7 @@ export default function COGSPage() {
               timeMode === 'week' ? 'bg-white text-[#1B5E20] shadow-sm' : 'text-gray-500 hover:text-gray-700'
             }`}
           >
-            <CalendarDays size={12} /> By Week
+            <CalendarDays size={12} /> {t('analysis.byWeek')}
           </button>
         </div>
         {!isLoading && (
@@ -347,14 +349,14 @@ export default function COGSPage() {
               <thead>
                 <tr className="bg-gray-700 text-white">
                   <th className="sticky left-0 z-10 bg-gray-700 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide min-w-[220px]">
-                    Item
+                    {t('analysis.item')}
                   </th>
                   <th className="sticky left-[220px] z-10 bg-gray-700 px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide min-w-[110px] border-l border-gray-600">
-                    Location
+                    {t('analysis.location')}
                   </th>
                   {subCat === 'All' && (
                     <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide min-w-[100px] border-l border-gray-600">
-                      Category
+                      {t('analysis.category')}
                     </th>
                   )}
                   {periods.map((pk) => (
@@ -373,7 +375,7 @@ export default function COGSPage() {
                     className="px-3 py-3 text-right text-xs font-semibold uppercase tracking-wide min-w-[90px] border-l border-gray-500 bg-gray-600 cursor-pointer hover:bg-gray-500 select-none"
                   >
                     <span className="inline-flex items-center justify-end gap-0.5">
-                      Total<SortIcon col="total" />
+                      {t('analysis.total')}<SortIcon col="total" />
                     </span>
                   </th>
                 </tr>
@@ -408,7 +410,7 @@ export default function COGSPage() {
                 {/* Column totals footer */}
                 <tr className="border-t-2 border-gray-200 bg-gray-50 font-semibold">
                   <td className="sticky left-0 z-10 bg-gray-50 px-4 py-2.5 text-xs text-gray-600 uppercase tracking-wide">
-                    Total
+                    {t('analysis.total')}
                   </td>
                   <td className="sticky left-[220px] z-10 bg-gray-50 px-3 py-2.5 border-r border-gray-200" />
                   {subCat === 'All' && <td className="px-3 py-2.5 border-r border-gray-100" />}

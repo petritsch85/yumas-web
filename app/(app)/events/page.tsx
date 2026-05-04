@@ -7,6 +7,7 @@ import {
   Plus, X, Pencil, FileText, CalendarDays, Users, Phone, Mail,
   MapPin, Euro, ChevronDown, ChevronUp, CheckCircle2, Clock, XCircle, Star,
 } from 'lucide-react';
+import { useT } from '@/lib/i18n';
 
 /* ─── Types ─────────────────────────────────────────────────────────────── */
 type EventStatus = 'tentative' | 'confirmed' | 'cancelled';
@@ -139,6 +140,7 @@ function EventForm({
   error: string;
   isEdit?: boolean;
 }) {
+  const { t } = useT();
   const set = (key: keyof EventDraft, value: any) => onChange({ ...draft, [key]: value });
 
   const canSubmit =
@@ -151,7 +153,7 @@ function EventForm({
     <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6 mb-6">
       <div className="flex items-center justify-between mb-5">
         <h2 className="text-sm font-semibold text-gray-900">
-          {isEdit ? 'Edit Event' : 'New Event'}
+          {isEdit ? t('events.editEvent') : t('events.newEvent')}
         </h2>
         <button onClick={onCancel} className="text-gray-400 hover:text-gray-600"><X size={16} /></button>
       </div>
@@ -159,7 +161,7 @@ function EventForm({
       <div className="grid grid-cols-3 gap-4">
         {/* Event name */}
         <div className="col-span-2">
-          <label className="block text-xs font-medium text-gray-500 mb-1">Event Name *</label>
+          <label className="block text-xs font-medium text-gray-500 mb-1">{t('events.form.eventName')} *</label>
           <input
             type="text"
             value={draft.name}
@@ -171,21 +173,21 @@ function EventForm({
 
         {/* Status */}
         <div>
-          <label className="block text-xs font-medium text-gray-500 mb-1">Status</label>
+          <label className="block text-xs font-medium text-gray-500 mb-1">{t('events.form.status')}</label>
           <select
             value={draft.status}
             onChange={e => set('status', e.target.value as EventStatus)}
             className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30"
           >
             {STATUSES.map(s => (
-              <option key={s} value={s}>{statusConfig[s].label}</option>
+              <option key={s} value={s}>{t(`events.status.${s}`)}</option>
             ))}
           </select>
         </div>
 
         {/* Location */}
         <div>
-          <label className="block text-xs font-medium text-gray-500 mb-1">Location *</label>
+          <label className="block text-xs font-medium text-gray-500 mb-1">{t('events.form.location')} *</label>
           <select
             value={draft.location}
             onChange={e => set('location', e.target.value)}
@@ -197,7 +199,7 @@ function EventForm({
 
         {/* Date */}
         <div>
-          <label className="block text-xs font-medium text-gray-500 mb-1">Date *</label>
+          <label className="block text-xs font-medium text-gray-500 mb-1">{t('events.form.date')} *</label>
           <input
             type="date"
             value={draft.event_date}
@@ -208,7 +210,7 @@ function EventForm({
 
         {/* Guests */}
         <div>
-          <label className="block text-xs font-medium text-gray-500 mb-1">Number of Guests *</label>
+          <label className="block text-xs font-medium text-gray-500 mb-1">{t('events.form.numGuests')} *</label>
           <input
             type="number"
             min={1}
@@ -221,7 +223,7 @@ function EventForm({
 
         {/* Time From */}
         <div>
-          <label className="block text-xs font-medium text-gray-500 mb-1">Time From</label>
+          <label className="block text-xs font-medium text-gray-500 mb-1">{t('events.form.timeFrom')}</label>
           <input
             type="time"
             value={draft.event_time_from ?? ''}
@@ -232,7 +234,7 @@ function EventForm({
 
         {/* Time Until */}
         <div>
-          <label className="block text-xs font-medium text-gray-500 mb-1">Time Until</label>
+          <label className="block text-xs font-medium text-gray-500 mb-1">{t('events.form.timeUntil')}</label>
           <input
             type="time"
             value={draft.event_time_until ?? ''}
@@ -244,14 +246,14 @@ function EventForm({
         {/* Confidence (only for tentative) */}
         {draft.status === 'tentative' && (
           <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Confidence Level</label>
+            <label className="block text-xs font-medium text-gray-500 mb-1">{t('events.form.confidence')}</label>
             <div className="flex items-center gap-2 h-9">
               <StarRating
                 value={draft.confidence ?? 2}
                 onChange={v => set('confidence', v)}
               />
               <span className="text-xs text-gray-400">
-                {draft.confidence === 1 ? 'Low' : draft.confidence === 2 ? 'Medium' : 'High'}
+                {draft.confidence === 1 ? t('events.confidence.low') : draft.confidence === 2 ? t('events.confidence.medium') : t('events.confidence.high')}
               </span>
             </div>
           </div>
@@ -259,7 +261,7 @@ function EventForm({
 
         {/* Contact name */}
         <div>
-          <label className="block text-xs font-medium text-gray-500 mb-1">Contact Name *</label>
+          <label className="block text-xs font-medium text-gray-500 mb-1">{t('events.form.contactName')} *</label>
           <input
             type="text"
             value={draft.contact_name}
@@ -271,7 +273,7 @@ function EventForm({
 
         {/* Contact email */}
         <div>
-          <label className="block text-xs font-medium text-gray-500 mb-1">Contact Email</label>
+          <label className="block text-xs font-medium text-gray-500 mb-1">{t('events.form.contactEmail')}</label>
           <input
             type="email"
             value={draft.contact_email ?? ''}
@@ -283,7 +285,7 @@ function EventForm({
 
         {/* Contact phone */}
         <div>
-          <label className="block text-xs font-medium text-gray-500 mb-1">Contact Phone</label>
+          <label className="block text-xs font-medium text-gray-500 mb-1">{t('events.form.contactPhone')}</label>
           <input
             type="tel"
             value={draft.contact_phone ?? ''}
@@ -295,7 +297,7 @@ function EventForm({
 
         {/* Menu / Package */}
         <div>
-          <label className="block text-xs font-medium text-gray-500 mb-1">Menu / Package</label>
+          <label className="block text-xs font-medium text-gray-500 mb-1">{t('events.form.menuPackage')}</label>
           <input
             type="text"
             value={draft.menu_package ?? ''}
@@ -307,7 +309,7 @@ function EventForm({
 
         {/* Budget */}
         <div>
-          <label className="block text-xs font-medium text-gray-500 mb-1">Total Budget (€)</label>
+          <label className="block text-xs font-medium text-gray-500 mb-1">{t('events.form.budget')}</label>
           <input
             type="number"
             min={0}
@@ -321,7 +323,7 @@ function EventForm({
 
         {/* Deposit */}
         <div>
-          <label className="block text-xs font-medium text-gray-500 mb-1">Deposit Paid (€)</label>
+          <label className="block text-xs font-medium text-gray-500 mb-1">{t('events.form.deposit')}</label>
           <input
             type="number"
             min={0}
@@ -335,7 +337,7 @@ function EventForm({
 
         {/* Notes */}
         <div className="col-span-3">
-          <label className="block text-xs font-medium text-gray-500 mb-1">Special Requirements / Notes</label>
+          <label className="block text-xs font-medium text-gray-500 mb-1">{t('events.form.specialNotes')}</label>
           <textarea
             value={draft.notes ?? ''}
             onChange={e => set('notes', e.target.value)}
@@ -350,14 +352,14 @@ function EventForm({
 
       <div className="flex justify-end gap-2 mt-5">
         <button onClick={onCancel} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900">
-          Cancel
+          {t('events.cancel')}
         </button>
         <button
           onClick={onSubmit}
           disabled={isPending || !canSubmit}
           className="bg-[#1B5E20] text-white px-5 py-2 rounded-lg text-sm font-medium hover:bg-[#2E7D32] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          {isPending ? (isEdit ? 'Saving…' : 'Creating…') : (isEdit ? 'Save Changes' : 'Create Event')}
+          {isPending ? (isEdit ? t('events.saving') : t('events.creating')) : (isEdit ? t('events.saveChanges') : t('events.createEvent'))}
         </button>
       </div>
     </div>
@@ -366,6 +368,7 @@ function EventForm({
 
 /* ─── Event Card ─────────────────────────────────────────────────────────── */
 function EventCard({ event, onEdit }: { event: EventRow; onEdit: (e: EventRow) => void }) {
+  const { t } = useT();
   const [expanded, setExpanded] = useState(false);
   const cfg = statusConfig[event.status];
   const StatusIcon = cfg.Icon;

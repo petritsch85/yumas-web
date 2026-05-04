@@ -7,6 +7,7 @@ import { saveDraft, loadDraft, clearDraft } from '@/lib/draft-store';
 import { enqueue, dequeueAll, removeFromQueue, pendingCount } from '@/lib/offline-queue';
 import { ChevronLeft, Send, WifiOff, Wifi, RefreshCw, CheckCircle2, Timer, Play, Pause, Upload, X, FileSpreadsheet, AlertCircle } from 'lucide-react';
 import * as XLSX from 'xlsx';
+import { useT } from '@/lib/i18n';
 
 function formatTimer(seconds: number): string {
   const m = Math.floor(seconds / 60);
@@ -438,6 +439,7 @@ export default function LocationInventoryFormPage({
 }) {
   const router       = useRouter();
   const searchParams = useSearchParams();
+  const { t } = useT();
   const locationName = searchParams.get('name') ?? 'Location';
 
   const [counts, setCounts]         = useState<Record<string, string>>({});

@@ -9,6 +9,8 @@ import {
   ChevronDown, Eye, X, FilePlus, Save, MapPin, Calendar, Pencil,
 } from 'lucide-react';
 
+import { useT } from '@/lib/i18n';
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 type Location = { id: string; name: string };
 
@@ -205,6 +207,7 @@ async function saveBillToDB(item: QueueItem, userId: string | null): Promise<voi
 export default function BillsPage() {
   const queryClient  = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const { t } = useT();
 
   const [tab, setTab]               = useState<'upload' | 'bills'>('bills');
   const [isDragging, setIsDragging] = useState(false);
@@ -500,8 +503,8 @@ export default function BillsPage() {
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Bills</h1>
-          <p className="text-sm text-gray-500 mt-0.5">Upload invoices · AI extracts the data · review and save</p>
+          <h1 className="text-2xl font-bold text-gray-900">{t('bills.title')}</h1>
+          <p className="text-sm text-gray-500 mt-0.5">{t('bills.subtitle')}</p>
         </div>
         <button
           onClick={() => { setTab('upload'); setTimeout(() => fileInputRef.current?.click(), 100); }}

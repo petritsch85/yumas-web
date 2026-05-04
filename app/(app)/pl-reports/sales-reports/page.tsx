@@ -10,6 +10,7 @@ import {
   ChevronLeft, ChevronRight, TrendingUp, Receipt, Percent, Euro,
   Loader2, SlidersHorizontal, Ban,
 } from 'lucide-react';
+import { useT } from '@/lib/i18n';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TYPES
@@ -852,6 +853,7 @@ const MONTHLY_ROWS: MRow[] = [
 export default function SalesReportsPage() {
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const { t } = useT();
 
   // Tab / sub-tab
   const [activeTab,   setActiveTab]   = useState<'upload'|'daily'>('daily');
@@ -2080,7 +2082,7 @@ export default function SalesReportsPage() {
       {/* ── Page header ── */}
       <div className="flex items-start justify-between mb-5">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Sales Reports</h1>
+          <h1 className="text-2xl font-bold text-gray-900">{t('plReports.salesReports')}</h1>
           <p className="text-sm text-gray-500 mt-0.5">Upload shift &amp; weekly Z-reports · view daily and weekly P&amp;L</p>
         </div>
         <div className="flex items-center gap-5 text-xs text-gray-500 pt-1">

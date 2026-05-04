@@ -4,6 +4,7 @@ import dynamic from 'next/dynamic';
 import { useState, useCallback } from 'react';
 import { Plus, Trash2, FileDown } from 'lucide-react';
 import type { BillData, LineItem } from '@/components/bills/BillDocument';
+import { useT } from '@/lib/i18n';
 
 // Must be loaded dynamically (no SSR) due to @react-pdf/renderer
 const BillDocument = dynamic(
@@ -20,6 +21,7 @@ const DEFAULT_INTRO_MONTHLY = 'Wir bedanken uns für Ihren Auftrag und stellen I
 const DEFAULT_INTRO_DINNER  = 'Wir bedanken uns für Ihren Auftrag und stellen Ihnen für das Abendessen wie folgt eine Rechnung:';
 
 export default function NewBillPage() {
+  const { t } = useT();
   const [type, setType]             = useState<'monthly' | 'dinner'>('dinner');
   const [invoiceNumber, setInvoiceNumber] = useState('');
   const [date, setDate]             = useState(today());
@@ -112,7 +114,7 @@ export default function NewBillPage() {
   return (
     <div className="max-w-3xl">
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">New Bill</h1>
+        <h1 className="text-2xl font-bold text-gray-900">{t('bills.newBill')}</h1>
         <button
           onClick={handleGenerate}
           disabled={generating}

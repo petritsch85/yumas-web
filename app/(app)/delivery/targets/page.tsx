@@ -4,6 +4,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
 import { Target } from 'lucide-react';
+import { useT } from '@/lib/i18n';
 
 /* ─── Types ─────────────────────────────────────────────────────────────── */
 type TargetRow = {
@@ -226,6 +227,7 @@ function DeliverCell({ qty }: { qty: number }) {
 /* ─── Main Page ──────────────────────────────────────────────────────────── */
 export default function DeliveryTargetsPage() {
   const qc = useQueryClient();
+  const { t } = useT();
 
   const weekOptions = useMemo(() => buildWeekOptions(), []);
   // Default to current week (index 4 = offset 0)
@@ -378,7 +380,7 @@ export default function DeliveryTargetsPage() {
         <div>
           <div className="flex items-center gap-2 mb-1">
             <Target size={20} className="text-[#1B5E20]" />
-            <h1 className="text-2xl font-bold text-gray-900">Target Levels</h1>
+            <h1 className="text-2xl font-bold text-gray-900">{t('delivery.targets')}</h1>
           </div>
           {/* Week selector */}
           <div className="flex items-center gap-3 mt-2">

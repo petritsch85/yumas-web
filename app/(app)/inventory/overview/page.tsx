@@ -4,6 +4,7 @@ import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
 import { RefreshCw, ChevronLeft, ChevronRight, Trash2, X } from 'lucide-react';
+import { useT } from '@/lib/i18n';
 
 const LOCATIONS = ['Eschborn', 'Taunus', 'Westend', 'ZK'] as const;
 
@@ -1088,6 +1089,7 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
 /* ─── Main page ─────────────────────────────────────────────────────────────── */
 export default function InventoryOverviewPage() {
   const qc = useQueryClient();
+  const { t } = useT();
   const [activeTab, setActiveTab] = useState<TabView>('group');
   const [weekOffset, setWeekOffset] = useState(0);
   const [refreshedAt, setRefreshedAt] = useState<number>(Date.now());
@@ -1114,7 +1116,7 @@ export default function InventoryOverviewPage() {
     <div>
       <div className="flex items-start justify-between gap-4 mb-6 flex-wrap">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Current Inventory</h1>
+          <h1 className="text-2xl font-bold text-gray-900">{t('inventory.overview.title')}</h1>
           <p className="text-sm text-gray-500 mt-0.5">
             {activeTab === 'group'
               ? 'Latest submitted quantities per location'

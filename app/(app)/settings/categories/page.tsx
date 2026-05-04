@@ -3,8 +3,10 @@
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
 import { Plus } from 'lucide-react';
+import { useT } from '@/lib/i18n';
 
 export default function CategoriesPage() {
+  const { t } = useT();
   const { data: categories, isLoading } = useQuery({
     queryKey: ['categories'],
     queryFn: async () => {
@@ -16,10 +18,10 @@ export default function CategoriesPage() {
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Categories</h1>
+        <h1 className="text-2xl font-bold text-gray-900">{t('settings.categories.title')}</h1>
         <button className="bg-[#1B5E20] text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-[#2E7D32] transition-colors flex items-center gap-2">
           <Plus size={16} />
-          Add Category
+          {t('settings.categories.addCategory')}
         </button>
       </div>
 
@@ -30,13 +32,13 @@ export default function CategoriesPage() {
               {[...Array(5)].map((_, i) => <div key={i} className="h-4 bg-gray-100 rounded animate-pulse" />)}
             </div>
           ) : !categories || categories.length === 0 ? (
-            <div className="p-8 text-center text-gray-400 text-sm">No categories found</div>
+            <div className="p-8 text-center text-gray-400 text-sm">{t('settings.categories.noCategories')}</div>
           ) : (
             <table className="w-full text-sm">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Colour</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">{t('settings.categories.table.color')}</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">{t('settings.categories.table.name')}</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Hex</th>
                 </tr>
               </thead>

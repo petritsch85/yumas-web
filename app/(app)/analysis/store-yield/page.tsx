@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabase-browser';
 import {
   BarChart3, Plus, Trash2, AlertTriangle, CheckCircle2, Info,
 } from 'lucide-react';
+import { useT } from '@/lib/i18n';
 
 /* ─── Types ──────────────────────────────────────────────────────────────── */
 type BillLine = {
@@ -70,6 +71,7 @@ function varianceColor(pct: number | null) {
 
 /* ─── Page ───────────────────────────────────────────────────────────────── */
 export default function StoreYieldPage() {
+  const { t } = useT();
   const [store, setStore]       = useState<Store>('Eschborn');
   const [timeMode, setTimeMode] = useState<'week' | 'month'>('month');
   const [period, setPeriod]     = useState<string>('');
@@ -193,7 +195,7 @@ export default function StoreYieldPage() {
       {/* Header */}
       <div className="flex items-center gap-2 mb-6">
         <BarChart3 size={20} className="text-[#1B5E20]" />
-        <h1 className="text-2xl font-bold text-gray-900">Store Yield</h1>
+        <h1 className="text-2xl font-bold text-gray-900">{t('analysis.storeYield')}</h1>
       </div>
 
       {/* Controls */}

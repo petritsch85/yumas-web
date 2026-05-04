@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
 import { ChevronLeft, Upload, Trash2, X } from 'lucide-react';
+import { useT } from '@/lib/i18n';
 
 const CATEGORY = 'drinks-prep';
 
@@ -12,6 +13,7 @@ type VideoRow = { id: string; title: string; storage_path: string; created_at: s
 
 export default function DrinksPrepPage() {
   const router = useRouter();
+  const { t } = useT();
   const queryClient = useQueryClient();
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -37,23 +39,20 @@ export default function DrinksPrepPage() {
     supabase.storage.from('staff-videos').getPublicUrl(path).data.publicUrl;
 
   const handleUpload = async () => {
-    if (!file || !title.trim()) { setError('Please add a title and select a file.'); return; }
+    if (!file || !title.trim()) { setError(t('common.required')); return; }
     setUploading(true);
     setError('');
     try {
       const ext = file.name.split('.').pop();
       const path = `${CATEGORY}/${crypto.randomUUID()}.${ext}`;
-
       const { error: uploadError } = await supabase.storage
         .from('staff-videos')
         .upload(path, file, { contentType: file.type });
       if (uploadError) throw uploadError;
-
       const { error: dbError } = await supabase
         .from('staff_videos')
         .insert({ title: title.trim(), category: CATEGORY, storage_path: path });
       if (dbError) throw dbError;
-
       queryClient.invalidateQueries({ queryKey: ['staff-videos', CATEGORY] });
       setShowUpload(false);
       setTitle('');
@@ -74,7 +73,6 @@ export default function DrinksPrepPage() {
 
   return (
     <div>
-      {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
           <button
@@ -82,10 +80,10 @@ export default function DrinksPrepPage() {
             className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-800 transition-colors"
           >
             <ChevronLeft size={16} />
-            Back
+            {t('common.cancel')}
           </button>
           <div className="h-4 w-px bg-gray-200" />
-          <h1 className="text-2xl font-bold text-gray-900">Drinks Prep</h1>
+          <h1 className="text-2xl font-bold text-gray-900">{t('staffVideos.drinksPrep')}</h1>
         </div>
         <button
           onClick={() => setShowUpload(true)}
@@ -96,7 +94,6 @@ export default function DrinksPrepPage() {
         </button>
       </div>
 
-      {/* Upload modal */}
       {showUpload && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
@@ -106,10 +103,9 @@ export default function DrinksPrepPage() {
                 <X size={20} />
               </button>
             </div>
-
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Title</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">{t('common.name')}</label>
                 <input
                   type="text"
                   value={title}
@@ -118,7 +114,6 @@ export default function DrinksPrepPage() {
                   className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]"
                 />
               </div>
-
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Video file</label>
                 <div
@@ -143,22 +138,19 @@ export default function DrinksPrepPage() {
                   onChange={(e) => setFile(e.target.files?.[0] ?? null)}
                 />
               </div>
-
               {error && <p className="text-sm text-red-500">{error}</p>}
-
               <button
                 onClick={handleUpload}
                 disabled={uploading}
                 className="w-full bg-[#1B5E20] text-white py-2.5 rounded-lg text-sm font-bold hover:bg-[#2E7D32] transition-colors disabled:opacity-50"
               >
-                {uploading ? 'Uploading…' : 'Upload'}
+                {uploading ? t('common.saving') : 'Upload'}
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Video list */}
       {isLoading ? (
         <div className="space-y-4">
           {[...Array(2)].map((_, i) => <div key={i} className="aspect-video bg-gray-100 rounded-lg animate-pulse" />)}
@@ -166,8 +158,7 @@ export default function DrinksPrepPage() {
       ) : !videos || videos.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-24 gap-3 text-center">
           <Upload size={40} className="text-gray-200" />
-          <p className="text-gray-500 font-medium">No videos yet</p>
-          <p className="text-sm text-gray-400">Click "Upload Video" to add the first one</p>
+          <p className="text-gray-500 font-medium">{t('staffVideos.noVideos')}</p>
         </div>
       ) : (
         <div className="space-y-6 max-w-2xl">

@@ -8,6 +8,7 @@ import {
   History, MapPin, Trash2, ChevronLeft, ChevronRight,
   TrendingUp, Receipt, Percent, Euro,
 } from 'lucide-react';
+import { useT } from '@/lib/i18n';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type Location = { id: string; name: string };
@@ -226,6 +227,7 @@ const PAGE_SIZE = 30;
 // ── Page component ────────────────────────────────────────────────────────────
 export default function CSVImporterPage() {
   const queryClient = useQueryClient();
+  const { t } = useT();
   const [tab, setTab]               = useState<'upload' | 'history'>('upload');
   const [location, setLocation]     = useState<Location | null>(null);
   const [fileName, setFileName]     = useState<string | null>(null);
@@ -375,8 +377,8 @@ export default function CSVImporterPage() {
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">CSV Importer</h1>
-          <p className="text-sm text-gray-500 mt-0.5">Upload weekly Orderbird Z-report exports</p>
+          <h1 className="text-2xl font-bold text-gray-900">{t('plReports.csvImporter')}</h1>
+          <p className="text-sm text-gray-500 mt-0.5">{t('plReports.csvImporterSubtitle')}</p>
         </div>
       </div>
 

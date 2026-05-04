@@ -8,6 +8,7 @@ import { Plus } from 'lucide-react';
 import { StatusBadge } from '@/components/ui/StatusBadge';
 import { formatDate } from '@/lib/utils';
 import type { ProductionStatus } from '@/types';
+import { useT } from '@/lib/i18n';
 
 const STATUS_OPTIONS: (ProductionStatus | 'all')[] = ['all', 'planned', 'in_progress', 'completed', 'cancelled'];
 
@@ -88,6 +89,7 @@ type Tab = 'batches' | 'catalog';
 
 export default function ProductionPage() {
   const router = useRouter();
+  const { t } = useT();
   const [statusFilter, setStatusFilter] = useState<ProductionStatus | 'all'>('all');
   const [tab, setTab] = useState<Tab>('catalog');
   const [catalogSearch, setCatalogSearch] = useState('');
@@ -121,34 +123,34 @@ export default function ProductionPage() {
     <div>
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Production</h1>
+        <h1 className="text-2xl font-bold text-gray-900">{t('production.title')}</h1>
         <div className="flex gap-2">
           <button
             onClick={() => router.push('/production/recipes')}
             className="bg-white text-gray-700 border border-gray-200 px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors"
           >
-            Recipes
+            {t('recipes.title')}
           </button>
           <button className="bg-[#1B5E20] text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-[#2E7D32] transition-colors flex items-center gap-2">
             <Plus size={16} />
-            New Batch
+            {t('production.newBatch')}
           </button>
         </div>
       </div>
 
       {/* Tabs */}
       <div className="flex gap-1 mb-5 border-b border-gray-200">
-        {(['catalog', 'batches'] as Tab[]).map((t) => (
+        {(['catalog', 'batches'] as Tab[]).map((tabKey) => (
           <button
-            key={t}
-            onClick={() => setTab(t)}
+            key={tabKey}
+            onClick={() => setTab(tabKey)}
             className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px capitalize ${
-              tab === t
+              tab === tabKey
                 ? 'border-[#1B5E20] text-[#1B5E20]'
                 : 'border-transparent text-gray-500 hover:text-gray-700'
             }`}
           >
-            {t === 'catalog' ? `Catalog (${CATALOG.length})` : 'Batches'}
+            {tabKey === 'catalog' ? `${t('production.catalog')} (${CATALOG.length})` : t('production.batches')}
           </button>
         ))}
       </div>
@@ -160,7 +162,7 @@ export default function ProductionPage() {
           <div className="flex flex-wrap gap-3 mb-4">
             <input
               type="text"
-              placeholder="Search products…"
+              placeholder={t('production.searchProducts')}
               value={catalogSearch}
               onChange={(e) => setCatalogSearch(e.target.value)}
               className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm w-56 focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30"
@@ -172,7 +174,7 @@ export default function ProductionPage() {
             >
               {categories.map((c) => (
                 <option key={c} value={c}>
-                  {c === 'all' ? 'All categories' : c}
+                  {c === 'all' ? t('production.allCategories') : c}
                 </option>
               ))}
             </select>
@@ -183,12 +185,12 @@ export default function ProductionPage() {
               <thead className="bg-gray-50">
                 <tr>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase w-8">#</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Product</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Category</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Unit</th>
-                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Min. to Produce</th>
-                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Days to Expiry</th>
-                  <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Freezable</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">{t('production.table.product')}</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">{t('production.table.category')}</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">{t('production.table.unit')}</th>
+                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">{t('production.table.minToProduce')}</th>
+                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">{t('production.table.daysToExpiry')}</th>
+                  <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">{t('production.table.freezable')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -206,9 +208,9 @@ export default function ProductionPage() {
                     <td className="px-4 py-2.5 text-right text-gray-700">{item.daysToExpiry}</td>
                     <td className="px-4 py-2.5 text-center">
                       {item.freezable === 'Y' ? (
-                        <span className="text-blue-600 font-medium text-xs">✓ Yes</span>
+                        <span className="text-blue-600 font-medium text-xs">✓ {t('production.freezableYes')}</span>
                       ) : item.freezable === 'N' ? (
-                        <span className="text-gray-400 text-xs">No</span>
+                        <span className="text-gray-400 text-xs">{t('production.freezableNo')}</span>
                       ) : (
                         <span className="text-gray-300 text-xs">—</span>
                       )}
@@ -218,11 +220,11 @@ export default function ProductionPage() {
               </tbody>
             </table>
             {filteredCatalog.length === 0 && (
-              <div className="p-8 text-center text-gray-400 text-sm">No products match your filters</div>
+              <div className="p-8 text-center text-gray-400 text-sm">{t('production.noProductsMatch')}</div>
             )}
           </div>
 
-          <p className="text-xs text-gray-400 mt-2">{filteredCatalog.length} of {CATALOG.length} products</p>
+          <p className="text-xs text-gray-400 mt-2">{filteredCatalog.length} {t('production.ofProducts')} {CATALOG.length} {t('production.products')}</p>
         </div>
       )}
 
@@ -239,7 +241,7 @@ export default function ProductionPage() {
                 }`}
                 style={statusFilter === s ? { backgroundColor: '#1B5E20' } : undefined}
               >
-                {s === 'all' ? 'All' : s.replace(/_/g, ' ')}
+                {s === 'all' ? t('common.all') : t(`status.${s}`)}
               </button>
             ))}
           </div>
@@ -251,17 +253,17 @@ export default function ProductionPage() {
                   {[...Array(6)].map((_, i) => <div key={i} className="h-4 bg-gray-100 rounded animate-pulse" />)}
                 </div>
               ) : !batches || batches.length === 0 ? (
-                <div className="p-8 text-center text-gray-400 text-sm">No production batches found</div>
+                <div className="p-8 text-center text-gray-400 text-sm">{t('production.noBatches')}</div>
               ) : (
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50">
                     <tr>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Batch #</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Recipe</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Location</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Planned Date</th>
-                      <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Planned Qty</th>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">{t('production.table.batchNumber')}</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">{t('production.table.recipe')}</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">{t('production.table.location')}</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">{t('production.table.plannedDate')}</th>
+                      <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">{t('production.table.plannedQty')}</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">{t('production.table.status')}</th>
                     </tr>
                   </thead>
                   <tbody>

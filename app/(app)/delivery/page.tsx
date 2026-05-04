@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import type { Profile } from '@/types';
+import { useT } from '@/lib/i18n';
 
 function formatTimer(seconds: number): string {
   const m = Math.floor(seconds / 60);
@@ -849,6 +850,7 @@ function StoreManagerView({ run, lines, targetDate, myStore }: {
 export default function DeliveryPage() {
   const qc = useQueryClient();
   const fileRef = useRef<HTMLInputElement>(null);
+  const { t } = useT();
 
   const [activeStore, setActiveStore] = useState<Store>('Eschborn');
   const [generating, setGenerating] = useState(false);

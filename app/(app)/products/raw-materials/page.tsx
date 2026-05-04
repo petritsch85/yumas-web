@@ -6,11 +6,13 @@ import { useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { Search, Plus } from 'lucide-react';
 import type { Item } from '@/types';
+import { useT } from '@/lib/i18n';
 
 const FOOD_CATEGORIES = ['Meat & Fish', 'Dairy & Eggs', 'Fruit & Vegetables', 'Dry Goods', 'Prepared Items'];
 
 export default function RawMaterialsPage() {
   const router = useRouter();
+  const { t } = useT();
   const [search, setSearch]             = useState('');
   const [activeCategory, setActiveCategory] = useState<string>('All');
 
@@ -58,7 +60,7 @@ export default function RawMaterialsPage() {
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Raw Materials</h1>
+        <h1 className="text-2xl font-bold text-gray-900">{t('products.rawMaterials')}</h1>
         <button className="bg-[#1B5E20] text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-[#2E7D32] transition-colors flex items-center gap-2">
           <Plus size={16} />
           Add Item
@@ -76,7 +78,7 @@ export default function RawMaterialsPage() {
                 : 'bg-white border border-gray-200 text-gray-600 hover:border-gray-300 hover:text-gray-900'
             }`}
           >
-            All
+            {t('common.all')}
           </button>
           {categories.map((cat) => (
             <button
@@ -158,7 +160,7 @@ export default function RawMaterialsPage() {
                     <td className="px-4 py-3 text-gray-600">{item.unit?.abbreviation ?? '—'}</td>
                     <td className="px-4 py-3">
                       <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${item.is_purchasable ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
-                        {item.is_purchasable ? 'Yes' : 'No'}
+                        {item.is_purchasable ? t('common.yes') : t('common.no')}
                       </span>
                     </td>
                   </tr>

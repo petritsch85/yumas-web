@@ -8,6 +8,7 @@ import {
   ImagePlus, Video, Upload,
 } from 'lucide-react';
 import { useState, useEffect, useId, useRef } from 'react';
+import { useT } from '@/lib/i18n';
 
 /* ─── Types ──────────────────────────────────────────────────────────────── */
 interface IngredientRow {
@@ -61,6 +62,7 @@ function getEmbedUrl(raw: string): string | null {
 
 /* ─── Component ──────────────────────────────────────────────────────────── */
 export default function RecipeDetailPage() {
+  const { t } = useT();
   const { id: itemId } = useParams<{ id: string }>();
   const router = useRouter();
   const qc = useQueryClient();

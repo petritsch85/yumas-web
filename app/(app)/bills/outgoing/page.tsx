@@ -10,6 +10,7 @@ import {
   FilePlus, Plus, FileDown,
 } from 'lucide-react';
 import type { BillData, LineItem } from '@/components/bills/BillDocument';
+import { useT } from '@/lib/i18n';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -102,6 +103,7 @@ function uid() { return Math.random().toString(36).slice(2); }
 export default function OutgoingBillsPage() {
   const queryClient  = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const { t } = useT();
 
   const [tab, setTab]               = useState<'bills' | 'upload' | 'create'>('bills');
   const [isDragging, setIsDragging] = useState(false);
@@ -421,8 +423,8 @@ export default function OutgoingBillsPage() {
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Outgoing Bills</h1>
-          <p className="text-sm text-gray-500 mt-0.5">Invoices Yumas issues to corporate clients</p>
+          <h1 className="text-2xl font-bold text-gray-900">{t('bills.outgoingTitle')}</h1>
+          <p className="text-sm text-gray-500 mt-0.5">{t('bills.outgoingSubtitle')}</p>
         </div>
         <div className="flex items-center gap-3">
           <button

@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
 import { useState, useMemo } from 'react';
 import { ChevronLeft, ChevronRight, RefreshCw } from 'lucide-react';
+import { useT } from '@/lib/i18n';
 import {
   computeSimplyRatios,
   computeDailyTotal,
@@ -106,6 +107,7 @@ function isToday(d: Date) {
 
 /* ── Main page ───────────────────────────────────────────────────────────── */
 export default function UsageForecastPage() {
+  const { t } = useT();
   const [weekOffset, setWeekOffset] = useState(0);
   const weekDays = useMemo(() => getWeekDays(weekOffset), [weekOffset]);
 
@@ -417,7 +419,7 @@ export default function UsageForecastPage() {
     <div className="space-y-4">
       {/* ── Header ── */}
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900">Usage Forecast</h1>
+        <h1 className="text-2xl font-bold text-gray-900">{t('inventory.usageForecast.title')}</h1>
         <p className="text-xs text-gray-400">Sales from Sales Reports · usage proportional to sales</p>
       </div>
 

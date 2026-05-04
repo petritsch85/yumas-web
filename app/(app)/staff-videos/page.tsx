@@ -2,31 +2,33 @@
 
 import { useRouter } from 'next/navigation';
 import { UtensilsCrossed, GlassWater } from 'lucide-react';
-
-const items = [
-  {
-    icon: UtensilsCrossed,
-    label: 'Food Prep',
-    sublabel: 'Food preparation training videos',
-    href: '/staff-videos/food-prep',
-    color: '#2E7D32',
-  },
-  {
-    icon: GlassWater,
-    label: 'Drinks Prep',
-    sublabel: 'Drinks preparation training videos',
-    href: '/staff-videos/drinks-prep',
-    color: '#1565C0',
-  },
-];
+import { useT } from '@/lib/i18n';
 
 export default function StaffVideosPage() {
   const router = useRouter();
+  const { t } = useT();
+
+  const items = [
+    {
+      icon: UtensilsCrossed,
+      labelKey: 'staffVideos.foodPrep',
+      sublabelKey: 'staffVideos.foodPrepSub',
+      href: '/staff-videos/food-prep',
+      color: '#2E7D32',
+    },
+    {
+      icon: GlassWater,
+      labelKey: 'staffVideos.drinksPrep',
+      sublabelKey: 'staffVideos.drinksPrepSub',
+      href: '/staff-videos/drinks-prep',
+      color: '#1565C0',
+    },
+  ];
 
   return (
     <div>
-      <h1 className="text-2xl font-bold text-gray-900 mb-1">Staff Videos</h1>
-      <p className="text-sm text-gray-500 mb-6">Choose a category to view training videos</p>
+      <h1 className="text-2xl font-bold text-gray-900 mb-1">{t('staffVideos.title')}</h1>
+      <p className="text-sm text-gray-500 mb-6">{t('staffVideos.subtitle')}</p>
 
       <div className="bg-white rounded-lg shadow-sm border border-gray-100 overflow-hidden max-w-lg">
         {items.map((item, i) => {
@@ -46,8 +48,8 @@ export default function StaffVideosPage() {
                 <Icon size={20} style={{ color: item.color }} />
               </div>
               <div className="flex-1">
-                <div className="font-medium text-gray-900">{item.label}</div>
-                <div className="text-xs text-gray-500 mt-0.5">{item.sublabel}</div>
+                <div className="font-medium text-gray-900">{t(item.labelKey)}</div>
+                <div className="text-xs text-gray-500 mt-0.5">{t(item.sublabelKey)}</div>
               </div>
               <svg className="text-gray-400" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M9 18l6-6-6-6" />

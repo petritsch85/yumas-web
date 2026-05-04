@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
 import { Plus, Pencil, X, Eye, EyeOff, Trash2, CheckSquare, Square } from 'lucide-react';
+import { useT } from '@/lib/i18n';
 
 type Location = { id: string; name: string };
 
@@ -130,11 +131,6 @@ const roleColor: Record<string, string> = {
   manager: 'bg-blue-100 text-blue-700',
   staff:   'bg-gray-100 text-gray-600',
 };
-const roleHint: Record<string, string> = {
-  staff:   'Inventory forms only',
-  manager: 'Operational access, assigned location',
-  admin:   'Full access, all locations',
-};
 
 /* ─── Permissions editor ─────────────────────────────────────────────────── */
 function PermissionsEditor({
@@ -146,10 +142,12 @@ function PermissionsEditor({
   onChange: (p: AppPermissions) => void;
   isAdmin?: boolean;
 }) {
+  const { t } = useT();
+
   if (isAdmin) {
     return (
       <div className="mt-4 pt-4 border-t border-gray-100">
-        <p className="text-xs text-gray-400 italic">Admins have access to everything — no restrictions apply.</p>
+        <p className="text-xs text-gray-400 italic">{t('team.permissions.adminNote')}</p>
       </div>
     );
   }
@@ -168,21 +166,21 @@ function PermissionsEditor({
   return (
     <div className="mt-4 pt-4 border-t border-gray-100 space-y-5">
       <div className="flex items-center justify-between">
-        <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Section Access</p>
+        <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide">{t('team.permissions.sectionAccess')}</p>
         <div className="flex gap-3">
           <button
             type="button"
             onClick={() => onChange(Object.fromEntries(MODULE_GROUPS.flatMap(g => g.items).map(i => [i.key, true])) as AppPermissions)}
             className="text-xs text-indigo-600 hover:underline font-medium"
           >
-            Enable all
+            {t('team.permissions.enableAll')}
           </button>
           <button
             type="button"
             onClick={() => onChange(Object.fromEntries(MODULE_GROUPS.flatMap(g => g.items).map(i => [i.key, false])) as AppPermissions)}
             className="text-xs text-gray-400 hover:underline"
           >
-            Clear all
+            {t('team.permissions.clearAll')}
           </button>
         </div>
       </div>
@@ -198,7 +196,7 @@ function PermissionsEditor({
                 onClick={() => allOn ? groupAllOff(group) : groupAllOn(group)}
                 className="text-xs text-gray-400 hover:text-indigo-600 transition-colors"
               >
-                {allOn ? 'Deselect all' : 'Select all'}
+                {allOn ? t('team.permissions.deselectAll') : t('team.permissions.selectAll')}
               </button>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
@@ -241,6 +239,13 @@ function PermissionsEditor({
 /* ─── Main page ──────────────────────────────────────────────────────────── */
 export default function TeamPage() {
   const qc = useQueryClient();
+  const { t } = useT();
+
+  const roleHint: Record<string, string> = {
+    staff:   t('team.roleHint.staff'),
+    manager: t('team.roleHint.manager'),
+    admin:   t('team.roleHint.admin'),
+  };
 
   const [showAdd, setShowAdd] = useState(false);
   const [addDraft, setAddDraft] = useState<AddDraft>({
@@ -378,15 +383,15 @@ export default function TeamPage() {
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Team</h1>
-          <p className="text-sm text-gray-500 mt-0.5">Create accounts and control access levels</p>
+          <h1 className="text-2xl font-bold text-gray-900">{t('team.title')}</h1>
+          <p className="text-sm text-gray-500 mt-0.5">{t('team.subtitle')}</p>
         </div>
         <button
           onClick={() => { setShowAdd(true); setAddError(''); }}
           className="bg-[#1B5E20] text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-[#2E7D32] transition-colors flex items-center gap-2"
         >
           <Plus size={16} />
-          Add Team Member
+          {t('team.addMember')}
         </button>
       </div>
 
@@ -406,7 +411,7 @@ export default function TeamPage() {
       {showAdd && (
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5 mb-6">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-sm font-semibold text-gray-900">New Team Member</h2>
+            <h2 className="text-sm font-semibold text-gray-900">{t('team.newMember')}</h2>
             <button onClick={() => { setShowAdd(false); setAddError(''); }} className="text-gray-400 hover:text-gray-600">
               <X size={16} />
             </button>
@@ -414,36 +419,36 @@ export default function TeamPage() {
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">Full name *</label>
+              <label className="block text-xs font-medium text-gray-500 mb-1">{t('team.form.fullName')}</label>
               <input
                 type="text"
                 value={addDraft.fullName}
                 onChange={e => setAddDraft(d => ({ ...d, fullName: e.target.value }))}
                 className="w-full border-2 border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/40 focus:border-[#1B5E20]"
-                placeholder="e.g. Maria García"
+                placeholder={t('team.form.namePlaceholder')}
               />
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">Email *</label>
+              <label className="block text-xs font-medium text-gray-500 mb-1">{t('team.form.email')}</label>
               <input
                 type="email"
                 value={addDraft.email}
                 onChange={e => setAddDraft(d => ({ ...d, email: e.target.value }))}
                 className="w-full border-2 border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/40 focus:border-[#1B5E20]"
-                placeholder="maria@example.com"
+                placeholder={t('team.form.emailPlaceholder')}
               />
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">Password * (min 6 chars)</label>
+              <label className="block text-xs font-medium text-gray-500 mb-1">{t('team.form.password')}</label>
               <div className="relative">
                 <input
                   type={showPassword ? 'text' : 'password'}
                   value={addDraft.password}
                   onChange={e => setAddDraft(d => ({ ...d, password: e.target.value }))}
                   className="w-full border-2 border-gray-300 rounded-lg px-3 py-2 pr-9 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/40 focus:border-[#1B5E20]"
-                  placeholder="Min 6 characters"
+                  placeholder={t('team.form.passwordPlaceholder')}
                 />
                 <button type="button" onClick={() => setShowPassword(p => !p)}
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
@@ -453,7 +458,7 @@ export default function TeamPage() {
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">Role *</label>
+              <label className="block text-xs font-medium text-gray-500 mb-1">{t('team.form.role')}</label>
               <select
                 value={addDraft.role}
                 onChange={e => {
@@ -470,13 +475,13 @@ export default function TeamPage() {
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">Location</label>
+              <label className="block text-xs font-medium text-gray-500 mb-1">{t('team.form.location')}</label>
               <select
                 value={addDraft.locationId}
                 onChange={e => setAddDraft(d => ({ ...d, locationId: e.target.value }))}
                 className="w-full border-2 border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/40 focus:border-[#1B5E20]"
               >
-                <option value="">All locations (for admin)</option>
+                <option value="">{t('team.form.allLocations')}</option>
                 {locations?.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
               </select>
             </div>
@@ -494,14 +499,14 @@ export default function TeamPage() {
           <div className="flex justify-end gap-2 mt-5">
             <button onClick={() => { setShowAdd(false); setAddError(''); }}
               className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900">
-              Cancel
+              {t('common.cancel')}
             </button>
             <button
               onClick={() => createUser.mutate({ draft: addDraft, perms: addPerms })}
               disabled={createUser.isPending || !canCreate}
               className="bg-[#1B5E20] text-white px-5 py-2 rounded-lg text-sm font-medium hover:bg-[#2E7D32] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {createUser.isPending ? 'Creating…' : 'Create Account'}
+              {createUser.isPending ? t('team.creating') : t('team.createAccount')}
             </button>
           </div>
         </div>
@@ -513,21 +518,20 @@ export default function TeamPage() {
         return (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
             <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-sm mx-4">
-              <h3 className="text-base font-semibold text-gray-900 mb-1">Delete account?</h3>
+              <h3 className="text-base font-semibold text-gray-900 mb-1">{t('team.deleteAccount')}</h3>
               <p className="text-sm text-gray-500 mb-5">
-                <span className="font-medium text-gray-700">{target?.full_name ?? 'This user'}</span>'s
-                account will be permanently deleted. This cannot be undone.
+                <span className="font-medium text-gray-700">{target?.full_name ?? 'This user'}</span>&apos;s {t('team.deleteConfirm')}
               </p>
               {deleteUser.error && <p className="text-red-500 text-xs mb-3">{(deleteUser.error as any).message}</p>}
               <div className="flex justify-end gap-2">
                 <button onClick={() => { setConfirmDeleteId(null); deleteUser.reset(); }}
-                  className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900">Cancel</button>
+                  className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900">{t('common.cancel')}</button>
                 <button
                   onClick={() => deleteUser.mutate(confirmDeleteId)}
                   disabled={deleteUser.isPending}
                   className="bg-red-600 text-white px-5 py-2 rounded-lg text-sm font-medium hover:bg-red-700 disabled:opacity-50"
                 >
-                  {deleteUser.isPending ? 'Deleting…' : 'Delete permanently'}
+                  {deleteUser.isPending ? t('team.deleting') : t('team.deletePermanently')}
                 </button>
               </div>
             </div>
@@ -544,17 +548,17 @@ export default function TeamPage() {
             </div>
           ) : !users || users.length === 0 ? (
             <div className="p-10 text-center">
-              <p className="text-gray-400 text-sm">No team members yet — add your first one above.</p>
+              <p className="text-gray-400 text-sm">{t('team.noMembers')}</p>
             </div>
           ) : (
             <table className="w-full text-sm">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">Name</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">Email</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">Role</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">Location</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">Status</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">{t('team.table.name')}</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">{t('team.table.email')}</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">{t('team.table.role')}</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">{t('team.table.location')}</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">{t('team.table.status')}</th>
                   <th className="px-4 py-3 w-16" />
                 </tr>
               </thead>
@@ -576,7 +580,7 @@ export default function TeamPage() {
                       </td>
                       <td className="px-4 py-3">
                         <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${user.is_active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'}`}>
-                          {user.is_active ? 'Active' : 'Inactive'}
+                          {user.is_active ? t('team.active') : t('team.inactive')}
                         </span>
                       </td>
                       <td className="px-4 py-3 text-right">
@@ -606,7 +610,7 @@ export default function TeamPage() {
                               <div className="w-7 h-7 rounded-full bg-white/20 flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
                                 {user.full_name.charAt(0)}
                               </div>
-                              <span className="text-white text-sm font-semibold">Editing: {user.full_name}</span>
+                              <span className="text-white text-sm font-semibold">{t('team.editing')} {user.full_name}</span>
                             </div>
                             <button onClick={() => setEditingId(null)} className="text-white/70 hover:text-white transition-colors">
                               <X size={15} />
@@ -616,7 +620,7 @@ export default function TeamPage() {
                           {/* Basic fields */}
                           <div className="grid grid-cols-2 md:grid-cols-3 gap-3 items-end mb-3">
                             <div className="col-span-2 md:col-span-1">
-                              <label className="block text-xs font-medium text-gray-500 mb-1">Email</label>
+                              <label className="block text-xs font-medium text-gray-500 mb-1">{t('team.table.email')}</label>
                               <input
                                 type="email"
                                 value={editDraft.newEmail}
@@ -627,7 +631,7 @@ export default function TeamPage() {
                             </div>
                             <div>
                               <label className="block text-xs font-medium text-gray-500 mb-1">
-                                New password <span className="text-gray-400 font-normal">(leave blank to keep)</span>
+                                {t('team.form.newPassword')} <span className="text-gray-400 font-normal">{t('team.form.leaveBlank')}</span>
                               </label>
                               <input
                                 type="text"
@@ -640,7 +644,7 @@ export default function TeamPage() {
                           </div>
                           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 items-end">
                             <div>
-                              <label className="block text-xs font-medium text-gray-500 mb-1">Role</label>
+                              <label className="block text-xs font-medium text-gray-500 mb-1">{t('team.form.role')}</label>
                               <select
                                 value={editDraft.role}
                                 onChange={e => {
@@ -653,25 +657,25 @@ export default function TeamPage() {
                               </select>
                             </div>
                             <div>
-                              <label className="block text-xs font-medium text-gray-500 mb-1">Location</label>
+                              <label className="block text-xs font-medium text-gray-500 mb-1">{t('team.form.location')}</label>
                               <select
                                 value={editDraft.locationId}
                                 onChange={e => setEditDraft(d => ({ ...d, locationId: e.target.value }))}
                                 className="w-full border-2 border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/40 focus:border-[#1B5E20]"
                               >
-                                <option value="">All locations</option>
+                                <option value="">{t('team.form.allLocationsShort')}</option>
                                 {locations?.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
                               </select>
                             </div>
                             <div>
-                              <label className="block text-xs font-medium text-gray-500 mb-1">Status</label>
+                              <label className="block text-xs font-medium text-gray-500 mb-1">{t('team.form.status')}</label>
                               <select
                                 value={editDraft.isActive ? 'active' : 'inactive'}
                                 onChange={e => setEditDraft(d => ({ ...d, isActive: e.target.value === 'active' }))}
                                 className="w-full border-2 border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/40 focus:border-[#1B5E20]"
                               >
-                                <option value="active">Active</option>
-                                <option value="inactive">Inactive</option>
+                                <option value="active">{t('team.active')}</option>
+                                <option value="inactive">{t('team.inactive')}</option>
                               </select>
                             </div>
                           </div>
@@ -689,11 +693,11 @@ export default function TeamPage() {
                               disabled={updateUser.isPending}
                               className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-xs font-semibold hover:bg-indigo-700 transition-colors disabled:opacity-50"
                             >
-                              {updateUser.isPending ? 'Saving…' : 'Save changes'}
+                              {updateUser.isPending ? t('team.saving') : t('team.saveChanges')}
                             </button>
                             <button onClick={() => setEditingId(null)}
                               className="px-4 py-2 text-xs text-gray-500 hover:text-gray-700">
-                              Cancel
+                              {t('common.cancel')}
                             </button>
                           </div>
                           </div>{/* end content padding div */}

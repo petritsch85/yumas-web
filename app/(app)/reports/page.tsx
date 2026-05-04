@@ -5,8 +5,11 @@ import { supabase } from '@/lib/supabase-browser';
 import { formatCurrency } from '@/lib/utils';
 import { TrendingDown, AlertTriangle, Package, ShoppingCart } from 'lucide-react';
 import Link from 'next/link';
+import { useT } from '@/lib/i18n';
 
 export default function ReportsPage() {
+  const { t } = useT();
+
   const { data: stockValue, isLoading: loadingStockValue } = useQuery({
     queryKey: ['report-stock-value'],
     queryFn: async () => {
@@ -60,36 +63,36 @@ export default function ReportsPage() {
 
   const cards = [
     {
-      label: 'Stock Value',
+      labelKey: 'reports.stockValue',
+      descKey: 'reports.stockValueDesc',
       value: formatCurrency(stockValue ?? 0),
-      description: 'Total inventory value on hand',
       icon: Package,
       color: '#1B5E20',
       loading: loadingStockValue,
       href: '/products/raw-materials',
     },
     {
-      label: 'Low Stock Items',
-      value: `${lowStockCount ?? 0} items`,
-      description: 'Below minimum threshold',
+      labelKey: 'reports.lowStockItems',
+      descKey: 'reports.lowStockDesc',
+      value: `${lowStockCount ?? 0} ${t('reports.items')}`,
       icon: AlertTriangle,
       color: '#C62828',
       loading: loadingLowStock,
       href: '/products/raw-materials',
     },
     {
-      label: 'Waste This Month',
+      labelKey: 'reports.wasteThisMonth',
+      descKey: 'reports.wasteThisMonthDesc',
       value: formatCurrency(wasteThisMonth ?? 0),
-      description: 'Estimated waste cost',
       icon: TrendingDown,
       color: '#E65100',
       loading: loadingWaste,
       href: '/waste',
     },
     {
-      label: 'PO Value This Month',
+      labelKey: 'reports.poValueThisMonth',
+      descKey: 'reports.poValueThisMonthDesc',
       value: formatCurrency(poValueThisMonth ?? 0),
-      description: 'Received orders value',
       icon: ShoppingCart,
       color: '#1565C0',
       loading: loadingPOValue,
@@ -100,15 +103,15 @@ export default function ReportsPage() {
   return (
     <div>
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Reports</h1>
-        <p className="text-sm text-gray-500 mt-1">Overview of key inventory metrics</p>
+        <h1 className="text-2xl font-bold text-gray-900">{t('reports.title')}</h1>
+        <p className="text-sm text-gray-500 mt-1">{t('reports.subtitle')}</p>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
         {cards.map((card) => {
           const Icon = card.icon;
           return (
-            <div key={card.label} className="bg-white rounded-lg shadow-sm border border-gray-100 p-6">
+            <div key={card.labelKey} className="bg-white rounded-lg shadow-sm border border-gray-100 p-6">
               <div className="flex items-start justify-between mb-4">
                 <div className="rounded-full p-3" style={{ backgroundColor: `${card.color}18` }}>
                   <Icon size={22} style={{ color: card.color }} />
@@ -118,7 +121,7 @@ export default function ReportsPage() {
                   className="text-xs font-medium hover:underline"
                   style={{ color: '#1B5E20' }}
                 >
-                  View Details →
+                  {t('reports.viewDetails')}
                 </Link>
               </div>
               {card.loading ? (
@@ -126,8 +129,8 @@ export default function ReportsPage() {
               ) : (
                 <div className="text-2xl font-bold text-gray-900 mb-1">{card.value}</div>
               )}
-              <div className="text-sm text-gray-500">{card.label}</div>
-              <div className="text-xs text-gray-400 mt-0.5">{card.description}</div>
+              <div className="text-sm text-gray-500">{t(card.labelKey)}</div>
+              <div className="text-xs text-gray-400 mt-0.5">{t(card.descKey)}</div>
             </div>
           );
         })}

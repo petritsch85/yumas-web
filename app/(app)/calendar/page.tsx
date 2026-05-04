@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { useState } from 'react';
+import { useT } from '@/lib/i18n';
 
 function getWeekDates(startDate: Date): Date[] {
   return Array.from({ length: 7 }, (_, i) => {
@@ -25,6 +26,7 @@ function getMondayOfWeek(d: Date): Date {
 }
 
 export default function CalendarPage() {
+  const { t } = useT();
   const [weekStart, setWeekStart] = useState(() => getMondayOfWeek(new Date()));
 
   const weekDates = getWeekDates(weekStart);
@@ -65,7 +67,7 @@ export default function CalendarPage() {
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Delivery Calendar</h1>
+        <h1 className="text-2xl font-bold text-gray-900">{t('calendar.title')}</h1>
         <div className="flex items-center gap-3">
           <button
             onClick={prevWeek}
@@ -108,7 +110,7 @@ export default function CalendarPage() {
                   </div>
                 </div>
                 {deliveries.length === 0 ? (
-                  <div className="text-xs text-gray-300 mt-2">No deliveries</div>
+                  <div className="text-xs text-gray-300 mt-2">{t('calendar.noDeliveries')}</div>
                 ) : (
                   <div className="space-y-1.5">
                     {deliveries.map((s, j) => (

@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabase-browser';
 import {
   Package, Truck, CheckCircle2, Clock, AlertTriangle, ChevronDown, ChevronUp,
 } from 'lucide-react';
+import { useT } from '@/lib/i18n';
 
 /* ─── Types ─────────────────────────────────────────────────────────────── */
 type DeliverySnapshot = {
@@ -279,6 +280,7 @@ function GrayBadge({ label }: { label: string }) {
 /* ─── Main page ──────────────────────────────────────────────────────────── */
 export default function DeliveryReportsPage() {
   const qc = useQueryClient();
+  const { t } = useT();
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [localChecked, setLocalChecked] = useState<Record<string, boolean>>({});
   const [localNotes, setLocalNotes] = useState<Record<string, string>>({});
@@ -480,7 +482,7 @@ export default function DeliveryReportsPage() {
   return (
     <div className="max-w-3xl">
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Delivery Reports</h1>
+        <h1 className="text-2xl font-bold text-gray-900">{t('delivery.reports')}</h1>
         <p className="text-sm text-gray-500 mt-0.5">Step-by-step log of each delivery run</p>
       </div>
 

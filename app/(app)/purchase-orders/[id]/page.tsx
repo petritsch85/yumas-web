@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
 import { useParams, useRouter } from 'next/navigation';
 import { ArrowLeft, Send, CheckCircle, XCircle, Clock, AlertTriangle } from 'lucide-react';
+import { useT } from '@/lib/i18n';
 import { StatusBadge } from '@/components/ui/StatusBadge';
 import { formatDate } from '@/lib/utils';
 import type { POStatus } from '@/types';
@@ -45,6 +46,7 @@ const fmt = (n: number) =>
   n.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 export default function PODetailPage() {
+  const { t } = useT();
   const { id }      = useParams<{ id: string }>();
   const router      = useRouter();
   const queryClient = useQueryClient();

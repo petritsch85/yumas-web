@@ -8,11 +8,13 @@ import { Plus } from 'lucide-react';
 import { StatusBadge } from '@/components/ui/StatusBadge';
 import { formatDate, formatCurrency } from '@/lib/utils';
 import type { POStatus } from '@/types';
+import { useT } from '@/lib/i18n';
 
 const STATUS_OPTIONS: (POStatus | 'all')[] = ['all', 'draft', 'sent', 'confirmed', 'partial', 'received', 'cancelled'];
 
 export default function PurchaseOrdersPage() {
   const router = useRouter();
+  const { t } = useT();
   const [statusFilter, setStatusFilter] = useState<POStatus | 'all'>('all');
 
   const { data: orders, isLoading } = useQuery({
@@ -31,17 +33,16 @@ export default function PurchaseOrdersPage() {
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Purchase Orders</h1>
+        <h1 className="text-2xl font-bold text-gray-900">{t('purchaseOrders.title')}</h1>
         <button
           onClick={() => router.push('/purchase-orders/new')}
           className="bg-[#1B5E20] text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-[#2E7D32] transition-colors flex items-center gap-2"
         >
           <Plus size={16} />
-          New PO
+          {t('purchaseOrders.newPO')}
         </button>
       </div>
 
-      {/* Status filter */}
       <div className="flex gap-2 mb-4 flex-wrap">
         {STATUS_OPTIONS.map((s) => (
           <button
@@ -54,7 +55,7 @@ export default function PurchaseOrdersPage() {
             }`}
             style={statusFilter === s ? { backgroundColor: '#1B5E20' } : undefined}
           >
-            {s === 'all' ? 'All' : s.replace(/_/g, ' ')}
+            {s === 'all' ? t('common.all') : t(`status.${s}`)}
           </button>
         ))}
       </div>
@@ -66,17 +67,17 @@ export default function PurchaseOrdersPage() {
               {[...Array(8)].map((_, i) => <div key={i} className="h-4 bg-gray-100 rounded animate-pulse" />)}
             </div>
           ) : !orders || orders.length === 0 ? (
-            <div className="p-8 text-center text-gray-400 text-sm">No purchase orders found</div>
+            <div className="p-8 text-center text-gray-400 text-sm">{t('purchaseOrders.noOrders')}</div>
           ) : (
             <table className="w-full text-sm">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">PO Number</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Supplier</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Destination</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Order Date</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Expected</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{t('purchaseOrders.table.poNumber')}</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{t('purchaseOrders.table.supplier')}</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{t('purchaseOrders.table.destination')}</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{t('purchaseOrders.table.orderDate')}</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{t('purchaseOrders.table.expected')}</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{t('purchaseOrders.table.status')}</th>
                 </tr>
               </thead>
               <tbody>

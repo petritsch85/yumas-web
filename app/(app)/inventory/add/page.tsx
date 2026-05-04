@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
 import { Building2, Factory } from 'lucide-react';
+import { useT } from '@/lib/i18n';
 
 const LOCATION_COLORS: Record<string, string> = {
   Eschborn: '#1565C0',
@@ -14,6 +15,7 @@ const LOCATION_COLORS: Record<string, string> = {
 
 export default function AddInventoryPage() {
   const router = useRouter();
+  const { t } = useT();
 
   const { data: locations, isLoading } = useQuery({
     queryKey: ['locations', 'active'],
@@ -29,8 +31,8 @@ export default function AddInventoryPage() {
 
   return (
     <div>
-      <h1 className="text-2xl font-bold text-gray-900 mb-1">Add New Inventory</h1>
-      <p className="text-sm text-gray-500 mb-6">Choose the location for which you want to add inventory</p>
+      <h1 className="text-2xl font-bold text-gray-900 mb-1">{t('inventory.add.title')}</h1>
+      <p className="text-sm text-gray-500 mb-6">{t('inventory.add.selectLocation')}</p>
 
       <div className="bg-white rounded-lg shadow-sm border border-gray-100 overflow-hidden max-w-lg">
         {isLoading ? (
@@ -61,7 +63,7 @@ export default function AddInventoryPage() {
                 <div className="flex-1">
                   <div className="font-medium text-gray-900">{loc.name}</div>
                   <div className="text-xs text-gray-500 mt-0.5">
-                    {loc.type === 'production' ? 'Production' : 'Restaurant'}
+                    {loc.type === 'production' ? t('sidebar.groups.supplyChain') : 'Restaurant'}
                   </div>
                 </div>
                 <svg className="text-gray-400" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">

@@ -4,8 +4,10 @@ import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
 import { useState } from 'react';
 import { Plus, ChevronDown, ChevronRight } from 'lucide-react';
+import { useT } from '@/lib/i18n';
 
 export default function RecipesPage() {
+  const { t } = useT();
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const { data: recipes, isLoading } = useQuery({
@@ -35,10 +37,10 @@ export default function RecipesPage() {
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Recipes</h1>
+        <h1 className="text-2xl font-bold text-gray-900">{t('recipes.title')}</h1>
         <button className="bg-[#1B5E20] text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-[#2E7D32] transition-colors flex items-center gap-2">
           <Plus size={16} />
-          New Recipe
+          {t('recipes.newRecipe')}
         </button>
       </div>
 
@@ -49,17 +51,17 @@ export default function RecipesPage() {
               {[...Array(5)].map((_, i) => <div key={i} className="h-4 bg-gray-100 rounded animate-pulse" />)}
             </div>
           ) : !recipes || recipes.length === 0 ? (
-            <div className="p-8 text-center text-gray-400 text-sm">No recipes found</div>
+            <div className="p-8 text-center text-gray-400 text-sm">{t('recipes.noRecipes')}</div>
           ) : (
             <table className="w-full text-sm">
               <thead className="bg-gray-50">
                 <tr>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase w-8"></th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Output Item</th>
-                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Output Qty</th>
-                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Yield %</th>
-                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Ingredients</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">{t('recipes.table.name')}</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">{t('recipes.table.outputItem')}</th>
+                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">{t('recipes.table.outputQty')}</th>
+                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">{t('recipes.table.yieldPercent')}</th>
+                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">{t('recipes.table.ingredients')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -96,14 +98,14 @@ export default function RecipesPage() {
                         <tr key={`${recipe.id}-detail`} className="border-t border-gray-100 bg-gray-50">
                           <td colSpan={6} className="px-8 py-4">
                             {lines.length === 0 ? (
-                              <div className="text-gray-400 text-sm">No ingredients</div>
+                              <div className="text-gray-400 text-sm">{t('recipes.noIngredients')}</div>
                             ) : (
                               <table className="w-full text-sm">
                                 <thead>
                                   <tr>
-                                    <th className="text-left text-xs font-medium text-gray-500 pb-2">Ingredient</th>
-                                    <th className="text-right text-xs font-medium text-gray-500 pb-2">Qty</th>
-                                    <th className="text-left text-xs font-medium text-gray-500 pb-2 pl-2">Unit</th>
+                                    <th className="text-left text-xs font-medium text-gray-500 pb-2">{t('recipes.table.ingredient')}</th>
+                                    <th className="text-right text-xs font-medium text-gray-500 pb-2">{t('recipes.table.qty')}</th>
+                                    <th className="text-left text-xs font-medium text-gray-500 pb-2 pl-2">{t('recipes.table.unit')}</th>
                                   </tr>
                                 </thead>
                                 <tbody>

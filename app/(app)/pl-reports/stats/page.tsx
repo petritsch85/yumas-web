@@ -4,6 +4,7 @@ import { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
 import { MapPin, BarChart3, Loader2 } from 'lucide-react';
+import { useT } from '@/lib/i18n';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -41,6 +42,7 @@ const fmt = (n: number) =>
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function StatsPage() {
+  const { t } = useT();
   const [locationId, setLocationId] = useState('');
   const [view,       setView]       = useState<'weekly' | 'monthly'>('weekly');
   const [year,       setYear]       = useState(CUR_YEAR);
@@ -303,8 +305,8 @@ export default function StatsPage() {
     <div>
       {/* Header */}
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Stats</h1>
-        <p className="text-sm text-gray-500 mt-0.5">Revenue overview by week or month</p>
+        <h1 className="text-2xl font-bold text-gray-900">{t('plReports.stats')}</h1>
+        <p className="text-sm text-gray-500 mt-0.5">{t('plReports.statsSubtitle')}</p>
       </div>
 
       {/* Controls */}
@@ -360,7 +362,7 @@ export default function StatsPage() {
       {!locationId ? (
         <div className="flex flex-col items-center justify-center h-48 border border-dashed border-gray-200 rounded-xl gap-3">
           <BarChart3 size={32} className="text-gray-200" />
-          <p className="text-sm text-gray-400">Select a location to view stats</p>
+          <p className="text-sm text-gray-400">{t('plReports.selectLocation')}</p>
         </div>
       ) : (
         <>

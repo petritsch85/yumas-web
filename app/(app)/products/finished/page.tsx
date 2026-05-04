@@ -6,9 +6,11 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Search, Plus } from 'lucide-react';
 import type { Item } from '@/types';
+import { useT } from '@/lib/i18n';
 
 export default function FinishedGoodsPage() {
   const router = useRouter();
+  const { t } = useT();
   const [search, setSearch] = useState('');
 
   const { data: items, isLoading } = useQuery({
@@ -31,7 +33,7 @@ export default function FinishedGoodsPage() {
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Finished Goods</h1>
+        <h1 className="text-2xl font-bold text-gray-900">{t('products.finishedGoods')}</h1>
         <button className="bg-[#1B5E20] text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-[#2E7D32] transition-colors flex items-center gap-2">
           <Plus size={16} />
           Add Item
@@ -62,10 +64,10 @@ export default function FinishedGoodsPage() {
             <table className="w-full text-sm">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Category</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Unit</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{t('common.name')}</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{t('production.table.category')}</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{t('production.table.unit')}</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{t('common.status')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -89,7 +91,7 @@ export default function FinishedGoodsPage() {
                     <td className="px-4 py-3 text-gray-600">{item.unit?.abbreviation ?? '—'}</td>
                     <td className="px-4 py-3">
                       <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${item.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
-                        {item.is_active ? 'Active' : 'Inactive'}
+                        {item.is_active ? t('common.active') : t('common.inactive')}
                       </span>
                     </td>
                   </tr>

@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
 import { TrendingUp, ChevronLeft, ChevronRight, Lock, Save, CheckCircle2 } from 'lucide-react';
+import { useT } from '@/lib/i18n';
 
 /* ─── Types ─────────────────────────────────────────────────────────────── */
 type StoreDayStandard = {
@@ -122,6 +123,7 @@ function ForecastCell({
 /* ─── Main Page ──────────────────────────────────────────────────────────── */
 export default function ForecastPage() {
   const qc = useQueryClient();
+  const { t } = useT();
   const [weekOffset, setWeekOffset] = useState(0);
   const [localEdits, setLocalEdits] = useState<Record<string, string>>({});
   const [savedFlash, setSavedFlash] = useState(false);
@@ -264,7 +266,7 @@ export default function ForecastPage() {
         <div>
           <div className="flex items-center gap-2 mb-1">
             <TrendingUp size={20} className="text-[#1B5E20]" />
-            <h1 className="text-2xl font-bold text-gray-900">Weekly Sales Forecast</h1>
+            <h1 className="text-2xl font-bold text-gray-900">{t('delivery.salesForecast')}</h1>
           </div>
           <p className="text-sm text-gray-500">
             Set expected sales per store per delivery day — targets scale proportionally

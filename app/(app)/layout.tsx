@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase-browser';
 import Sidebar from '@/components/layout/Sidebar';
 import TopBar from '@/components/layout/TopBar';
+import { LanguageProvider } from '@/lib/i18n';
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -35,21 +36,23 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="flex h-screen overflow-hidden">
-      {/* Mobile backdrop */}
-      {sidebarOpen && (
-        <div
-          className="fixed inset-0 bg-black/50 z-30 md:hidden"
-          onClick={closeSidebar}
-        />
-      )}
-      <Sidebar isOpen={sidebarOpen} onClose={closeSidebar} />
-      <div className="flex-1 flex flex-col overflow-hidden min-w-0">
-        <TopBar onMenuToggle={toggleSidebar} />
-        <main className="flex-1 overflow-auto p-4 md:p-6 bg-gray-50">
-          {children}
-        </main>
+    <LanguageProvider>
+      <div className="flex h-screen overflow-hidden">
+        {/* Mobile backdrop */}
+        {sidebarOpen && (
+          <div
+            className="fixed inset-0 bg-black/50 z-30 md:hidden"
+            onClick={closeSidebar}
+          />
+        )}
+        <Sidebar isOpen={sidebarOpen} onClose={closeSidebar} />
+        <div className="flex-1 flex flex-col overflow-hidden min-w-0">
+          <TopBar onMenuToggle={toggleSidebar} />
+          <main className="flex-1 overflow-auto p-4 md:p-6 bg-gray-50">
+            {children}
+          </main>
+        </div>
       </div>
-    </div>
+    </LanguageProvider>
   );
 }

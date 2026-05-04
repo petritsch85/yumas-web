@@ -4,6 +4,7 @@ import { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
 import { MapPin } from 'lucide-react';
+import { useT } from '@/lib/i18n';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type Location = { id: string; name: string };
@@ -156,6 +157,7 @@ const ROWS: RowDef[] = [
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default function WeeklySalesPage() {
+  const { t } = useT();
   const [location, setLocation] = useState<Location | null>(null);
   const [year, setYear]         = useState(new Date().getFullYear());
 
@@ -258,8 +260,8 @@ export default function WeeklySalesPage() {
       {/* ── Header ── */}
       <div className="flex items-start justify-between mb-5">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Weekly Sales P&L</h1>
-          <p className="text-sm text-gray-500 mt-0.5">Gross revenue by calendar week · {year}</p>
+          <h1 className="text-2xl font-bold text-gray-900">{t('plReports.weeklySales')}</h1>
+          <p className="text-sm text-gray-500 mt-0.5">{t('plReports.weeklySalesSubtitle')} · {year}</p>
         </div>
         {/* Legend */}
         <div className="flex items-center gap-5 text-xs text-gray-500 pt-1">
@@ -316,7 +318,7 @@ export default function WeeklySalesPage() {
       {!location ? (
         <div className="flex flex-col items-center justify-center h-64 text-gray-400 gap-2 border border-dashed border-gray-200 rounded-xl">
           <MapPin size={36} className="text-gray-200" />
-          <p className="text-sm">Select a location to view the P&L</p>
+          <p className="text-sm">{t('plReports.selectLocation')}</p>
         </div>
       ) : (
         <div className="border border-gray-200 rounded-xl overflow-hidden shadow-sm">

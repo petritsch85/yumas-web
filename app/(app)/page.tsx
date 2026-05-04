@@ -12,37 +12,8 @@ import { StatusBadge } from '@/components/ui/StatusBadge';
 import { formatDate } from '@/lib/utils';
 import Link from 'next/link';
 import type { Profile, AppPermissions } from '@/types';
+import { useT } from '@/lib/i18n';
 
-/* ── Quick-access tile definitions ─────────────────────────────────────── */
-type QuickLink = {
-  label: string;
-  href: string;
-  icon: React.ElementType;
-  color: string;
-  permKey?: keyof AppPermissions;
-  adminOnly?: boolean;
-};
-
-const QUICK_LINKS: QuickLink[] = [
-  { label: 'Inventory',        href: '/inventory/overview',    icon: ClipboardList,   color: '#1B5E20', permKey: 'inventory' },
-  { label: 'Add Inventory',    href: '/inventory/add',         icon: FilePlus,        color: '#2E7D32', permKey: 'inventory' },
-  { label: 'Suppliers',        href: '/suppliers',             icon: Store,           color: '#FF8F00', permKey: 'suppliers' },
-  { label: 'Menus',            href: '/products/menus',        icon: UtensilsCrossed, color: '#6D4C41', permKey: 'products' },
-  { label: 'Products',         href: '/products',              icon: Package,         color: '#4CAF50', permKey: 'products' },
-  { label: 'Buying',           href: '/purchase-orders',       icon: ShoppingCart,    color: '#1565C0', permKey: 'buying' },
-  { label: 'Production',       href: '/production',            icon: Factory,         color: '#7B1FA2', permKey: 'production' },
-  { label: 'Waste Log',        href: '/waste',                 icon: Trash2,          color: '#C62828', permKey: 'waste_log' },
-  { label: 'Delivery',         href: '/delivery',              icon: Truck,           color: '#00838F', permKey: 'delivery' },
-  { label: 'Analysis',         href: '/analysis',              icon: BarChart3,       color: '#F57F17', permKey: 'analysis' },
-  { label: 'Events',           href: '/events',                icon: PartyPopper,     color: '#AD1457', permKey: 'events' },
-  { label: 'Staff Videos',     href: '/staff-videos',          icon: Users,           color: '#37474F', permKey: 'staff_videos' },
-  { label: 'Bills',            href: '/bills',                 icon: FilePlus,        color: '#558B2F', permKey: 'bills' },
-  { label: 'Sales Reports',    href: '/pl-reports/sales-reports', icon: LineChart,   color: '#283593', permKey: 'pl_reports' },
-  { label: 'Team',             href: '/settings/users',        icon: Users,           color: '#4E342E', adminOnly: true },
-  { label: 'P&L Reports',      href: '/reports',               icon: TrendingUp,      color: '#00695C', adminOnly: true },
-];
-
-/* ── KPI card ───────────────────────────────────────────────────────────── */
 function KpiCard({
   label, value, icon: Icon, color, loading,
 }: {
@@ -65,10 +36,9 @@ function KpiCard({
   );
 }
 
-/* ── Dashboard ──────────────────────────────────────────────────────────── */
 export default function DashboardPage() {
+  const { t } = useT();
 
-  /* Profile + permissions */
   const { data: profile } = useQuery<Profile | null>({
     queryKey: ['dashboard-profile'],
     queryFn: async () => {
@@ -83,14 +53,13 @@ export default function DashboardPage() {
   const perms   = profile?.permissions ?? {};
 
   const can = (permKey?: keyof AppPermissions, adminOnly?: boolean): boolean => {
-    if (profile === undefined) return false; // still loading — hide
+    if (profile === undefined) return false;
     if (isAdmin) return true;
     if (adminOnly) return false;
     if (permKey) return !!perms[permKey];
     return true;
   };
 
-  /* KPI queries */
   const { data: itemCount,     isLoading: loadingItems }    = useQuery({
     queryKey: ['kpi-items'],
     enabled: can('products'),
@@ -127,8 +96,7 @@ export default function DashboardPage() {
     },
   });
 
-  /* Panel queries */
-  const { data: recentPOs,      isLoading: loadingRecentPOs }     = useQuery({
+  const { data: recentPOs,     isLoading: loadingRecentPOs }    = useQuery({
     queryKey: ['recent-pos'],
     enabled: can('buying'),
     queryFn: async () => {
@@ -139,7 +107,7 @@ export default function DashboardPage() {
     },
   });
 
-  const { data: lowStockItems,  isLoading: loadingLowStockItems }  = useQuery({
+  const { data: lowStockItems, isLoading: loadingLowStockItems } = useQuery({
     queryKey: ['low-stock-items'],
     enabled: can('analysis'),
     queryFn: async () => {
@@ -154,24 +122,49 @@ export default function DashboardPage() {
     },
   });
 
-  /* Visible KPIs */
+  // Quick links with translation keys
+  type QuickLink = {
+    labelKey: string;
+    href: string;
+    icon: React.ElementType;
+    color: string;
+    permKey?: keyof AppPermissions;
+    adminOnly?: boolean;
+  };
+
+  const QUICK_LINKS: QuickLink[] = [
+    { labelKey: 'dashboard.quickLinks.inventory',    href: '/inventory/overview',       icon: ClipboardList,   color: '#1B5E20', permKey: 'inventory' },
+    { labelKey: 'dashboard.quickLinks.addInventory', href: '/inventory/add',            icon: FilePlus,        color: '#2E7D32', permKey: 'inventory' },
+    { labelKey: 'dashboard.quickLinks.suppliers',    href: '/suppliers',                icon: Store,           color: '#FF8F00', permKey: 'suppliers' },
+    { labelKey: 'dashboard.quickLinks.menus',        href: '/products/menus',           icon: UtensilsCrossed, color: '#6D4C41', permKey: 'products' },
+    { labelKey: 'dashboard.quickLinks.products',     href: '/products',                 icon: Package,         color: '#4CAF50', permKey: 'products' },
+    { labelKey: 'dashboard.quickLinks.buying',       href: '/purchase-orders',          icon: ShoppingCart,    color: '#1565C0', permKey: 'buying' },
+    { labelKey: 'dashboard.quickLinks.production',   href: '/production',               icon: Factory,         color: '#7B1FA2', permKey: 'production' },
+    { labelKey: 'dashboard.quickLinks.wasteLog',     href: '/waste',                    icon: Trash2,          color: '#C62828', permKey: 'waste_log' },
+    { labelKey: 'dashboard.quickLinks.delivery',     href: '/delivery',                 icon: Truck,           color: '#00838F', permKey: 'delivery' },
+    { labelKey: 'dashboard.quickLinks.analysis',     href: '/analysis',                 icon: BarChart3,       color: '#F57F17', permKey: 'analysis' },
+    { labelKey: 'dashboard.quickLinks.events',       href: '/events',                   icon: PartyPopper,     color: '#AD1457', permKey: 'events' },
+    { labelKey: 'dashboard.quickLinks.staffVideos',  href: '/staff-videos',             icon: Users,           color: '#37474F', permKey: 'staff_videos' },
+    { labelKey: 'dashboard.quickLinks.bills',        href: '/bills',                    icon: FilePlus,        color: '#558B2F', permKey: 'bills' },
+    { labelKey: 'dashboard.quickLinks.salesReports', href: '/pl-reports/sales-reports', icon: LineChart,       color: '#283593', permKey: 'pl_reports' },
+    { labelKey: 'dashboard.quickLinks.team',         href: '/settings/users',           icon: Users,           color: '#4E342E', adminOnly: true },
+    { labelKey: 'dashboard.quickLinks.plReports',    href: '/reports',                  icon: TrendingUp,      color: '#00695C', adminOnly: true },
+  ];
+
   const kpis = [
-    { label: 'Total Items',      value: itemCount     ?? 0, icon: Package,       color: '#1B5E20', loading: loadingItems,    show: can('products')  },
-    { label: 'Active Suppliers', value: supplierCount ?? 0, icon: Truck,         color: '#FF8F00', loading: loadingSuppliers, show: can('suppliers') },
-    { label: 'Pending POs',      value: pendingPOs    ?? 0, icon: ShoppingCart,  color: '#1565C0', loading: loadingPOs,       show: can('buying')    },
-    { label: 'Low Stock Items',  value: lowStockCount ?? 0, icon: AlertTriangle, color: '#C62828', loading: loadingLowStock,  show: can('analysis') },
+    { label: t('dashboard.kpi.totalItems'),      value: itemCount     ?? 0, icon: Package,       color: '#1B5E20', loading: loadingItems,     show: can('products')  },
+    { label: t('dashboard.kpi.activeSuppliers'), value: supplierCount ?? 0, icon: Truck,         color: '#FF8F00', loading: loadingSuppliers, show: can('suppliers') },
+    { label: t('dashboard.kpi.pendingPOs'),      value: pendingPOs    ?? 0, icon: ShoppingCart,  color: '#1565C0', loading: loadingPOs,       show: can('buying')    },
+    { label: t('dashboard.kpi.lowStockItems'),   value: lowStockCount ?? 0, icon: AlertTriangle, color: '#C62828', loading: loadingLowStock,  show: can('analysis')  },
   ].filter((k) => k.show);
 
-  /* Visible quick links */
   const visibleLinks = QUICK_LINKS.filter((l) => can(l.permKey, l.adminOnly));
-
-  const showPOPanel        = can('buying');
-  const showLowStockPanel  = can('analysis');
-  const showPanelRow       = showPOPanel || showLowStockPanel;
+  const showPOPanel       = can('buying');
+  const showLowStockPanel = can('analysis');
+  const showPanelRow      = showPOPanel || showLowStockPanel;
 
   return (
     <div>
-      {/* KPI cards — only shown if at least one is visible */}
       {kpis.length > 0 && (
         <div className={`grid gap-3 md:gap-4 mb-6 md:mb-8 ${
           kpis.length === 1 ? 'grid-cols-1 max-w-xs' :
@@ -183,16 +176,14 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* Panels row */}
       {showPanelRow && (
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 mb-6 md:mb-8">
-          {/* Recent Purchase Orders */}
           {showPOPanel && (
             <div className="bg-white rounded-lg shadow-sm border border-gray-100">
               <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
-                <h3 className="font-semibold text-gray-900">Recent Purchase Orders</h3>
+                <h3 className="font-semibold text-gray-900">{t('dashboard.recentPOs')}</h3>
                 <Link href="/purchase-orders" className="text-xs font-medium hover:underline" style={{ color: '#1B5E20' }}>
-                  View all
+                  {t('common.viewAll')}
                 </Link>
               </div>
               <div className="overflow-x-auto">
@@ -202,10 +193,10 @@ export default function DashboardPage() {
                   <table className="w-full text-sm">
                     <thead className="bg-gray-50">
                       <tr>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">PO #</th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Supplier</th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{t('dashboard.table.poNumber')}</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{t('dashboard.table.supplier')}</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{t('dashboard.table.status')}</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{t('dashboard.table.date')}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -220,19 +211,18 @@ export default function DashboardPage() {
                     </tbody>
                   </table>
                 ) : (
-                  <div className="p-6 text-center text-gray-400 text-sm">No purchase orders found</div>
+                  <div className="p-6 text-center text-gray-400 text-sm">{t('dashboard.noRecentPOs')}</div>
                 )}
               </div>
             </div>
           )}
 
-          {/* Low Stock Items */}
           {showLowStockPanel && (
             <div className="bg-white rounded-lg shadow-sm border border-gray-100">
               <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
-                <h3 className="font-semibold text-gray-900">Low Stock Items</h3>
+                <h3 className="font-semibold text-gray-900">{t('dashboard.lowStock')}</h3>
                 <Link href="/reports" className="text-xs font-medium hover:underline" style={{ color: '#1B5E20' }}>
-                  View report
+                  {t('common.viewReport')}
                 </Link>
               </div>
               <div className="overflow-x-auto">
@@ -242,10 +232,10 @@ export default function DashboardPage() {
                   <table className="w-full text-sm">
                     <thead className="bg-gray-50">
                       <tr>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Item</th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Location</th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Qty</th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Threshold</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{t('dashboard.table.item')}</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{t('dashboard.table.location')}</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{t('dashboard.table.qty')}</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{t('dashboard.table.threshold')}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -260,7 +250,7 @@ export default function DashboardPage() {
                     </tbody>
                   </table>
                 ) : (
-                  <div className="p-6 text-center text-gray-400 text-sm">All items are adequately stocked</div>
+                  <div className="p-6 text-center text-gray-400 text-sm">{t('dashboard.allStocked')}</div>
                 )}
               </div>
             </div>
@@ -268,25 +258,24 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* Quick Access */}
       {visibleLinks.length > 0 && (
         <div className="bg-white rounded-lg shadow-sm border border-gray-100">
           <div className="px-6 py-4 border-b border-gray-100">
-            <h3 className="font-semibold text-gray-900">Quick Access</h3>
+            <h3 className="font-semibold text-gray-900">{t('dashboard.quickAccess')}</h3>
           </div>
           <div className="p-4 md:p-6 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
             {visibleLinks.map((link) => {
               const Icon = link.icon;
               return (
                 <Link
-                  key={link.href + link.label}
+                  key={link.href + link.labelKey}
                   href={link.href}
                   className="flex flex-col items-center gap-2 p-4 rounded-lg border border-gray-100 hover:border-gray-200 hover:bg-gray-50 transition-colors text-center group"
                 >
                   <div className="rounded-full p-2.5" style={{ backgroundColor: `${link.color}15` }}>
                     <Icon size={20} style={{ color: link.color }} />
                   </div>
-                  <span className="text-xs font-medium text-gray-700 group-hover:text-gray-900 leading-tight">{link.label}</span>
+                  <span className="text-xs font-medium text-gray-700 group-hover:text-gray-900 leading-tight">{t(link.labelKey)}</span>
                 </Link>
               );
             })}
