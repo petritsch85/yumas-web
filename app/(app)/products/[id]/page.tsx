@@ -1,273 +1,392 @@
 'use client';
 
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
 import { useParams, useRouter } from 'next/navigation';
-import { ArrowLeft } from 'lucide-react';
-import { StatusBadge } from '@/components/ui/StatusBadge';
-import { formatCurrency } from '@/lib/utils';
+import { ArrowLeft, Plus, Trash2, Save, ChevronDown } from 'lucide-react';
+import { useState, useEffect, useId } from 'react';
 
-export default function ProductDetailPage() {
-  const { id } = useParams<{ id: string }>();
+/* ─── Types ──────────────────────────────────────────────────────────────── */
+interface IngredientRow {
+  id: string | null;       // null = new (unsaved) row
+  item_id: string;
+  quantity: number | string;
+  unit_id: string;
+  notes: string;
+}
+
+interface Recipe {
+  id: string;
+  output_item_id: string;
+  output_quantity: number | null;
+  yield_percent: number | null;
+  instructions: string | null;
+}
+
+/* ─── Helpers ─────────────────────────────────────────────────────────────── */
+const newRow = (): IngredientRow => ({
+  id: null,
+  item_id: '',
+  quantity: '',
+  unit_id: '',
+  notes: '',
+});
+
+/* ─── Component ──────────────────────────────────────────────────────────── */
+export default function RecipeDetailPage() {
+  const { id: itemId } = useParams<{ id: string }>();
   const router = useRouter();
+  const qc = useQueryClient();
+  const uid = useId();
 
-  const { data: item, isLoading } = useQuery({
-    queryKey: ['item', id],
+  /* ── Master data ── */
+  const { data: item } = useQuery({
+    queryKey: ['item', itemId],
     queryFn: async () => {
       const { data } = await supabase
         .from('items')
-        .select('*, category:categories(id, name, color_hex), unit:units_of_measure(id, name, abbreviation)')
-        .eq('id', id)
+        .select('id, name, product_type, category:categories(id, name, color_hex)')
+        .eq('id', itemId)
         .single();
       return data;
     },
   });
 
-  const { data: stockLevels } = useQuery({
-    queryKey: ['stock-levels', id],
+  const { data: allItems = [] } = useQuery({
+    queryKey: ['items-for-select'],
     queryFn: async () => {
       const { data } = await supabase
-        .from('inventory_levels')
-        .select('*, location:locations(id, name)')
-        .eq('item_id', id);
+        .from('items')
+        .select('id, name, product_type')
+        .in('product_type', ['raw_material', 'semi_finished'])
+        .eq('is_active', true)
+        .order('name');
       return data ?? [];
     },
   });
 
-  const { data: supplierItems } = useQuery({
-    queryKey: ['supplier-items', id],
-    enabled: item?.product_type === 'raw_material',
+  const { data: units = [] } = useQuery({
+    queryKey: ['units'],
     queryFn: async () => {
       const { data } = await supabase
-        .from('supplier_items')
-        .select('*, supplier:suppliers(id, name)')
-        .eq('item_id', id);
+        .from('units_of_measure')
+        .select('id, name, abbreviation')
+        .order('name');
       return data ?? [];
     },
   });
 
-  const { data: recipeLines } = useQuery({
-    queryKey: ['recipe-lines', id],
-    enabled: item?.product_type === 'semi_finished' || item?.product_type === 'finished',
+  /* ── Recipe data ── */
+  const { data: recipe, isLoading } = useQuery<Recipe | null>({
+    queryKey: ['recipe', itemId],
     queryFn: async () => {
-      // Get recipe where this item is the output
-      const { data: recipe } = await supabase
+      const { data } = await supabase
         .from('recipes')
-        .select('*, lines:recipe_ingredients(*, ingredient:items(name), unit:units_of_measure(abbreviation))')
-        .eq('output_item_id', id)
-        .single();
-      return recipe;
+        .select('id, output_item_id, output_quantity, yield_percent, instructions')
+        .eq('output_item_id', itemId)
+        .maybeSingle();
+      return data ?? null;
     },
   });
 
-  const { data: usedIn } = useQuery({
-    queryKey: ['used-in', id],
+  const { data: savedIngredients = [] } = useQuery({
+    queryKey: ['recipe-ingredients', itemId],
+    enabled: !!recipe?.id,
     queryFn: async () => {
       const { data } = await supabase
         .from('recipe_ingredients')
-        .select('recipe:recipes(id, output_item_id, output_item:items(name))')
-        .eq('item_id', id);
-      return data ?? [];
+        .select('id, item_id, quantity, unit_id, notes')
+        .eq('recipe_id', recipe!.id)
+        .order('id');
+      return (data ?? []) as IngredientRow[];
     },
   });
 
+  /* ── Local form state ── */
+  const [outputQty, setOutputQty] = useState<string>('');
+  const [yieldPct, setYieldPct] = useState<string>('');
+  const [instructions, setInstructions] = useState('');
+  const [rows, setRows] = useState<IngredientRow[]>([]);
+  const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  /* Populate from DB once loaded */
+  useEffect(() => {
+    if (recipe) {
+      setOutputQty(recipe.output_quantity != null ? String(recipe.output_quantity) : '');
+      setYieldPct(recipe.yield_percent != null ? String(recipe.yield_percent) : '');
+      setInstructions(recipe.instructions ?? '');
+    }
+  }, [recipe]);
+
+  useEffect(() => {
+    if (savedIngredients.length > 0) {
+      setRows(savedIngredients.map(r => ({ ...r, quantity: String(r.quantity), notes: r.notes ?? '' })));
+    } else if (!isLoading && savedIngredients.length === 0 && recipe?.id) {
+      setRows([newRow()]);
+    } else if (!isLoading && !recipe) {
+      setRows([newRow()]);
+    }
+  }, [savedIngredients, recipe, isLoading]);
+
+  /* ── Row helpers ── */
+  const updateRow = (idx: number, patch: Partial<IngredientRow>) =>
+    setRows(prev => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
+
+  const deleteRow = (idx: number) =>
+    setRows(prev => prev.filter((_, i) => i !== idx));
+
+  /* ── Save ── */
+  const handleSave = async () => {
+    setSaving(true);
+    setSaved(false);
+    try {
+      /* 1. Upsert recipe header */
+      let recipeId = recipe?.id ?? null;
+      if (!recipeId) {
+        const { data, error } = await supabase
+          .from('recipes')
+          .insert({
+            output_item_id: itemId,
+            output_quantity: outputQty !== '' ? Number(outputQty) : null,
+            yield_percent: yieldPct !== '' ? Number(yieldPct) : null,
+            instructions: instructions || null,
+          })
+          .select('id')
+          .single();
+        if (error) throw error;
+        recipeId = data.id;
+      } else {
+        const { error } = await supabase
+          .from('recipes')
+          .update({
+            output_quantity: outputQty !== '' ? Number(outputQty) : null,
+            yield_percent: yieldPct !== '' ? Number(yieldPct) : null,
+            instructions: instructions || null,
+          })
+          .eq('id', recipeId);
+        if (error) throw error;
+      }
+
+      /* 2. Replace ingredient lines: delete all then re-insert */
+      await supabase.from('recipe_ingredients').delete().eq('recipe_id', recipeId);
+
+      const validRows = rows.filter(r => r.item_id && r.quantity !== '' && r.quantity !== null);
+      if (validRows.length > 0) {
+        const { error } = await supabase.from('recipe_ingredients').insert(
+          validRows.map(r => ({
+            recipe_id: recipeId,
+            item_id: r.item_id,
+            quantity: Number(r.quantity),
+            unit_id: r.unit_id || null,
+            notes: r.notes || null,
+          }))
+        );
+        if (error) throw error;
+      }
+
+      await qc.invalidateQueries({ queryKey: ['recipe', itemId] });
+      await qc.invalidateQueries({ queryKey: ['recipe-ingredients', itemId] });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 3000);
+    } catch (err) {
+      console.error(err);
+      alert('Save failed. Please try again.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  /* ── Render ── */
+  const catColor = (item?.category as { color_hex?: string | null } | null)?.color_hex ?? '#9CA3AF';
+  const catName  = (item?.category as { name?: string } | null)?.name ?? '';
+
   if (isLoading) {
     return (
-      <div className="space-y-4">
+      <div className="max-w-2xl mx-auto space-y-4">
         {[...Array(3)].map((_, i) => (
-          <div key={i} className="h-32 bg-white rounded-lg animate-pulse" />
+          <div key={i} className="h-24 bg-white rounded-xl animate-pulse border border-gray-100" />
         ))}
       </div>
     );
   }
 
-  if (!item) {
-    return <div className="text-center text-gray-500 mt-12">Item not found</div>;
-  }
-
-  const typeLabel = item.product_type?.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase()) ?? 'Unknown';
-
   return (
-    <div>
-      {/* Header */}
-      <div className="flex items-center gap-4 mb-6">
+    <div className="max-w-2xl mx-auto space-y-6 pb-10">
+
+      {/* ── Header ── */}
+      <div className="flex items-start gap-3">
         <button
           onClick={() => router.back()}
-          className="text-gray-500 hover:text-gray-700 transition-colors"
+          className="mt-1 text-gray-400 hover:text-gray-700 transition-colors flex-shrink-0"
         >
           <ArrowLeft size={20} />
         </button>
-        <div className="flex-1">
-          <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-bold text-gray-900">{item.name}</h1>
-            <StatusBadge status={item.product_type ?? 'unknown'} />
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-0.5">
+            <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: catColor }} />
+            <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">{catName}</span>
           </div>
+          <h1 className="text-2xl font-bold text-gray-900 leading-tight">{item?.name ?? '…'}</h1>
+        </div>
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="flex items-center gap-2 bg-[#1B5E20] text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-[#2E7D32] transition-colors disabled:opacity-60 flex-shrink-0"
+        >
+          <Save size={15} />
+          {saving ? 'Saving…' : 'Save'}
+        </button>
+      </div>
+
+      {saved && (
+        <div className="bg-green-50 border border-green-200 text-green-700 text-sm rounded-xl px-4 py-3">
+          Recipe saved successfully.
+        </div>
+      )}
+
+      {/* ── Recipe settings ── */}
+      <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5 space-y-4">
+        <h2 className="font-semibold text-gray-900 text-sm">Recipe Settings</h2>
+
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Output Quantity</label>
+            <input
+              type="number"
+              min="0"
+              step="any"
+              value={outputQty}
+              onChange={e => setOutputQty(e.target.value)}
+              placeholder="e.g. 10"
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20]"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Yield %</label>
+            <input
+              type="number"
+              min="0"
+              max="100"
+              step="any"
+              value={yieldPct}
+              onChange={e => setYieldPct(e.target.value)}
+              placeholder="e.g. 95"
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20]"
+            />
+          </div>
+        </div>
+
+        <div>
+          <label className="block text-xs font-medium text-gray-500 mb-1">Instructions / Notes</label>
+          <textarea
+            rows={3}
+            value={instructions}
+            onChange={e => setInstructions(e.target.value)}
+            placeholder="Add preparation notes…"
+            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20] resize-none"
+          />
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Details card */}
-        <div className="bg-white rounded-lg shadow-sm border border-gray-100 p-6">
-          <h2 className="font-semibold text-gray-900 mb-4">Details</h2>
-          <dl className="space-y-3 text-sm">
-            <div className="flex justify-between">
-              <dt className="text-gray-500">Name</dt>
-              <dd className="font-medium text-gray-900">{item.name}</dd>
-            </div>
-            {item.sku && (
-              <div className="flex justify-between">
-                <dt className="text-gray-500">SKU</dt>
-                <dd className="font-mono text-gray-700">{item.sku}</dd>
-              </div>
-            )}
-            <div className="flex justify-between">
-              <dt className="text-gray-500">Type</dt>
-              <dd>{typeLabel}</dd>
-            </div>
-            <div className="flex justify-between">
-              <dt className="text-gray-500">Category</dt>
-              <dd className="text-gray-700">{item.category?.name ?? '—'}</dd>
-            </div>
-            <div className="flex justify-between">
-              <dt className="text-gray-500">Unit</dt>
-              <dd className="text-gray-700">{item.unit?.name ?? '—'} {item.unit?.abbreviation ? `(${item.unit.abbreviation})` : ''}</dd>
-            </div>
-            {item.description && (
-              <div className="flex justify-between">
-                <dt className="text-gray-500">Description</dt>
-                <dd className="text-gray-700 text-right max-w-48">{item.description}</dd>
-              </div>
-            )}
-            <div className="flex justify-between">
-              <dt className="text-gray-500">Status</dt>
-              <dd>
-                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${item.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
-                  {item.is_active ? 'Active' : 'Inactive'}
-                </span>
-              </dd>
-            </div>
-          </dl>
+      {/* ── Ingredients ── */}
+      <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-50">
+          <h2 className="font-semibold text-gray-900 text-sm">Ingredients</h2>
+          <button
+            onClick={() => setRows(prev => [...prev, newRow()])}
+            className="flex items-center gap-1.5 text-[#1B5E20] text-xs font-medium hover:text-[#2E7D32] transition-colors"
+          >
+            <Plus size={14} />
+            Add ingredient
+          </button>
         </div>
 
-        {/* Stock levels */}
-        <div className="bg-white rounded-lg shadow-sm border border-gray-100 p-6">
-          <h2 className="font-semibold text-gray-900 mb-4">Stock by Location</h2>
-          {stockLevels && stockLevels.length > 0 ? (
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Location</th>
-                  <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase">Qty</th>
-                  <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase">Min</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(stockLevels as Record<string, unknown>[]).map((row, i) => (
-                  <tr key={i} className="border-t border-gray-100">
-                    <td className="px-3 py-2 text-gray-800">{(row.location as { name: string } | null)?.name ?? '—'}</td>
-                    <td className="px-3 py-2 text-right font-medium text-gray-900">{row.quantity as number ?? 0}</td>
-                    <td className="px-3 py-2 text-right text-gray-500">{row.low_stock_threshold as number ?? '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          ) : (
-            <div className="text-center text-gray-400 text-sm py-4">No stock records found</div>
-          )}
+        {/* Column headers */}
+        <div className="grid grid-cols-[1fr_80px_90px_36px] gap-2 px-5 py-2 bg-gray-50 border-b border-gray-100">
+          <span className="text-xs font-medium text-gray-400 uppercase tracking-wide">Ingredient</span>
+          <span className="text-xs font-medium text-gray-400 uppercase tracking-wide">Qty</span>
+          <span className="text-xs font-medium text-gray-400 uppercase tracking-wide">Unit</span>
+          <span />
         </div>
 
-        {/* Suppliers (raw materials) */}
-        {item.product_type === 'raw_material' && supplierItems && supplierItems.length > 0 && (
-          <div className="bg-white rounded-lg shadow-sm border border-gray-100 p-6 lg:col-span-2">
-            <h2 className="font-semibold text-gray-900 mb-4">Suppliers</h2>
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Supplier</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Unit Price</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Package Size</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Preferred</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(supplierItems as Record<string, unknown>[]).map((si, i) => (
-                  <tr key={i} className="border-t border-gray-100">
-                    <td className="px-4 py-3 text-gray-800">{(si.supplier as { name: string } | null)?.name ?? '—'}</td>
-                    <td className="px-4 py-3 text-gray-800">{formatCurrency(si.unit_price as number)}</td>
-                    <td className="px-4 py-3 text-gray-600">{si.package_size as string ?? '—'}</td>
-                    <td className="px-4 py-3">
-                      {si.is_preferred ? (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">Primary</span>
-                      ) : (
-                        <span className="text-gray-400 text-xs">Secondary</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        {rows.length === 0 ? (
+          <div className="text-center text-gray-400 text-sm py-8">
+            No ingredients yet — click &ldquo;Add ingredient&rdquo; to start.
+          </div>
+        ) : (
+          <div className="divide-y divide-gray-50">
+            {rows.map((row, idx) => (
+              <div key={`${uid}-${idx}`} className="grid grid-cols-[1fr_80px_90px_36px] gap-2 px-5 py-3 items-center">
+
+                {/* Ingredient selector */}
+                <div className="relative">
+                  <select
+                    value={row.item_id}
+                    onChange={e => updateRow(idx, { item_id: e.target.value })}
+                    className="w-full appearance-none border border-gray-200 rounded-lg pl-3 pr-7 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20] text-gray-900"
+                  >
+                    <option value="">Select…</option>
+                    {allItems.map(i => (
+                      <option key={i.id} value={i.id}>{i.name}</option>
+                    ))}
+                  </select>
+                  <ChevronDown size={13} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                </div>
+
+                {/* Quantity */}
+                <input
+                  type="number"
+                  min="0"
+                  step="any"
+                  value={row.quantity}
+                  onChange={e => updateRow(idx, { quantity: e.target.value })}
+                  placeholder="0"
+                  className="w-full border border-gray-200 rounded-lg px-2 py-2 text-sm text-center focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20]"
+                />
+
+                {/* Unit selector */}
+                <div className="relative">
+                  <select
+                    value={row.unit_id}
+                    onChange={e => updateRow(idx, { unit_id: e.target.value })}
+                    className="w-full appearance-none border border-gray-200 rounded-lg pl-2 pr-6 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20] text-gray-900"
+                  >
+                    <option value="">—</option>
+                    {units.map(u => (
+                      <option key={u.id} value={u.id}>{u.abbreviation || u.name}</option>
+                    ))}
+                  </select>
+                  <ChevronDown size={13} className="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                </div>
+
+                {/* Delete */}
+                <button
+                  onClick={() => deleteRow(idx)}
+                  className="flex items-center justify-center text-gray-300 hover:text-red-400 transition-colors"
+                >
+                  <Trash2 size={15} />
+                </button>
+              </div>
+            ))}
           </div>
         )}
 
-        {/* Recipe (semi-finished / finished) */}
-        {(item.product_type === 'semi_finished' || item.product_type === 'finished') && recipeLines && (
-          <div className="bg-white rounded-lg shadow-sm border border-gray-100 p-6 lg:col-span-2">
-            <h2 className="font-semibold text-gray-900 mb-4">Recipe</h2>
-            <div className="flex gap-6 mb-4 text-sm">
-              <div>
-                <span className="text-gray-500">Output Qty: </span>
-                <span className="font-medium">{(recipeLines as Record<string, unknown>).output_quantity as number ?? '—'}</span>
-              </div>
-              <div>
-                <span className="text-gray-500">Yield: </span>
-                <span className="font-medium">{(recipeLines as Record<string, unknown>).yield_percent as number ?? '—'}%</span>
-              </div>
-            </div>
-            {((recipeLines as Record<string, unknown>).lines as Record<string, unknown>[])?.length > 0 ? (
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Ingredient</th>
-                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Qty</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Unit</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Notes</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(((recipeLines as Record<string, unknown>).lines as Record<string, unknown>[]) ?? []).map((line: Record<string, unknown>, i: number) => (
-                    <tr key={i} className="border-t border-gray-100">
-                      <td className="px-4 py-3 text-gray-800">{(line.ingredient as { name: string } | null)?.name ?? '—'}</td>
-                      <td className="px-4 py-3 text-right text-gray-800">{line.quantity as number}</td>
-                      <td className="px-4 py-3 text-gray-600">{(line.unit as { abbreviation: string } | null)?.abbreviation ?? '—'}</td>
-                      <td className="px-4 py-3 text-gray-400 text-xs">{line.notes as string ?? ''}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            ) : (
-              <div className="text-gray-400 text-sm">No recipe lines defined</div>
-            )}
-          </div>
-        )}
-
-        {/* Used In */}
-        {usedIn && usedIn.length > 0 && (
-          <div className="bg-white rounded-lg shadow-sm border border-gray-100 p-6 lg:col-span-2">
-            <h2 className="font-semibold text-gray-900 mb-4">Used In</h2>
-            <div className="flex flex-wrap gap-2">
-              {(usedIn as Record<string, unknown>[]).map((row, i) => {
-                const recipe = row.recipe as Record<string, unknown> | null;
-                const outputItem = recipe?.output_item as { name: string } | null;
-                return (
-                  <span key={i} className="inline-flex items-center px-3 py-1 rounded-full text-sm bg-gray-100 text-gray-700">
-                    {outputItem?.name ?? '—'}
-                  </span>
-                );
-              })}
-            </div>
-          </div>
-        )}
+        {/* Notes per ingredient — expandable row below each */}
+        <div className="px-5 pb-4 pt-1 border-t border-gray-50">
+          <p className="text-xs text-gray-400">Tip: notes per ingredient coming soon. Use the Instructions field above for prep notes.</p>
+        </div>
       </div>
+
+      {/* ── Bottom save ── */}
+      <button
+        onClick={handleSave}
+        disabled={saving}
+        className="w-full flex items-center justify-center gap-2 bg-[#1B5E20] text-white py-3 rounded-xl text-sm font-semibold hover:bg-[#2E7D32] transition-colors disabled:opacity-60"
+      >
+        <Save size={16} />
+        {saving ? 'Saving…' : 'Save Recipe'}
+      </button>
     </div>
   );
 }
