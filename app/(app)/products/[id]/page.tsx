@@ -53,7 +53,7 @@ export default function ProductDetailPage() {
       // Get recipe where this item is the output
       const { data: recipe } = await supabase
         .from('recipes')
-        .select('*, lines:recipe_lines(*, ingredient:items(name), unit:units_of_measure(abbreviation))')
+        .select('*, lines:recipe_ingredients(*, ingredient:items(name), unit:units_of_measure(abbreviation))')
         .eq('output_item_id', id)
         .single();
       return recipe;
@@ -64,9 +64,9 @@ export default function ProductDetailPage() {
     queryKey: ['used-in', id],
     queryFn: async () => {
       const { data } = await supabase
-        .from('recipe_lines')
+        .from('recipe_ingredients')
         .select('recipe:recipes(id, output_item_id, output_item:items(name))')
-        .eq('ingredient_item_id', id);
+        .eq('item_id', id);
       return data ?? [];
     },
   });
@@ -220,7 +220,7 @@ export default function ProductDetailPage() {
               </div>
               <div>
                 <span className="text-gray-500">Yield: </span>
-                <span className="font-medium">{(recipeLines as Record<string, unknown>).yield_percentage as number ?? '—'}%</span>
+                <span className="font-medium">{(recipeLines as Record<string, unknown>).yield_percent as number ?? '—'}%</span>
               </div>
             </div>
             {((recipeLines as Record<string, unknown>).lines as Record<string, unknown>[])?.length > 0 ? (
@@ -230,8 +230,7 @@ export default function ProductDetailPage() {
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Ingredient</th>
                     <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Qty</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Unit</th>
-                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Cost/Unit</th>
-                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Line Cost</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Notes</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -240,8 +239,7 @@ export default function ProductDetailPage() {
                       <td className="px-4 py-3 text-gray-800">{(line.ingredient as { name: string } | null)?.name ?? '—'}</td>
                       <td className="px-4 py-3 text-right text-gray-800">{line.quantity as number}</td>
                       <td className="px-4 py-3 text-gray-600">{(line.unit as { abbreviation: string } | null)?.abbreviation ?? '—'}</td>
-                      <td className="px-4 py-3 text-right text-gray-600">{formatCurrency(line.cost_per_unit as number)}</td>
-                      <td className="px-4 py-3 text-right font-medium text-gray-900">{formatCurrency(line.line_cost as number)}</td>
+                      <td className="px-4 py-3 text-gray-400 text-xs">{line.notes as string ?? ''}</td>
                     </tr>
                   ))}
                 </tbody>
