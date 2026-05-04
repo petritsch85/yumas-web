@@ -202,7 +202,7 @@ export default function RecipeDetailPage() {
       await qc.invalidateQueries({ queryKey: ['recipe-ingredients', itemId] });
       setSaved(true); setEditing(false);
       setTimeout(() => setSaved(false), 3000);
-    } catch (err) { console.error(err); alert('Save failed. Please try again.'); }
+    } catch (err) { console.error(err); alert('Save failed: ' + (err instanceof Error ? err.message : String(err))); }
     finally { setSaving(false); }
   };
 
