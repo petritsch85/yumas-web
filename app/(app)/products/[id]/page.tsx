@@ -566,7 +566,7 @@ export default function RecipeDetailPage() {
                   className="w-full border-2 border-gray-300 bg-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20]" />
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">Days to Expiry</label>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Days to Expiry <span className="font-normal text-gray-400">(without freezing)</span></label>
                 <input type="number" min="0" step="1" value={daysToExpiry} onChange={e => setDaysToExpiry(e.target.value)} placeholder="e.g. 5"
                   className="w-full border-2 border-gray-300 bg-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20]" />
               </div>
@@ -612,7 +612,7 @@ export default function RecipeDetailPage() {
               <dd className="font-semibold text-gray-900">{recipe?.minutes_to_produce != null ? `${recipe.minutes_to_produce} min` : <span className="text-gray-300">—</span>}</dd>
             </div>
             <div>
-              <dt className="text-xs text-gray-400 mb-0.5">Days to Expiry</dt>
+              <dt className="text-xs text-gray-400 mb-0.5">Days to Expiry (without freezing)</dt>
               <dd className="font-semibold text-gray-900">{recipe?.days_to_expiry != null ? `${recipe.days_to_expiry} days` : <span className="text-gray-300">—</span>}</dd>
             </div>
             <div>
