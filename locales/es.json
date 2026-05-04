@@ -145,7 +145,8 @@
     "actions": "Acciones",
     "from": "Desde:",
     "to": "Hasta:",
-    "reset": "Restablecer"
+    "reset": "Restablecer",
+    "signOut": "Cerrar sesión"
   },
   "status": {
     "draft": "Borrador",

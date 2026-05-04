@@ -18,7 +18,7 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    const { fullName, email, password, role, locationId, permissions } = await request.json();
+    const { fullName, email, password, role, locationId, permissions, language } = await request.json();
 
     if (!fullName || !email || !password || !role) {
       return NextResponse.json({ error: 'Name, email, password and role are required' }, { status: 400 });
@@ -50,6 +50,7 @@ export async function POST(request: Request) {
       is_active: true,
     };
     if (permissions !== undefined) profilePayload.permissions = permissions;
+    if (language)  profilePayload.language  = language;
 
     const { error: profileError } = await admin
       .from('profiles')

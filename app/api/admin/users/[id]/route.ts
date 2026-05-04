@@ -28,7 +28,7 @@ export async function PATCH(
 ) {
   try {
     const { id } = await params;
-    const { role, locationId, isActive, permissions, newPassword, newEmail } = await request.json();
+    const { role, locationId, isActive, permissions, newPassword, newEmail, language } = await request.json();
 
     const admin = getSupabaseAdmin();
 
@@ -41,6 +41,7 @@ export async function PATCH(
     if (permissions !== undefined) {
       updatePayload.permissions = permissions;
     }
+    if (language) updatePayload.language = language;
 
     const { error } = await admin
       .from('profiles')

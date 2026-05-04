@@ -110,18 +110,20 @@ type UserRow = {
   role: string;
   location_id: string | null;
   is_active: boolean;
+  language?: string;
   permissions?: Partial<AppPermissions>;
   location?: { name: string } | null;
 };
 
 type AddDraft = {
   fullName: string; email: string; password: string;
-  role: string; locationId: string;
+  role: string; locationId: string; language: string;
 };
 
 type EditDraft = {
   role: string; locationId: string; isActive: boolean;
   permissions: AppPermissions; newPassword: string; newEmail: string;
+  language: string;
 };
 
 const ROLES = ['staff', 'manager', 'admin'];
@@ -249,7 +251,7 @@ export default function TeamPage() {
 
   const [showAdd, setShowAdd] = useState(false);
   const [addDraft, setAddDraft] = useState<AddDraft>({
-    fullName: '', email: '', password: 'Yumas2026!', role: 'staff', locationId: '',
+    fullName: '', email: '', password: 'Yumas2026!', role: 'staff', locationId: '', language: 'en',
   });
   const [addPerms, setAddPerms] = useState<AppPermissions>(defaultsForRole('staff'));
   const [showPassword, setShowPassword] = useState(false);
@@ -258,7 +260,7 @@ export default function TeamPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<EditDraft>({
     role: 'staff', locationId: '', isActive: true,
-    permissions: { ...STAFF_DEFAULTS }, newPassword: '', newEmail: '',
+    permissions: { ...STAFF_DEFAULTS }, newPassword: '', newEmail: '', language: 'en',
   });
 
   const { data: users, isLoading } = useQuery({
@@ -266,7 +268,7 @@ export default function TeamPage() {
     queryFn: async () => {
       const { data } = await supabase
         .from('profiles')
-        .select('*, location:locations(name)')
+        .select('*, location:locations(name), language')
         .order('full_name');
       return (data ?? []) as UserRow[];
     },
@@ -305,6 +307,7 @@ export default function TeamPage() {
           role:        draft.role,
           locationId:  draft.locationId || null,
           permissions: draft.role !== 'admin' ? perms : null,
+          language:    draft.language || 'en',
         }),
       });
       const json = await res.json();
@@ -314,7 +317,7 @@ export default function TeamPage() {
       qc.invalidateQueries({ queryKey: ['team-users'] });
       qc.invalidateQueries({ queryKey: ['team-emails'] });
       setShowAdd(false);
-      setAddDraft({ fullName: '', email: '', password: 'Yumas2026!', role: 'staff', locationId: '' });
+      setAddDraft({ fullName: '', email: '', password: 'Yumas2026!', role: 'staff', locationId: '', language: 'en' });
       setAddPerms(defaultsForRole('staff'));
       setAddError('');
       setShowPassword(false);
@@ -328,6 +331,7 @@ export default function TeamPage() {
         role:       draft.role,
         locationId: draft.locationId || null,
         isActive:   draft.isActive,
+        language:   draft.language || 'en',
       };
       if (draft.role !== 'admin') body.permissions = draft.permissions;
       if (draft.newPassword.trim()) body.newPassword = draft.newPassword.trim();
@@ -373,6 +377,7 @@ export default function TeamPage() {
       permissions: mergePermissions(user.permissions),
       newPassword: '',
       newEmail:    emailMap?.[user.id] ?? '',
+      language:    user.language ?? 'en',
     });
   };
 
@@ -483,6 +488,19 @@ export default function TeamPage() {
               >
                 <option value="">{t('team.form.allLocations')}</option>
                 {locations?.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">{t('team.form.language')}</label>
+              <select
+                value={addDraft.language}
+                onChange={e => setAddDraft(d => ({ ...d, language: e.target.value }))}
+                className="w-full border-2 border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/40 focus:border-[#1B5E20]"
+              >
+                <option value="en">🇬🇧 {t('language.en')}</option>
+                <option value="de">🇩🇪 {t('language.de')}</option>
+                <option value="es">🇪🇸 {t('language.es')}</option>
               </select>
             </div>
           </div>
@@ -676,6 +694,18 @@ export default function TeamPage() {
                               >
                                 <option value="active">{t('team.active')}</option>
                                 <option value="inactive">{t('team.inactive')}</option>
+                              </select>
+                            </div>
+                            <div>
+                              <label className="block text-xs font-medium text-gray-500 mb-1">{t('team.form.language')}</label>
+                              <select
+                                value={editDraft.language}
+                                onChange={e => setEditDraft(d => ({ ...d, language: e.target.value }))}
+                                className="w-full border-2 border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/40 focus:border-[#1B5E20]"
+                              >
+                                <option value="en">🇬🇧 {t('language.en')}</option>
+                                <option value="de">🇩🇪 {t('language.de')}</option>
+                                <option value="es">🇪🇸 {t('language.es')}</option>
                               </select>
                             </div>
                           </div>

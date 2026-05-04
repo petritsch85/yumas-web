@@ -145,7 +145,8 @@
     "actions": "Actions",
     "from": "From:",
     "to": "To:",
-    "reset": "Reset"
+    "reset": "Reset",
+    "signOut": "Sign out"
   },
   "status": {
     "draft": "Draft",

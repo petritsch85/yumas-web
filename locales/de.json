@@ -145,7 +145,8 @@
     "actions": "Aktionen",
     "from": "Von:",
     "to": "Bis:",
-    "reset": "Zurücksetzen"
+    "reset": "Zurücksetzen",
+    "signOut": "Abmelden"
   },
   "status": {
     "draft": "Entwurf",
