@@ -564,9 +564,11 @@
     "noProducts": "No products found",
     "searchProducts": "Search products...",
     "addProduct": "Add Product",
+    "itemDetails": "Item Details",
+    "itemCategory": "Category",
     "nameTranslations": "Item Name Translations",
     "nameTranslationsDesc": "Set how this item appears in each language. Leave blank to fall back to the primary name.",
-    "namesSaved": "Names saved"
+    "namesSaved": "Saved"
   },
   "menus": {
     "subtitle": "View and manage your restaurant menus",

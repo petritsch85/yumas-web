@@ -564,9 +564,11 @@
     "noProducts": "Keine Produkte gefunden",
     "searchProducts": "Produkte suchen...",
     "addProduct": "Produkt hinzufügen",
+    "itemDetails": "Artikeldetails",
+    "itemCategory": "Kategorie",
     "nameTranslations": "Artikelname-Übersetzungen",
     "nameTranslationsDesc": "Legen Sie fest, wie dieser Artikel in jeder Sprache angezeigt wird. Leer lassen, um auf den Hauptnamen zurückzugreifen.",
-    "namesSaved": "Namen gespeichert"
+    "namesSaved": "Gespeichert"
   },
   "menus": {
     "subtitle": "Speisekarten Ihrer Restaurants anzeigen und verwalten",

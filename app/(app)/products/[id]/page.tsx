@@ -98,10 +98,18 @@ export default function RecipeDetailPage() {
     queryFn: async () => {
       const { data } = await supabase
         .from('items')
-        .select('id, name, name_en, name_de, name_es, product_type, category:categories(id, name, color_hex), unit:units_of_measure(id, name, abbreviation)')
+        .select('id, name, name_en, name_de, name_es, product_type, category_id, category:categories(id, name, color_hex), unit:units_of_measure(id, name, abbreviation)')
         .eq('id', itemId)
         .single();
       return data;
+    },
+  });
+
+  const { data: categories = [] } = useQuery({
+    queryKey: ['categories'],
+    queryFn: async () => {
+      const { data } = await supabase.from('categories').select('id, name, color_hex').order('name');
+      return data ?? [];
     },
   });
 
@@ -185,8 +193,9 @@ export default function RecipeDetailPage() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
-  /* ── Item name translations ── */
+  /* ── Item details (admin card) ── */
   const [nameDraft, setNameDraft] = useState({ en: '', de: '', es: '' });
+  const [categoryDraft, setCategoryDraft] = useState('');
   const [nameSaving, setNameSaving] = useState(false);
   const [nameSaved, setNameSaved] = useState(false);
 
@@ -208,8 +217,9 @@ export default function RecipeDetailPage() {
 
   useEffect(() => {
     if (item) {
-      const i = item as { name_en?: string | null; name_de?: string | null; name_es?: string | null };
+      const i = item as { name_en?: string | null; name_de?: string | null; name_es?: string | null; category_id?: string | null };
       setNameDraft({ en: i.name_en ?? '', de: i.name_de ?? '', es: i.name_es ?? '' });
+      setCategoryDraft(i.category_id ?? '');
     }
   }, [item]);
 
@@ -258,15 +268,17 @@ export default function RecipeDetailPage() {
       const { error } = await supabase
         .from('items')
         .update({
-          name_en: nameDraft.en.trim() || null,
-          name_de: nameDraft.de.trim() || null,
-          name_es: nameDraft.es.trim() || null,
+          name_en:     nameDraft.en.trim() || null,
+          name_de:     nameDraft.de.trim() || null,
+          name_es:     nameDraft.es.trim() || null,
+          category_id: categoryDraft || null,
         })
         .eq('id', itemId);
       if (error) throw error;
       await qc.invalidateQueries({ queryKey: ['item', itemId] });
       await qc.invalidateQueries({ queryKey: ['items-for-select'] });
       await qc.invalidateQueries({ queryKey: ['recipe-ingredients', itemId] });
+      await qc.invalidateQueries({ queryKey: ['items'] }); // refresh product list pages
       setNameSaved(true);
       setTimeout(() => setNameSaved(false), 3000);
     } catch (err) {
@@ -422,43 +434,65 @@ export default function RecipeDetailPage() {
         </div>
       )}
 
-      {/* ── Item Name Translations (admin only) ── */}
+      {/* ── Item Details (admin only) ── */}
       {profile?.role === 'admin' && (
         <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5 space-y-4">
           <div className="flex items-center justify-between">
-            <h2 className="font-semibold text-gray-900 text-sm">{t('products.nameTranslations')}</h2>
+            <h2 className="font-semibold text-gray-900 text-sm">{t('products.itemDetails')}</h2>
             {nameSaved && <span className="text-xs text-green-600 font-medium">✓ {t('products.namesSaved')}</span>}
           </div>
-          <p className="text-xs text-gray-400">{t('products.nameTranslationsDesc')}</p>
-          <div className="space-y-3">
-            <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">🇬🇧 {t('language.en')}</label>
-              <input
-                value={nameDraft.en}
-                onChange={e => setNameDraft(d => ({ ...d, en: e.target.value }))}
-                placeholder={item?.name}
-                className="w-full border-2 border-gray-300 bg-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20]"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">🇩🇪 {t('language.de')}</label>
-              <input
-                value={nameDraft.de}
-                onChange={e => setNameDraft(d => ({ ...d, de: e.target.value }))}
-                placeholder={item?.name}
-                className="w-full border-2 border-gray-300 bg-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20]"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">🇪🇸 {t('language.es')}</label>
-              <input
-                value={nameDraft.es}
-                onChange={e => setNameDraft(d => ({ ...d, es: e.target.value }))}
-                placeholder={item?.name}
-                className="w-full border-2 border-gray-300 bg-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20]"
-              />
+
+          {/* Category */}
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">{t('products.itemCategory')}</label>
+            <div className="relative">
+              <select
+                value={categoryDraft}
+                onChange={e => setCategoryDraft(e.target.value)}
+                className="w-full appearance-none border-2 border-gray-300 bg-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20] text-gray-900 pr-8"
+              >
+                <option value="">— {t('common.optional')} —</option>
+                {categories.map(c => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+              <ChevronDown size={13} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
             </div>
           </div>
+
+          <div className="border-t border-gray-50 pt-3">
+            <p className="text-xs text-gray-400 mb-3">{t('products.nameTranslationsDesc')}</p>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">🇬🇧 {t('language.en')}</label>
+                <input
+                  value={nameDraft.en}
+                  onChange={e => setNameDraft(d => ({ ...d, en: e.target.value }))}
+                  placeholder={item?.name}
+                  className="w-full border-2 border-gray-300 bg-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20]"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">🇩🇪 {t('language.de')}</label>
+                <input
+                  value={nameDraft.de}
+                  onChange={e => setNameDraft(d => ({ ...d, de: e.target.value }))}
+                  placeholder={item?.name}
+                  className="w-full border-2 border-gray-300 bg-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20]"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">🇪🇸 {t('language.es')}</label>
+                <input
+                  value={nameDraft.es}
+                  onChange={e => setNameDraft(d => ({ ...d, es: e.target.value }))}
+                  placeholder={item?.name}
+                  className="w-full border-2 border-gray-300 bg-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20]"
+                />
+              </div>
+            </div>
+          </div>
+
           <button
             onClick={handleSaveNames}
             disabled={nameSaving}

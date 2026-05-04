@@ -564,9 +564,11 @@
     "noProducts": "No se encontraron productos",
     "searchProducts": "Buscar productos...",
     "addProduct": "Añadir Producto",
+    "itemDetails": "Detalles del Artículo",
+    "itemCategory": "Categoría",
     "nameTranslations": "Traducciones del Nombre del Artículo",
     "nameTranslationsDesc": "Establezca cómo aparece este artículo en cada idioma. Dejar en blanco para usar el nombre principal.",
-    "namesSaved": "Nombres guardados"
+    "namesSaved": "Guardado"
   },
   "menus": {
     "subtitle": "Ver y gestionar los menús de sus restaurantes",
