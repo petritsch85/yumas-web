@@ -2,21 +2,21 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
-import { useState, useMemo } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Search, Plus } from 'lucide-react';
+import { Search, Plus, ChevronRight } from 'lucide-react';
 import type { Item } from '@/types';
 
-export default function SemiFinishedPage() {
+export default function RecipesListPage() {
   const router = useRouter();
   const [search, setSearch] = useState('');
 
-  const { data: items, isLoading } = useQuery({
+  const { data: items = [], isLoading } = useQuery({
     queryKey: ['items', 'semi_finished'],
     queryFn: async () => {
       const { data } = await supabase
         .from('items')
-        .select('*, category:categories(id, name, color_hex), unit:units_of_measure(id, name, abbreviation)')
+        .select('*, category:categories(id, name, color_hex)')
         .eq('product_type', 'semi_finished')
         .eq('is_active', true)
         .order('name');
@@ -24,91 +24,99 @@ export default function SemiFinishedPage() {
     },
   });
 
-  // Build SKU map: F2-1, F2-2… alphabetically
-  const skuMap = useMemo(() => {
-    if (!items) return {} as Record<string, string>;
-    const map: Record<string, string> = {};
-    items.forEach((item, i) => { map[item.id] = `F2-${i + 1}`; });
-    return map;
-  }, [items]);
-
-  const filtered = (items ?? []).filter((i) =>
+  const filtered = items.filter(i =>
     i.name.toLowerCase().includes(search.toLowerCase())
   );
 
+  /* Group by category */
+  const grouped = filtered.reduce<Record<string, { color: string; items: Item[] }>>((acc, item) => {
+    const cat = item.category?.name ?? 'Uncategorised';
+    const color = item.category?.color_hex ?? '#9CA3AF';
+    if (!acc[cat]) acc[cat] = { color, items: [] };
+    acc[cat].items.push(item);
+    return acc;
+  }, {});
+
+  const categories = Object.keys(grouped).sort();
+
   return (
-    <div>
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Semi-Finished Products</h1>
-        <button className="bg-[#1B5E20] text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-[#2E7D32] transition-colors flex items-center gap-2">
+    <div className="max-w-2xl mx-auto space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold text-gray-900">Recipes</h1>
+        <button
+          onClick={() => router.push('/products/semi-finished/new')}
+          className="bg-[#1B5E20] text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-[#2E7D32] transition-colors flex items-center gap-2"
+        >
           <Plus size={16} />
-          Add Item
+          New Recipe
         </button>
       </div>
 
-      <div className="bg-white rounded-lg shadow-sm border border-gray-100">
-        <div className="p-4 border-b border-gray-100">
-          <div className="relative max-w-xs">
-            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search items..."
-              className="w-full border border-gray-200 rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20] focus:border-transparent"
-            />
-          </div>
-        </div>
-
-        <div className="overflow-x-auto">
-          {isLoading ? (
-            <div className="p-6 space-y-3">
-              {[...Array(6)].map((_, i) => <div key={i} className="h-4 bg-gray-100 rounded animate-pulse" />)}
-            </div>
-          ) : filtered.length === 0 ? (
-            <div className="p-8 text-center text-gray-400 text-sm">No items found</div>
-          ) : (
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">SKU</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Category</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Unit</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Has Recipe</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((item) => (
-                  <tr
-                    key={item.id}
-                    className="border-t border-gray-100 hover:bg-gray-50 cursor-pointer"
-                    onClick={() => router.push(`/products/${item.id}`)}
-                  >
-                    <td className="px-4 py-3 text-gray-500 font-mono text-xs">{skuMap[item.id] ?? '—'}</td>
-                    <td className="px-4 py-3 text-gray-900 font-medium">{item.name}</td>
-                    <td className="px-4 py-3 text-gray-600">
-                      {item.category ? (
-                        <span className="inline-flex items-center gap-1.5">
-                          {item.category.color_hex && (
-                            <span className="w-2 h-2 rounded-full" style={{ backgroundColor: item.category.color_hex }} />
-                          )}
-                          {item.category.name}
-                        </span>
-                      ) : '—'}
-                    </td>
-                    <td className="px-4 py-3 text-gray-600">{item.unit?.abbreviation ?? '—'}</td>
-                    <td className="px-4 py-3">
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${item.is_produced ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
-                        {item.is_produced ? 'Yes' : 'No'}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
+      {/* Search */}
+      <div className="relative">
+        <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+        <input
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          placeholder="Search recipes…"
+          className="w-full border border-gray-200 rounded-xl pl-9 pr-4 py-2.5 text-sm bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20]"
+        />
       </div>
+
+      {/* List */}
+      {isLoading ? (
+        <div className="space-y-2">
+          {[...Array(6)].map((_, i) => (
+            <div key={i} className="h-16 bg-white rounded-xl border border-gray-100 animate-pulse" />
+          ))}
+        </div>
+      ) : filtered.length === 0 ? (
+        <div className="text-center py-16 text-gray-400 text-sm">
+          {search ? 'No recipes match your search.' : 'No recipes yet. Add your first recipe above.'}
+        </div>
+      ) : (
+        <div className="space-y-6">
+          {categories.map(cat => (
+            <div key={cat}>
+              {/* Category header */}
+              <div className="flex items-center gap-2 mb-2 px-1">
+                <span
+                  className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                  style={{ backgroundColor: grouped[cat].color }}
+                />
+                <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">{cat}</span>
+                <span className="text-xs text-gray-400 ml-auto">{grouped[cat].items.length}</span>
+              </div>
+
+              {/* Recipe cards */}
+              <div className="bg-white rounded-xl border border-gray-100 shadow-sm divide-y divide-gray-50">
+                {grouped[cat].items.map(item => (
+                  <button
+                    key={item.id}
+                    onClick={() => router.push(`/products/${item.id}`)}
+                    className="w-full flex items-center gap-4 px-5 py-4 hover:bg-gray-50/70 transition-colors text-left first:rounded-t-xl last:rounded-b-xl"
+                  >
+                    {/* Colour dot */}
+                    <span
+                      className="w-3 h-3 rounded-full flex-shrink-0"
+                      style={{ backgroundColor: grouped[cat].color }}
+                    />
+
+                    {/* Name + category */}
+                    <div className="flex-1 min-w-0">
+                      <div className="font-semibold text-gray-900 text-sm leading-snug">{item.name}</div>
+                      <div className="text-xs text-gray-400 mt-0.5">{cat}</div>
+                    </div>
+
+                    <ChevronRight size={16} className="text-gray-300 flex-shrink-0" />
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
