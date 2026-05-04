@@ -530,7 +530,7 @@ export default function LocationInventoryFormPage({
     return () => { if (draftTimer.current) clearTimeout(draftTimer.current); };
   }, [counts, comment, params.locationId]);
 
-  const filledCount = Object.values(counts).filter((v) => v.trim() !== '').length;
+  const filledCount = Object.values(counts).filter((v) => v !== '' && v !== '0').length;
 
   const handleChange = (name: string, value: string) => {
     setCounts((prev) => ({ ...prev, [name]: value }));
@@ -559,7 +559,7 @@ export default function LocationInventoryFormPage({
           section:  section.title,
           name:     item.name,
           unit:     item.unit,
-          quantity: parseFloat(counts[item.name] ?? '0') || 0,
+          quantity: parseInt(counts[item.name] ?? '0', 10) || 0,
         }))
       );
 
@@ -829,20 +829,22 @@ export default function LocationInventoryFormPage({
                     <div className="text-sm font-medium text-gray-900 truncate">{item.name}</div>
                     <div className="text-xs text-gray-400 mt-0.5">{item.unit}</div>
                   </div>
-                  <input
-                    type="number"
-                    min="0"
-                    step="any"
-                    value={counts[item.name] ?? ''}
+                  <select
+                    value={counts[item.name] ?? '0'}
                     onChange={(e) => handleChange(item.name, e.target.value)}
-                    placeholder="0"
                     disabled={!timerStarted}
                     className={`w-20 text-right border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20] transition-colors ${
                       timerStarted
-                        ? 'border-gray-200 bg-gray-50'
+                        ? counts[item.name] && counts[item.name] !== '0'
+                          ? 'border-[#1B5E20] bg-green-50 text-[#1B5E20] font-semibold'
+                          : 'border-gray-200 bg-gray-50'
                         : 'border-gray-100 bg-gray-100 text-gray-300 cursor-not-allowed'
                     }`}
-                  />
+                  >
+                    {Array.from({ length: 51 }, (_, i) => (
+                      <option key={i} value={String(i)}>{i}</option>
+                    ))}
+                  </select>
                 </div>
               ))}
             </div>
