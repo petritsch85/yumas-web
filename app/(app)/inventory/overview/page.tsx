@@ -983,7 +983,7 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
                         <th
                           key={`${di}-${col}`}
                           className={`px-1 py-1.5 text-center font-medium uppercase tracking-wide whitespace-nowrap ${
-                            isFirst ? 'border-l-2 border-gray-300' : ''
+                            isFirst ? (di === 7 ? 'border-l-[3px] border-gray-400' : 'border-l-2 border-gray-300') : ''
                           } ${isToday ? 'bg-[#F1F8E9] text-gray-400' : isNextWeek ? 'bg-gray-50 text-gray-300' : 'text-gray-400'}`}
                         >
                           {col}
@@ -999,12 +999,20 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
                   <>
                     {/* Section header */}
                     <tr key={`s-${section.title}`} className="bg-[#F1F8E9] border-y border-green-100">
-                      <td
-                        colSpan={1 + extendedDays.length * 5}
-                        className="sticky left-0 px-4 py-1.5 text-xs font-bold text-[#2E7D32] uppercase tracking-wider bg-[#F1F8E9]"
-                      >
+                      <td className="sticky left-0 px-4 py-1.5 text-xs font-bold text-[#2E7D32] uppercase tracking-wider bg-[#F1F8E9]">
                         {section.title}
                       </td>
+                      {extendedDays.map((_, di) =>
+                        DAY_COLS.map((col, ci) => (
+                          <td
+                            key={`sh-${di}-${col}`}
+                            className={ci === 0
+                              ? (di === 7 ? 'border-l-[3px] border-gray-400 bg-[#F1F8E9]' : 'border-l-2 border-gray-300 bg-[#F1F8E9]')
+                              : 'bg-[#F1F8E9]'
+                            }
+                          />
+                        ))
+                      )}
                     </tr>
 
                     {/* Item rows */}
@@ -1027,7 +1035,7 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
                             const isNextWeek = dk >= nextWeekStart;
                             const isForecast = dk >= todayStr;
                             const dayBg = isToday ? 'bg-[#F1F8E9]/60' : isNextWeek ? 'bg-gray-50/50' : '';
-                            const borderL = di === 7 ? 'border-l-4 border-gray-300' : 'border-l-2 border-gray-200';
+                            const borderL = di === 7 ? 'border-l-[3px] border-gray-400' : 'border-l-2 border-gray-300';
 
                             return (
                               <>
