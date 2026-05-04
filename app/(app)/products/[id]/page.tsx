@@ -3,8 +3,11 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
 import { useParams, useRouter } from 'next/navigation';
-import { ArrowLeft, Plus, Trash2, Save, ChevronDown, Pencil, X } from 'lucide-react';
-import { useState, useEffect, useId } from 'react';
+import {
+  ArrowLeft, Plus, Trash2, Save, ChevronDown, Pencil, X,
+  ImagePlus, Video, Upload,
+} from 'lucide-react';
+import { useState, useEffect, useId, useRef } from 'react';
 
 /* ─── Types ──────────────────────────────────────────────────────────────── */
 interface IngredientRow {
@@ -21,9 +24,32 @@ interface Recipe {
   output_quantity: number | null;
   yield_percent: number | null;
   instructions: string | null;
+  video_url: string | null;
 }
 
+interface PhotoRow { id: string; storage_path: string; created_at: string }
+
 const newRow = (): IngredientRow => ({ id: null, item_id: '', quantity: '', unit_id: '', notes: '' });
+
+/* ─── Video embed helper ─────────────────────────────────────────────────── */
+function getEmbedUrl(raw: string): string | null {
+  try {
+    const url = new URL(raw.trim());
+    // YouTube
+    if (url.hostname.includes('youtube.com') || url.hostname.includes('youtu.be')) {
+      const id = url.hostname.includes('youtu.be')
+        ? url.pathname.slice(1)
+        : url.searchParams.get('v') ?? url.pathname.split('/').pop() ?? '';
+      return id ? `https://www.youtube.com/embed/${id}` : null;
+    }
+    // Vimeo
+    if (url.hostname.includes('vimeo.com')) {
+      const id = url.pathname.split('/').filter(Boolean).pop() ?? '';
+      return id ? `https://player.vimeo.com/video/${id}` : null;
+    }
+  } catch { /* fall through */ }
+  return null;
+}
 
 /* ─── Component ──────────────────────────────────────────────────────────── */
 export default function RecipeDetailPage() {
@@ -31,8 +57,14 @@ export default function RecipeDetailPage() {
   const router = useRouter();
   const qc = useQueryClient();
   const uid = useId();
+  const photoInputRef = useRef<HTMLInputElement>(null);
 
   const [editing, setEditing] = useState(false);
+  const [showVideoModal, setShowVideoModal] = useState(false);
+  const [videoInput, setVideoInput] = useState('');
+  const [videoSaving, setVideoSaving] = useState(false);
+  const [photoUploading, setPhotoUploading] = useState(false);
+  const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
 
   /* ── Master data ── */
   const { data: item } = useQuery({
@@ -79,7 +111,7 @@ export default function RecipeDetailPage() {
     queryFn: async () => {
       const { data } = await supabase
         .from('recipes')
-        .select('id, output_item_id, output_quantity, yield_percent, instructions')
+        .select('id, output_item_id, output_quantity, yield_percent, instructions, video_url')
         .eq('output_item_id', itemId)
         .maybeSingle();
       return data ?? null;
@@ -102,6 +134,19 @@ export default function RecipeDetailPage() {
     },
   });
 
+  const { data: photos = [] } = useQuery({
+    queryKey: ['recipe-photos', itemId],
+    enabled: !!recipe?.id,
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('recipe_photos')
+        .select('id, storage_path, created_at')
+        .eq('recipe_id', recipe!.id)
+        .order('created_at');
+      return (data ?? []) as PhotoRow[];
+    },
+  });
+
   /* ── Edit state ── */
   const [outputQty, setOutputQty] = useState<string>('');
   const [yieldPct, setYieldPct] = useState<string>('');
@@ -110,7 +155,6 @@ export default function RecipeDetailPage() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
-  /* Sync DB → local state */
   const syncFromDb = () => {
     setOutputQty(recipe?.output_quantity != null ? String(recipe.output_quantity) : '');
     setYieldPct(recipe?.yield_percent != null ? String(recipe.yield_percent) : '');
@@ -124,89 +168,115 @@ export default function RecipeDetailPage() {
 
   useEffect(() => { syncFromDb(); }, [recipe, savedIngredients]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const handleEdit = () => { syncFromDb(); setEditing(true); };
-
+  const handleEdit   = () => { syncFromDb(); setEditing(true); };
   const handleCancel = () => { syncFromDb(); setEditing(false); };
 
-  /* ── Row helpers ── */
   const updateRow = (idx: number, patch: Partial<IngredientRow>) =>
     setRows(prev => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
   const deleteRow = (idx: number) =>
     setRows(prev => prev.filter((_, i) => i !== idx));
 
-  /* ── Save ── */
+  /* ── Save recipe ── */
   const handleSave = async () => {
-    setSaving(true);
-    setSaved(false);
+    setSaving(true); setSaved(false);
     try {
       let recipeId = recipe?.id ?? null;
       if (!recipeId) {
         const { data, error } = await supabase
           .from('recipes')
-          .insert({
-            output_item_id: itemId,
-            output_quantity: outputQty !== '' ? Number(outputQty) : null,
-            yield_percent: yieldPct !== '' ? Number(yieldPct) : null,
-            instructions: instructions || null,
-          })
-          .select('id')
-          .single();
+          .insert({ output_item_id: itemId, output_quantity: outputQty !== '' ? Number(outputQty) : null, yield_percent: yieldPct !== '' ? Number(yieldPct) : null, instructions: instructions || null })
+          .select('id').single();
         if (error) throw error;
         recipeId = data.id;
       } else {
-        const { error } = await supabase
-          .from('recipes')
-          .update({
-            output_quantity: outputQty !== '' ? Number(outputQty) : null,
-            yield_percent: yieldPct !== '' ? Number(yieldPct) : null,
-            instructions: instructions || null,
-          })
-          .eq('id', recipeId);
+        const { error } = await supabase.from('recipes').update({ output_quantity: outputQty !== '' ? Number(outputQty) : null, yield_percent: yieldPct !== '' ? Number(yieldPct) : null, instructions: instructions || null }).eq('id', recipeId);
         if (error) throw error;
       }
-
       await supabase.from('recipe_ingredients').delete().eq('recipe_id', recipeId);
       const validRows = rows.filter(r => r.item_id && r.quantity !== '' && r.quantity !== null);
       if (validRows.length > 0) {
-        const { error } = await supabase.from('recipe_ingredients').insert(
-          validRows.map(r => ({
-            recipe_id: recipeId,
-            item_id: r.item_id,
-            quantity: Number(r.quantity),
-            unit_id: r.unit_id || null,
-            notes: r.notes || null,
-          }))
-        );
+        const { error } = await supabase.from('recipe_ingredients').insert(validRows.map(r => ({ recipe_id: recipeId, item_id: r.item_id, quantity: Number(r.quantity), unit_id: r.unit_id || null, notes: r.notes || null })));
         if (error) throw error;
       }
-
       await qc.invalidateQueries({ queryKey: ['recipe', itemId] });
       await qc.invalidateQueries({ queryKey: ['recipe-ingredients', itemId] });
-      setSaved(true);
-      setEditing(false);
+      setSaved(true); setEditing(false);
       setTimeout(() => setSaved(false), 3000);
-    } catch (err) {
-      console.error(err);
-      alert('Save failed. Please try again.');
-    } finally {
-      setSaving(false);
+    } catch (err) { console.error(err); alert('Save failed. Please try again.'); }
+    finally { setSaving(false); }
+  };
+
+  /* ── Ensure recipe row exists (needed before adding photos/video) ── */
+  const ensureRecipe = async (): Promise<string | null> => {
+    if (recipe?.id) return recipe.id;
+    const { data, error } = await supabase
+      .from('recipes')
+      .insert({ output_item_id: itemId, output_quantity: null, yield_percent: null, instructions: null })
+      .select('id').single();
+    if (error) { alert('Could not create recipe record: ' + error.message); return null; }
+    await qc.invalidateQueries({ queryKey: ['recipe', itemId] });
+    return data.id;
+  };
+
+  /* ── Upload photos ── */
+  const handlePhotoFiles = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    setPhotoUploading(true);
+    try {
+      const recipeId = await ensureRecipe();
+      if (!recipeId) return;
+      for (const file of Array.from(files)) {
+        const ext = file.name.split('.').pop();
+        const path = `${recipeId}/${crypto.randomUUID()}.${ext}`;
+        const { error: upErr } = await supabase.storage.from('recipe-media').upload(path, file, { contentType: file.type });
+        if (upErr) throw upErr;
+        const { error: dbErr } = await supabase.from('recipe_photos').insert({ recipe_id: recipeId, storage_path: path });
+        if (dbErr) throw dbErr;
+      }
+      await qc.invalidateQueries({ queryKey: ['recipe-photos', itemId] });
+    } catch (e: unknown) { alert('Photo upload failed: ' + (e as Error).message); }
+    finally { setPhotoUploading(false); if (photoInputRef.current) photoInputRef.current.value = ''; }
+  };
+
+  const handleDeletePhoto = async (photo: PhotoRow) => {
+    if (!confirm('Delete this photo?')) return;
+    await supabase.storage.from('recipe-media').remove([photo.storage_path]);
+    await supabase.from('recipe_photos').delete().eq('id', photo.id);
+    qc.invalidateQueries({ queryKey: ['recipe-photos', itemId] });
+  };
+
+  /* ── Save video URL ── */
+  const handleSaveVideo = async () => {
+    const embed = getEmbedUrl(videoInput);
+    if (!embed && videoInput.trim()) { alert('Please enter a valid YouTube or Vimeo URL.'); return; }
+    setVideoSaving(true);
+    try {
+      const recipeId = await ensureRecipe();
+      if (!recipeId) return;
+      await supabase.from('recipes').update({ video_url: videoInput.trim() || null }).eq('id', recipeId);
+      await qc.invalidateQueries({ queryKey: ['recipe', itemId] });
+      setShowVideoModal(false); setVideoInput('');
+    } catch (e: unknown) { alert('Save failed: ' + (e as Error).message); }
+    finally { setVideoSaving(false); }
+  };
+
+  const handleDeleteVideo = async () => {
+    if (!confirm('Remove the video link?')) return;
+    if (recipe?.id) {
+      await supabase.from('recipes').update({ video_url: null }).eq('id', recipe.id);
+      qc.invalidateQueries({ queryKey: ['recipe', itemId] });
     }
   };
 
-  /* ── Derived display helpers ── */
-  const catColor   = (item?.category as { color_hex?: string | null } | null)?.color_hex ?? '#9CA3AF';
-  const catName    = (item?.category as { name?: string } | null)?.name ?? '';
-  const itemUnit   = (item?.unit as { abbreviation?: string | null; name?: string } | null);
-  const itemUnitLabel = itemUnit?.abbreviation || itemUnit?.name || '';
+  /* ── Helpers ── */
+  const getPhotoUrl = (path: string) =>
+    supabase.storage.from('recipe-media').getPublicUrl(path).data.publicUrl;
 
-  const unitLabel = (unit_id: string) => {
-    const u = units.find(u => u.id === unit_id);
-    return u?.abbreviation || u?.name || '—';
-  };
-  const itemLabel = (item_id: string) => {
-    const i = allItems.find(i => i.id === item_id);
-    return i?.name ?? '—';
-  };
+  const catColor      = (item?.category as { color_hex?: string | null } | null)?.color_hex ?? '#9CA3AF';
+  const catName       = (item?.category as { name?: string } | null)?.name ?? '';
+  const itemUnit      = (item?.unit as { abbreviation?: string | null; name?: string } | null);
+  const itemUnitLabel = itemUnit?.abbreviation || itemUnit?.name || '';
+  const embedUrl      = recipe?.video_url ? getEmbedUrl(recipe.video_url) : null;
 
   if (isLoading) {
     return (
@@ -222,11 +292,8 @@ export default function RecipeDetailPage() {
     <div className="max-w-2xl mx-auto space-y-6 pb-10">
 
       {/* ── Header ── */}
-      <div className="flex items-start gap-3">
-        <button
-          onClick={() => router.back()}
-          className="mt-1 text-gray-400 hover:text-gray-700 transition-colors flex-shrink-0"
-        >
+      <div className="flex items-start gap-2 flex-wrap">
+        <button onClick={() => router.back()} className="mt-1 text-gray-400 hover:text-gray-700 transition-colors flex-shrink-0">
           <ArrowLeft size={20} />
         </button>
         <div className="flex-1 min-w-0">
@@ -237,33 +304,44 @@ export default function RecipeDetailPage() {
           <h1 className="text-2xl font-bold text-gray-900 leading-tight">{item?.name ?? '…'}</h1>
         </div>
 
-        {editing ? (
-          <div className="flex items-center gap-2 flex-shrink-0">
-            <button
-              onClick={handleCancel}
-              className="flex items-center gap-1.5 border border-gray-200 text-gray-600 px-3 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors"
-            >
-              <X size={14} />
-              Cancel
-            </button>
-            <button
-              onClick={handleSave}
-              disabled={saving}
-              className="flex items-center gap-1.5 bg-[#1B5E20] text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-[#2E7D32] transition-colors disabled:opacity-60"
-            >
-              <Save size={14} />
-              {saving ? 'Saving…' : 'Save'}
-            </button>
-          </div>
-        ) : (
+        {/* Action buttons */}
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {/* Add Photos */}
           <button
-            onClick={handleEdit}
-            className="flex items-center gap-1.5 border border-gray-200 text-gray-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors flex-shrink-0"
+            onClick={() => photoInputRef.current?.click()}
+            disabled={photoUploading}
+            className="flex items-center gap-1.5 border border-gray-200 text-gray-700 px-3 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors disabled:opacity-50"
           >
-            <Pencil size={14} />
-            Edit
+            <ImagePlus size={14} />
+            {photoUploading ? 'Uploading…' : 'Add Photos'}
           </button>
-        )}
+          <input ref={photoInputRef} type="file" accept="image/*" multiple className="hidden" onChange={e => handlePhotoFiles(e.target.files)} />
+
+          {/* Add / Change Video */}
+          <button
+            onClick={() => { setVideoInput(recipe?.video_url ?? ''); setShowVideoModal(true); }}
+            className="flex items-center gap-1.5 border border-gray-200 text-gray-700 px-3 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors"
+          >
+            <Video size={14} />
+            {recipe?.video_url ? 'Change Video' : 'Add Video'}
+          </button>
+
+          {/* Edit recipe */}
+          {editing ? (
+            <>
+              <button onClick={handleCancel} className="flex items-center gap-1.5 border border-gray-200 text-gray-600 px-3 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors">
+                <X size={14} />Cancel
+              </button>
+              <button onClick={handleSave} disabled={saving} className="flex items-center gap-1.5 bg-[#1B5E20] text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-[#2E7D32] transition-colors disabled:opacity-60">
+                <Save size={14} />{saving ? 'Saving…' : 'Save'}
+              </button>
+            </>
+          ) : (
+            <button onClick={handleEdit} className="flex items-center gap-1.5 border border-gray-200 text-gray-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors">
+              <Pencil size={14} />Edit
+            </button>
+          )}
+        </div>
       </div>
 
       {saved && (
@@ -275,40 +353,24 @@ export default function RecipeDetailPage() {
       {/* ── Recipe Settings ── */}
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5 space-y-4">
         <h2 className="font-semibold text-gray-900 text-sm">Recipe Settings</h2>
-
         {editing ? (
           <>
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-xs font-medium text-gray-500 mb-1">Output Quantity</label>
-                <input
-                  type="number" min="0" step="any"
-                  value={outputQty}
-                  onChange={e => setOutputQty(e.target.value)}
-                  placeholder="e.g. 10"
-                  className="w-full border-2 border-gray-300 bg-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20]"
-                />
+                <input type="number" min="0" step="any" value={outputQty} onChange={e => setOutputQty(e.target.value)} placeholder="e.g. 10"
+                  className="w-full border-2 border-gray-300 bg-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20]" />
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-500 mb-1">Yield %</label>
-                <input
-                  type="number" min="0" max="100" step="any"
-                  value={yieldPct}
-                  onChange={e => setYieldPct(e.target.value)}
-                  placeholder="e.g. 95"
-                  className="w-full border-2 border-gray-300 bg-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20]"
-                />
+                <input type="number" min="0" max="100" step="any" value={yieldPct} onChange={e => setYieldPct(e.target.value)} placeholder="e.g. 95"
+                  className="w-full border-2 border-gray-300 bg-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20]" />
               </div>
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-1">Instructions / Notes</label>
-              <textarea
-                rows={3}
-                value={instructions}
-                onChange={e => setInstructions(e.target.value)}
-                placeholder="Add preparation notes…"
-                className="w-full border-2 border-gray-300 bg-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20] resize-none"
-              />
+              <textarea rows={3} value={instructions} onChange={e => setInstructions(e.target.value)} placeholder="Add preparation notes…"
+                className="w-full border-2 border-gray-300 bg-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20] resize-none" />
             </div>
           </>
         ) : (
@@ -340,71 +402,45 @@ export default function RecipeDetailPage() {
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-50">
           <h2 className="font-semibold text-gray-900 text-sm">Ingredients</h2>
           {editing && (
-            <button
-              onClick={() => setRows(prev => [...prev, newRow()])}
-              className="flex items-center gap-1.5 text-[#1B5E20] text-xs font-medium hover:text-[#2E7D32] transition-colors"
-            >
-              <Plus size={14} />
-              Add ingredient
+            <button onClick={() => setRows(prev => [...prev, newRow()])} className="flex items-center gap-1.5 text-[#1B5E20] text-xs font-medium hover:text-[#2E7D32] transition-colors">
+              <Plus size={14} />Add ingredient
             </button>
           )}
         </div>
 
         {editing ? (
           <>
-            {/* Edit column headers */}
             <div className="grid grid-cols-[1fr_80px_90px_36px] gap-2 px-5 py-2 bg-gray-50 border-b border-gray-100">
               <span className="text-xs font-medium text-gray-400 uppercase tracking-wide">Ingredient</span>
               <span className="text-xs font-medium text-gray-400 uppercase tracking-wide">Qty</span>
               <span className="text-xs font-medium text-gray-400 uppercase tracking-wide">Unit</span>
               <span />
             </div>
-
             {rows.length === 0 ? (
-              <div className="text-center text-gray-400 text-sm py-8">
-                No ingredients yet — click &ldquo;Add ingredient&rdquo; to start.
-              </div>
+              <div className="text-center text-gray-400 text-sm py-8">No ingredients yet — click &ldquo;Add ingredient&rdquo; to start.</div>
             ) : (
               <div className="divide-y divide-gray-50">
                 {rows.map((row, idx) => (
                   <div key={`${uid}-${idx}`} className="grid grid-cols-[1fr_80px_90px_36px] gap-2 px-5 py-3 items-center">
                     <div className="relative">
-                      <select
-                        value={row.item_id}
-                        onChange={e => updateRow(idx, { item_id: e.target.value })}
-                        className="w-full appearance-none border-2 border-gray-300 rounded-lg pl-3 pr-7 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20] text-gray-900"
-                      >
+                      <select value={row.item_id} onChange={e => updateRow(idx, { item_id: e.target.value })}
+                        className="w-full appearance-none border-2 border-gray-300 rounded-lg pl-3 pr-7 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20] text-gray-900">
                         <option value="">Select…</option>
-                        {allItems.map(i => (
-                          <option key={i.id} value={i.id}>{i.name}</option>
-                        ))}
+                        {allItems.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}
                       </select>
                       <ChevronDown size={13} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
                     </div>
-                    <input
-                      type="number" min="0" step="any"
-                      value={row.quantity}
-                      onChange={e => updateRow(idx, { quantity: e.target.value })}
-                      placeholder="0"
-                      className="w-full border-2 border-gray-300 bg-white rounded-lg px-2 py-2 text-sm text-center focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20]"
-                    />
+                    <input type="number" min="0" step="any" value={row.quantity} onChange={e => updateRow(idx, { quantity: e.target.value })} placeholder="0"
+                      className="w-full border-2 border-gray-300 bg-white rounded-lg px-2 py-2 text-sm text-center focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20]" />
                     <div className="relative">
-                      <select
-                        value={row.unit_id}
-                        onChange={e => updateRow(idx, { unit_id: e.target.value })}
-                        className="w-full appearance-none border-2 border-gray-300 rounded-lg pl-2 pr-6 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20] text-gray-900"
-                      >
+                      <select value={row.unit_id} onChange={e => updateRow(idx, { unit_id: e.target.value })}
+                        className="w-full appearance-none border-2 border-gray-300 rounded-lg pl-2 pr-6 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20] text-gray-900">
                         <option value="">—</option>
-                        {units.map(u => (
-                          <option key={u.id} value={u.id}>{u.abbreviation || u.name}</option>
-                        ))}
+                        {units.map(u => <option key={u.id} value={u.id}>{u.abbreviation || u.name}</option>)}
                       </select>
                       <ChevronDown size={13} className="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
                     </div>
-                    <button
-                      onClick={() => deleteRow(idx)}
-                      className="flex items-center justify-center text-gray-300 hover:text-red-400 transition-colors"
-                    >
+                    <button onClick={() => deleteRow(idx)} className="flex items-center justify-center text-gray-300 hover:text-red-400 transition-colors">
                       <Trash2 size={15} />
                     </button>
                   </div>
@@ -413,7 +449,6 @@ export default function RecipeDetailPage() {
             )}
           </>
         ) : (
-          /* Read-only ingredient list */
           savedIngredients.length === 0 ? (
             <div className="text-center text-gray-300 text-sm py-8">No ingredients added yet.</div>
           ) : (
@@ -428,12 +463,8 @@ export default function RecipeDetailPage() {
                   const ingredientName = (row as { ingredient?: { name: string } | null }).ingredient?.name ?? '—';
                   const unitRow = (row as { unit?: { name: string; abbreviation: string | null } | null }).unit;
                   const unitName = unitRow?.abbreviation || unitRow?.name || '—';
-                  const isEven = idx % 2 === 0;
                   return (
-                    <div
-                      key={idx}
-                      className={`grid grid-cols-[1fr_80px_72px] px-5 py-3 items-center border-b border-gray-100 ${isEven ? 'bg-white' : 'bg-gray-50/60'}`}
-                    >
+                    <div key={idx} className={`grid grid-cols-[1fr_80px_72px] px-5 py-3 items-center border-b border-gray-100 ${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/60'}`}>
                       <span className="text-sm font-medium text-gray-800">{ingredientName}</span>
                       <span className="text-sm text-gray-700 text-center tabular-nums">{row.quantity}</span>
                       <span className="text-sm text-gray-500 text-center">{unitName}</span>
@@ -448,14 +479,115 @@ export default function RecipeDetailPage() {
 
       {/* ── Bottom save (edit mode only) ── */}
       {editing && (
-        <button
-          onClick={handleSave}
-          disabled={saving}
-          className="w-full flex items-center justify-center gap-2 bg-[#1B5E20] text-white py-3 rounded-xl text-sm font-semibold hover:bg-[#2E7D32] transition-colors disabled:opacity-60"
-        >
-          <Save size={16} />
-          {saving ? 'Saving…' : 'Save Recipe'}
+        <button onClick={handleSave} disabled={saving}
+          className="w-full flex items-center justify-center gap-2 bg-[#1B5E20] text-white py-3 rounded-xl text-sm font-semibold hover:bg-[#2E7D32] transition-colors disabled:opacity-60">
+          <Save size={16} />{saving ? 'Saving…' : 'Save Recipe'}
         </button>
+      )}
+
+      {/* ── Photos ── */}
+      {(photos.length > 0 || photoUploading) && (
+        <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+          <div className="flex items-center justify-between px-5 py-4 border-b border-gray-50">
+            <h2 className="font-semibold text-gray-900 text-sm">Photos</h2>
+            <button onClick={() => photoInputRef.current?.click()} className="flex items-center gap-1.5 text-[#1B5E20] text-xs font-medium hover:text-[#2E7D32] transition-colors">
+              <Plus size={14} />Add more
+            </button>
+          </div>
+          <div className="p-4 grid grid-cols-3 gap-3">
+            {photos.map(photo => (
+              <div key={photo.id} className="relative group aspect-square rounded-lg overflow-hidden bg-gray-100">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={getPhotoUrl(photo.storage_path)}
+                  alt=""
+                  className="w-full h-full object-cover cursor-pointer"
+                  onClick={() => setLightboxSrc(getPhotoUrl(photo.storage_path))}
+                />
+                <button
+                  onClick={() => handleDeletePhoto(photo)}
+                  className="absolute top-1.5 right-1.5 bg-black/50 hover:bg-red-600 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                >
+                  <Trash2 size={12} />
+                </button>
+              </div>
+            ))}
+            {photoUploading && (
+              <div className="aspect-square rounded-lg bg-gray-100 flex items-center justify-center">
+                <Upload size={20} className="text-gray-400 animate-pulse" />
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Video ── */}
+      {embedUrl && (
+        <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+          <div className="flex items-center justify-between px-5 py-4 border-b border-gray-50">
+            <h2 className="font-semibold text-gray-900 text-sm">Video</h2>
+            <button onClick={handleDeleteVideo} className="flex items-center gap-1.5 text-red-400 hover:text-red-600 text-xs font-medium transition-colors">
+              <Trash2 size={13} />Remove
+            </button>
+          </div>
+          <div className="aspect-video w-full">
+            <iframe
+              src={embedUrl}
+              className="w-full h-full"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+              allowFullScreen
+            />
+          </div>
+        </div>
+      )}
+
+      {/* ── Video Modal ── */}
+      {showVideoModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setShowVideoModal(false)}>
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6 space-y-4" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <h3 className="font-bold text-gray-900">{recipe?.video_url ? 'Change Video' : 'Add Video'}</h3>
+              <button onClick={() => setShowVideoModal(false)} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
+            </div>
+            <p className="text-xs text-gray-500">Paste a YouTube or Vimeo URL. The video will be embedded directly on the recipe page.</p>
+            <input
+              type="url"
+              value={videoInput}
+              onChange={e => setVideoInput(e.target.value)}
+              placeholder="https://www.youtube.com/watch?v=…"
+              className="w-full border-2 border-gray-300 bg-white rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20]"
+              autoFocus
+            />
+            {videoInput.trim() && !getEmbedUrl(videoInput) && (
+              <p className="text-xs text-red-500">Not a recognised YouTube or Vimeo URL.</p>
+            )}
+            <div className="flex gap-2 pt-1">
+              {recipe?.video_url && (
+                <button onClick={async () => { await handleDeleteVideo(); setShowVideoModal(false); }} className="flex-1 border border-gray-200 text-red-500 py-2.5 rounded-lg text-sm font-medium hover:bg-red-50 transition-colors">
+                  Remove video
+                </button>
+              )}
+              <button
+                onClick={handleSaveVideo}
+                disabled={videoSaving || (!!videoInput.trim() && !getEmbedUrl(videoInput))}
+                className="flex-1 bg-[#1B5E20] text-white py-2.5 rounded-lg text-sm font-semibold hover:bg-[#2E7D32] transition-colors disabled:opacity-50"
+              >
+                {videoSaving ? 'Saving…' : 'Save'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Photo lightbox ── */}
+      {lightboxSrc && (
+        <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4" onClick={() => setLightboxSrc(null)}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={lightboxSrc} alt="" className="max-w-full max-h-full rounded-lg object-contain" onClick={e => e.stopPropagation()} />
+          <button onClick={() => setLightboxSrc(null)} className="absolute top-4 right-4 text-white/70 hover:text-white">
+            <X size={28} />
+          </button>
+        </div>
       )}
     </div>
   );
