@@ -50,6 +50,7 @@ function getTitleKey(pathname: string): string {
     '/pl-reports/csv-importer':   'topbar.csvImporter',
     '/inventory':                 'topbar.inventory',
     '/products':                  'topbar.productDetails',
+    '/products/menus':            'topbar.menus',
     '/waste/new':                 'topbar.logWaste',
   };
   if (exact[pathname]) return exact[pathname];

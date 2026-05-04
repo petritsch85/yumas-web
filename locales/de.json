@@ -116,7 +116,8 @@
     "salesReports": "Verkaufsberichte",
     "weeklySales": "Wöchentliche Verkäufe",
     "csvImporter": "CSV-Importer",
-    "calendar": "Lieferkalender"
+    "calendar": "Lieferkalender",
+    "menus": "Speisekarten"
   },
   "common": {
     "save": "Speichern",
@@ -548,6 +549,11 @@
     "noProducts": "Keine Produkte gefunden",
     "searchProducts": "Produkte suchen...",
     "addProduct": "Produkt hinzufügen"
+  },
+  "menus": {
+    "subtitle": "Speisekarten Ihrer Restaurants anzeigen und verwalten",
+    "comingSoon": "Speisekarten — Demnächst verfügbar",
+    "comingSoonDesc": "Dieser Bereich befindet sich in Entwicklung. Die Speisekartengestaltung wird in einem zukünftigen Update verfügbar sein."
   },
   "events": {
     "title": "Events",

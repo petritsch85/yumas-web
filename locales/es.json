@@ -116,7 +116,8 @@
     "salesReports": "Informes de Ventas",
     "weeklySales": "Ventas Semanales",
     "csvImporter": "Importador CSV",
-    "calendar": "Calendario de Entregas"
+    "calendar": "Calendario de Entregas",
+    "menus": "Menús"
   },
   "common": {
     "save": "Guardar",
@@ -548,6 +549,11 @@
     "noProducts": "No se encontraron productos",
     "searchProducts": "Buscar productos...",
     "addProduct": "Añadir Producto"
+  },
+  "menus": {
+    "subtitle": "Ver y gestionar los menús de sus restaurantes",
+    "comingSoon": "Menús — Próximamente",
+    "comingSoonDesc": "Esta sección está en desarrollo. La gestión de menús estará disponible en una próxima actualización."
   },
   "events": {
     "title": "Eventos",
