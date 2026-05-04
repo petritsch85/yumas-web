@@ -419,7 +419,7 @@ export default function TeamPage() {
                 type="text"
                 value={addDraft.fullName}
                 onChange={e => setAddDraft(d => ({ ...d, fullName: e.target.value }))}
-                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30"
+                className="w-full border-2 border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/40 focus:border-[#1B5E20]"
                 placeholder="e.g. Maria García"
               />
             </div>
@@ -430,7 +430,7 @@ export default function TeamPage() {
                 type="email"
                 value={addDraft.email}
                 onChange={e => setAddDraft(d => ({ ...d, email: e.target.value }))}
-                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30"
+                className="w-full border-2 border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/40 focus:border-[#1B5E20]"
                 placeholder="maria@example.com"
               />
             </div>
@@ -442,7 +442,7 @@ export default function TeamPage() {
                   type={showPassword ? 'text' : 'password'}
                   value={addDraft.password}
                   onChange={e => setAddDraft(d => ({ ...d, password: e.target.value }))}
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 pr-9 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30"
+                  className="w-full border-2 border-gray-300 rounded-lg px-3 py-2 pr-9 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/40 focus:border-[#1B5E20]"
                   placeholder="Min 6 characters"
                 />
                 <button type="button" onClick={() => setShowPassword(p => !p)}
@@ -461,7 +461,7 @@ export default function TeamPage() {
                   setAddDraft(d => ({ ...d, role }));
                   setAddPerms(defaultsForRole(role));
                 }}
-                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30"
+                className="w-full border-2 border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/40 focus:border-[#1B5E20]"
               >
                 {ROLES.map(r => (
                   <option key={r} value={r}>{r.charAt(0).toUpperCase() + r.slice(1)} — {roleHint[r]}</option>
@@ -474,7 +474,7 @@ export default function TeamPage() {
               <select
                 value={addDraft.locationId}
                 onChange={e => setAddDraft(d => ({ ...d, locationId: e.target.value }))}
-                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30"
+                className="w-full border-2 border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/40 focus:border-[#1B5E20]"
               >
                 <option value="">All locations (for admin)</option>
                 {locations?.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
@@ -621,7 +621,7 @@ export default function TeamPage() {
                                 type="email"
                                 value={editDraft.newEmail}
                                 onChange={e => setEditDraft(d => ({ ...d, newEmail: e.target.value }))}
-                                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                                className="w-full border-2 border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/40 focus:border-[#1B5E20]"
                                 placeholder="email@example.com"
                               />
                             </div>
@@ -633,7 +633,7 @@ export default function TeamPage() {
                                 type="text"
                                 value={editDraft.newPassword}
                                 onChange={e => setEditDraft(d => ({ ...d, newPassword: e.target.value }))}
-                                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300 font-mono"
+                                className="w-full border-2 border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/40 focus:border-[#1B5E20] font-mono"
                                 placeholder="min 6 chars"
                               />
                             </div>
@@ -647,7 +647,7 @@ export default function TeamPage() {
                                   const role = e.target.value;
                                   setEditDraft(d => ({ ...d, role, permissions: defaultsForRole(role) }));
                                 }}
-                                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                                className="w-full border-2 border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/40 focus:border-[#1B5E20]"
                               >
                                 {ROLES.map(r => <option key={r} value={r}>{r.charAt(0).toUpperCase() + r.slice(1)}</option>)}
                               </select>
@@ -657,7 +657,7 @@ export default function TeamPage() {
                               <select
                                 value={editDraft.locationId}
                                 onChange={e => setEditDraft(d => ({ ...d, locationId: e.target.value }))}
-                                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                                className="w-full border-2 border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/40 focus:border-[#1B5E20]"
                               >
                                 <option value="">All locations</option>
                                 {locations?.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
@@ -668,7 +668,7 @@ export default function TeamPage() {
                               <select
                                 value={editDraft.isActive ? 'active' : 'inactive'}
                                 onChange={e => setEditDraft(d => ({ ...d, isActive: e.target.value === 'active' }))}
-                                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                                className="w-full border-2 border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/40 focus:border-[#1B5E20]"
                               >
                                 <option value="active">Active</option>
                                 <option value="inactive">Inactive</option>
