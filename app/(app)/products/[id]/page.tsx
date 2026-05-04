@@ -27,7 +27,9 @@ interface Recipe {
   yield_percent: number | null;
   instructions: string | null;
   video_url: string | null;
-  process_steps: string[] | null;
+  process_steps_en: string[] | null;
+  process_steps_de: string[] | null;
+  process_steps_es: string[] | null;
 }
 
 interface PhotoRow { id: string; storage_path: string; created_at: string }
@@ -135,7 +137,7 @@ export default function RecipeDetailPage() {
     queryFn: async () => {
       const { data } = await supabase
         .from('recipes')
-        .select('id, output_item_id, output_quantity, yield_percent, instructions, video_url, process_steps')
+        .select('id, output_item_id, output_quantity, yield_percent, instructions, video_url, process_steps_en, process_steps_de, process_steps_es')
         .eq('output_item_id', itemId)
         .maybeSingle();
       return data ?? null;
@@ -176,7 +178,10 @@ export default function RecipeDetailPage() {
   const [yieldPct, setYieldPct] = useState<string>('');
   const [instructions, setInstructions] = useState('');
   const [rows, setRows] = useState<IngredientRow[]>([]);
-  const [steps, setSteps] = useState<string[]>([]);
+  const [stepsEn, setStepsEn] = useState<string[]>([]);
+  const [stepsDe, setStepsDe] = useState<string[]>([]);
+  const [stepsEs, setStepsEs] = useState<string[]>([]);
+  const [stepsTab, setStepsTab] = useState<'en' | 'de' | 'es'>('en');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
@@ -189,7 +194,9 @@ export default function RecipeDetailPage() {
     setOutputQty(recipe?.output_quantity != null ? String(recipe.output_quantity) : '');
     setYieldPct(recipe?.yield_percent != null ? String(recipe.yield_percent) : '');
     setInstructions(recipe?.instructions ?? '');
-    setSteps(recipe?.process_steps ?? []);
+    setStepsEn(recipe?.process_steps_en ?? []);
+    setStepsDe(recipe?.process_steps_de ?? []);
+    setStepsEs(recipe?.process_steps_es ?? []);
     setRows(
       savedIngredients.length > 0
         ? savedIngredients.map(r => ({ ...r, quantity: String(r.quantity), notes: r.notes ?? '' }))
@@ -222,12 +229,12 @@ export default function RecipeDetailPage() {
       if (!recipeId) {
         const { data, error } = await supabase
           .from('recipes')
-          .insert({ output_item_id: itemId, output_quantity: outputQty !== '' ? Number(outputQty) : null, yield_percent: yieldPct !== '' ? Number(yieldPct) : null, instructions: instructions || null, process_steps: steps.filter(s => s.trim()) })
+          .insert({ output_item_id: itemId, output_quantity: outputQty !== '' ? Number(outputQty) : null, yield_percent: yieldPct !== '' ? Number(yieldPct) : null, instructions: instructions || null, process_steps_en: stepsEn.filter(s => s.trim()), process_steps_de: stepsDe.filter(s => s.trim()), process_steps_es: stepsEs.filter(s => s.trim()) })
           .select('id').single();
         if (error) throw error;
         recipeId = data.id;
       } else {
-        const { error } = await supabase.from('recipes').update({ output_quantity: outputQty !== '' ? Number(outputQty) : null, yield_percent: yieldPct !== '' ? Number(yieldPct) : null, instructions: instructions || null, process_steps: steps.filter(s => s.trim()) }).eq('id', recipeId);
+        const { error } = await supabase.from('recipes').update({ output_quantity: outputQty !== '' ? Number(outputQty) : null, yield_percent: yieldPct !== '' ? Number(yieldPct) : null, instructions: instructions || null, process_steps_en: stepsEn.filter(s => s.trim()), process_steps_de: stepsDe.filter(s => s.trim()), process_steps_es: stepsEs.filter(s => s.trim()) }).eq('id', recipeId);
         if (error) throw error;
       }
       await supabase.from('recipe_ingredients').delete().eq('recipe_id', recipeId);
@@ -274,7 +281,7 @@ export default function RecipeDetailPage() {
     if (recipe?.id) return recipe.id;
     const { data, error } = await supabase
       .from('recipes')
-      .insert({ output_item_id: itemId, output_quantity: null, yield_percent: null, instructions: null, process_steps: [] })
+      .insert({ output_item_id: itemId, output_quantity: null, yield_percent: null, instructions: null, process_steps_en: [], process_steps_de: [], process_steps_es: [] })
       .select('id').single();
     if (error) { alert('Could not create recipe record: ' + error.message); return null; }
     await qc.invalidateQueries({ queryKey: ['recipe', itemId] });
@@ -597,87 +604,131 @@ export default function RecipeDetailPage() {
       </div>
 
       {/* ── Process ── */}
-      <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-50">
-          <h2 className="font-semibold text-gray-900 text-sm">{t('recipes.process')}</h2>
-          {editing && (
-            <button
-              onClick={() => setSteps(prev => [...prev, ''])}
-              className="flex items-center gap-1.5 text-[#1B5E20] text-xs font-medium hover:text-[#2E7D32] transition-colors"
-            >
-              <Plus size={14} />{t('recipes.addStep')}
-            </button>
-          )}
-        </div>
+      {(() => {
+        // Derive active set + setter from the selected tab
+        const activeSteps = stepsTab === 'en' ? stepsEn : stepsTab === 'de' ? stepsDe : stepsEs;
+        const setActiveSteps = stepsTab === 'en' ? setStepsEn : stepsTab === 'de' ? setStepsDe : setStepsEs;
 
-        {editing ? (
-          steps.length === 0 ? (
-            <div className="text-center text-gray-400 text-sm py-8">
-              {t('recipes.noSteps')}
+        // Read view: show the user's language, fall back to English
+        const readSteps = (() => {
+          const langSteps =
+            lang === 'de' ? recipe?.process_steps_de :
+            lang === 'es' ? recipe?.process_steps_es :
+            recipe?.process_steps_en;
+          return (langSteps && langSteps.length > 0) ? langSteps : (recipe?.process_steps_en ?? []);
+        })();
+
+        const TABS = [
+          { code: 'en' as const, flag: '🇬🇧', count: stepsEn.filter(s => s.trim()).length },
+          { code: 'de' as const, flag: '🇩🇪', count: stepsDe.filter(s => s.trim()).length },
+          { code: 'es' as const, flag: '🇪🇸', count: stepsEs.filter(s => s.trim()).length },
+        ];
+
+        return (
+          <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+            {/* Card header */}
+            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-50">
+              <h2 className="font-semibold text-gray-900 text-sm">{t('recipes.process')}</h2>
+              {editing && (
+                <button
+                  onClick={() => setActiveSteps(prev => [...prev, ''])}
+                  className="flex items-center gap-1.5 text-[#1B5E20] text-xs font-medium hover:text-[#2E7D32] transition-colors"
+                >
+                  <Plus size={14} />{t('recipes.addStep')}
+                </button>
+              )}
             </div>
-          ) : (
-            <div className="divide-y divide-gray-50">
-              {steps.map((step, idx) => (
-                <div key={idx} className="flex items-start gap-3 px-5 py-3">
-                  {/* Step number badge */}
-                  <span className="mt-2 flex-shrink-0 w-6 h-6 rounded-full bg-[#1B5E20]/10 text-[#1B5E20] text-xs font-bold flex items-center justify-center">
-                    {idx + 1}
-                  </span>
-                  {/* Text input */}
-                  <textarea
-                    value={step}
-                    onChange={e => setSteps(prev => prev.map((s, i) => i === idx ? e.target.value : s))}
-                    placeholder={t('recipes.stepPlaceholder')}
-                    rows={2}
-                    className="flex-1 border-2 border-gray-300 bg-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20] resize-none"
-                  />
-                  {/* Up / Down / Delete */}
-                  <div className="flex flex-col gap-1 flex-shrink-0 mt-1">
+
+            {editing ? (
+              <>
+                {/* Language tabs */}
+                <div className="flex border-b border-gray-100">
+                  {TABS.map(({ code, flag, count }) => (
                     <button
-                      disabled={idx === 0}
-                      onClick={() => setSteps(prev => { const a = [...prev]; [a[idx - 1], a[idx]] = [a[idx], a[idx - 1]]; return a; })}
-                      className="text-gray-300 hover:text-gray-600 disabled:opacity-20 transition-colors"
-                      aria-label="Move up"
+                      key={code}
+                      onClick={() => setStepsTab(code)}
+                      className={`flex items-center gap-1.5 px-5 py-2.5 text-xs font-semibold border-b-2 transition-colors ${
+                        stepsTab === code
+                          ? 'border-[#1B5E20] text-[#1B5E20]'
+                          : 'border-transparent text-gray-400 hover:text-gray-600'
+                      }`}
                     >
-                      <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 2L2 8h10L7 2z" fill="currentColor"/></svg>
+                      {flag} {code.toUpperCase()}
+                      {count > 0 && (
+                        <span className="w-4 h-4 rounded-full bg-[#1B5E20]/10 text-[#1B5E20] text-[10px] font-bold flex items-center justify-center">
+                          {count}
+                        </span>
+                      )}
                     </button>
-                    <button
-                      disabled={idx === steps.length - 1}
-                      onClick={() => setSteps(prev => { const a = [...prev]; [a[idx], a[idx + 1]] = [a[idx + 1], a[idx]]; return a; })}
-                      className="text-gray-300 hover:text-gray-600 disabled:opacity-20 transition-colors"
-                      aria-label="Move down"
-                    >
-                      <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 12L2 6h10L7 12z" fill="currentColor"/></svg>
-                    </button>
-                    <button
-                      onClick={() => setSteps(prev => prev.filter((_, i) => i !== idx))}
-                      className="text-gray-300 hover:text-red-400 transition-colors mt-0.5"
-                      aria-label="Delete step"
-                    >
-                      <Trash2 size={14} />
-                    </button>
-                  </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-          )
-        ) : (
-          !recipe?.process_steps || recipe.process_steps.length === 0 ? (
-            <div className="text-center text-gray-300 text-sm py-8">{t('recipes.noSteps')}</div>
-          ) : (
-            <ol className="px-5 py-4 space-y-3">
-              {recipe.process_steps.map((step, idx) => (
-                <li key={idx} className="flex items-start gap-3">
-                  <span className="flex-shrink-0 w-6 h-6 rounded-full bg-[#1B5E20]/10 text-[#1B5E20] text-xs font-bold flex items-center justify-center mt-0.5">
-                    {idx + 1}
-                  </span>
-                  <span className="text-sm text-gray-800 leading-relaxed">{step}</span>
-                </li>
-              ))}
-            </ol>
-          )
-        )}
-      </div>
+
+                {/* Steps for active tab */}
+                {activeSteps.length === 0 ? (
+                  <div className="text-center text-gray-400 text-sm py-8">{t('recipes.noSteps')}</div>
+                ) : (
+                  <div className="divide-y divide-gray-50">
+                    {activeSteps.map((step, idx) => (
+                      <div key={idx} className="flex items-start gap-3 px-5 py-3">
+                        <span className="mt-2 flex-shrink-0 w-6 h-6 rounded-full bg-[#1B5E20]/10 text-[#1B5E20] text-xs font-bold flex items-center justify-center">
+                          {idx + 1}
+                        </span>
+                        <textarea
+                          value={step}
+                          onChange={e => setActiveSteps(prev => prev.map((s, i) => i === idx ? e.target.value : s))}
+                          placeholder={t('recipes.stepPlaceholder')}
+                          rows={2}
+                          className="flex-1 border-2 border-gray-300 bg-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20] resize-none"
+                        />
+                        <div className="flex flex-col gap-1 flex-shrink-0 mt-1">
+                          <button
+                            disabled={idx === 0}
+                            onClick={() => setActiveSteps(prev => { const a = [...prev]; [a[idx - 1], a[idx]] = [a[idx], a[idx - 1]]; return a; })}
+                            className="text-gray-300 hover:text-gray-600 disabled:opacity-20 transition-colors"
+                            aria-label="Move up"
+                          >
+                            <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 2L2 8h10L7 2z" fill="currentColor"/></svg>
+                          </button>
+                          <button
+                            disabled={idx === activeSteps.length - 1}
+                            onClick={() => setActiveSteps(prev => { const a = [...prev]; [a[idx], a[idx + 1]] = [a[idx + 1], a[idx]]; return a; })}
+                            className="text-gray-300 hover:text-gray-600 disabled:opacity-20 transition-colors"
+                            aria-label="Move down"
+                          >
+                            <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 12L2 6h10L7 12z" fill="currentColor"/></svg>
+                          </button>
+                          <button
+                            onClick={() => setActiveSteps(prev => prev.filter((_, i) => i !== idx))}
+                            className="text-gray-300 hover:text-red-400 transition-colors mt-0.5"
+                            aria-label="Delete step"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
+            ) : (
+              readSteps.length === 0 ? (
+                <div className="text-center text-gray-300 text-sm py-8">{t('recipes.noSteps')}</div>
+              ) : (
+                <ol className="px-5 py-4 space-y-3">
+                  {readSteps.map((step, idx) => (
+                    <li key={idx} className="flex items-start gap-3">
+                      <span className="flex-shrink-0 w-6 h-6 rounded-full bg-[#1B5E20]/10 text-[#1B5E20] text-xs font-bold flex items-center justify-center mt-0.5">
+                        {idx + 1}
+                      </span>
+                      <span className="text-sm text-gray-800 leading-relaxed">{step}</span>
+                    </li>
+                  ))}
+                </ol>
+              )
+            )}
+          </div>
+        );
+      })()}
 
       {/* ── Bottom save (edit mode only) ── */}
       {editing && (
