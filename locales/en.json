@@ -73,7 +73,7 @@
   "topbar": {
     "dashboard": "Dashboard",
     "rawMaterials": "Raw Materials",
-    "semiFinished": "Semi-Finished Products",
+    "semiFinished": "Recipes",
     "finishedGoods": "Finished Goods",
     "inventoryCounts": "Inventory Reports",
     "purchaseOrders": "Purchase Orders",
@@ -117,7 +117,8 @@
     "weeklySales": "Weekly Sales",
     "csvImporter": "CSV Importer",
     "calendar": "Delivery Calendar",
-    "menus": "Menus"
+    "menus": "Menus",
+    "newRecipe": "New Recipe"
   },
   "common": {
     "save": "Save",
@@ -292,6 +293,16 @@
   "recipes": {
     "title": "Recipes",
     "newRecipe": "New Recipe",
+    "newRecipeSubtitle": "Fill in the basics — you can add ingredients and steps after saving.",
+    "recipeName": "Recipe Name",
+    "recipeNamePlaceholder": "e.g. Al Pastor Marinade",
+    "category": "Category",
+    "unit": "Unit",
+    "outputQuantity": "Output Quantity",
+    "yieldPercent": "Yield %",
+    "creating": "Creating…",
+    "createRecipe": "Create Recipe",
+    "nameRequired": "Recipe name is required",
     "noRecipes": "No recipes found",
     "noIngredients": "No ingredients",
     "table": {
@@ -544,9 +555,9 @@
     "rawMaterials": "Raw Materials",
     "rawMaterialsLabel": "1 - Raw Materials",
     "rawMaterialsDesc": "Ingredients and base materials used in production",
-    "semiFinished": "Semi-Finished Products",
-    "semiFinishedLabel": "2 - Semi Finished",
-    "semiFinishedDesc": "Prepared components made at the central kitchen",
+    "semiFinished": "Recipes",
+    "semiFinishedLabel": "2 - Recipes",
+    "semiFinishedDesc": "Prepared components and recipes from the central kitchen",
     "finishedGoods": "Finished Goods",
     "finishedGoodsLabel": "3 - Finished",
     "finishedGoodsDesc": "Final products ready for service",

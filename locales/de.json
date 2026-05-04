@@ -117,7 +117,8 @@
     "weeklySales": "Wöchentliche Verkäufe",
     "csvImporter": "CSV-Importer",
     "calendar": "Lieferkalender",
-    "menus": "Speisekarten"
+    "menus": "Speisekarten",
+    "newRecipe": "Neues Rezept"
   },
   "common": {
     "save": "Speichern",
@@ -292,6 +293,16 @@
   "recipes": {
     "title": "Rezepte",
     "newRecipe": "Neues Rezept",
+    "newRecipeSubtitle": "Füllen Sie die Grunddaten aus — Zutaten und Schritte können Sie nach dem Speichern hinzufügen.",
+    "recipeName": "Rezeptname",
+    "recipeNamePlaceholder": "z.B. Al Pastor Marinade",
+    "category": "Kategorie",
+    "unit": "Einheit",
+    "outputQuantity": "Ausgabemenge",
+    "yieldPercent": "Ausbeute %",
+    "creating": "Wird erstellt…",
+    "createRecipe": "Rezept erstellen",
+    "nameRequired": "Rezeptname ist erforderlich",
     "noRecipes": "Keine Rezepte gefunden",
     "noIngredients": "Keine Zutaten",
     "table": {

@@ -51,6 +51,7 @@ function getTitleKey(pathname: string): string {
     '/inventory':                 'topbar.inventory',
     '/products':                  'topbar.productDetails',
     '/products/menus':            'topbar.menus',
+    '/products/semi-finished/new': 'topbar.newRecipe',
     '/waste/new':                 'topbar.logWaste',
   };
   if (exact[pathname]) return exact[pathname];
