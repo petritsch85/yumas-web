@@ -31,6 +31,14 @@ interface PhotoRow { id: string; storage_path: string; created_at: string }
 
 const newRow = (): IngredientRow => ({ id: null, item_id: '', quantity: '', unit_id: '', notes: '' });
 
+/* Convert any quantity to a common gram/ml base for sorting */
+function normalizeQty(quantity: number | string, abbreviation: string | null | undefined): number {
+  const q = Number(quantity) || 0;
+  const u = (abbreviation ?? '').toLowerCase();
+  if (u === 'kg' || u === 'l') return q * 1000;
+  return q; // g, ml, mL, pcs, etc. — use as-is
+}
+
 /* ─── Video embed helper ─────────────────────────────────────────────────── */
 function getEmbedUrl(raw: string): string | null {
   try {
@@ -459,18 +467,24 @@ export default function RecipeDetailPage() {
                 <span className="text-xs font-medium text-gray-400 uppercase tracking-wide text-center">Unit</span>
               </div>
               <div>
-                {savedIngredients.map((row, idx) => {
-                  const ingredientName = (row as { ingredient?: { name: string } | null }).ingredient?.name ?? '—';
-                  const unitRow = (row as { unit?: { name: string; abbreviation: string | null } | null }).unit;
-                  const unitName = unitRow?.abbreviation || unitRow?.name || '—';
-                  return (
-                    <div key={idx} className={`grid grid-cols-[1fr_80px_72px] px-5 py-3 items-center border-b border-gray-100 ${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/60'}`}>
-                      <span className="text-sm font-medium text-gray-800">{ingredientName}</span>
-                      <span className="text-sm text-gray-700 text-center tabular-nums">{row.quantity}</span>
-                      <span className="text-sm text-gray-500 text-center">{unitName}</span>
-                    </div>
-                  );
-                })}
+                {[...savedIngredients]
+                  .sort((a, b) => {
+                    const unitA = (a as { unit?: { abbreviation: string | null } | null }).unit?.abbreviation;
+                    const unitB = (b as { unit?: { abbreviation: string | null } | null }).unit?.abbreviation;
+                    return normalizeQty(b.quantity, unitB) - normalizeQty(a.quantity, unitA);
+                  })
+                  .map((row, idx) => {
+                    const ingredientName = (row as { ingredient?: { name: string } | null }).ingredient?.name ?? '—';
+                    const unitRow = (row as { unit?: { name: string; abbreviation: string | null } | null }).unit;
+                    const unitName = unitRow?.abbreviation || unitRow?.name || '—';
+                    return (
+                      <div key={idx} className={`grid grid-cols-[1fr_80px_72px] px-5 py-3 items-center border-b border-gray-100 ${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/60'}`}>
+                        <span className="text-sm font-medium text-gray-800">{ingredientName}</span>
+                        <span className="text-sm text-gray-700 text-center tabular-nums">{row.quantity}</span>
+                        <span className="text-sm text-gray-500 text-center">{unitName}</span>
+                      </div>
+                    );
+                  })}
               </div>
             </>
           )
