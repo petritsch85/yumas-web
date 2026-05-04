@@ -13,3 +13,25 @@ body {
 }
 
 * { box-sizing: border-box; }
+
+/* ── Always-visible horizontal scrollbar ───────────────────────────────────
+   Applied to any element with class "scrollbar-always".
+   Works on WebKit (Chrome/Safari/Edge) and Firefox.               */
+.scrollbar-always {
+  scrollbar-gutter: stable;
+}
+.scrollbar-always::-webkit-scrollbar {
+  height: 8px;
+  width: 8px;
+}
+.scrollbar-always::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 4px;
+}
+.scrollbar-always::-webkit-scrollbar-thumb {
+  background: #c1c1c1;
+  border-radius: 4px;
+}
+.scrollbar-always::-webkit-scrollbar-thumb:hover {
+  background: #a1a1a1;
+}

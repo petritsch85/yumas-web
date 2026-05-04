@@ -1,9 +1,18 @@
 'use client';
 
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
 import { useState, useMemo } from 'react';
 import { ChevronLeft, ChevronRight, RefreshCw } from 'lucide-react';
+import {
+  computeSimplyRatios,
+  computeDailyTotal,
+  currentQuarterRange,
+  type ForecastSettings,
+  type ForecastOverride,
+  type ShiftRowLite,
+  type DelivRowLite,
+} from '@/lib/forecast-utils';
 
 /* ── Canonical sort order (mirrors delivery + overview pages) ─────────────── */
 const SECTION_ORDER = ['Kühlhaus', 'Tiefkühler', 'Trockenware', 'Regale', 'Lager'];
@@ -36,32 +45,6 @@ function canonicalItemOrder<T extends { item_name: string }>(items: T[]): T[] {
     const rb = ITEM_RANK[b.item_name] ?? 9999;
     return ra !== rb ? ra - rb : a.item_name.localeCompare(b.item_name);
   });
-}
-
-/* ── Forecast helpers (mirrors sales-reports/page.tsx) ───────────────────── */
-type ForecastSettings = {
-  location_id:   string;
-  shift_type:    'lunch' | 'dinner';
-  week_base_net: number;
-  growth_rate:   number;
-  weight_mon: number; weight_tue: number; weight_wed: number; weight_thu: number;
-  weight_fri: number; weight_sat: number; weight_sun: number;
-};
-
-const DOW_WEIGHT_KEYS = [
-  'weight_sun','weight_mon','weight_tue','weight_wed',
-  'weight_thu','weight_fri','weight_sat',
-] as const;
-
-function computeDailyForecast(dateKey: string, s: ForecastSettings): number {
-  if (!s.week_base_net) return 0;
-  const d        = new Date(dateKey + 'T12:00:00Z');
-  const today    = new Date();
-  const refMs    = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
-  const weeksAhead = Math.round((d.getTime() - refMs) / (7 * 24 * 3600 * 1000));
-  const growth   = (1 + s.growth_rate / 100) ** Math.max(0, weeksAhead);
-  const weight   = s[DOW_WEIGHT_KEYS[d.getUTCDay()]] as number;
-  return s.week_base_net * weight * growth;
 }
 
 /* ── Constants ───────────────────────────────────────────────────────────── */
@@ -126,7 +109,7 @@ export default function UsageForecastPage() {
   const [weekOffset, setWeekOffset] = useState(0);
   const weekDays = useMemo(() => getWeekDays(weekOffset), [weekOffset]);
 
-  /* Fetch all active locations to map name → id */
+  /* ── Locations ── */
   const { data: locations = [] } = useQuery({
     queryKey: ['locations-usage'],
     queryFn: async () => {
@@ -138,75 +121,74 @@ export default function UsageForecastPage() {
     },
   });
 
-  /* Fetch forecast settings for all locations */
+  /* ── Forecast settings for all locations ── */
   const { data: allForecastSettings = [] } = useQuery({
     queryKey: ['forecast-settings-all'],
     queryFn: async () => {
       const { data } = await supabase
         .from('forecast_settings')
-        .select('location_id,shift_type,week_base_net,growth_rate,weight_mon,weight_tue,weight_wed,weight_thu,weight_fri,weight_sat,weight_sun');
+        .select('location_id,shift_type,week_base_net,growth_rate,weight_mon,weight_tue,weight_wed,weight_thu,weight_fri,weight_sat,weight_sun,closed_weekdays');
       return (data ?? []) as ForecastSettings[];
     },
   });
 
+  /* ── Week date range ── */
   const weekStart = weekDays[0] ? dateKey(weekDays[0]) : '';
   const weekEnd   = weekDays[6] ? dateKey(weekDays[6]) : '';
 
-  const qc = useQueryClient(); // eslint-disable-line @typescript-eslint/no-unused-vars
+  /* ── Current quarter range (for ratio computation) ── */
+  const { qStart, qEnd } = useMemo(() => currentQuarterRange(), []);
 
-  /* Historical Simply/OB ratio — past 90 days for all locations.
-     Used to scale the Orderbird forecast to include estimated delivery revenue. */
-  const histStart = useMemo(() => {
-    const d = new Date();
-    d.setDate(d.getDate() - 90);
-    return dateKey(d);
-  }, []);
-  const histEnd = useMemo(() => {
-    const d = new Date();
-    d.setDate(d.getDate() - 1); // up to yesterday (today has no actuals yet)
-    return dateKey(d);
-  }, []);
-
-  const { data: histShifts = [] } = useQuery({
-    queryKey: ['hist-shifts-ratio', histStart],
-    staleTime: 5 * 60 * 1000, // 5 min — doesn't change often
+  /* ── Quarter shift_reports — exact same data as Sales Reports uses for ratio ── */
+  const { data: qShiftRows = [], refetch: refetchQShifts } = useQuery({
+    queryKey: ['q-shift-rows-ratio', qStart, qEnd],
+    staleTime: 5 * 60 * 1000,
     queryFn: async () => {
       const { data } = await supabase
         .from('shift_reports')
-        .select('location_id, net_total')
-        .gte('report_date', histStart)
-        .lte('report_date', histEnd);
-      return (data ?? []) as { location_id: string; net_total: number }[];
+        .select('location_id, report_date, shift_type, net_total, z_report_number')
+        .gte('report_date', qStart)
+        .lte('report_date', qEnd);
+      return (data ?? []) as ShiftRowLite[];
     },
   });
 
-  const { data: histDeliveries = [] } = useQuery({
-    queryKey: ['hist-deliveries-ratio', histStart],
+  /* ── Quarter delivery_reports — exact same data as Sales Reports uses for ratio ── */
+  const { data: qDelivRows = [], refetch: refetchQDeliv } = useQuery({
+    queryKey: ['q-deliv-rows-ratio', qStart, qEnd],
     staleTime: 5 * 60 * 1000,
     queryFn: async () => {
       const { data } = await supabase
         .from('delivery_reports')
-        .select('location_id, net_revenue')
-        .gte('report_date', histStart)
-        .lte('report_date', histEnd);
-      return (data ?? []) as { location_id: string; net_revenue: number }[];
+        .select('location_id, report_date, shift_type, net_revenue')
+        .gte('report_date', qStart)
+        .lte('report_date', qEnd);
+      return (data ?? []) as DelivRowLite[];
     },
   });
 
-  /* Simply/OB ratio per location_id — computed from 90-day history */
-  const simplyRatioByLocId = useMemo(() => {
-    const obByLoc:  Record<string, number> = {};
-    const simByLoc: Record<string, number> = {};
-    for (const r of histShifts)    obByLoc[r.location_id]  = (obByLoc[r.location_id]  ?? 0) + (r.net_total   ?? 0);
-    for (const r of histDeliveries) simByLoc[r.location_id] = (simByLoc[r.location_id] ?? 0) + (r.net_revenue ?? 0);
-    const out: Record<string, number> = {};
-    for (const locId of Object.keys(obByLoc)) {
-      if (obByLoc[locId] > 0) out[locId] = (simByLoc[locId] ?? 0) / obByLoc[locId];
-    }
-    return out;
-  }, [histShifts, histDeliveries]);
+  /* ── Simply/OB ratios — computed with the EXACT same algorithm as Sales Reports ── */
+  const simplyRatios = useMemo(
+    () => computeSimplyRatios(qShiftRows, qDelivRows),
+    [qShiftRows, qDelivRows],
+  );
 
-  /* Fetch actual Orderbird shift_reports for the week — always fresh */
+  /* ── Forecast overrides for the displayed week ── */
+  const { data: weekOverrides = [], refetch: refetchOverrides } = useQuery({
+    queryKey: ['forecast-overrides-week', weekStart, weekEnd],
+    enabled: !!weekStart,
+    staleTime: 0,
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('forecast_overrides')
+        .select('location_id, forecast_date, shift_type, net_revenue')
+        .gte('forecast_date', weekStart)
+        .lte('forecast_date', weekEnd);
+      return (data ?? []) as ForecastOverride[];
+    },
+  });
+
+  /* ── Actual Orderbird shift_reports for the week ── */
   const { data: weekShiftRows = [], refetch: refetchShifts } = useQuery({
     queryKey: ['shift-reports-week', weekStart, weekEnd],
     enabled: !!weekStart,
@@ -221,7 +203,7 @@ export default function UsageForecastPage() {
     },
   });
 
-  /* Fetch actual Simply delivery_reports for the week — always fresh */
+  /* ── Actual Simply delivery_reports for the week ── */
   const { data: weekDeliveryRows = [], refetch: refetchDeliveries } = useQuery({
     queryKey: ['delivery-reports-week', weekStart, weekEnd],
     enabled: !!weekStart,
@@ -236,7 +218,7 @@ export default function UsageForecastPage() {
     },
   });
 
-  /* Fetch outgoing_bills (large-group invoices) — filtered by location names */
+  /* ── Outgoing bills for the week ── */
   const locationNames = useMemo(() => locations.map(l => l.name), [locations]);
   const { data: weekBillRows = [], refetch: refetchBills } = useQuery({
     queryKey: ['outgoing-bills-week', weekStart, weekEnd, locationNames.join(',')],
@@ -253,7 +235,7 @@ export default function UsageForecastPage() {
     },
   });
 
-  /* Fetch closure days — always fresh */
+  /* ── Closure days ── */
   const { data: closureDays = [], refetch: refetchClosures } = useQuery({
     queryKey: ['closure-days-usage', weekStart, weekEnd],
     enabled: !!weekStart,
@@ -271,29 +253,34 @@ export default function UsageForecastPage() {
   const [refreshing, setRefreshing] = useState(false);
   const handleRefresh = async () => {
     setRefreshing(true);
-    await Promise.all([refetchShifts(), refetchDeliveries(), refetchBills(), refetchClosures()]);
+    await Promise.all([
+      refetchShifts(),
+      refetchDeliveries(),
+      refetchBills(),
+      refetchClosures(),
+      refetchOverrides(),
+      refetchQShifts(),
+      refetchQDeliv(),
+    ]);
     setRefreshing(false);
   };
 
-  /* Local closure overrides — toggled immediately on click; persisted async to DB.
-     Key = "locId:dateKey", value = true (closed) | false (open override) */
+  /* Local closure overrides — toggled immediately on click; persisted async to DB */
   const [localClosures, setLocalClosures] = useState<Record<string, boolean>>({});
 
-  /* Build effective closed set: DB data UNION local overrides */
+  /* Effective closed set: DB data UNION local overrides */
   const closedSet = useMemo(() => {
     const s = new Set<string>();
     for (const c of closureDays) s.add(`${c.location_id}:${c.closure_date}`);
-    // Apply local overrides
     for (const [key, closed] of Object.entries(localClosures)) {
       if (closed) s.add(key); else s.delete(key);
     }
     return s;
   }, [closureDays, localClosures]);
 
-  /* Toggle closure — update local state immediately, persist to DB async */
+  /* Toggle closure — optimistic update then async persist */
   const handleToggleClosure = async (locId: string, dk: string, currentlyClosed: boolean) => {
     const key = `${locId}:${dk}`;
-    // Optimistic update
     setLocalClosures(prev => ({ ...prev, [key]: !currentlyClosed }));
     try {
       if (currentlyClosed) {
@@ -309,12 +296,9 @@ export default function UsageForecastPage() {
         }, { onConflict: 'location_id,closure_date,shift_type' });
         if (error) throw new Error(error.message);
       }
-      // Sync DB state back
       await refetchClosures();
-      // Clear local override (DB is now source of truth)
       setLocalClosures(prev => { const n = { ...prev }; delete n[key]; return n; });
     } catch (e: any) {
-      // Revert optimistic update
       setLocalClosures(prev => { const n = { ...prev }; delete n[key]; return n; });
       alert(`Could not update closure: ${e.message}`);
     }
@@ -340,7 +324,7 @@ export default function UsageForecastPage() {
     },
   });
 
-  /* Build location name → id lookup (single source) */
+  /* Build location name → id lookup */
   const locationIdByName = useMemo(() => {
     const m: Record<string, string> = {};
     for (const loc of locations) m[loc.name] = loc.id;
@@ -363,7 +347,15 @@ export default function UsageForecastPage() {
     return m;
   }, [weekShiftRows, weekDeliveryRows, weekBillRows, locationIdByName]);
 
-  /* Per store+day: null=closed, { val, isActual } otherwise */
+  /**
+   * Per store+day sales value.
+   * - Actual: sum of uploaded shift_reports + delivery_reports + outgoing_bills (blue)
+   * - Forecast: computeDailyTotal() — identical computation to Sales Reports "Daily Total" row (green)
+   * - Closed: null
+   *
+   * NOTE: forecast values ALWAYS match the Sales Reports Daily Total row exactly because
+   * both use computeDailyTotal() + computeSimplyRatios() from lib/forecast-utils.ts.
+   */
   type DaySales = { val: number; isActual: boolean } | null;
   const dailySalesByStore = useMemo(() => {
     const result: Record<Store, Record<string, DaySales>> = {
@@ -374,26 +366,34 @@ export default function UsageForecastPage() {
       if (!locId) continue;
       const lunchS  = allForecastSettings.find(s => s.location_id === locId && s.shift_type === 'lunch');
       const dinnerS = allForecastSettings.find(s => s.location_id === locId && s.shift_type === 'dinner');
+      const ratios  = simplyRatios[locId] ?? { lunch: 0, dinner: 0 };
+
       for (const day of weekDays) {
         const dk = dateKey(day);
         if (closedSet.has(`${locId}:${dk}`)) { result[store][dk] = null; continue; }
+
         const actualKey = `${locId}:${dk}`;
         if (actualKey in actualSalesByLocDate) {
-          // Uploaded data exists — show it as actual
+          // Uploaded data exists — show exact actuals
           result[store][dk] = { val: actualSalesByLocDate[actualKey], isActual: true };
         } else {
-          // No actuals — use forecast (OB) scaled by historical Simply/OB ratio
-          const l = lunchS  ? computeDailyForecast(dk, lunchS)  : 0;
-          const d = dinnerS ? computeDailyForecast(dk, dinnerS) : 0;
-          const obForecast    = l + d;
-          const simplyRatio   = simplyRatioByLocId[locId] ?? 0;
-          const simplyForecast = Math.round(obForecast * simplyRatio);
-          result[store][dk] = { val: obForecast + simplyForecast, isActual: false };
+          // No actuals — compute forecast exactly as Sales Reports "Daily Total" row
+          const lunchOverride  = weekOverrides.find(
+            o => o.location_id === locId && o.forecast_date === dk && o.shift_type === 'lunch',
+          );
+          const dinnerOverride = weekOverrides.find(
+            o => o.location_id === locId && o.forecast_date === dk && o.shift_type === 'dinner',
+          );
+          const total = computeDailyTotal(dk, lunchS, dinnerS, lunchOverride, dinnerOverride, ratios);
+          result[store][dk] = { val: total, isActual: false };
         }
       }
     }
     return result;
-  }, [locationIdByName, allForecastSettings, weekDays, closedSet, actualSalesByLocDate, simplyRatioByLocId]);
+  }, [
+    locationIdByName, allForecastSettings, weekDays, closedSet,
+    actualSalesByLocDate, simplyRatios, weekOverrides,
+  ]);
 
   /* Group items by section in canonical order */
   const sections = useMemo(() => {
@@ -418,7 +418,7 @@ export default function UsageForecastPage() {
       {/* ── Header ── */}
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-gray-900">Usage Forecast</h1>
-        <p className="text-xs text-gray-400">Sales forecasts from Forecast Settings · usage proportional to sales</p>
+        <p className="text-xs text-gray-400">Sales from Sales Reports · usage proportional to sales</p>
       </div>
 
       {/* ── Week nav + legend ── */}
@@ -482,7 +482,7 @@ export default function UsageForecastPage() {
                 {/* ── Row 1: Day headers ── */}
                 <tr className="border-b border-gray-100">
                   <th
-                    className="sticky left-0 z-20 bg-white border-r border-gray-100 px-4 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide"
+                    className="sticky left-0 z-20 bg-white border-r border-gray-200 px-4 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide"
                     style={{ minWidth: ITEM_W }}
                     rowSpan={3}
                   >
@@ -490,11 +490,12 @@ export default function UsageForecastPage() {
                   </th>
                   {weekDays.map((day, di) => {
                     const today = isToday(day);
+                    const altBg = !today && di % 2 === 1 ? 'bg-gray-50' : '';
                     return (
                       <th
                         key={di}
                         colSpan={STORES.length}
-                        className={`text-center font-bold text-sm py-2 border-l border-gray-100 ${today ? 'bg-green-50 text-[#1B5E20]' : 'text-gray-700'}`}
+                        className={`text-center font-bold text-sm py-2 border-l-2 border-gray-300 ${today ? 'bg-green-50 text-[#1B5E20]' : `text-gray-700 ${altBg}`}`}
                         style={{ minWidth: COL_W * STORES.length }}
                       >
                         {fmtDayHeader(day)}
@@ -506,25 +507,26 @@ export default function UsageForecastPage() {
                   })}
                 </tr>
 
-                {/* ── Row 2: Forecasted sales per store ── */}
+                {/* ── Row 2: Net sales per store (matches Sales Reports Daily Total exactly) ── */}
                 <tr className="border-b border-gray-100">
                   {weekDays.map((day, di) => {
                     const today = isToday(day);
                     const dk = dateKey(day);
+                    const altBg = !today && di % 2 === 1 ? 'bg-gray-50' : '';
                     return STORES.map((store, si) => {
-                      const locId   = locationIdByName[store];
-                      const entry   = dailySalesByStore[store][dk];
-                      const isClosed   = entry === null;
-                      const isActual   = !isClosed && entry?.isActual === true;
-                      const salesVal   = entry?.val ?? 0;
-                      const hasVal     = !isClosed && salesVal > 0;
+                      const locId    = locationIdByName[store];
+                      const entry    = dailySalesByStore[store][dk];
+                      const isClosed = entry === null;
+                      const isActual = !isClosed && entry?.isActual === true;
+                      const salesVal = entry?.val ?? 0;
+                      const hasVal   = !isClosed && salesVal > 0;
                       return (
                         <th
                           key={`${di}-${si}`}
                           onClick={() => locId && handleToggleClosure(locId, dk, isClosed)}
-                          className={`text-center py-1 px-1 border-l font-semibold text-[10px] cursor-pointer select-none transition-colors ${
-                            si === 0 ? 'border-gray-200' : 'border-gray-50'
-                          } ${today ? 'bg-green-50/60' : ''} ${
+                          className={`text-center py-1 px-1 font-semibold text-[10px] cursor-pointer select-none transition-colors ${
+                            si === 0 ? 'border-l-2 border-gray-300' : 'border-l border-gray-100'
+                          } ${today ? 'bg-green-50/60' : altBg} ${
                             isClosed
                               ? 'bg-red-50 text-red-400 hover:bg-red-100'
                               : isActual
@@ -551,12 +553,13 @@ export default function UsageForecastPage() {
                 <tr className="border-b-2 border-gray-200">
                   {weekDays.map((day, di) => {
                     const today = isToday(day);
+                    const altBg = !today && di % 2 === 1 ? 'bg-gray-50' : '';
                     return STORES.map((store, si) => (
                       <th
                         key={`${di}-${si}-label`}
-                        className={`text-center py-1.5 px-1 font-semibold text-[10px] uppercase tracking-wide border-l ${
-                          si === 0 ? 'border-gray-200' : 'border-gray-50'
-                        } ${today ? 'bg-green-50/40 text-[#1B5E20]/70' : 'text-gray-400'}`}
+                        className={`text-center py-1.5 px-1 font-semibold text-[10px] uppercase tracking-wide ${
+                          si === 0 ? 'border-l-2 border-gray-300' : 'border-l border-gray-100'
+                        } ${today ? 'bg-green-50/40 text-[#1B5E20]/70' : `text-gray-400 ${altBg}`}`}
                         style={{ minWidth: COL_W }}
                       >
                         {store}
@@ -597,6 +600,7 @@ export default function UsageForecastPage() {
                         {weekDays.map((day, di) => {
                           const today = isToday(day);
                           const dk = dateKey(day);
+                          const altBg = !today && di % 2 === 1 ? 'bg-gray-50/60' : '';
                           return STORES.map((store, si) => {
                             const entry = dailySalesByStore[store][dk];
                             const salesVal = entry?.val ?? 0;
@@ -605,9 +609,9 @@ export default function UsageForecastPage() {
                             return (
                               <td
                                 key={`${di}-${si}`}
-                                className={`text-center py-2 px-1 border-l ${
-                                  si === 0 ? 'border-gray-100' : 'border-gray-50'
-                                } ${today ? 'bg-green-50/20' : ''}`}
+                                className={`text-center py-2 px-1 ${
+                                  si === 0 ? 'border-l-2 border-gray-300' : 'border-l border-gray-100'
+                                } ${today ? 'bg-green-50/20' : altBg}`}
                                 style={{ minWidth: COL_W }}
                               >
                                 {usage !== null
@@ -637,7 +641,8 @@ export default function UsageForecastPage() {
       </div>
 
       <p className="text-xs text-gray-400">
-        Sales figures come from Forecast Settings per location. Item quantities are proportional to forecasted sales — connect recipe/BOM data for precise amounts.
+        Sales figures match the Daily Total row in Sales Reports exactly (OB + Simply + Bills, actual or forecast).
+        Item quantities are proportional to forecasted sales — connect recipe/BOM data for precise amounts.
       </p>
     </div>
   );

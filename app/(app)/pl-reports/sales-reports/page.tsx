@@ -2713,7 +2713,7 @@ export default function SalesReportsPage() {
                         <p className="text-xs text-gray-400">{weeklyResult.rows.length} products · page {weeklyPage+1} of {Math.ceil(weeklyResult.rows.length/PAGE_SIZE)}</p>
                       </div>
                       <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
-                        <div className="overflow-x-auto">
+                        <div className="overflow-x-auto scrollbar-always">
                           <table className="w-full text-xs">
                             <thead>
                               <tr className="bg-gray-50 border-b border-gray-200">
@@ -3293,7 +3293,7 @@ export default function SalesReportsPage() {
 
           return (
             <div className="flex-1 min-h-0 flex flex-col border border-gray-200 rounded-xl overflow-hidden shadow-sm">
-              <div className="flex-1 min-h-0 overflow-x-scroll overflow-y-auto">
+              <div className="flex-1 min-h-0 overflow-x-scroll overflow-y-auto scrollbar-always">
                 <table className="text-xs border-collapse" style={{ minWidth: LABEL_W + (dailyCols.length + 1) * COL_W_D }}>
                   {/* Sticky column header */}
                   <thead className="sticky top-0 z-30">
@@ -3937,7 +3937,7 @@ export default function SalesReportsPage() {
           </div>
         ) : (
           <div className="border border-gray-200 rounded-xl overflow-hidden shadow-sm">
-              <div className="overflow-x-scroll overflow-y-auto" style={{ maxHeight: 'calc(100vh - 260px)' }}>
+              <div className="overflow-x-scroll overflow-y-auto scrollbar-always" style={{ maxHeight: 'calc(100vh - 260px)' }}>
                 <table className="text-xs border-collapse" style={{ minWidth: LABEL_W + (TOTAL_WEEKS + 1) * COL_W_WK }}>
                   <thead className="sticky top-0 z-30">
                     <tr style={{ backgroundColor:'#111827' }}>
