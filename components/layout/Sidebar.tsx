@@ -117,9 +117,8 @@ const navGroups: NavGroup[] = [
       {
         label: 'Production', href: '/production', icon: Factory, permKey: 'production',
         children: [
-          { label: 'Batches',       href: '/production',              icon: Factory },
-          { label: 'Recipes',       href: '/production/recipes',      icon: ClipboardList },
-          { label: 'Semi Finished', href: '/products/semi-finished',  icon: FlaskConical },
+          { label: 'Batches',  href: '/production',             icon: Factory },
+          { label: 'Recipes',  href: '/products/semi-finished', icon: FlaskConical },
         ],
       },
       { label: 'Buying',      href: '/purchase-orders',         icon: ShoppingCart, permKey: 'buying' },
