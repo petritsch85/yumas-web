@@ -30,6 +30,9 @@ interface Recipe {
   process_steps_en: string[] | null;
   process_steps_de: string[] | null;
   process_steps_es: string[] | null;
+  minutes_to_produce: number | null;
+  days_to_expiry: number | null;
+  freezable: boolean | null;
 }
 
 interface PhotoRow { id: string; storage_path: string; created_at: string }
@@ -145,7 +148,7 @@ export default function RecipeDetailPage() {
     queryFn: async () => {
       const { data } = await supabase
         .from('recipes')
-        .select('id, output_item_id, output_quantity, yield_percent, instructions, video_url, process_steps_en, process_steps_de, process_steps_es')
+        .select('id, output_item_id, output_quantity, yield_percent, instructions, video_url, process_steps_en, process_steps_de, process_steps_es, minutes_to_produce, days_to_expiry, freezable')
         .eq('output_item_id', itemId)
         .maybeSingle();
       return data ?? null;
@@ -184,6 +187,9 @@ export default function RecipeDetailPage() {
   /* ── Edit state ── */
   const [outputQty, setOutputQty] = useState<string>('');
   const [yieldPct, setYieldPct] = useState<string>('');
+  const [minutesToProduce, setMinutesToProduce] = useState<string>('');
+  const [daysToExpiry, setDaysToExpiry] = useState<string>('');
+  const [freezable, setFreezable] = useState<boolean | null>(null);
   const [instructions, setInstructions] = useState('');
   const [rows, setRows] = useState<IngredientRow[]>([]);
   const [stepsEn, setStepsEn] = useState<string[]>([]);
@@ -203,6 +209,9 @@ export default function RecipeDetailPage() {
   const syncFromDb = () => {
     setOutputQty(recipe?.output_quantity != null ? String(recipe.output_quantity) : '');
     setYieldPct(recipe?.yield_percent != null ? String(recipe.yield_percent) : '');
+    setMinutesToProduce(recipe?.minutes_to_produce != null ? String(recipe.minutes_to_produce) : '');
+    setDaysToExpiry(recipe?.days_to_expiry != null ? String(recipe.days_to_expiry) : '');
+    setFreezable(recipe?.freezable ?? null);
     setInstructions(recipe?.instructions ?? '');
     setStepsEn(recipe?.process_steps_en ?? []);
     setStepsDe(recipe?.process_steps_de ?? []);
@@ -240,12 +249,12 @@ export default function RecipeDetailPage() {
       if (!recipeId) {
         const { data, error } = await supabase
           .from('recipes')
-          .insert({ output_item_id: itemId, output_quantity: outputQty !== '' ? Number(outputQty) : null, yield_percent: yieldPct !== '' ? Number(yieldPct) : null, instructions: instructions || null, process_steps_en: stepsEn.filter(s => s.trim()), process_steps_de: stepsDe.filter(s => s.trim()), process_steps_es: stepsEs.filter(s => s.trim()) })
+          .insert({ output_item_id: itemId, output_quantity: outputQty !== '' ? Number(outputQty) : null, yield_percent: yieldPct !== '' ? Number(yieldPct) : null, minutes_to_produce: minutesToProduce !== '' ? Number(minutesToProduce) : null, days_to_expiry: daysToExpiry !== '' ? Number(daysToExpiry) : null, freezable: freezable, instructions: instructions || null, process_steps_en: stepsEn.filter(s => s.trim()), process_steps_de: stepsDe.filter(s => s.trim()), process_steps_es: stepsEs.filter(s => s.trim()) })
           .select('id').single();
         if (error) throw error;
         recipeId = data.id;
       } else {
-        const { error } = await supabase.from('recipes').update({ output_quantity: outputQty !== '' ? Number(outputQty) : null, yield_percent: yieldPct !== '' ? Number(yieldPct) : null, instructions: instructions || null, process_steps_en: stepsEn.filter(s => s.trim()), process_steps_de: stepsDe.filter(s => s.trim()), process_steps_es: stepsEs.filter(s => s.trim()) }).eq('id', recipeId);
+        const { error } = await supabase.from('recipes').update({ output_quantity: outputQty !== '' ? Number(outputQty) : null, yield_percent: yieldPct !== '' ? Number(yieldPct) : null, minutes_to_produce: minutesToProduce !== '' ? Number(minutesToProduce) : null, days_to_expiry: daysToExpiry !== '' ? Number(daysToExpiry) : null, freezable: freezable, instructions: instructions || null, process_steps_en: stepsEn.filter(s => s.trim()), process_steps_de: stepsDe.filter(s => s.trim()), process_steps_es: stepsEs.filter(s => s.trim()) }).eq('id', recipeId);
         if (error) throw error;
       }
       await supabase.from('recipe_ingredients').delete().eq('recipe_id', recipeId);
@@ -536,6 +545,7 @@ export default function RecipeDetailPage() {
         <h2 className="font-semibold text-gray-900 text-sm">Recipe Settings</h2>
         {editing ? (
           <>
+            {/* Row 1: Output Qty + Yield */}
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-xs font-medium text-gray-500 mb-1">Output Quantity</label>
@@ -548,6 +558,35 @@ export default function RecipeDetailPage() {
                   className="w-full border-2 border-gray-300 bg-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20]" />
               </div>
             </div>
+            {/* Row 2: Min to Produce + Days to Expiry */}
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Min. to Produce</label>
+                <input type="number" min="0" step="1" value={minutesToProduce} onChange={e => setMinutesToProduce(e.target.value)} placeholder="e.g. 60"
+                  className="w-full border-2 border-gray-300 bg-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20]" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Days to Expiry</label>
+                <input type="number" min="0" step="1" value={daysToExpiry} onChange={e => setDaysToExpiry(e.target.value)} placeholder="e.g. 5"
+                  className="w-full border-2 border-gray-300 bg-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20]" />
+              </div>
+            </div>
+            {/* Row 3: Freezable toggle */}
+            <div className="flex items-center justify-between py-1">
+              <div>
+                <p className="text-sm font-medium text-gray-700">Freezable</p>
+                <p className="text-xs text-gray-400">Can this recipe be frozen after production?</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setFreezable(v => v === true ? false : v === false ? null : true)}
+                className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none ${
+                  freezable === true ? 'bg-blue-500' : freezable === false ? 'bg-gray-200' : 'bg-gray-200'
+                }`}
+              >
+                <span className={`inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ${freezable === true ? 'translate-x-5' : 'translate-x-0'}`} />
+              </button>
+            </div>
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-1">Instructions / Notes</label>
               <textarea rows={3} value={instructions} onChange={e => setInstructions(e.target.value)} placeholder="Add preparation notes…"
@@ -555,7 +594,7 @@ export default function RecipeDetailPage() {
             </div>
           </>
         ) : (
-          <dl className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm">
+          <dl className="grid grid-cols-2 gap-x-6 gap-y-4 text-sm">
             <div>
               <dt className="text-xs text-gray-400 mb-0.5">Output Quantity</dt>
               <dd className="font-semibold text-gray-900">
@@ -567,6 +606,24 @@ export default function RecipeDetailPage() {
             <div>
               <dt className="text-xs text-gray-400 mb-0.5">Yield %</dt>
               <dd className="font-semibold text-gray-900">{recipe?.yield_percent != null ? `${recipe.yield_percent}%` : <span className="text-gray-300">—</span>}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-gray-400 mb-0.5">Min. to Produce</dt>
+              <dd className="font-semibold text-gray-900">{recipe?.minutes_to_produce != null ? `${recipe.minutes_to_produce} min` : <span className="text-gray-300">—</span>}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-gray-400 mb-0.5">Days to Expiry</dt>
+              <dd className="font-semibold text-gray-900">{recipe?.days_to_expiry != null ? `${recipe.days_to_expiry} days` : <span className="text-gray-300">—</span>}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-gray-400 mb-0.5">Freezable</dt>
+              <dd className="font-semibold text-gray-900">
+                {recipe?.freezable === true
+                  ? <span className="text-blue-600">✓ Yes</span>
+                  : recipe?.freezable === false
+                  ? <span className="text-gray-400">No</span>
+                  : <span className="text-gray-300">—</span>}
+              </dd>
             </div>
             {recipe?.instructions && (
               <div className="col-span-2">

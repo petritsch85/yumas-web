@@ -188,9 +188,6 @@ export default function ProductionPage() {
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">{t('production.table.product')}</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">{t('production.table.category')}</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">{t('production.table.unit')}</th>
-                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">{t('production.table.minToProduce')}</th>
-                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">{t('production.table.daysToExpiry')}</th>
-                  <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">{t('production.table.freezable')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -204,17 +201,6 @@ export default function ProductionPage() {
                       </span>
                     </td>
                     <td className="px-4 py-2.5 text-gray-600 text-xs">{item.unit}</td>
-                    <td className="px-4 py-2.5 text-right text-gray-700">{item.minutesToProduce}</td>
-                    <td className="px-4 py-2.5 text-right text-gray-700">{item.daysToExpiry}</td>
-                    <td className="px-4 py-2.5 text-center">
-                      {item.freezable === 'Y' ? (
-                        <span className="text-blue-600 font-medium text-xs">✓ {t('production.freezableYes')}</span>
-                      ) : item.freezable === 'N' ? (
-                        <span className="text-gray-400 text-xs">{t('production.freezableNo')}</span>
-                      ) : (
-                        <span className="text-gray-300 text-xs">—</span>
-                      )}
-                    </td>
                   </tr>
                 ))}
               </tbody>
