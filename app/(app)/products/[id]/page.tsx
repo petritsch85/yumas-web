@@ -40,7 +40,7 @@ export default function RecipeDetailPage() {
     queryFn: async () => {
       const { data } = await supabase
         .from('items')
-        .select('id, name, product_type, category:categories(id, name, color_hex)')
+        .select('id, name, product_type, category:categories(id, name, color_hex), unit:units_of_measure(id, name, abbreviation)')
         .eq('id', itemId)
         .single();
       return data;
@@ -194,8 +194,10 @@ export default function RecipeDetailPage() {
   };
 
   /* ── Derived display helpers ── */
-  const catColor = (item?.category as { color_hex?: string | null } | null)?.color_hex ?? '#9CA3AF';
-  const catName  = (item?.category as { name?: string } | null)?.name ?? '';
+  const catColor   = (item?.category as { color_hex?: string | null } | null)?.color_hex ?? '#9CA3AF';
+  const catName    = (item?.category as { name?: string } | null)?.name ?? '';
+  const itemUnit   = (item?.unit as { abbreviation?: string | null; name?: string } | null);
+  const itemUnitLabel = itemUnit?.abbreviation || itemUnit?.name || '';
 
   const unitLabel = (unit_id: string) => {
     const u = units.find(u => u.id === unit_id);
@@ -313,7 +315,11 @@ export default function RecipeDetailPage() {
           <dl className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm">
             <div>
               <dt className="text-xs text-gray-400 mb-0.5">Output Quantity</dt>
-              <dd className="font-semibold text-gray-900">{recipe?.output_quantity ?? <span className="text-gray-300">—</span>}</dd>
+              <dd className="font-semibold text-gray-900">
+                {recipe?.output_quantity != null
+                  ? <>{recipe.output_quantity}{itemUnitLabel && <span className="text-gray-400 font-normal ml-1">{itemUnitLabel}</span>}</>
+                  : <span className="text-gray-300">—</span>}
+              </dd>
             </div>
             <div>
               <dt className="text-xs text-gray-400 mb-0.5">Yield %</dt>
