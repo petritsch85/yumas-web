@@ -412,21 +412,25 @@ export default function RecipeDetailPage() {
             <div className="text-center text-gray-300 text-sm py-8">No ingredients added yet.</div>
           ) : (
             <>
-              <div className="grid grid-cols-[1fr_64px_72px] gap-2 px-5 py-2 bg-gray-50 border-b border-gray-100">
+              <div className="grid grid-cols-[1fr_80px_72px] px-5 py-2 bg-gray-50 border-b border-gray-200">
                 <span className="text-xs font-medium text-gray-400 uppercase tracking-wide">Ingredient</span>
-                <span className="text-xs font-medium text-gray-400 uppercase tracking-wide text-right">Qty</span>
-                <span className="text-xs font-medium text-gray-400 uppercase tracking-wide">Unit</span>
+                <span className="text-xs font-medium text-gray-400 uppercase tracking-wide text-center">Qty</span>
+                <span className="text-xs font-medium text-gray-400 uppercase tracking-wide text-center">Unit</span>
               </div>
-              <div className="divide-y divide-gray-50">
+              <div>
                 {savedIngredients.map((row, idx) => {
                   const ingredientName = (row as { ingredient?: { name: string } | null }).ingredient?.name ?? '—';
                   const unitRow = (row as { unit?: { name: string; abbreviation: string | null } | null }).unit;
                   const unitName = unitRow?.abbreviation || unitRow?.name || '—';
+                  const isEven = idx % 2 === 0;
                   return (
-                    <div key={idx} className="grid grid-cols-[1fr_64px_72px] gap-2 px-5 py-3 items-center">
+                    <div
+                      key={idx}
+                      className={`grid grid-cols-[1fr_80px_72px] px-5 py-3 items-center border-b border-gray-100 ${isEven ? 'bg-white' : 'bg-gray-50/60'}`}
+                    >
                       <span className="text-sm font-medium text-gray-800">{ingredientName}</span>
-                      <span className="text-sm text-gray-700 text-right tabular-nums">{row.quantity}</span>
-                      <span className="text-sm text-gray-500">{unitName}</span>
+                      <span className="text-sm text-gray-700 text-center tabular-nums">{row.quantity}</span>
+                      <span className="text-sm text-gray-500 text-center">{unitName}</span>
                     </div>
                   );
                 })}
