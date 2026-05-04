@@ -63,7 +63,10 @@ export default function RawMaterialsPage() {
     <div>
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold text-gray-900">{t('products.rawMaterials')}</h1>
-        <button className="bg-[#1B5E20] text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-[#2E7D32] transition-colors flex items-center gap-2">
+        <button
+          onClick={() => router.push('/products/raw-materials/new')}
+          className="bg-[#1B5E20] text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-[#2E7D32] transition-colors flex items-center gap-2"
+        >
           <Plus size={16} />
           Add Item
         </button>

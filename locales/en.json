@@ -118,7 +118,8 @@
     "csvImporter": "CSV Importer",
     "calendar": "Delivery Calendar",
     "menus": "Menus",
-    "newRecipe": "New Recipe"
+    "newRecipe": "New Recipe",
+    "newRawMaterial": "New Raw Material"
   },
   "common": {
     "save": "Save",

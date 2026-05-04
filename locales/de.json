@@ -118,7 +118,8 @@
     "csvImporter": "CSV-Importer",
     "calendar": "Lieferkalender",
     "menus": "Speisekarten",
-    "newRecipe": "Neues Rezept"
+    "newRecipe": "Neues Rezept",
+    "newRawMaterial": "Neue Rohware"
   },
   "common": {
     "save": "Speichern",
