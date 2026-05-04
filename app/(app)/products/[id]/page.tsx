@@ -192,6 +192,7 @@ export default function RecipeDetailPage() {
   const [stepsTab, setStepsTab] = useState<'en' | 'de' | 'es'>('en');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   /* ── Item details (admin card) ── */
   const [nameDraft, setNameDraft] = useState({ en: '', de: '', es: '' });
@@ -259,6 +260,32 @@ export default function RecipeDetailPage() {
       setTimeout(() => setSaved(false), 3000);
     } catch (err) { console.error(err); alert('Save failed: ' + (err instanceof Error ? err.message : String(err))); }
     finally { setSaving(false); }
+  };
+
+  /* ── Delete entire recipe + item ── */
+  const handleDeleteRecipe = async () => {
+    if (!confirm('Delete this recipe permanently? This will remove the recipe, all ingredients, steps, and photos. This cannot be undone.')) return;
+    setDeleting(true);
+    try {
+      // 1. Remove photos from storage
+      if (photos.length > 0) {
+        await supabase.storage.from('recipe-media').remove(photos.map(p => p.storage_path));
+      }
+      if (recipe?.id) {
+        // 2. Delete photo rows, ingredients
+        await supabase.from('recipe_photos').delete().eq('recipe_id', recipe.id);
+        await supabase.from('recipe_ingredients').delete().eq('recipe_id', recipe.id);
+        // 3. Delete recipe row
+        await supabase.from('recipes').delete().eq('id', recipe.id);
+      }
+      // 4. Delete the item itself
+      await supabase.from('items').delete().eq('id', itemId);
+      // 5. Go back to the recipes list
+      router.push('/products/semi-finished');
+    } catch (err) {
+      alert('Delete failed: ' + (err instanceof Error ? err.message : String(err)));
+      setDeleting(false);
+    }
   };
 
   /* ── Save item name translations ── */
@@ -412,6 +439,13 @@ export default function RecipeDetailPage() {
             {/* Edit recipe */}
             {editing ? (
               <>
+                <button
+                  onClick={handleDeleteRecipe}
+                  disabled={deleting}
+                  className="flex items-center gap-1.5 border border-red-200 text-red-600 px-3 py-2 rounded-lg text-sm font-medium hover:bg-red-50 transition-colors disabled:opacity-60"
+                >
+                  <Trash2 size={14} />{deleting ? 'Deleting…' : 'Delete Recipe'}
+                </button>
                 <button onClick={handleCancel} className="flex items-center gap-1.5 border border-gray-200 text-gray-600 px-3 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors">
                   <X size={14} />Cancel
                 </button>
