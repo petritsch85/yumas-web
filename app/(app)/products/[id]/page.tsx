@@ -1,14 +1,14 @@
 'use client';
 
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
 import { useParams, useRouter } from 'next/navigation';
-import { ArrowLeft, Plus, Trash2, Save, ChevronDown } from 'lucide-react';
+import { ArrowLeft, Plus, Trash2, Save, ChevronDown, Pencil, X } from 'lucide-react';
 import { useState, useEffect, useId } from 'react';
 
 /* ─── Types ──────────────────────────────────────────────────────────────── */
 interface IngredientRow {
-  id: string | null;       // null = new (unsaved) row
+  id: string | null;
   item_id: string;
   quantity: number | string;
   unit_id: string;
@@ -23,14 +23,7 @@ interface Recipe {
   instructions: string | null;
 }
 
-/* ─── Helpers ─────────────────────────────────────────────────────────────── */
-const newRow = (): IngredientRow => ({
-  id: null,
-  item_id: '',
-  quantity: '',
-  unit_id: '',
-  notes: '',
-});
+const newRow = (): IngredientRow => ({ id: null, item_id: '', quantity: '', unit_id: '', notes: '' });
 
 /* ─── Component ──────────────────────────────────────────────────────────── */
 export default function RecipeDetailPage() {
@@ -38,6 +31,8 @@ export default function RecipeDetailPage() {
   const router = useRouter();
   const qc = useQueryClient();
   const uid = useId();
+
+  const [editing, setEditing] = useState(false);
 
   /* ── Master data ── */
   const { data: item } = useQuery({
@@ -54,6 +49,7 @@ export default function RecipeDetailPage() {
 
   const { data: allItems = [] } = useQuery({
     queryKey: ['items-for-select'],
+    enabled: editing,
     queryFn: async () => {
       const { data } = await supabase
         .from('items')
@@ -67,6 +63,7 @@ export default function RecipeDetailPage() {
 
   const { data: units = [] } = useQuery({
     queryKey: ['units'],
+    enabled: editing,
     queryFn: async () => {
       const { data } = await supabase
         .from('units_of_measure')
@@ -102,37 +99,35 @@ export default function RecipeDetailPage() {
     },
   });
 
-  /* ── Local form state ── */
+  /* ── Edit state ── */
   const [outputQty, setOutputQty] = useState<string>('');
   const [yieldPct, setYieldPct] = useState<string>('');
   const [instructions, setInstructions] = useState('');
   const [rows, setRows] = useState<IngredientRow[]>([]);
-  const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
 
-  /* Populate from DB once loaded */
-  useEffect(() => {
-    if (recipe) {
-      setOutputQty(recipe.output_quantity != null ? String(recipe.output_quantity) : '');
-      setYieldPct(recipe.yield_percent != null ? String(recipe.yield_percent) : '');
-      setInstructions(recipe.instructions ?? '');
-    }
-  }, [recipe]);
+  /* Sync DB → local state */
+  const syncFromDb = () => {
+    setOutputQty(recipe?.output_quantity != null ? String(recipe.output_quantity) : '');
+    setYieldPct(recipe?.yield_percent != null ? String(recipe.yield_percent) : '');
+    setInstructions(recipe?.instructions ?? '');
+    setRows(
+      savedIngredients.length > 0
+        ? savedIngredients.map(r => ({ ...r, quantity: String(r.quantity), notes: r.notes ?? '' }))
+        : [newRow()]
+    );
+  };
 
-  useEffect(() => {
-    if (savedIngredients.length > 0) {
-      setRows(savedIngredients.map(r => ({ ...r, quantity: String(r.quantity), notes: r.notes ?? '' })));
-    } else if (!isLoading && savedIngredients.length === 0 && recipe?.id) {
-      setRows([newRow()]);
-    } else if (!isLoading && !recipe) {
-      setRows([newRow()]);
-    }
-  }, [savedIngredients, recipe, isLoading]);
+  useEffect(() => { syncFromDb(); }, [recipe, savedIngredients]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleEdit = () => { syncFromDb(); setEditing(true); };
+
+  const handleCancel = () => { syncFromDb(); setEditing(false); };
 
   /* ── Row helpers ── */
   const updateRow = (idx: number, patch: Partial<IngredientRow>) =>
     setRows(prev => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
-
   const deleteRow = (idx: number) =>
     setRows(prev => prev.filter((_, i) => i !== idx));
 
@@ -141,7 +136,6 @@ export default function RecipeDetailPage() {
     setSaving(true);
     setSaved(false);
     try {
-      /* 1. Upsert recipe header */
       let recipeId = recipe?.id ?? null;
       if (!recipeId) {
         const { data, error } = await supabase
@@ -168,9 +162,7 @@ export default function RecipeDetailPage() {
         if (error) throw error;
       }
 
-      /* 2. Replace ingredient lines: delete all then re-insert */
       await supabase.from('recipe_ingredients').delete().eq('recipe_id', recipeId);
-
       const validRows = rows.filter(r => r.item_id && r.quantity !== '' && r.quantity !== null);
       if (validRows.length > 0) {
         const { error } = await supabase.from('recipe_ingredients').insert(
@@ -188,6 +180,7 @@ export default function RecipeDetailPage() {
       await qc.invalidateQueries({ queryKey: ['recipe', itemId] });
       await qc.invalidateQueries({ queryKey: ['recipe-ingredients', itemId] });
       setSaved(true);
+      setEditing(false);
       setTimeout(() => setSaved(false), 3000);
     } catch (err) {
       console.error(err);
@@ -197,9 +190,18 @@ export default function RecipeDetailPage() {
     }
   };
 
-  /* ── Render ── */
+  /* ── Derived display helpers ── */
   const catColor = (item?.category as { color_hex?: string | null } | null)?.color_hex ?? '#9CA3AF';
   const catName  = (item?.category as { name?: string } | null)?.name ?? '';
+
+  const unitLabel = (unit_id: string) => {
+    const u = units.find(u => u.id === unit_id);
+    return u?.abbreviation || u?.name || '—';
+  };
+  const itemLabel = (item_id: string) => {
+    const i = allItems.find(i => i.id === item_id);
+    return i?.name ?? '—';
+  };
 
   if (isLoading) {
     return (
@@ -229,14 +231,34 @@ export default function RecipeDetailPage() {
           </div>
           <h1 className="text-2xl font-bold text-gray-900 leading-tight">{item?.name ?? '…'}</h1>
         </div>
-        <button
-          onClick={handleSave}
-          disabled={saving}
-          className="flex items-center gap-2 bg-[#1B5E20] text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-[#2E7D32] transition-colors disabled:opacity-60 flex-shrink-0"
-        >
-          <Save size={15} />
-          {saving ? 'Saving…' : 'Save'}
-        </button>
+
+        {editing ? (
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <button
+              onClick={handleCancel}
+              className="flex items-center gap-1.5 border border-gray-200 text-gray-600 px-3 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors"
+            >
+              <X size={14} />
+              Cancel
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              className="flex items-center gap-1.5 bg-[#1B5E20] text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-[#2E7D32] transition-colors disabled:opacity-60"
+            >
+              <Save size={14} />
+              {saving ? 'Saving…' : 'Save'}
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={handleEdit}
+            className="flex items-center gap-1.5 border border-gray-200 text-gray-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors flex-shrink-0"
+          >
+            <Pencil size={14} />
+            Edit
+          </button>
+        )}
       </div>
 
       {saved && (
@@ -245,148 +267,182 @@ export default function RecipeDetailPage() {
         </div>
       )}
 
-      {/* ── Recipe settings ── */}
+      {/* ── Recipe Settings ── */}
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5 space-y-4">
         <h2 className="font-semibold text-gray-900 text-sm">Recipe Settings</h2>
 
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Output Quantity</label>
-            <input
-              type="number"
-              min="0"
-              step="any"
-              value={outputQty}
-              onChange={e => setOutputQty(e.target.value)}
-              placeholder="e.g. 10"
-              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20]"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Yield %</label>
-            <input
-              type="number"
-              min="0"
-              max="100"
-              step="any"
-              value={yieldPct}
-              onChange={e => setYieldPct(e.target.value)}
-              placeholder="e.g. 95"
-              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20]"
-            />
-          </div>
-        </div>
-
-        <div>
-          <label className="block text-xs font-medium text-gray-500 mb-1">Instructions / Notes</label>
-          <textarea
-            rows={3}
-            value={instructions}
-            onChange={e => setInstructions(e.target.value)}
-            placeholder="Add preparation notes…"
-            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20] resize-none"
-          />
-        </div>
+        {editing ? (
+          <>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Output Quantity</label>
+                <input
+                  type="number" min="0" step="any"
+                  value={outputQty}
+                  onChange={e => setOutputQty(e.target.value)}
+                  placeholder="e.g. 10"
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20]"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Yield %</label>
+                <input
+                  type="number" min="0" max="100" step="any"
+                  value={yieldPct}
+                  onChange={e => setYieldPct(e.target.value)}
+                  placeholder="e.g. 95"
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20]"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Instructions / Notes</label>
+              <textarea
+                rows={3}
+                value={instructions}
+                onChange={e => setInstructions(e.target.value)}
+                placeholder="Add preparation notes…"
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20] resize-none"
+              />
+            </div>
+          </>
+        ) : (
+          <dl className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm">
+            <div>
+              <dt className="text-xs text-gray-400 mb-0.5">Output Quantity</dt>
+              <dd className="font-semibold text-gray-900">{recipe?.output_quantity ?? <span className="text-gray-300">—</span>}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-gray-400 mb-0.5">Yield %</dt>
+              <dd className="font-semibold text-gray-900">{recipe?.yield_percent != null ? `${recipe.yield_percent}%` : <span className="text-gray-300">—</span>}</dd>
+            </div>
+            {recipe?.instructions && (
+              <div className="col-span-2">
+                <dt className="text-xs text-gray-400 mb-0.5">Instructions / Notes</dt>
+                <dd className="text-gray-700 whitespace-pre-wrap">{recipe.instructions}</dd>
+              </div>
+            )}
+          </dl>
+        )}
       </div>
 
       {/* ── Ingredients ── */}
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-50">
           <h2 className="font-semibold text-gray-900 text-sm">Ingredients</h2>
-          <button
-            onClick={() => setRows(prev => [...prev, newRow()])}
-            className="flex items-center gap-1.5 text-[#1B5E20] text-xs font-medium hover:text-[#2E7D32] transition-colors"
-          >
-            <Plus size={14} />
-            Add ingredient
-          </button>
+          {editing && (
+            <button
+              onClick={() => setRows(prev => [...prev, newRow()])}
+              className="flex items-center gap-1.5 text-[#1B5E20] text-xs font-medium hover:text-[#2E7D32] transition-colors"
+            >
+              <Plus size={14} />
+              Add ingredient
+            </button>
+          )}
         </div>
 
-        {/* Column headers */}
-        <div className="grid grid-cols-[1fr_80px_90px_36px] gap-2 px-5 py-2 bg-gray-50 border-b border-gray-100">
-          <span className="text-xs font-medium text-gray-400 uppercase tracking-wide">Ingredient</span>
-          <span className="text-xs font-medium text-gray-400 uppercase tracking-wide">Qty</span>
-          <span className="text-xs font-medium text-gray-400 uppercase tracking-wide">Unit</span>
-          <span />
-        </div>
+        {editing ? (
+          <>
+            {/* Edit column headers */}
+            <div className="grid grid-cols-[1fr_80px_90px_36px] gap-2 px-5 py-2 bg-gray-50 border-b border-gray-100">
+              <span className="text-xs font-medium text-gray-400 uppercase tracking-wide">Ingredient</span>
+              <span className="text-xs font-medium text-gray-400 uppercase tracking-wide">Qty</span>
+              <span className="text-xs font-medium text-gray-400 uppercase tracking-wide">Unit</span>
+              <span />
+            </div>
 
-        {rows.length === 0 ? (
-          <div className="text-center text-gray-400 text-sm py-8">
-            No ingredients yet — click &ldquo;Add ingredient&rdquo; to start.
-          </div>
-        ) : (
-          <div className="divide-y divide-gray-50">
-            {rows.map((row, idx) => (
-              <div key={`${uid}-${idx}`} className="grid grid-cols-[1fr_80px_90px_36px] gap-2 px-5 py-3 items-center">
-
-                {/* Ingredient selector */}
-                <div className="relative">
-                  <select
-                    value={row.item_id}
-                    onChange={e => updateRow(idx, { item_id: e.target.value })}
-                    className="w-full appearance-none border border-gray-200 rounded-lg pl-3 pr-7 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20] text-gray-900"
-                  >
-                    <option value="">Select…</option>
-                    {allItems.map(i => (
-                      <option key={i.id} value={i.id}>{i.name}</option>
-                    ))}
-                  </select>
-                  <ChevronDown size={13} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
-                </div>
-
-                {/* Quantity */}
-                <input
-                  type="number"
-                  min="0"
-                  step="any"
-                  value={row.quantity}
-                  onChange={e => updateRow(idx, { quantity: e.target.value })}
-                  placeholder="0"
-                  className="w-full border border-gray-200 rounded-lg px-2 py-2 text-sm text-center focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20]"
-                />
-
-                {/* Unit selector */}
-                <div className="relative">
-                  <select
-                    value={row.unit_id}
-                    onChange={e => updateRow(idx, { unit_id: e.target.value })}
-                    className="w-full appearance-none border border-gray-200 rounded-lg pl-2 pr-6 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20] text-gray-900"
-                  >
-                    <option value="">—</option>
-                    {units.map(u => (
-                      <option key={u.id} value={u.id}>{u.abbreviation || u.name}</option>
-                    ))}
-                  </select>
-                  <ChevronDown size={13} className="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
-                </div>
-
-                {/* Delete */}
-                <button
-                  onClick={() => deleteRow(idx)}
-                  className="flex items-center justify-center text-gray-300 hover:text-red-400 transition-colors"
-                >
-                  <Trash2 size={15} />
-                </button>
+            {rows.length === 0 ? (
+              <div className="text-center text-gray-400 text-sm py-8">
+                No ingredients yet — click &ldquo;Add ingredient&rdquo; to start.
               </div>
-            ))}
-          </div>
+            ) : (
+              <div className="divide-y divide-gray-50">
+                {rows.map((row, idx) => (
+                  <div key={`${uid}-${idx}`} className="grid grid-cols-[1fr_80px_90px_36px] gap-2 px-5 py-3 items-center">
+                    <div className="relative">
+                      <select
+                        value={row.item_id}
+                        onChange={e => updateRow(idx, { item_id: e.target.value })}
+                        className="w-full appearance-none border border-gray-200 rounded-lg pl-3 pr-7 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20] text-gray-900"
+                      >
+                        <option value="">Select…</option>
+                        {allItems.map(i => (
+                          <option key={i.id} value={i.id}>{i.name}</option>
+                        ))}
+                      </select>
+                      <ChevronDown size={13} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                    </div>
+                    <input
+                      type="number" min="0" step="any"
+                      value={row.quantity}
+                      onChange={e => updateRow(idx, { quantity: e.target.value })}
+                      placeholder="0"
+                      className="w-full border border-gray-200 rounded-lg px-2 py-2 text-sm text-center focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20]"
+                    />
+                    <div className="relative">
+                      <select
+                        value={row.unit_id}
+                        onChange={e => updateRow(idx, { unit_id: e.target.value })}
+                        className="w-full appearance-none border border-gray-200 rounded-lg pl-2 pr-6 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20] text-gray-900"
+                      >
+                        <option value="">—</option>
+                        {units.map(u => (
+                          <option key={u.id} value={u.id}>{u.abbreviation || u.name}</option>
+                        ))}
+                      </select>
+                      <ChevronDown size={13} className="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                    </div>
+                    <button
+                      onClick={() => deleteRow(idx)}
+                      className="flex items-center justify-center text-gray-300 hover:text-red-400 transition-colors"
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        ) : (
+          /* Read-only ingredient list */
+          savedIngredients.length === 0 ? (
+            <div className="text-center text-gray-300 text-sm py-8">No ingredients added yet.</div>
+          ) : (
+            <>
+              <div className="grid grid-cols-[1fr_64px_72px] gap-2 px-5 py-2 bg-gray-50 border-b border-gray-100">
+                <span className="text-xs font-medium text-gray-400 uppercase tracking-wide">Ingredient</span>
+                <span className="text-xs font-medium text-gray-400 uppercase tracking-wide text-right">Qty</span>
+                <span className="text-xs font-medium text-gray-400 uppercase tracking-wide">Unit</span>
+              </div>
+              <div className="divide-y divide-gray-50">
+                {savedIngredients.map((row, idx) => {
+                  const u = units.find(u => u.id === row.unit_id);
+                  const i = allItems.find(i => i.id === row.item_id);
+                  return (
+                    <div key={idx} className="grid grid-cols-[1fr_64px_72px] gap-2 px-5 py-3 items-center">
+                      <span className="text-sm font-medium text-gray-800">{i?.name ?? row.item_id}</span>
+                      <span className="text-sm text-gray-700 text-right tabular-nums">{row.quantity}</span>
+                      <span className="text-sm text-gray-500">{u?.abbreviation || u?.name || '—'}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )
         )}
-
-        {/* Notes per ingredient — expandable row below each */}
-        <div className="px-5 pb-4 pt-1 border-t border-gray-50">
-          <p className="text-xs text-gray-400">Tip: notes per ingredient coming soon. Use the Instructions field above for prep notes.</p>
-        </div>
       </div>
 
-      {/* ── Bottom save ── */}
-      <button
-        onClick={handleSave}
-        disabled={saving}
-        className="w-full flex items-center justify-center gap-2 bg-[#1B5E20] text-white py-3 rounded-xl text-sm font-semibold hover:bg-[#2E7D32] transition-colors disabled:opacity-60"
-      >
-        <Save size={16} />
-        {saving ? 'Saving…' : 'Save Recipe'}
-      </button>
+      {/* ── Bottom save (edit mode only) ── */}
+      {editing && (
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="w-full flex items-center justify-center gap-2 bg-[#1B5E20] text-white py-3 rounded-xl text-sm font-semibold hover:bg-[#2E7D32] transition-colors disabled:opacity-60"
+        >
+          <Save size={16} />
+          {saving ? 'Saving…' : 'Save Recipe'}
+        </button>
+      )}
     </div>
   );
 }
