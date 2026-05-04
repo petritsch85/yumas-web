@@ -587,11 +587,6 @@ export default function RecipeDetailPage() {
                 <span className={`inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ${freezable === true ? 'translate-x-5' : 'translate-x-0'}`} />
               </button>
             </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">Instructions / Notes</label>
-              <textarea rows={3} value={instructions} onChange={e => setInstructions(e.target.value)} placeholder="Add preparation notes…"
-                className="w-full border-2 border-gray-300 bg-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20] resize-none" />
-            </div>
           </>
         ) : (
           <dl className="grid grid-cols-2 gap-x-6 gap-y-4 text-sm">
@@ -625,12 +620,6 @@ export default function RecipeDetailPage() {
                   : <span className="text-gray-300">—</span>}
               </dd>
             </div>
-            {recipe?.instructions && (
-              <div className="col-span-2">
-                <dt className="text-xs text-gray-400 mb-0.5">Instructions / Notes</dt>
-                <dd className="text-gray-700 whitespace-pre-wrap">{recipe.instructions}</dd>
-              </div>
-            )}
           </dl>
         )}
       </div>
