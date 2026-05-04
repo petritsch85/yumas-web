@@ -496,7 +496,7 @@ export default function RecipeDetailPage() {
           </div>
           <div className="p-4 grid grid-cols-3 gap-3">
             {photos.map(photo => (
-              <div key={photo.id} className="relative group aspect-square rounded-lg overflow-hidden bg-gray-100">
+              <div key={photo.id} className="relative aspect-square rounded-lg overflow-hidden bg-gray-100">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={getPhotoUrl(photo.storage_path)}
@@ -506,7 +506,7 @@ export default function RecipeDetailPage() {
                 />
                 <button
                   onClick={() => handleDeletePhoto(photo)}
-                  className="absolute top-1.5 right-1.5 bg-black/50 hover:bg-red-600 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                  className="absolute top-1.5 right-1.5 bg-black/50 hover:bg-red-600 text-white rounded-full p-1 transition-colors"
                 >
                   <Trash2 size={12} />
                 </button>
