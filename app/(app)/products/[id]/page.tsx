@@ -92,10 +92,13 @@ export default function RecipeDetailPage() {
     queryFn: async () => {
       const { data } = await supabase
         .from('recipe_ingredients')
-        .select('id, item_id, quantity, unit_id, notes')
+        .select('id, item_id, quantity, unit_id, notes, ingredient:items(name), unit:units_of_measure(name, abbreviation)')
         .eq('recipe_id', recipe!.id)
         .order('id');
-      return (data ?? []) as IngredientRow[];
+      return (data ?? []) as unknown as (IngredientRow & {
+        ingredient?: { name: string } | null;
+        unit?: { name: string; abbreviation: string | null } | null;
+      })[];
     },
   });
 
@@ -416,13 +419,14 @@ export default function RecipeDetailPage() {
               </div>
               <div className="divide-y divide-gray-50">
                 {savedIngredients.map((row, idx) => {
-                  const u = units.find(u => u.id === row.unit_id);
-                  const i = allItems.find(i => i.id === row.item_id);
+                  const ingredientName = (row as { ingredient?: { name: string } | null }).ingredient?.name ?? '—';
+                  const unitRow = (row as { unit?: { name: string; abbreviation: string | null } | null }).unit;
+                  const unitName = unitRow?.abbreviation || unitRow?.name || '—';
                   return (
                     <div key={idx} className="grid grid-cols-[1fr_64px_72px] gap-2 px-5 py-3 items-center">
-                      <span className="text-sm font-medium text-gray-800">{i?.name ?? row.item_id}</span>
+                      <span className="text-sm font-medium text-gray-800">{ingredientName}</span>
                       <span className="text-sm text-gray-700 text-right tabular-nums">{row.quantity}</span>
-                      <span className="text-sm text-gray-500">{u?.abbreviation || u?.name || '—'}</span>
+                      <span className="text-sm text-gray-500">{unitName}</span>
                     </div>
                   );
                 })}
