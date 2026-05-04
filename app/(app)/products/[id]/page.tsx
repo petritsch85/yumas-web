@@ -27,6 +27,7 @@ interface Recipe {
   yield_percent: number | null;
   instructions: string | null;
   video_url: string | null;
+  process_steps: string[] | null;
 }
 
 interface PhotoRow { id: string; storage_path: string; created_at: string }
@@ -134,7 +135,7 @@ export default function RecipeDetailPage() {
     queryFn: async () => {
       const { data } = await supabase
         .from('recipes')
-        .select('id, output_item_id, output_quantity, yield_percent, instructions, video_url')
+        .select('id, output_item_id, output_quantity, yield_percent, instructions, video_url, process_steps')
         .eq('output_item_id', itemId)
         .maybeSingle();
       return data ?? null;
@@ -175,6 +176,7 @@ export default function RecipeDetailPage() {
   const [yieldPct, setYieldPct] = useState<string>('');
   const [instructions, setInstructions] = useState('');
   const [rows, setRows] = useState<IngredientRow[]>([]);
+  const [steps, setSteps] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
@@ -187,6 +189,7 @@ export default function RecipeDetailPage() {
     setOutputQty(recipe?.output_quantity != null ? String(recipe.output_quantity) : '');
     setYieldPct(recipe?.yield_percent != null ? String(recipe.yield_percent) : '');
     setInstructions(recipe?.instructions ?? '');
+    setSteps(recipe?.process_steps ?? []);
     setRows(
       savedIngredients.length > 0
         ? savedIngredients.map(r => ({ ...r, quantity: String(r.quantity), notes: r.notes ?? '' }))
@@ -219,12 +222,12 @@ export default function RecipeDetailPage() {
       if (!recipeId) {
         const { data, error } = await supabase
           .from('recipes')
-          .insert({ output_item_id: itemId, output_quantity: outputQty !== '' ? Number(outputQty) : null, yield_percent: yieldPct !== '' ? Number(yieldPct) : null, instructions: instructions || null })
+          .insert({ output_item_id: itemId, output_quantity: outputQty !== '' ? Number(outputQty) : null, yield_percent: yieldPct !== '' ? Number(yieldPct) : null, instructions: instructions || null, process_steps: steps.filter(s => s.trim()) })
           .select('id').single();
         if (error) throw error;
         recipeId = data.id;
       } else {
-        const { error } = await supabase.from('recipes').update({ output_quantity: outputQty !== '' ? Number(outputQty) : null, yield_percent: yieldPct !== '' ? Number(yieldPct) : null, instructions: instructions || null }).eq('id', recipeId);
+        const { error } = await supabase.from('recipes').update({ output_quantity: outputQty !== '' ? Number(outputQty) : null, yield_percent: yieldPct !== '' ? Number(yieldPct) : null, instructions: instructions || null, process_steps: steps.filter(s => s.trim()) }).eq('id', recipeId);
         if (error) throw error;
       }
       await supabase.from('recipe_ingredients').delete().eq('recipe_id', recipeId);
@@ -271,7 +274,7 @@ export default function RecipeDetailPage() {
     if (recipe?.id) return recipe.id;
     const { data, error } = await supabase
       .from('recipes')
-      .insert({ output_item_id: itemId, output_quantity: null, yield_percent: null, instructions: null })
+      .insert({ output_item_id: itemId, output_quantity: null, yield_percent: null, instructions: null, process_steps: [] })
       .select('id').single();
     if (error) { alert('Could not create recipe record: ' + error.message); return null; }
     await qc.invalidateQueries({ queryKey: ['recipe', itemId] });
@@ -589,6 +592,89 @@ export default function RecipeDetailPage() {
                   })}
               </div>
             </>
+          )
+        )}
+      </div>
+
+      {/* ── Process ── */}
+      <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-50">
+          <h2 className="font-semibold text-gray-900 text-sm">{t('recipes.process')}</h2>
+          {editing && (
+            <button
+              onClick={() => setSteps(prev => [...prev, ''])}
+              className="flex items-center gap-1.5 text-[#1B5E20] text-xs font-medium hover:text-[#2E7D32] transition-colors"
+            >
+              <Plus size={14} />{t('recipes.addStep')}
+            </button>
+          )}
+        </div>
+
+        {editing ? (
+          steps.length === 0 ? (
+            <div className="text-center text-gray-400 text-sm py-8">
+              {t('recipes.noSteps')}
+            </div>
+          ) : (
+            <div className="divide-y divide-gray-50">
+              {steps.map((step, idx) => (
+                <div key={idx} className="flex items-start gap-3 px-5 py-3">
+                  {/* Step number badge */}
+                  <span className="mt-2 flex-shrink-0 w-6 h-6 rounded-full bg-[#1B5E20]/10 text-[#1B5E20] text-xs font-bold flex items-center justify-center">
+                    {idx + 1}
+                  </span>
+                  {/* Text input */}
+                  <textarea
+                    value={step}
+                    onChange={e => setSteps(prev => prev.map((s, i) => i === idx ? e.target.value : s))}
+                    placeholder={t('recipes.stepPlaceholder')}
+                    rows={2}
+                    className="flex-1 border-2 border-gray-300 bg-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20] resize-none"
+                  />
+                  {/* Up / Down / Delete */}
+                  <div className="flex flex-col gap-1 flex-shrink-0 mt-1">
+                    <button
+                      disabled={idx === 0}
+                      onClick={() => setSteps(prev => { const a = [...prev]; [a[idx - 1], a[idx]] = [a[idx], a[idx - 1]]; return a; })}
+                      className="text-gray-300 hover:text-gray-600 disabled:opacity-20 transition-colors"
+                      aria-label="Move up"
+                    >
+                      <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 2L2 8h10L7 2z" fill="currentColor"/></svg>
+                    </button>
+                    <button
+                      disabled={idx === steps.length - 1}
+                      onClick={() => setSteps(prev => { const a = [...prev]; [a[idx], a[idx + 1]] = [a[idx + 1], a[idx]]; return a; })}
+                      className="text-gray-300 hover:text-gray-600 disabled:opacity-20 transition-colors"
+                      aria-label="Move down"
+                    >
+                      <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 12L2 6h10L7 12z" fill="currentColor"/></svg>
+                    </button>
+                    <button
+                      onClick={() => setSteps(prev => prev.filter((_, i) => i !== idx))}
+                      className="text-gray-300 hover:text-red-400 transition-colors mt-0.5"
+                      aria-label="Delete step"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )
+        ) : (
+          !recipe?.process_steps || recipe.process_steps.length === 0 ? (
+            <div className="text-center text-gray-300 text-sm py-8">{t('recipes.noSteps')}</div>
+          ) : (
+            <ol className="px-5 py-4 space-y-3">
+              {recipe.process_steps.map((step, idx) => (
+                <li key={idx} className="flex items-start gap-3">
+                  <span className="flex-shrink-0 w-6 h-6 rounded-full bg-[#1B5E20]/10 text-[#1B5E20] text-xs font-bold flex items-center justify-center mt-0.5">
+                    {idx + 1}
+                  </span>
+                  <span className="text-sm text-gray-800 leading-relaxed">{step}</span>
+                </li>
+              ))}
+            </ol>
           )
         )}
       </div>

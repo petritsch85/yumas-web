@@ -315,7 +315,11 @@
     "pasteUrl": "YouTube- oder Vimeo-URL einfügen…",
     "saveVideo": "Video speichern",
     "removeVideo": "Video entfernen",
-    "noPhotos": "Noch keine Fotos"
+    "noPhotos": "Noch keine Fotos",
+    "process": "Zubereitung",
+    "addStep": "Schritt hinzufügen",
+    "noSteps": "Noch keine Schritte hinzugefügt.",
+    "stepPlaceholder": "Diesen Schritt beschreiben…"
   },
   "purchaseOrders": {
     "title": "Bestellungen",
