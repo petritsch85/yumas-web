@@ -79,7 +79,6 @@ const navGroups: NavGroup[] = [
         label: 'Products', href: '/products', icon: Package, permKey: 'products',
         children: [
           { label: 'Raw Materials', href: '/products/raw-materials', icon: Package },
-          { label: 'Semi Finished', href: '/products/semi-finished', icon: FlaskConical },
           { label: 'Finished',      href: '/products/finished',      icon: Utensils },
         ],
       },
@@ -118,8 +117,9 @@ const navGroups: NavGroup[] = [
       {
         label: 'Production', href: '/production', icon: Factory, permKey: 'production',
         children: [
-          { label: 'Batches', href: '/production',         icon: Factory },
-          { label: 'Recipes', href: '/production/recipes', icon: ClipboardList },
+          { label: 'Batches',       href: '/production',              icon: Factory },
+          { label: 'Recipes',       href: '/production/recipes',      icon: ClipboardList },
+          { label: 'Semi Finished', href: '/products/semi-finished',  icon: FlaskConical },
         ],
       },
       { label: 'Buying',      href: '/purchase-orders',         icon: ShoppingCart, permKey: 'buying' },
