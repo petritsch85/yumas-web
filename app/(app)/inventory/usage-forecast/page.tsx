@@ -9,6 +9,7 @@ import { useT } from '@/lib/i18n';
 import {
   computeSimplyRatios,
   computeDailyTotal,
+  computeDailyForecast,
   currentQuarterRange,
   type ForecastSettings,
   type ForecastOverride,
@@ -200,10 +201,10 @@ export default function UsageForecastPage() {
     queryFn: async () => {
       const { data } = await supabase
         .from('shift_reports')
-        .select('location_id, report_date, net_total')
+        .select('location_id, report_date, shift_type, net_total, z_report_number')
         .gte('report_date', weekStart)
         .lte('report_date', weekEnd);
-      return (data ?? []) as { location_id: string; report_date: string; net_total: number }[];
+      return (data ?? []) as ShiftRowLite[];
     },
   });
 
@@ -352,13 +353,42 @@ export default function UsageForecastPage() {
   }, [weekShiftRows, weekDeliveryRows, weekBillRows, locationIdByName]);
 
   /**
+   * Which OB shifts have been uploaded per location+date.
+   * Used to detect partial days (e.g. lunch uploaded but dinner not yet done).
+   * Tagged shift_type takes precedence; falls back to Z-report order count.
+   */
+  const uploadedShiftsByLocDate = useMemo(() => {
+    const m: Record<string, { hasLunch: boolean; hasDinner: boolean }> = {};
+    const groups: Record<string, ShiftRowLite[]> = {};
+    for (const r of weekShiftRows) {
+      const k = `${r.location_id}:${r.report_date}`;
+      if (!groups[k]) groups[k] = [];
+      groups[k].push(r);
+    }
+    for (const [key, rows] of Object.entries(groups)) {
+      const allTagged = rows.every(r => r.shift_type === 'lunch' || r.shift_type === 'dinner');
+      if (allTagged) {
+        m[key] = {
+          hasLunch:  rows.some(r => r.shift_type === 'lunch'),
+          hasDinner: rows.some(r => r.shift_type === 'dinner'),
+        };
+      } else {
+        // Legacy: Z-report order — 1 row = lunch only, 2+ rows = both
+        m[key] = { hasLunch: rows.length >= 1, hasDinner: rows.length >= 2 };
+      }
+    }
+    return m;
+  }, [weekShiftRows]);
+
+  /**
    * Per store+day sales value.
-   * - Actual: sum of uploaded shift_reports + delivery_reports + outgoing_bills (blue)
-   * - Forecast: computeDailyTotal() — identical computation to Sales Reports "Daily Total" row (green)
-   * - Closed: null
+   * - Full actual (both shifts uploaded): exact uploaded total, blue.
+   * - Partial actual (only lunch uploaded): lunch actual + dinner forecast, blue.
+   * - No actual: full forecast (lunch + dinner), green.
+   * - Closed: null.
    *
-   * NOTE: forecast values ALWAYS match the Sales Reports Daily Total row exactly because
-   * both use computeDailyTotal() + computeSimplyRatios() from lib/forecast-utils.ts.
+   * This ensures the daily total is ALWAYS the complete day figure,
+   * never just the portion that has been uploaded so far.
    */
   type DaySales = { val: number; isActual: boolean } | null;
   const dailySalesByStore = useMemo(() => {
@@ -376,12 +406,26 @@ export default function UsageForecastPage() {
         const dk = dateKey(day);
         if (closedSet.has(`${locId}:${dk}`)) { result[store][dk] = null; continue; }
 
-        const actualKey = `${locId}:${dk}`;
-        if (actualKey in actualSalesByLocDate) {
-          // Uploaded data exists — show exact actuals
-          result[store][dk] = { val: actualSalesByLocDate[actualKey], isActual: true };
+        const actualKey  = `${locId}:${dk}`;
+        const shiftInfo  = uploadedShiftsByLocDate[actualKey];
+        const hasActual  = actualKey in actualSalesByLocDate;
+
+        if (hasActual) {
+          let total = actualSalesByLocDate[actualKey]; // OB + Simply actuals uploaded so far
+
+          // If dinner hasn't been uploaded yet, add the dinner forecast to complete the day
+          if (shiftInfo && !shiftInfo.hasDinner) {
+            const dinnerOverride = weekOverrides.find(
+              o => o.location_id === locId && o.forecast_date === dk && o.shift_type === 'dinner',
+            );
+            const dOB = dinnerOverride?.net_revenue
+              ?? (dinnerS ? computeDailyForecast(dk, dinnerS) : 0);
+            total += Math.round(dOB + dOB * ratios.dinner);
+          }
+
+          result[store][dk] = { val: total, isActual: true };
         } else {
-          // No actuals — compute forecast exactly as Sales Reports "Daily Total" row
+          // No actuals at all — full forecast
           const lunchOverride  = weekOverrides.find(
             o => o.location_id === locId && o.forecast_date === dk && o.shift_type === 'lunch',
           );
@@ -396,7 +440,7 @@ export default function UsageForecastPage() {
     return result;
   }, [
     locationIdByName, allForecastSettings, weekDays, closedSet,
-    actualSalesByLocDate, simplyRatios, weekOverrides,
+    actualSalesByLocDate, uploadedShiftsByLocDate, simplyRatios, weekOverrides,
   ]);
 
   /* Group items by section in canonical order */

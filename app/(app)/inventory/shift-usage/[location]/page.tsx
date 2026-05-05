@@ -97,9 +97,10 @@ type ShiftUsageRow = {
 
 type DayShiftSales = {
   lunch: number;
+  lunchIsActual: boolean; // true = uploaded, false = forecast
   dinner: number;
-  isActual: boolean; // true = uploaded data, false = forecast
-} | null; // null = closed / no data
+  dinnerIsActual: boolean; // true = uploaded, false = forecast
+} | null; // null = no settings / no data
 
 function cellKey(date: string, shift: 'lunch' | 'dinner', itemName: string): string {
   return `${date}|${shift}|${itemName}`;
@@ -241,73 +242,92 @@ export default function ShiftUsagePage() {
     },
   });
 
-  /* ── Compute per-day lunch/dinner sales: actual (blue) or forecast (green) ──
+  /* ── Compute per-day, per-shift sales ─────────────────────────────────────
    *
-   * Actual = shift_reports (OB) + delivery_reports (Simply) for that date.
-   * OB lunch vs dinner: use shift_type tag if present, else first/second by Z-report number.
-   * Forecast = computeDailyForecast (OB) × (1 + Simply ratio) per shift.
+   * Each shift is evaluated independently:
+   *   - If OB data exists for that shift → actual (blue)
+   *   - Otherwise → forecast (green)
+   *
+   * This means within a single day, lunch can be blue (uploaded) while
+   * dinner is still green (forecast, not yet done).
    */
   const salesByDay = useMemo((): Record<string, DayShiftSales> => {
     const m: Record<string, DayShiftSales> = {};
 
-    // Group week OB rows by date
+    // Determine which OB shifts are uploaded per date
     const obByDate: Record<string, ShiftRowLite[]> = {};
     for (const r of weekShiftRows) {
       if (!obByDate[r.report_date]) obByDate[r.report_date] = [];
       obByDate[r.report_date].push(r);
     }
 
-    // Dates that have any actual OB data
-    const actualDates = new Set(weekShiftRows.map(r => r.report_date));
-
     for (const day of weekDays) {
       const dk = dateKey(day);
+      const obRows = obByDate[dk] ?? [];
 
-      if (actualDates.has(dk)) {
-        // ── Actual ──
-        const obRows = obByDate[dk] ?? [];
-        let obLunch = 0, obDinner = 0;
+      // Determine which OB shifts exist for this date
+      let obLunchActual = 0, obDinnerActual = 0;
+      let hasObLunch = false, hasObDinner = false;
+
+      if (obRows.length > 0) {
         const allTagged = obRows.every(r => r.shift_type === 'lunch' || r.shift_type === 'dinner');
         if (allTagged) {
           for (const r of obRows) {
-            if (r.shift_type === 'lunch') obLunch += r.net_total ?? 0;
-            else obDinner += r.net_total ?? 0;
+            if (r.shift_type === 'lunch') { obLunchActual += r.net_total ?? 0; hasObLunch = true; }
+            else                          { obDinnerActual += r.net_total ?? 0; hasObDinner = true; }
           }
         } else {
+          // Legacy Z-report order: first = lunch, second = dinner
           const sorted = [...obRows].sort(
             (a, b) => parseInt(a.z_report_number || '0', 10) - parseInt(b.z_report_number || '0', 10),
           );
-          if (sorted[0]) obLunch  += sorted[0].net_total ?? 0;
-          if (sorted[1]) obDinner += sorted[1].net_total ?? 0;
+          if (sorted[0]) { obLunchActual  += sorted[0].net_total ?? 0; hasObLunch  = true; }
+          if (sorted[1]) { obDinnerActual += sorted[1].net_total ?? 0; hasObDinner = true; }
         }
+      }
 
-        // Simply actual
-        let simLunch = 0, simDinner = 0;
-        for (const r of weekDelivRows) {
-          if (r.report_date !== dk) continue;
-          if (r.shift_type === 'dinner') simDinner += r.net_revenue ?? 0;
-          else simLunch += r.net_revenue ?? 0;
-        }
+      // Simply actuals for this date (split by shift_type)
+      let simLunchActual = 0, simDinnerActual = 0;
+      for (const r of weekDelivRows) {
+        if (r.report_date !== dk) continue;
+        if (r.shift_type === 'dinner') simDinnerActual += r.net_revenue ?? 0;
+        else                           simLunchActual  += r.net_revenue ?? 0;
+      }
 
-        m[dk] = { lunch: obLunch + simLunch, dinner: obDinner + simDinner, isActual: true };
+      // Forecast overrides
+      const lunchOverride  = weekOverrides.find(o => o.forecast_date === dk && o.shift_type === 'lunch');
+      const dinnerOverride = weekOverrides.find(o => o.forecast_date === dk && o.shift_type === 'dinner');
+
+      // ── Lunch: actual if OB uploaded, otherwise forecast ──
+      let lunchVal: number;
+      let lunchIsActual: boolean;
+      if (hasObLunch) {
+        lunchVal      = obLunchActual + simLunchActual;
+        lunchIsActual = true;
       } else {
-        // ── Forecast ──
-        const lunchOverride  = weekOverrides.find(o => o.forecast_date === dk && o.shift_type === 'lunch');
-        const dinnerOverride = weekOverrides.find(o => o.forecast_date === dk && o.shift_type === 'dinner');
-
         const lOB = lunchOverride?.net_revenue
           ?? (lunchSettings ? computeDailyForecast(dk, lunchSettings) : 0);
+        lunchVal      = Math.round(lOB + lOB * ratios.lunch);
+        lunchIsActual = false;
+      }
+
+      // ── Dinner: actual if OB uploaded, otherwise forecast ──
+      let dinnerVal: number;
+      let dinnerIsActual: boolean;
+      if (hasObDinner) {
+        dinnerVal      = obDinnerActual + simDinnerActual;
+        dinnerIsActual = true;
+      } else {
         const dOB = dinnerOverride?.net_revenue
           ?? (dinnerSettings ? computeDailyForecast(dk, dinnerSettings) : 0);
+        dinnerVal      = Math.round(dOB + dOB * ratios.dinner);
+        dinnerIsActual = false;
+      }
 
-        const lunchTotal  = Math.round(lOB  + lOB  * ratios.lunch);
-        const dinnerTotal = Math.round(dOB + dOB * ratios.dinner);
-
-        if (lunchTotal === 0 && dinnerTotal === 0) {
-          m[dk] = null;
-        } else {
-          m[dk] = { lunch: lunchTotal, dinner: dinnerTotal, isActual: false };
-        }
+      if (lunchVal === 0 && dinnerVal === 0) {
+        m[dk] = null;
+      } else {
+        m[dk] = { lunch: lunchVal, lunchIsActual, dinner: dinnerVal, dinnerIsActual };
       }
     }
 
@@ -531,43 +551,52 @@ export default function ShiftUsagePage() {
                   })}
                 </tr>
 
-                {/* ── Row 2: Net sales per shift (blue = actual, green = forecast) ── */}
+                {/* ── Row 2: Net sales per shift (each shift coloured independently) ──
+                 *  Blue  = actual uploaded data for that shift
+                 *  Green = forecast (shift not yet uploaded)
+                 */}
                 <tr className="border-b border-gray-100">
                   {weekDays.map((day, di) => {
                     const today = isTodayDate(day);
                     const dk    = dateKey(day);
                     const entry = salesByDay[dk];
-                    const isActual = entry?.isActual === true;
 
-                    const lunchVal  = entry?.lunch  ?? 0;
-                    const dinnerVal = entry?.dinner ?? 0;
-                    const totalVal  = lunchVal + dinnerVal;
+                    const lunchVal      = entry?.lunch  ?? 0;
+                    const dinnerVal     = entry?.dinner ?? 0;
+                    const totalVal      = lunchVal + dinnerVal;
+                    const lunchIsActual  = entry?.lunchIsActual  ?? false;
+                    const dinnerIsActual = entry?.dinnerIsActual ?? false;
+                    // Total colour: blue if any shift is actual, green if all forecast
+                    const totalIsActual  = lunchIsActual || dinnerIsActual;
 
-                    const colorClass = isActual ? 'text-blue-600' : 'text-[#1B5E20]';
-                    const bgToday = today ? (isActual ? 'bg-blue-50/30' : 'bg-green-50/60') : '';
-
-                    const fmt = (v: number) =>
-                      v > 0 ? `€${(v / 1000).toFixed(1)}k` : '—';
+                    const altBg = !today && di % 2 === 1 ? 'bg-gray-50/50' : '';
+                    const fmt   = (v: number) => v > 0 ? `€${(v / 1000).toFixed(1)}k` : '—';
 
                     return (
                       <>
                         <th
                           key={`${di}-sales-lunch`}
-                          className={`text-center py-1 px-1 font-semibold text-[10px] border-l-2 border-gray-300 ${colorClass} ${bgToday} ${!today && di % 2 === 1 ? 'bg-gray-50/50' : ''}`}
+                          className={`text-center py-1 px-1 font-semibold text-[10px] border-l-2 border-gray-300 ${
+                            lunchIsActual ? 'text-blue-600' : 'text-[#1B5E20]'
+                          } ${today ? (lunchIsActual ? 'bg-blue-50/30' : 'bg-green-50/40') : altBg}`}
                           style={{ minWidth: SUB_W }}
                         >
                           {fmt(lunchVal)}
                         </th>
                         <th
                           key={`${di}-sales-dinner`}
-                          className={`text-center py-1 px-1 font-semibold text-[10px] border-l border-gray-100 ${colorClass} ${bgToday} ${!today && di % 2 === 1 ? 'bg-gray-50/50' : ''}`}
+                          className={`text-center py-1 px-1 font-semibold text-[10px] border-l border-gray-100 ${
+                            dinnerIsActual ? 'text-blue-600' : 'text-[#1B5E20]'
+                          } ${today ? (dinnerIsActual ? 'bg-blue-50/30' : 'bg-green-50/40') : altBg}`}
                           style={{ minWidth: SUB_W }}
                         >
                           {fmt(dinnerVal)}
                         </th>
                         <th
                           key={`${di}-sales-total`}
-                          className={`text-center py-1 px-1 font-semibold text-[10px] border-l border-gray-100 ${colorClass} ${bgToday} ${!today && di % 2 === 1 ? 'bg-gray-50/50' : ''}`}
+                          className={`text-center py-1 px-1 font-semibold text-[10px] border-l border-gray-100 ${
+                            totalIsActual ? 'text-blue-600' : 'text-[#1B5E20]'
+                          } ${today ? (totalIsActual ? 'bg-blue-50/30' : 'bg-green-50/40') : altBg}`}
                           style={{ minWidth: SUB_W }}
                         >
                           {fmt(totalVal)}
