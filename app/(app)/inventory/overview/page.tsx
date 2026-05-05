@@ -626,22 +626,18 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
   const qc = useQueryClient();
   const [editDay, setEditDay] = useState<DayEditTarget | null>(null);
 
-  // Always show current week + next week (14 days)
-  const weekDays    = useMemo(() => getWeekDays(weekOffset),     [weekOffset]);
-  const extendedDays = useMemo(() => [
-    ...getWeekDays(weekOffset),
-    ...getWeekDays(weekOffset + 1),
-  ], [weekOffset]);
+  // Show current week only (7 days)
+  const weekDays = useMemo(() => getWeekDays(weekOffset), [weekOffset]);
 
-  const weekStart = toLocalDateStr(extendedDays[0]);
-  const weekEnd   = toLocalDateStr(extendedDays[13]);
+  const weekStart = toLocalDateStr(weekDays[0]);
+  const weekEnd   = toLocalDateStr(weekDays[6]);
 
-  // Extended query range: day before Mon → Sun of next week (for Mon's Starting Inventory)
+  // Query range: day before Mon (for Mon's Starting Inventory)
   const queryRangeStart = useMemo(() => {
-    const d = new Date(extendedDays[0]);
+    const d = new Date(weekDays[0]);
     d.setDate(d.getDate() - 1);
     return toLocalDateStr(d);
-  }, [extendedDays]);
+  }, [weekDays]);
 
   const { data, isLoading } = useQuery({
     queryKey: ['inventory-weekly', location, weekStart, weekEnd],
@@ -741,11 +737,11 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
     const todayStr  = toLocalDateStr(new Date());
     const storeIdx  = STORE_INDICES[location] ?? 0;
 
-    // Build per-item per-day data (using extendedDays = 14 days)
+    // Build per-item per-day data (7 days)
     const tableData: WeekTableData = {};
     for (const [itemName] of allItems) {
       tableData[itemName] = {};
-      for (const day of extendedDays) {
+      for (const day of weekDays) {
         const dk     = toLocalDateStr(day);
         const prevDk = toLocalDateStr(new Date(day.getTime() - 86_400_000));
         const dayName = day.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase();
@@ -775,10 +771,10 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
       }
 
       // ── Second pass: for every future day, chain START and always compute END ──
-      for (let i = 1; i < extendedDays.length; i++) {
-        const day    = extendedDays[i];
+      for (let i = 1; i < weekDays.length; i++) {
+        const day    = weekDays[i];
         const dk     = toLocalDateStr(day);
-        const prevDk = toLocalDateStr(extendedDays[i - 1]);
+        const prevDk = toLocalDateStr(weekDays[i - 1]);
         const isFutureOrToday = dk >= todayStr;
 
         if (!isFutureOrToday) continue;
@@ -830,12 +826,10 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
     for (const [name, { unit }] of allItems) itemUnit[name] = unit;
 
     return { tableData, sections, itemUnit };
-  }, [data, extendedDays, location]);
+  }, [data, weekDays, location]);
 
   const isEmpty = sections.length === 0 && !isLoading;
   const todayStr = toLocalDateStr(new Date());
-  // First day of "next week" within the 14-day view
-  const nextWeekStart = toLocalDateStr(extendedDays[7]);
 
   /* ── Cell renderers ── */
   function InvCell({ v }: { v: number | null }) {
@@ -879,7 +873,7 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
           <ChevronLeft size={15} />
         </button>
         <span className="text-sm font-semibold text-gray-700 min-w-[190px] text-center">
-          {fmtWeekRange(extendedDays)}
+          {fmtWeekRange(weekDays)}
         </span>
         <button
           onClick={() => onOffsetChange(weekOffset + 1)}
@@ -922,14 +916,14 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
             <table className="text-xs border-collapse">
               {/* ── Column groups for visual separation ── */}
               <colgroup>
-                <col style={{ minWidth: 200 }} />
-                {extendedDays.map((_, di) => (
+                <col style={{ minWidth: 130 }} />
+                {weekDays.map((_, di) => (
                   <>
-                    <col key={`c-s-${di}`}  style={{ minWidth: 52 }} />
-                    <col key={`c-rq-${di}`} style={{ minWidth: 52 }} />
-                    <col key={`c-ac-${di}`} style={{ minWidth: 52 }} />
-                    <col key={`c-us-${di}`} style={{ minWidth: 52 }} />
-                    <col key={`c-e-${di}`}  style={{ minWidth: 52 }} />
+                    <col key={`c-s-${di}`}  style={{ minWidth: 30 }} />
+                    <col key={`c-rq-${di}`} style={{ minWidth: 30 }} />
+                    <col key={`c-ac-${di}`} style={{ minWidth: 30 }} />
+                    <col key={`c-us-${di}`} style={{ minWidth: 30 }} />
+                    <col key={`c-e-${di}`}  style={{ minWidth: 30 }} />
                   </>
                 ))}
               </colgroup>
@@ -940,11 +934,9 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
                   <th className="sticky left-0 z-20 bg-gray-50 px-4 py-2.5 text-left text-xs font-semibold text-gray-600 uppercase tracking-wide" rowSpan={2}>
                     Item
                   </th>
-                  {extendedDays.map((day, di) => {
+                  {weekDays.map((day, di) => {
                     const dk = toLocalDateStr(day);
-                    const isToday    = dk === todayStr;
-                    const isNextWeek = dk >= nextWeekStart;
-                    const isWeekBoundary = di === 7; // first day of next week
+                    const isToday = dk === todayStr;
                     return (
                       <th
                         key={di}
@@ -953,10 +945,6 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
                         className={`px-2 py-2 text-center text-xs font-bold tracking-wide border-l-2 cursor-pointer select-none group/dayhead ${
                           isToday
                             ? 'text-[#1B5E20] border-[#1B5E20] bg-[#F1F8E9] hover:bg-green-100'
-                            : isWeekBoundary
-                            ? 'text-gray-500 border-gray-400 bg-gray-100 hover:bg-gray-200'
-                            : isNextWeek
-                            ? 'text-gray-500 border-gray-200 bg-gray-50 hover:bg-gray-100'
                             : 'text-gray-600 border-gray-300 hover:bg-gray-100'
                         }`}
                         title="Click to edit / delete data for this day"
@@ -974,18 +962,17 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
 
                 {/* Row 2: Sub-column headers */}
                 <tr className="bg-gray-50 border-b border-gray-200">
-                  {extendedDays.map((day, di) => {
+                  {weekDays.map((day, di) => {
                     const dk = toLocalDateStr(day);
-                    const isToday    = dk === todayStr;
-                    const isNextWeek = dk >= nextWeekStart;
+                    const isToday = dk === todayStr;
                     return DAY_COLS.map((col, ci) => {
                       const isFirst = ci === 0;
                       return (
                         <th
                           key={`${di}-${col}`}
                           className={`px-1 py-1.5 text-center font-medium uppercase tracking-wide whitespace-nowrap ${
-                            isFirst ? (di === 7 ? 'border-l-[3px] border-gray-400' : 'border-l-2 border-gray-300') : ''
-                          } ${isToday ? 'bg-[#F1F8E9] text-gray-400' : isNextWeek ? 'bg-gray-50 text-gray-300' : 'text-gray-400'}`}
+                            isFirst ? 'border-l-2 border-gray-300' : ''
+                          } ${isToday ? 'bg-[#F1F8E9] text-gray-400' : 'text-gray-400'}`}
                         >
                           {col}
                         </th>
@@ -1003,14 +990,11 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
                       <td className="sticky left-0 px-4 py-1.5 text-xs font-bold text-[#2E7D32] uppercase tracking-wider bg-[#F1F8E9]">
                         {section.title}
                       </td>
-                      {extendedDays.map((_, di) =>
+                      {weekDays.map((_, di) =>
                         DAY_COLS.map((col, ci) => (
                           <td
                             key={`sh-${di}-${col}`}
-                            className={ci === 0
-                              ? (di === 7 ? 'border-l-[3px] border-gray-400 bg-[#F1F8E9]' : 'border-l-2 border-gray-300 bg-[#F1F8E9]')
-                              : 'bg-[#F1F8E9]'
-                            }
+                            className={ci === 0 ? 'border-l-2 border-gray-300 bg-[#F1F8E9]' : 'bg-[#F1F8E9]'}
                           />
                         ))
                       )}
@@ -1029,14 +1013,13 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
                             {unit && <span className="block text-gray-400 text-[10px] leading-tight mt-0.5">{unit}</span>}
                           </td>
 
-                          {extendedDays.map((day, di) => {
+                          {weekDays.map((day, di) => {
                             const dk = toLocalDateStr(day);
                             const d  = tableData[itemName]?.[dk];
                             const isToday    = dk === todayStr;
-                            const isNextWeek = dk >= nextWeekStart;
                             const isForecast = dk >= todayStr;
-                            const dayBg = isToday ? 'bg-[#F1F8E9]/60' : isNextWeek ? 'bg-gray-50/50' : '';
-                            const borderL = di === 7 ? 'border-l-[3px] border-gray-400' : 'border-l-2 border-gray-300';
+                            const dayBg  = isToday ? 'bg-[#F1F8E9]/60' : '';
+                            const borderL = 'border-l-2 border-gray-300';
 
                             return (
                               <>
