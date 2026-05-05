@@ -139,7 +139,7 @@ export default function DashboardPage() {
     { labelKey: 'dashboard.quickLinks.menus',        href: '/products/menus',           icon: UtensilsCrossed, color: '#6D4C41', permKey: 'products' },
     { labelKey: 'dashboard.quickLinks.products',     href: '/products',                 icon: Package,         color: '#4CAF50', permKey: 'products' },
     { labelKey: 'dashboard.quickLinks.buying',       href: '/purchase-orders',          icon: ShoppingCart,    color: '#1565C0', permKey: 'buying' },
-    { labelKey: 'dashboard.quickLinks.production',   href: '/production',               icon: Factory,         color: '#7B1FA2', permKey: 'production' },
+    { labelKey: 'dashboard.quickLinks.production',   href: '/products/semi-finished',   icon: Factory,         color: '#7B1FA2', permKey: 'production' },
     { labelKey: 'dashboard.quickLinks.wasteLog',     href: '/waste',                    icon: Trash2,          color: '#C62828', permKey: 'waste_log' },
     { labelKey: 'dashboard.quickLinks.delivery',     href: '/delivery',                 icon: Truck,           color: '#00838F', permKey: 'delivery' },
     { labelKey: 'dashboard.quickLinks.analysis',     href: '/analysis',                 icon: BarChart3,       color: '#F57F17', permKey: 'analysis' },
