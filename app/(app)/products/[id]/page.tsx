@@ -89,7 +89,7 @@ export default function RecipeDetailPage() {
       return data as { role: string; permissions: Record<string, boolean> } | null;
     },
   });
-  const canEdit = profile?.role === 'admin' || !!profile?.permissions?.recipe_edit;
+  const canEdit = profile?.role === 'admin' || profile?.role === 'manager';
   const [videoInput, setVideoInput] = useState('');
   const [videoSaving, setVideoSaving] = useState(false);
   const [photoUploading, setPhotoUploading] = useState(false);
@@ -271,7 +271,7 @@ export default function RecipeDetailPage() {
 
   /* ── Delete entire recipe + item ── */
   const handleDeleteRecipe = async () => {
-    if (!confirm('Delete this recipe permanently? This will remove the recipe, all ingredients, steps, and photos. This cannot be undone.')) return;
+    if (!confirm(t('recipes.deleteConfirm'))) return;
     setDeleting(true);
     try {
       // 1. Remove photos from storage
@@ -355,7 +355,7 @@ export default function RecipeDetailPage() {
   };
 
   const handleDeletePhoto = async (photo: PhotoRow) => {
-    if (!confirm('Delete this photo?')) return;
+    if (!confirm(t('recipes.deletePhotoConfirm'))) return;
     await supabase.storage.from('recipe-media').remove([photo.storage_path]);
     await supabase.from('recipe_photos').delete().eq('id', photo.id);
     qc.invalidateQueries({ queryKey: ['recipe-photos', itemId] });
@@ -377,7 +377,7 @@ export default function RecipeDetailPage() {
   };
 
   const handleDeleteVideo = async () => {
-    if (!confirm('Remove the video link?')) return;
+    if (!confirm(t('recipes.removeVideoConfirm'))) return;
     if (recipe?.id) {
       await supabase.from('recipes').update({ video_url: null }).eq('id', recipe.id);
       qc.invalidateQueries({ queryKey: ['recipe', itemId] });
@@ -432,7 +432,7 @@ export default function RecipeDetailPage() {
                   className="flex items-center gap-1.5 border border-gray-200 text-gray-700 px-3 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors disabled:opacity-50"
                 >
                   <ImagePlus size={14} />
-                  <span className="hidden sm:inline">{photoUploading ? 'Uploading…' : 'Add Photos'}</span>
+                  <span className="hidden sm:inline">{photoUploading ? t('recipes.uploading') : t('recipes.addPhotos')}</span>
                 </button>
                 <input ref={photoInputRef} type="file" accept="image/*" multiple className="hidden" onChange={e => handlePhotoFiles(e.target.files)} />
 
@@ -441,7 +441,7 @@ export default function RecipeDetailPage() {
                   className="flex items-center gap-1.5 border border-gray-200 text-gray-700 px-3 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors"
                 >
                   <Video size={14} />
-                  <span className="hidden sm:inline">{recipe?.video_url ? 'Change Video' : 'Add Video'}</span>
+                  <span className="hidden sm:inline">{recipe?.video_url ? t('recipes.changeVideo') : t('recipes.addVideo')}</span>
                 </button>
               </>
             )}
@@ -450,15 +450,15 @@ export default function RecipeDetailPage() {
             {editing ? (
               <>
                 <button onClick={handleCancel} className="flex items-center gap-1.5 border border-gray-200 text-gray-600 px-3 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors">
-                  <X size={14} />Cancel
+                  <X size={14} />{t('common.cancel')}
                 </button>
                 <button onClick={handleSave} disabled={saving} className="flex items-center gap-1.5 bg-[#1B5E20] text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-[#2E7D32] transition-colors disabled:opacity-60">
-                  <Save size={14} />{saving ? 'Saving…' : 'Save'}
+                  <Save size={14} />{saving ? t('common.saving') : t('common.save')}
                 </button>
               </>
             ) : (
               <button onClick={handleEdit} className="flex items-center gap-1.5 border border-gray-200 text-gray-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors">
-                <Pencil size={14} />Edit
+                <Pencil size={14} />{t('common.edit')}
               </button>
             )}
           </div>
@@ -467,7 +467,7 @@ export default function RecipeDetailPage() {
 
       {saved && (
         <div className="bg-green-50 border border-green-200 text-green-700 text-sm rounded-xl px-4 py-3">
-          Recipe saved successfully.
+          {t('recipes.savedSuccess')}
         </div>
       )}
 
@@ -543,18 +543,18 @@ export default function RecipeDetailPage() {
 
       {/* ── Recipe Settings ── */}
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5 space-y-4">
-        <h2 className="font-semibold text-gray-900 text-sm">Recipe Settings</h2>
+        <h2 className="font-semibold text-gray-900 text-sm">{t('recipes.settings')}</h2>
         {editing ? (
           <>
             {/* Row 1: Min to Produce + Days to Expiry */}
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">Production time (minutes)</label>
+                <label className="block text-xs font-medium text-gray-500 mb-1">{t('recipes.productionTime')}</label>
                 <input type="number" min="0" step="1" value={minutesToProduce} onChange={e => setMinutesToProduce(e.target.value)} placeholder="e.g. 60"
                   className="w-full border-2 border-gray-300 bg-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20]" />
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">Days to Expiry <span className="font-normal text-gray-400">(without freezing)</span></label>
+                <label className="block text-xs font-medium text-gray-500 mb-1">{t('recipes.daysToExpiry')} <span className="font-normal text-gray-400">{t('recipes.daysToExpiryWithout')}</span></label>
                 <input type="number" min="0" step="1" value={daysToExpiry} onChange={e => setDaysToExpiry(e.target.value)} placeholder="e.g. 5"
                   className="w-full border-2 border-gray-300 bg-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20]" />
               </div>
@@ -562,8 +562,8 @@ export default function RecipeDetailPage() {
             {/* Row 3: Freezable toggle */}
             <div className="flex items-center justify-between py-1">
               <div>
-                <p className="text-sm font-medium text-gray-700">Freezable</p>
-                <p className="text-xs text-gray-400">Can this recipe be frozen after production?</p>
+                <p className="text-sm font-medium text-gray-700">{t('recipes.freezable')}</p>
+                <p className="text-xs text-gray-400">{t('recipes.freezableDesc')}</p>
               </div>
               <button
                 type="button"
@@ -579,20 +579,20 @@ export default function RecipeDetailPage() {
         ) : (
           <dl className="grid grid-cols-2 gap-x-6 gap-y-4 text-sm">
             <div>
-              <dt className="text-xs text-gray-400 mb-0.5">Production time (minutes)</dt>
-              <dd className="font-semibold text-gray-900">{recipe?.minutes_to_produce != null ? `${recipe.minutes_to_produce} min` : <span className="text-gray-300">—</span>}</dd>
+              <dt className="text-xs text-gray-400 mb-0.5">{t('recipes.productionTime')}</dt>
+              <dd className="font-semibold text-gray-900">{recipe?.minutes_to_produce != null ? `${recipe.minutes_to_produce} ${t('recipes.minutesUnit')}` : <span className="text-gray-300">—</span>}</dd>
             </div>
             <div>
-              <dt className="text-xs text-gray-400 mb-0.5">Days to Expiry (without freezing)</dt>
-              <dd className="font-semibold text-gray-900">{recipe?.days_to_expiry != null ? `${recipe.days_to_expiry} days` : <span className="text-gray-300">—</span>}</dd>
+              <dt className="text-xs text-gray-400 mb-0.5">{t('recipes.daysToExpiry')} {t('recipes.daysToExpiryWithout')}</dt>
+              <dd className="font-semibold text-gray-900">{recipe?.days_to_expiry != null ? `${recipe.days_to_expiry} ${t('recipes.daysUnit')}` : <span className="text-gray-300">—</span>}</dd>
             </div>
             <div>
-              <dt className="text-xs text-gray-400 mb-0.5">Freezable</dt>
+              <dt className="text-xs text-gray-400 mb-0.5">{t('recipes.freezable')}</dt>
               <dd className="font-semibold text-gray-900">
                 {recipe?.freezable === true
-                  ? <span className="text-blue-600">✓ Yes</span>
+                  ? <span className="text-blue-600">{t('recipes.freezableYes')}</span>
                   : recipe?.freezable === false
-                  ? <span className="text-gray-400">No</span>
+                  ? <span className="text-gray-400">{t('recipes.freezableNo')}</span>
                   : <span className="text-gray-300">—</span>}
               </dd>
             </div>
@@ -603,10 +603,10 @@ export default function RecipeDetailPage() {
       {/* ── Ingredients ── */}
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-50">
-          <h2 className="font-semibold text-gray-900 text-sm">Ingredients</h2>
+          <h2 className="font-semibold text-gray-900 text-sm">{t('recipes.ingredients')}</h2>
           {editing && (
             <button onClick={() => setRows(prev => [...prev, newRow()])} className="flex items-center gap-1.5 text-[#1B5E20] text-xs font-medium hover:text-[#2E7D32] transition-colors">
-              <Plus size={14} />Add ingredient
+              <Plus size={14} />{t('recipes.addIngredient')}
             </button>
           )}
         </div>
@@ -633,13 +633,13 @@ export default function RecipeDetailPage() {
             return (
               <>
                 <div className="grid grid-cols-[1fr_80px_90px_36px] gap-2 px-5 py-2 bg-gray-50 border-b border-gray-100">
-                  <span className="text-xs font-medium text-gray-400 uppercase tracking-wide">Ingredient</span>
-                  <span className="text-xs font-medium text-gray-400 uppercase tracking-wide">Qty</span>
-                  <span className="text-xs font-medium text-gray-400 uppercase tracking-wide">Unit</span>
+                  <span className="text-xs font-medium text-gray-400 uppercase tracking-wide">{t('recipes.ingredientCol')}</span>
+                  <span className="text-xs font-medium text-gray-400 uppercase tracking-wide">{t('recipes.qtyCol')}</span>
+                  <span className="text-xs font-medium text-gray-400 uppercase tracking-wide">{t('recipes.unitCol')}</span>
                   <span />
                 </div>
                 {rows.length === 0 ? (
-                  <div className="text-center text-gray-400 text-sm py-8">No ingredients yet — click &ldquo;Add ingredient&rdquo; to start.</div>
+                  <div className="text-center text-gray-400 text-sm py-8">{t('recipes.noIngredientsEdit')}</div>
                 ) : (
                   <div className="divide-y divide-gray-50">
                     {rows.map((row, idx) => (
@@ -674,14 +674,14 @@ export default function RecipeDetailPage() {
                 <div className="border-t-2 border-gray-200 mt-1">
                   {/* Total */}
                   <div className="grid grid-cols-[1fr_80px_90px_36px] gap-2 px-5 py-3 items-center bg-gray-50">
-                    <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Total</span>
+                    <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{t('recipes.total')}</span>
                     <span className="text-sm font-bold text-gray-800 text-center tabular-nums">{editTotal % 1 === 0 ? editTotal : editTotal.toFixed(3)}</span>
                     <span className="text-sm text-gray-500 text-left pl-2">kg</span>
                     <span />
                   </div>
                   {/* Actual Output */}
                   <div className="grid grid-cols-[1fr_80px_90px_36px] gap-2 px-5 py-3 items-center border-t border-gray-100">
-                    <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Actual Output</span>
+                    <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{t('recipes.actualOutput')}</span>
                     <input
                       type="number" min="0" step="any"
                       value={outputQty}
@@ -694,7 +694,7 @@ export default function RecipeDetailPage() {
                   </div>
                   {/* Yield % */}
                   <div className="grid grid-cols-[1fr_80px_90px_36px] gap-2 px-5 py-3 items-center border-t border-gray-100 bg-gray-50">
-                    <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Yield %</span>
+                    <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{t('recipes.yieldPct')}</span>
                     <span className={`text-sm font-bold text-center tabular-nums ${editYield != null && editYield < 80 ? 'text-red-500' : 'text-[#1B5E20]'}`}>
                       {editYield != null ? `${editYield.toFixed(1)}%` : '—'}
                     </span>
@@ -708,7 +708,7 @@ export default function RecipeDetailPage() {
 
           // ── Read mode ──
           if (savedIngredients.length === 0) {
-            return <div className="text-center text-gray-300 text-sm py-8">No ingredients added yet.</div>;
+            return <div className="text-center text-gray-300 text-sm py-8">{t('recipes.noIngredientsRead')}</div>;
           }
 
           const readTotal = savedIngredients.reduce((sum, row) => {
@@ -721,9 +721,9 @@ export default function RecipeDetailPage() {
           return (
             <>
               <div className="grid grid-cols-[1fr_80px_72px] px-5 py-2 bg-gray-50 border-b border-gray-200">
-                <span className="text-xs font-medium text-gray-400 uppercase tracking-wide">Ingredient</span>
-                <span className="text-xs font-medium text-gray-400 uppercase tracking-wide text-center">Qty</span>
-                <span className="text-xs font-medium text-gray-400 uppercase tracking-wide text-center">Unit</span>
+                <span className="text-xs font-medium text-gray-400 uppercase tracking-wide">{t('recipes.ingredientCol')}</span>
+                <span className="text-xs font-medium text-gray-400 uppercase tracking-wide text-center">{t('recipes.qtyCol')}</span>
+                <span className="text-xs font-medium text-gray-400 uppercase tracking-wide text-center">{t('recipes.unitCol')}</span>
               </div>
               <div>
                 {[...savedIngredients]
@@ -749,17 +749,17 @@ export default function RecipeDetailPage() {
               {/* ── Total / Actual Output / Yield (read mode) ── */}
               <div className="border-t-2 border-gray-200">
                 <div className="grid grid-cols-[1fr_80px_72px] px-5 py-3 items-center bg-gray-50">
-                  <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Total</span>
+                  <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{t('recipes.total')}</span>
                   <span className="text-sm font-bold text-gray-800 text-center tabular-nums">{readTotal % 1 === 0 ? readTotal : readTotal.toFixed(3)}</span>
                   <span className="text-sm text-gray-500 text-center">kg</span>
                 </div>
                 <div className="grid grid-cols-[1fr_80px_72px] px-5 py-3 items-center border-t border-gray-100">
-                  <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Actual Output</span>
+                  <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{t('recipes.actualOutput')}</span>
                   <span className="text-sm font-bold text-gray-800 text-center tabular-nums">{readActual != null ? readActual : <span className="text-gray-300">—</span>}</span>
                   <span className="text-sm text-gray-500 text-center">kg</span>
                 </div>
                 <div className="grid grid-cols-[1fr_80px_72px] px-5 py-3 items-center border-t border-gray-100 bg-gray-50">
-                  <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Yield %</span>
+                  <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{t('recipes.yieldPct')}</span>
                   <span className={`text-sm font-bold text-center tabular-nums col-span-2 ${readYield != null && readYield < 80 ? 'text-red-500' : 'text-[#1B5E20]'}`}>
                     {readYield != null ? `${readYield.toFixed(1)}%` : <span className="text-gray-300">—</span>}
                   </span>
@@ -901,7 +901,7 @@ export default function RecipeDetailPage() {
       {editing && (
         <button onClick={handleSave} disabled={saving}
           className="w-full flex items-center justify-center gap-2 bg-[#1B5E20] text-white py-3 rounded-xl text-sm font-semibold hover:bg-[#2E7D32] transition-colors disabled:opacity-60">
-          <Save size={16} />{saving ? 'Saving…' : 'Save Recipe'}
+          <Save size={16} />{saving ? t('common.saving') : t('recipes.saveRecipe')}
         </button>
       )}
 
@@ -909,9 +909,9 @@ export default function RecipeDetailPage() {
       {(photos.length > 0 || photoUploading) && (
         <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
           <div className="flex items-center justify-between px-5 py-4 border-b border-gray-50">
-            <h2 className="font-semibold text-gray-900 text-sm">Photos</h2>
+            <h2 className="font-semibold text-gray-900 text-sm">{t('recipes.photos')}</h2>
             <button onClick={() => photoInputRef.current?.click()} className="flex items-center gap-1.5 text-[#1B5E20] text-xs font-medium hover:text-[#2E7D32] transition-colors">
-              <Plus size={14} />Add more
+              <Plus size={14} />{t('recipes.addMore')}
             </button>
           </div>
           <div className="p-4 grid grid-cols-3 gap-3">
@@ -945,9 +945,9 @@ export default function RecipeDetailPage() {
       {embedUrl && (
         <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
           <div className="flex items-center justify-between px-5 py-4 border-b border-gray-50">
-            <h2 className="font-semibold text-gray-900 text-sm">Video</h2>
+            <h2 className="font-semibold text-gray-900 text-sm">{t('recipes.video')}</h2>
             <button onClick={handleDeleteVideo} className="flex items-center gap-1.5 text-red-400 hover:text-red-600 text-xs font-medium transition-colors">
-              <Trash2 size={13} />Remove
+              <Trash2 size={13} />{t('recipes.removeVideoShort')}
             </button>
           </div>
           <div className="aspect-video w-full">
@@ -966,10 +966,10 @@ export default function RecipeDetailPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setShowVideoModal(false)}>
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6 space-y-4" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between">
-              <h3 className="font-bold text-gray-900">{recipe?.video_url ? 'Change Video' : 'Add Video'}</h3>
+              <h3 className="font-bold text-gray-900">{recipe?.video_url ? t('recipes.changeVideo') : t('recipes.addVideo')}</h3>
               <button onClick={() => setShowVideoModal(false)} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
             </div>
-            <p className="text-xs text-gray-500">Paste a YouTube or Vimeo URL. The video will be embedded directly on the recipe page.</p>
+            <p className="text-xs text-gray-500">{t('recipes.videoUrlHint')}</p>
             <input
               type="url"
               value={videoInput}
@@ -979,12 +979,12 @@ export default function RecipeDetailPage() {
               autoFocus
             />
             {videoInput.trim() && !getEmbedUrl(videoInput) && (
-              <p className="text-xs text-red-500">Not a recognised YouTube or Vimeo URL.</p>
+              <p className="text-xs text-red-500">{t('recipes.videoUrlInvalid')}</p>
             )}
             <div className="flex gap-2 pt-1">
               {recipe?.video_url && (
                 <button onClick={async () => { await handleDeleteVideo(); setShowVideoModal(false); }} className="flex-1 border border-gray-200 text-red-500 py-2.5 rounded-lg text-sm font-medium hover:bg-red-50 transition-colors">
-                  Remove video
+                  {t('recipes.removeVideoLong')}
                 </button>
               )}
               <button
@@ -992,7 +992,7 @@ export default function RecipeDetailPage() {
                 disabled={videoSaving || (!!videoInput.trim() && !getEmbedUrl(videoInput))}
                 className="flex-1 bg-[#1B5E20] text-white py-2.5 rounded-lg text-sm font-semibold hover:bg-[#2E7D32] transition-colors disabled:opacity-50"
               >
-                {videoSaving ? 'Saving…' : 'Save'}
+                {videoSaving ? t('common.saving') : t('common.save')}
               </button>
             </div>
           </div>
@@ -1018,7 +1018,7 @@ export default function RecipeDetailPage() {
             disabled={deleting}
             className="w-full flex items-center justify-center gap-2 border border-red-200 text-red-600 px-4 py-3 rounded-xl text-sm font-medium hover:bg-red-50 transition-colors disabled:opacity-60"
           >
-            <Trash2 size={15} />{deleting ? 'Deleting…' : 'Delete Recipe'}
+            <Trash2 size={15} />{deleting ? t('recipes.deleting') : t('recipes.deleteRecipe')}
           </button>
         </div>
       )}
