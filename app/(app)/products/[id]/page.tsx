@@ -423,27 +423,30 @@ export default function RecipeDetailPage() {
         {/* Action buttons — only shown to users with recipe_edit permission */}
         {canEdit && (
           <div className="flex items-center gap-2 flex-shrink-0">
-            {/* Add Photos */}
-            <button
-              onClick={() => photoInputRef.current?.click()}
-              disabled={photoUploading}
-              className="flex items-center gap-1.5 border border-gray-200 text-gray-700 px-3 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors disabled:opacity-50"
-            >
-              <ImagePlus size={14} />
-              {photoUploading ? 'Uploading…' : 'Add Photos'}
-            </button>
-            <input ref={photoInputRef} type="file" accept="image/*" multiple className="hidden" onChange={e => handlePhotoFiles(e.target.files)} />
+            {/* Add Photos + Video — hidden while editing to keep header compact on mobile */}
+            {!editing && (
+              <>
+                <button
+                  onClick={() => photoInputRef.current?.click()}
+                  disabled={photoUploading}
+                  className="flex items-center gap-1.5 border border-gray-200 text-gray-700 px-3 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors disabled:opacity-50"
+                >
+                  <ImagePlus size={14} />
+                  <span className="hidden sm:inline">{photoUploading ? 'Uploading…' : 'Add Photos'}</span>
+                </button>
+                <input ref={photoInputRef} type="file" accept="image/*" multiple className="hidden" onChange={e => handlePhotoFiles(e.target.files)} />
 
-            {/* Add / Change Video */}
-            <button
-              onClick={() => { setVideoInput(recipe?.video_url ?? ''); setShowVideoModal(true); }}
-              className="flex items-center gap-1.5 border border-gray-200 text-gray-700 px-3 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors"
-            >
-              <Video size={14} />
-              {recipe?.video_url ? 'Change Video' : 'Add Video'}
-            </button>
+                <button
+                  onClick={() => { setVideoInput(recipe?.video_url ?? ''); setShowVideoModal(true); }}
+                  className="flex items-center gap-1.5 border border-gray-200 text-gray-700 px-3 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors"
+                >
+                  <Video size={14} />
+                  <span className="hidden sm:inline">{recipe?.video_url ? 'Change Video' : 'Add Video'}</span>
+                </button>
+              </>
+            )}
 
-            {/* Edit recipe */}
+            {/* Edit / Cancel / Save */}
             {editing ? (
               <>
                 <button onClick={handleCancel} className="flex items-center gap-1.5 border border-gray-200 text-gray-600 px-3 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors">
