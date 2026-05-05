@@ -186,7 +186,6 @@ export default function RecipeDetailPage() {
 
   /* ── Edit state ── */
   const [outputQty, setOutputQty] = useState<string>('');
-  const [yieldPct, setYieldPct] = useState<string>('');
   const [minutesToProduce, setMinutesToProduce] = useState<string>('');
   const [daysToExpiry, setDaysToExpiry] = useState<string>('');
   const [freezable, setFreezable] = useState<boolean | null>(null);
@@ -208,7 +207,6 @@ export default function RecipeDetailPage() {
 
   const syncFromDb = () => {
     setOutputQty(recipe?.output_quantity != null ? String(recipe.output_quantity) : '');
-    setYieldPct(recipe?.yield_percent != null ? String(recipe.yield_percent) : '');
     setMinutesToProduce(recipe?.minutes_to_produce != null ? String(recipe.minutes_to_produce) : '');
     setDaysToExpiry(recipe?.days_to_expiry != null ? String(recipe.days_to_expiry) : '');
     setFreezable(recipe?.freezable ?? null);
@@ -249,12 +247,12 @@ export default function RecipeDetailPage() {
       if (!recipeId) {
         const { data, error } = await supabase
           .from('recipes')
-          .insert({ output_item_id: itemId, output_quantity: outputQty !== '' ? Number(outputQty) : null, yield_percent: yieldPct !== '' ? Number(yieldPct) : null, minutes_to_produce: minutesToProduce !== '' ? Number(minutesToProduce) : null, days_to_expiry: daysToExpiry !== '' ? Number(daysToExpiry) : null, freezable: freezable, instructions: instructions || null, process_steps_en: stepsEn.filter(s => s.trim()), process_steps_de: stepsDe.filter(s => s.trim()), process_steps_es: stepsEs.filter(s => s.trim()) })
+          .insert({ output_item_id: itemId, output_quantity: outputQty !== '' ? Number(outputQty) : null, minutes_to_produce: minutesToProduce !== '' ? Number(minutesToProduce) : null, days_to_expiry: daysToExpiry !== '' ? Number(daysToExpiry) : null, freezable: freezable, instructions: instructions || null, process_steps_en: stepsEn.filter(s => s.trim()), process_steps_de: stepsDe.filter(s => s.trim()), process_steps_es: stepsEs.filter(s => s.trim()) })
           .select('id').single();
         if (error) throw error;
         recipeId = data.id;
       } else {
-        const { error } = await supabase.from('recipes').update({ output_quantity: outputQty !== '' ? Number(outputQty) : null, yield_percent: yieldPct !== '' ? Number(yieldPct) : null, minutes_to_produce: minutesToProduce !== '' ? Number(minutesToProduce) : null, days_to_expiry: daysToExpiry !== '' ? Number(daysToExpiry) : null, freezable: freezable, instructions: instructions || null, process_steps_en: stepsEn.filter(s => s.trim()), process_steps_de: stepsDe.filter(s => s.trim()), process_steps_es: stepsEs.filter(s => s.trim()) }).eq('id', recipeId);
+        const { error } = await supabase.from('recipes').update({ output_quantity: outputQty !== '' ? Number(outputQty) : null, minutes_to_produce: minutesToProduce !== '' ? Number(minutesToProduce) : null, days_to_expiry: daysToExpiry !== '' ? Number(daysToExpiry) : null, freezable: freezable, instructions: instructions || null, process_steps_en: stepsEn.filter(s => s.trim()), process_steps_de: stepsDe.filter(s => s.trim()), process_steps_es: stepsEs.filter(s => s.trim()) }).eq('id', recipeId);
         if (error) throw error;
       }
       await supabase.from('recipe_ingredients').delete().eq('recipe_id', recipeId);
@@ -545,20 +543,7 @@ export default function RecipeDetailPage() {
         <h2 className="font-semibold text-gray-900 text-sm">Recipe Settings</h2>
         {editing ? (
           <>
-            {/* Row 1: Output Qty + Yield */}
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">Output Quantity</label>
-                <input type="number" min="0" step="any" value={outputQty} onChange={e => setOutputQty(e.target.value)} placeholder="e.g. 10"
-                  className="w-full border-2 border-gray-300 bg-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20]" />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">Yield %</label>
-                <input type="number" min="0" max="100" step="any" value={yieldPct} onChange={e => setYieldPct(e.target.value)} placeholder="e.g. 95"
-                  className="w-full border-2 border-gray-300 bg-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20]" />
-              </div>
-            </div>
-            {/* Row 2: Min to Produce + Days to Expiry */}
+            {/* Row 1: Min to Produce + Days to Expiry */}
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-xs font-medium text-gray-500 mb-1">Min. to Produce</label>
@@ -590,18 +575,6 @@ export default function RecipeDetailPage() {
           </>
         ) : (
           <dl className="grid grid-cols-2 gap-x-6 gap-y-4 text-sm">
-            <div>
-              <dt className="text-xs text-gray-400 mb-0.5">Output Quantity</dt>
-              <dd className="font-semibold text-gray-900">
-                {recipe?.output_quantity != null
-                  ? <>{recipe.output_quantity}{itemUnitLabel && <span className="text-gray-400 font-normal ml-1">{itemUnitLabel}</span>}</>
-                  : <span className="text-gray-300">—</span>}
-              </dd>
-            </div>
-            <div>
-              <dt className="text-xs text-gray-400 mb-0.5">Yield %</dt>
-              <dd className="font-semibold text-gray-900">{recipe?.yield_percent != null ? `${recipe.yield_percent}%` : <span className="text-gray-300">—</span>}</dd>
-            </div>
             <div>
               <dt className="text-xs text-gray-400 mb-0.5">Min. to Produce</dt>
               <dd className="font-semibold text-gray-900">{recipe?.minutes_to_produce != null ? `${recipe.minutes_to_produce} min` : <span className="text-gray-300">—</span>}</dd>
@@ -635,50 +608,114 @@ export default function RecipeDetailPage() {
           )}
         </div>
 
-        {editing ? (
-          <>
-            <div className="grid grid-cols-[1fr_80px_90px_36px] gap-2 px-5 py-2 bg-gray-50 border-b border-gray-100">
-              <span className="text-xs font-medium text-gray-400 uppercase tracking-wide">Ingredient</span>
-              <span className="text-xs font-medium text-gray-400 uppercase tracking-wide">Qty</span>
-              <span className="text-xs font-medium text-gray-400 uppercase tracking-wide">Unit</span>
-              <span />
-            </div>
-            {rows.length === 0 ? (
-              <div className="text-center text-gray-400 text-sm py-8">No ingredients yet — click &ldquo;Add ingredient&rdquo; to start.</div>
-            ) : (
-              <div className="divide-y divide-gray-50">
-                {rows.map((row, idx) => (
-                  <div key={`${uid}-${idx}`} className="grid grid-cols-[1fr_80px_90px_36px] gap-2 px-5 py-3 items-center">
-                    <div className="relative">
-                      <select value={row.item_id} onChange={e => updateRow(idx, { item_id: e.target.value })}
-                        className="w-full appearance-none border-2 border-gray-300 rounded-lg pl-3 pr-7 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20] text-gray-900">
-                        <option value="">Select…</option>
-                        {allItems.map(i => <option key={i.id} value={i.id}>{localizedName(i as { name: string; name_en?: string | null; name_de?: string | null; name_es?: string | null }, lang)}</option>)}
-                      </select>
-                      <ChevronDown size={13} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
-                    </div>
-                    <input type="number" min="0" step="any" value={row.quantity} onChange={e => updateRow(idx, { quantity: e.target.value })} placeholder="0"
-                      className="w-full border-2 border-gray-300 bg-white rounded-lg px-2 py-2 text-sm text-center focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20]" />
-                    <div className="relative">
-                      <select value={row.unit_id} onChange={e => updateRow(idx, { unit_id: e.target.value })}
-                        className="w-full appearance-none border-2 border-gray-300 rounded-lg pl-2 pr-6 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20] text-gray-900">
-                        <option value="">—</option>
-                        {units.map(u => <option key={u.id} value={u.id}>{u.abbreviation || u.name}</option>)}
-                      </select>
-                      <ChevronDown size={13} className="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
-                    </div>
-                    <button onClick={() => deleteRow(idx)} className="flex items-center justify-center text-gray-300 hover:text-red-400 transition-colors">
-                      <Trash2 size={15} />
-                    </button>
+        {(() => {
+          // Convert a quantity to kg (L = kg, g/ml = /1000)
+          function toKg(qty: number | string, abbrev: string | null | undefined): number {
+            const q = Number(qty) || 0;
+            const u = (abbrev ?? '').toLowerCase();
+            if (u === 'kg' || u === 'l') return q;
+            if (u === 'g' || u === 'ml') return q / 1000;
+            return q; // pcs, Stück, etc. — include as-is
+          }
+
+          if (editing) {
+            // In edit mode, look up unit abbreviation from the units list
+            const editTotal = rows.reduce((sum, row) => {
+              const unitAbbrev = units.find(u => u.id === row.unit_id)?.abbreviation ?? null;
+              return sum + toKg(row.quantity, unitAbbrev);
+            }, 0);
+            const editActual = Number(outputQty) || 0;
+            const editYield = editTotal > 0 ? (editActual / editTotal) * 100 : null;
+
+            return (
+              <>
+                <div className="grid grid-cols-[1fr_80px_90px_36px] gap-2 px-5 py-2 bg-gray-50 border-b border-gray-100">
+                  <span className="text-xs font-medium text-gray-400 uppercase tracking-wide">Ingredient</span>
+                  <span className="text-xs font-medium text-gray-400 uppercase tracking-wide">Qty</span>
+                  <span className="text-xs font-medium text-gray-400 uppercase tracking-wide">Unit</span>
+                  <span />
+                </div>
+                {rows.length === 0 ? (
+                  <div className="text-center text-gray-400 text-sm py-8">No ingredients yet — click &ldquo;Add ingredient&rdquo; to start.</div>
+                ) : (
+                  <div className="divide-y divide-gray-50">
+                    {rows.map((row, idx) => (
+                      <div key={`${uid}-${idx}`} className="grid grid-cols-[1fr_80px_90px_36px] gap-2 px-5 py-3 items-center">
+                        <div className="relative">
+                          <select value={row.item_id} onChange={e => updateRow(idx, { item_id: e.target.value })}
+                            className="w-full appearance-none border-2 border-gray-300 rounded-lg pl-3 pr-7 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20] text-gray-900">
+                            <option value="">Select…</option>
+                            {allItems.map(i => <option key={i.id} value={i.id}>{localizedName(i as { name: string; name_en?: string | null; name_de?: string | null; name_es?: string | null }, lang)}</option>)}
+                          </select>
+                          <ChevronDown size={13} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                        </div>
+                        <input type="number" min="0" step="any" value={row.quantity} onChange={e => updateRow(idx, { quantity: e.target.value })} placeholder="0"
+                          className="w-full border-2 border-gray-300 bg-white rounded-lg px-2 py-2 text-sm text-center focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20]" />
+                        <div className="relative">
+                          <select value={row.unit_id} onChange={e => updateRow(idx, { unit_id: e.target.value })}
+                            className="w-full appearance-none border-2 border-gray-300 rounded-lg pl-2 pr-6 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20] text-gray-900">
+                            <option value="">—</option>
+                            {units.map(u => <option key={u.id} value={u.id}>{u.abbreviation || u.name}</option>)}
+                          </select>
+                          <ChevronDown size={13} className="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                        </div>
+                        <button onClick={() => deleteRow(idx)} className="flex items-center justify-center text-gray-300 hover:text-red-400 transition-colors">
+                          <Trash2 size={15} />
+                        </button>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
-            )}
-          </>
-        ) : (
-          savedIngredients.length === 0 ? (
-            <div className="text-center text-gray-300 text-sm py-8">No ingredients added yet.</div>
-          ) : (
+                )}
+
+                {/* ── Total / Actual Output / Yield (edit mode) ── */}
+                <div className="border-t-2 border-gray-200 mt-1">
+                  {/* Total */}
+                  <div className="grid grid-cols-[1fr_80px_90px_36px] gap-2 px-5 py-3 items-center bg-gray-50">
+                    <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Total</span>
+                    <span className="text-sm font-bold text-gray-800 text-center tabular-nums">{editTotal % 1 === 0 ? editTotal : editTotal.toFixed(3)}</span>
+                    <span className="text-sm text-gray-500 text-left pl-2">kg</span>
+                    <span />
+                  </div>
+                  {/* Actual Output */}
+                  <div className="grid grid-cols-[1fr_80px_90px_36px] gap-2 px-5 py-3 items-center border-t border-gray-100">
+                    <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Actual Output</span>
+                    <input
+                      type="number" min="0" step="any"
+                      value={outputQty}
+                      onChange={e => setOutputQty(e.target.value)}
+                      placeholder="0"
+                      className="w-full border-2 border-[#1B5E20] bg-white rounded-lg px-2 py-1.5 text-sm text-center font-bold focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30"
+                    />
+                    <span className="text-sm text-gray-500 text-left pl-2">kg</span>
+                    <span />
+                  </div>
+                  {/* Yield % */}
+                  <div className="grid grid-cols-[1fr_80px_90px_36px] gap-2 px-5 py-3 items-center border-t border-gray-100 bg-gray-50">
+                    <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Yield %</span>
+                    <span className={`text-sm font-bold text-center tabular-nums ${editYield != null && editYield < 80 ? 'text-red-500' : 'text-[#1B5E20]'}`}>
+                      {editYield != null ? `${editYield.toFixed(1)}%` : '—'}
+                    </span>
+                    <span />
+                    <span />
+                  </div>
+                </div>
+              </>
+            );
+          }
+
+          // ── Read mode ──
+          if (savedIngredients.length === 0) {
+            return <div className="text-center text-gray-300 text-sm py-8">No ingredients added yet.</div>;
+          }
+
+          const readTotal = savedIngredients.reduce((sum, row) => {
+            const unitRow = (row as { unit?: { abbreviation: string | null } | null }).unit;
+            return sum + toKg(row.quantity, unitRow?.abbreviation);
+          }, 0);
+          const readActual = recipe?.output_quantity ?? null;
+          const readYield = (readActual != null && readTotal > 0) ? (readActual / readTotal) * 100 : null;
+
+          return (
             <>
               <div className="grid grid-cols-[1fr_80px_72px] px-5 py-2 bg-gray-50 border-b border-gray-200">
                 <span className="text-xs font-medium text-gray-400 uppercase tracking-wide">Ingredient</span>
@@ -705,9 +742,29 @@ export default function RecipeDetailPage() {
                     );
                   })}
               </div>
+
+              {/* ── Total / Actual Output / Yield (read mode) ── */}
+              <div className="border-t-2 border-gray-200">
+                <div className="grid grid-cols-[1fr_80px_72px] px-5 py-3 items-center bg-gray-50">
+                  <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Total</span>
+                  <span className="text-sm font-bold text-gray-800 text-center tabular-nums">{readTotal % 1 === 0 ? readTotal : readTotal.toFixed(3)}</span>
+                  <span className="text-sm text-gray-500 text-center">kg</span>
+                </div>
+                <div className="grid grid-cols-[1fr_80px_72px] px-5 py-3 items-center border-t border-gray-100">
+                  <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Actual Output</span>
+                  <span className="text-sm font-bold text-gray-800 text-center tabular-nums">{readActual != null ? readActual : <span className="text-gray-300">—</span>}</span>
+                  <span className="text-sm text-gray-500 text-center">kg</span>
+                </div>
+                <div className="grid grid-cols-[1fr_80px_72px] px-5 py-3 items-center border-t border-gray-100 bg-gray-50">
+                  <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Yield %</span>
+                  <span className={`text-sm font-bold text-center tabular-nums col-span-2 ${readYield != null && readYield < 80 ? 'text-red-500' : 'text-[#1B5E20]'}`}>
+                    {readYield != null ? `${readYield.toFixed(1)}%` : <span className="text-gray-300">—</span>}
+                  </span>
+                </div>
+              </div>
             </>
-          )
-        )}
+          );
+        })()}
       </div>
 
       {/* ── Process ── */}
