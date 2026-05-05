@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase-browser';
 import { saveDraft, loadDraft, clearDraft } from '@/lib/draft-store';
 import { enqueue, dequeueAll, removeFromQueue, pendingCount } from '@/lib/offline-queue';
-import { ChevronLeft, Send, WifiOff, Wifi, RefreshCw, CheckCircle2, Timer, Play, Pause, Upload, X, FileSpreadsheet, AlertCircle } from 'lucide-react';
+import { ChevronLeft, Send, WifiOff, Wifi, RefreshCw, CheckCircle2, Timer, Play, Pause, Upload, X, FileSpreadsheet, AlertCircle, RotateCcw } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { useT } from '@/lib/i18n';
 
@@ -619,6 +619,13 @@ export default function LocationInventoryFormPage({
     }
   };
 
+  const handleReset = () => {
+    if (!window.confirm('Do you really want to reset? All entered quantities will be set back to 0.')) return;
+    setCounts({});
+    setComment('');
+    clearDraft(params.locationId);
+  };
+
   const startNew = () => {
     setCounts({});
     setComment('');
@@ -734,13 +741,24 @@ export default function LocationInventoryFormPage({
           <h1 className="text-2xl font-bold text-gray-900">{locationName} — Inventory</h1>
 
           <div className="flex items-center gap-2 flex-shrink-0">
+            {/* Reset button — only visible once timer has started */}
+            {timerStarted && (
+              <button
+                onClick={handleReset}
+                className="flex items-center gap-1.5 border border-red-200 text-red-500 px-3 py-2 rounded-lg text-sm font-semibold hover:bg-red-50 transition-colors"
+              >
+                <RotateCcw size={14} />
+                Reset
+              </button>
+            )}
+
             {/* Upload button — always visible */}
             <button
               onClick={() => setShowUpload(true)}
               className="flex items-center gap-1.5 border border-[#1B5E20] text-[#1B5E20] px-3 py-2 rounded-lg text-sm font-semibold hover:bg-[#1B5E20]/5 transition-colors"
             >
               <Upload size={14} />
-              Upload Inventory
+              Upload
             </button>
 
           {/* Timer */}
