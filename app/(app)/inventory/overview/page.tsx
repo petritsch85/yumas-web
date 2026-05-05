@@ -593,18 +593,17 @@ function DayEditModal({
 
 /* ─── Store Weekly View ─────────────────────────────────────────────────────── */
 type DayData = {
-  start:     number | null; // Starting Inventory
-  requested: number | null; // Requested Delivery (delivery_qty)
-  actual:    number | null; // Actual Delivery (packed_qty ?? delivery_qty)
-  ending:    number | null; // Ending Inventory
-  usage:     number | null; // Calculated
-  isPartial: boolean;       // packed_qty differs from delivery_qty
+  start:       number | null; // Starting Inventory (from previous day's count)
+  usageLunch:  number | null; // Lunch shift usage (from shift_usage table)
+  delivery:    number | null; // Confirmed delivery (packed_qty)
+  usageDinner: number | null; // Dinner shift usage (from shift_usage table)
+  ending:      number | null; // Ending Inventory (from count upload, or calculated)
 };
 
 type WeekTableData = Record<string, Record<string, DayData>>; // itemName -> dateStr -> DayData
 type WeekSectionGroup = { title: string; items: string[] };
 
-const DAY_COLS = ['Start', 'Req', 'Act', 'Usage', 'End'] as const;
+const DAY_COLS = ['Start', 'Lunch', 'Delivery', 'Dinner', 'End'] as const;
 
 /* ─── Delivery day helper ───────────────────────────────────────────────────── */
 const NO_DELIVERY_DAYS = new Set(['saturday', 'sunday']);
@@ -631,18 +630,27 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
     queryFn: async () => {
       const { data } = await supabase
         .from('shift_usage')
-        .select('usage_date, item_name, quantity')
+        .select('usage_date, item_name, quantity, shift')
         .eq('location_name', location)
         .gte('usage_date', weekStart)
         .lte('usage_date', weekEnd);
-      return (data ?? []) as { usage_date: string; item_name: string; quantity: number }[];
+      return (data ?? []) as { usage_date: string; item_name: string; quantity: number; shift: string }[];
     },
   });
 
-  /* Build lookup: item → date → total (lunch + dinner) */
-  const shiftUsageByItemDate = useMemo(() => {
+  /* Build per-shift lookups: item → date → quantity */
+  const shiftUsageLunch = useMemo(() => {
     const m: Record<string, Record<string, number>> = {};
-    for (const r of shiftUsageRows) {
+    for (const r of shiftUsageRows.filter(r => r.shift === 'lunch')) {
+      if (!m[r.item_name]) m[r.item_name] = {};
+      m[r.item_name][r.usage_date] = (m[r.item_name][r.usage_date] ?? 0) + (r.quantity ?? 0);
+    }
+    return m;
+  }, [shiftUsageRows]);
+
+  const shiftUsageDinner = useMemo(() => {
+    const m: Record<string, Record<string, number>> = {};
+    for (const r of shiftUsageRows.filter(r => r.shift === 'dinner')) {
       if (!m[r.item_name]) m[r.item_name] = {};
       m[r.item_name][r.usage_date] = (m[r.item_name][r.usage_date] ?? 0) + (r.quantity ?? 0);
     }
@@ -722,18 +730,13 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
       return subs[subs.length - 1].items;
     };
 
-    // Delivery data by date and item
-    const deliveryByDate: Record<string, Record<string, { requested: number; actual: number; isPartial: boolean }>> = {};
+    // Delivery data by date and item — store only confirmed packed_qty
+    const deliveryByDate: Record<string, Record<string, { packedQty: number | null }>> = {};
     for (const line of lines) {
       const dk = runDateMap[line.run_id];
       if (!dk) continue;
       if (!deliveryByDate[dk]) deliveryByDate[dk] = {};
-      const actual = line.packed_qty ?? line.delivery_qty;
-      deliveryByDate[dk][line.item_name] = {
-        requested:  line.delivery_qty,
-        actual,
-        isPartial: line.packed_qty !== null && line.packed_qty < line.delivery_qty,
-      };
+      deliveryByDate[dk][line.item_name] = { packedQty: line.packed_qty };
     }
 
     // Master item list from all submissions in range
@@ -761,30 +764,20 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
         const dk     = toLocalDateStr(day);
         const prevDk = toLocalDateStr(new Date(day.getTime() - 86_400_000));
         const dayName = day.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase();
-        const isNoDelivery   = NO_DELIVERY_DAYS.has(dayName);
-        const isFutureOrToday = dk >= todayStr;
+        const isNoDelivery = NO_DELIVERY_DAYS.has(dayName);
 
         const start  = getInventory(prevDk)?.[itemName] ?? null;
         const ending = getInventory(dk)?.[itemName]    ?? null;
         const del    = isNoDelivery ? null : (deliveryByDate[dk]?.[itemName] ?? null);
 
-        const requested  = del?.requested  ?? null;
-        const actual     = del?.actual     ?? null;
-        const isPartial  = del?.isPartial  ?? false;
+        // Delivery = confirmed packed_qty only (null = not yet confirmed)
+        const delivery = del?.packedQty ?? null;
 
-        // Usage = Start + Actual − End  (Actual = 0 on non-delivery days)
-        let usage: number | null = null;
-        if (start !== null && ending !== null) {
-          usage = start + (actual ?? 0) - ending;
-        }
+        // Per-shift usage from the Shift Usage page
+        const usageLunch  = shiftUsageLunch[itemName]?.[dk]  ?? null;
+        const usageDinner = shiftUsageDinner[itemName]?.[dk] ?? null;
 
-        // For today/future: fill usage from Shift Usage page data when not calculable from counts
-        if (isFutureOrToday && usage === null) {
-          const suVal = shiftUsageByItemDate[itemName]?.[dk];
-          usage = suVal !== undefined ? suVal : null;
-        }
-
-        tableData[itemName][dk] = { start, requested, actual, ending, usage, isPartial };
+        tableData[itemName][dk] = { start, usageLunch, delivery, usageDinner, ending };
       }
 
       // ── Second pass: for every future day, chain START and always compute END ──
@@ -805,23 +798,21 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
 
         // Chain START: use real value if available, otherwise carry forward prev END
         const effectiveStart = d.start !== null ? d.start : (prev.ending ?? null);
-        const req   = isNoDelivery ? null : d.requested;
-        const act   = isNoDelivery ? null : d.actual;
-        const suVal = shiftUsageByItemDate[itemName]?.[dk];
-        const usage = d.usage ?? (suVal !== undefined ? suVal : null);
+        const deliveryVal    = isNoDelivery ? null : d.delivery;
+        const lunchVal       = shiftUsageLunch[itemName]?.[dk]  ?? d.usageLunch;
+        const dinnerVal      = shiftUsageDinner[itemName]?.[dk] ?? d.usageDinner;
 
-        // END = START + actual_delivery - USAGE (only compute when usage is known)
-        const computedEnding = effectiveStart !== null && usage !== null
-          ? effectiveStart + (act ?? 0) - usage
+        // END = START − usageLunch + delivery − usageDinner
+        const computedEnding = effectiveStart !== null
+          ? effectiveStart - (lunchVal ?? 0) + (deliveryVal ?? 0) - (dinnerVal ?? 0)
           : null;
 
         tableData[itemName][dk] = {
-          start:     effectiveStart,
-          requested: req,
-          actual:    act,
-          ending:    d.ending ?? computedEnding,
-          usage,
-          isPartial: isNoDelivery ? false : d.isPartial,
+          start:       effectiveStart,
+          usageLunch:  lunchVal,
+          delivery:    deliveryVal,
+          usageDinner: dinnerVal,
+          ending:      d.ending ?? computedEnding,
         };
       }
     }
@@ -844,7 +835,7 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
     for (const [name, { unit }] of allItems) itemUnit[name] = unit;
 
     return { tableData, sections, itemUnit };
-  }, [data, weekDays, location]);
+  }, [data, weekDays, location, shiftUsageLunch, shiftUsageDinner]);
 
   const isEmpty = sections.length === 0 && !isLoading;
   const todayStr = toLocalDateStr(new Date());
@@ -910,10 +901,9 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
 
         {/* Legend */}
         <div className="ml-auto flex items-center gap-4 text-xs text-gray-400">
-          <span><span className="text-gray-800 font-semibold">12</span> Start/End inventory</span>
-          <span><span className="text-blue-600 font-semibold">5</span> Delivery</span>
-          <span><span className="text-amber-600 font-semibold">3</span> Partial delivery</span>
-          <span><span className="text-[#2E7D32] font-semibold">10</span> Usage</span>
+          <span><span className="text-gray-800 font-semibold">12</span> Start/End</span>
+          <span><span className="text-blue-600 font-semibold">5</span> Confirmed delivery</span>
+          <span><span className="text-[#2E7D32] font-semibold">10</span> Usage (actual)</span>
           <span><span className="text-violet-500 font-semibold italic">8</span> Forecast</span>
         </div>
       </div>
@@ -938,9 +928,9 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
                 {weekDays.map((_, di) => (
                   <>
                     <col key={`c-s-${di}`}  style={{ minWidth: 30 }} />
-                    <col key={`c-rq-${di}`} style={{ minWidth: 30 }} />
-                    <col key={`c-ac-${di}`} style={{ minWidth: 30 }} />
-                    <col key={`c-us-${di}`} style={{ minWidth: 30 }} />
+                    <col key={`c-lu-${di}`} style={{ minWidth: 30 }} />
+                    <col key={`c-dl-${di}`} style={{ minWidth: 30 }} />
+                    <col key={`c-di-${di}`} style={{ minWidth: 30 }} />
                     <col key={`c-e-${di}`}  style={{ minWidth: 30 }} />
                   </>
                 ))}
@@ -1046,20 +1036,27 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
 
                             return (
                               <>
+                                {/* Start */}
                                 <td key={`${di}-s`}  className={`px-1 py-2 text-center tabular-nums ${borderL} ${dayBg}`}>
                                   <InvCell v={d?.start ?? null} />
                                 </td>
-                                <td key={`${di}-rq`} className={`px-1 py-2 text-center tabular-nums ${dayBg}`}>
-                                  <DelivCell v={d?.requested ?? null} />
-                                </td>
-                                <td key={`${di}-ac`} className={`px-1 py-2 text-center tabular-nums ${dayBg}`}>
-                                  <DelivCell v={d?.actual ?? null} isPartial={d?.isPartial} />
-                                </td>
-                                <td key={`${di}-us`} className={`px-1 py-2 text-center tabular-nums ${dayBg}`}>
+                                {/* Usage Lunch */}
+                                <td key={`${di}-lu`} className={`px-1 py-2 text-center tabular-nums ${dayBg}`}>
                                   {isForecast
-                                    ? <ForecastCell v={d?.usage ?? null} />
-                                    : <UsageCell v={d?.usage ?? null} />}
+                                    ? <ForecastCell v={d?.usageLunch ?? null} />
+                                    : <UsageCell v={d?.usageLunch ?? null} />}
                                 </td>
+                                {/* Delivery (confirmed packed_qty) */}
+                                <td key={`${di}-dl`} className={`px-1 py-2 text-center tabular-nums ${dayBg}`}>
+                                  <DelivCell v={d?.delivery ?? null} />
+                                </td>
+                                {/* Usage Dinner */}
+                                <td key={`${di}-di`} className={`px-1 py-2 text-center tabular-nums ${dayBg}`}>
+                                  {isForecast
+                                    ? <ForecastCell v={d?.usageDinner ?? null} />
+                                    : <UsageCell v={d?.usageDinner ?? null} />}
+                                </td>
+                                {/* End */}
                                 <td key={`${di}-e`}  className={`px-1 py-2 text-center tabular-nums ${dayBg}`}>
                                   {isForecast && d?.ending !== null
                                     ? <ForecastCell v={d?.ending ?? null} dim />
