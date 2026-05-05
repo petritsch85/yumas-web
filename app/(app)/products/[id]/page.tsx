@@ -546,7 +546,7 @@ export default function RecipeDetailPage() {
             {/* Row 1: Min to Produce + Days to Expiry */}
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">Min. to Produce</label>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Production time (minutes)</label>
                 <input type="number" min="0" step="1" value={minutesToProduce} onChange={e => setMinutesToProduce(e.target.value)} placeholder="e.g. 60"
                   className="w-full border-2 border-gray-300 bg-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20]" />
               </div>
@@ -576,7 +576,7 @@ export default function RecipeDetailPage() {
         ) : (
           <dl className="grid grid-cols-2 gap-x-6 gap-y-4 text-sm">
             <div>
-              <dt className="text-xs text-gray-400 mb-0.5">Min. to Produce</dt>
+              <dt className="text-xs text-gray-400 mb-0.5">Production time (minutes)</dt>
               <dd className="font-semibold text-gray-900">{recipe?.minutes_to_produce != null ? `${recipe.minutes_to_produce} min` : <span className="text-gray-300">—</span>}</dd>
             </div>
             <div>
