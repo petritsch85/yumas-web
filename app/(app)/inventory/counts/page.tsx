@@ -90,8 +90,15 @@ export default function CurrentInventoryPage() {
 
   const editMutation = useMutation({
     mutationFn: async ({ id, data }: { id: string; data: { section: string; name: string; unit: string; quantity: number }[] }) => {
-      const { error } = await supabase.from('inventory_submissions').update({ data }).eq('id', id);
+      const { data: updated, error } = await supabase
+        .from('inventory_submissions')
+        .update({ data })
+        .eq('id', id)
+        .select('id');
       if (error) throw error;
+      if (!updated || updated.length === 0) {
+        throw new Error('Permission denied — your database RLS policy does not allow updates on inventory_submissions. Run the SQL fix in Supabase.');
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['inventory-submissions'] });
