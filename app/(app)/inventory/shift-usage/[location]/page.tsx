@@ -566,8 +566,8 @@ export default function ShiftUsagePage() {
                     const totalVal      = lunchVal + dinnerVal;
                     const lunchIsActual  = entry?.lunchIsActual  ?? false;
                     const dinnerIsActual = entry?.dinnerIsActual ?? false;
-                    // Total colour: blue only when BOTH shifts are actual, green if either is still forecast
-                    const totalIsActual  = lunchIsActual && dinnerIsActual;
+                    // Total colour: blue when lunch is actual AND dinner is either actual or has no value (no dinner shift that day)
+                    const totalIsActual  = lunchIsActual && (dinnerIsActual || dinnerVal === 0);
 
                     const altBg = !today && di % 2 === 1 ? 'bg-gray-50/50' : '';
                     const fmt   = (v: number) => v > 0 ? `€${(v / 1000).toFixed(1)}k` : '—';

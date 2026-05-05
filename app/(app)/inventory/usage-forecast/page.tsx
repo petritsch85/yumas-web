@@ -414,17 +414,21 @@ export default function UsageForecastPage() {
           let total = actualSalesByLocDate[actualKey]; // OB + Simply actuals uploaded so far
 
           // If dinner hasn't been uploaded yet, add dinner forecast to complete the day
-          const bothShiftsUploaded = shiftInfo ? (shiftInfo.hasLunch && shiftInfo.hasDinner) : true;
+          let dinnerForecastAdded = 0;
           if (shiftInfo && !shiftInfo.hasDinner) {
             const dinnerOverride = weekOverrides.find(
               o => o.location_id === locId && o.forecast_date === dk && o.shift_type === 'dinner',
             );
             const dOB = dinnerOverride?.net_revenue
               ?? (dinnerS ? computeDailyForecast(dk, dinnerS) : 0);
-            total += Math.round(dOB + dOB * ratios.dinner);
+            dinnerForecastAdded = Math.round(dOB + dOB * ratios.dinner);
+            total += dinnerForecastAdded;
           }
 
-          // Blue only when the full day is uploaded; green if dinner is still forecast
+          // Blue when lunch is reported AND (dinner is also reported OR there is no dinner shift today)
+          const bothShiftsUploaded = shiftInfo
+            ? (shiftInfo.hasLunch && (shiftInfo.hasDinner || dinnerForecastAdded === 0))
+            : true;
           result[store][dk] = { val: total, isActual: bothShiftsUploaded };
         } else {
           // No actuals at all — full forecast
