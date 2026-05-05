@@ -61,6 +61,7 @@ function getTitleKey(pathname: string): string {
   if (pathname.startsWith('/suppliers/'))          return 'topbar.supplierDetails';
   if (pathname.startsWith('/products/'))           return 'topbar.productDetails';
   if (pathname.startsWith('/waste/new'))           return 'topbar.logWaste';
+  if (pathname.startsWith('/inventory/shift-usage/')) return 'topbar.shiftUsage';
   return 'topbar.yumasInventory';
 }
 

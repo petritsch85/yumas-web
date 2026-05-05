@@ -119,7 +119,8 @@
     "calendar": "Delivery Calendar",
     "menus": "Menus",
     "newRecipe": "New Recipe",
-    "newRawMaterial": "New Raw Material"
+    "newRawMaterial": "New Raw Material",
+    "shiftUsage": "Shift Usage"
   },
   "common": {
     "save": "Save",
@@ -260,7 +261,18 @@
     },
     "usageForecast": {
       "title": "Usage Forecast",
-      "subtitle": "Projected ingredient usage based on sales"
+      "subtitle": "Projected ingredient usage based on sales",
+      "shiftUsageLabel": "Shift Usage:"
+    },
+    "shiftUsage": {
+      "title": "Shift Usage",
+      "subtitle": "Enter actual ingredient usage per shift",
+      "lunch": "Lunch",
+      "dinner": "Dinner",
+      "total": "Total",
+      "item": "Item",
+      "noItems": "No items found. Items appear once deliveries have been created.",
+      "hint": "Enter quantities used per shift. Values are saved automatically when you leave a cell."
     }
   },
   "production": {

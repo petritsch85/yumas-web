@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
 import { useState, useMemo } from 'react';
 import { ChevronLeft, ChevronRight, RefreshCw } from 'lucide-react';
+import { useRouter } from 'next/navigation';
 import { useT } from '@/lib/i18n';
 import {
   computeSimplyRatios,
@@ -108,6 +109,7 @@ function isToday(d: Date) {
 /* ── Main page ───────────────────────────────────────────────────────────── */
 export default function UsageForecastPage() {
   const { t } = useT();
+  const router = useRouter();
   const [weekOffset, setWeekOffset] = useState(0);
   const weekDays = useMemo(() => getWeekDays(weekOffset), [weekOffset]);
 
@@ -421,6 +423,22 @@ export default function UsageForecastPage() {
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-gray-900">{t('inventory.usageForecast.title')}</h1>
         <p className="text-xs text-gray-400">Sales from Sales Reports · usage proportional to sales</p>
+      </div>
+
+      {/* ── Shift Usage store buttons ── */}
+      <div className="flex items-center gap-3">
+        <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+          {t('inventory.usageForecast.shiftUsageLabel')}
+        </span>
+        {STORES.map(store => (
+          <button
+            key={store}
+            onClick={() => router.push(`/inventory/shift-usage/${store.toLowerCase()}`)}
+            className="px-4 py-2 rounded-lg text-sm font-semibold border border-[#1B5E20] text-[#1B5E20] hover:bg-[#1B5E20] hover:text-white transition-colors"
+          >
+            {store}
+          </button>
+        ))}
       </div>
 
       {/* ── Week nav + legend ── */}

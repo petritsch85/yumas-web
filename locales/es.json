@@ -119,7 +119,8 @@
     "calendar": "Calendario de Entregas",
     "menus": "Menús",
     "newRecipe": "Nueva Receta",
-    "newRawMaterial": "Nueva Materia Prima"
+    "newRawMaterial": "Nueva Materia Prima",
+    "shiftUsage": "Uso por Turno"
   },
   "common": {
     "save": "Guardar",
@@ -260,7 +261,18 @@
     },
     "usageForecast": {
       "title": "Previsión de Uso",
-      "subtitle": "Uso proyectado de ingredientes según ventas"
+      "subtitle": "Uso proyectado de ingredientes según ventas",
+      "shiftUsageLabel": "Uso por Turno:"
+    },
+    "shiftUsage": {
+      "title": "Uso por Turno",
+      "subtitle": "Introducir el uso real de ingredientes por turno",
+      "lunch": "Almuerzo",
+      "dinner": "Cena",
+      "total": "Total",
+      "item": "Artículo",
+      "noItems": "No se encontraron artículos. Aparecerán una vez creadas las entregas.",
+      "hint": "Introduce las cantidades usadas por turno. Los valores se guardan automáticamente al salir de la celda."
     }
   },
   "production": {
