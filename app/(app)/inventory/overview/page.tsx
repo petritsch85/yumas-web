@@ -606,17 +606,8 @@ type WeekSectionGroup = { title: string; items: string[] };
 
 const DAY_COLS = ['Start', 'Req', 'Act', 'Usage', 'End'] as const;
 
-/* ─── Usage-forecast helpers (mirrors usage-forecast/page.tsx) ─────────────── */
+/* ─── Delivery day helper ───────────────────────────────────────────────────── */
 const NO_DELIVERY_DAYS = new Set(['saturday', 'sunday']);
-const STORE_INDICES: Partial<Record<LocationName, number>> = { Westend: 0, Eschborn: 1, Taunus: 2 };
-
-function forecastUsage(itemName: string, day: Date, storeIdx: number): number {
-  let h = 0;
-  for (let i = 0; i < itemName.length; i++) h = (h * 31 + itemName.charCodeAt(i)) & 0xffff;
-  const dow = (day.getDay() + 6) % 7; // 0=Mon … 6=Sun
-  const raw = ((h + dow * 37 + storeIdx * 19) % 18) + 1;
-  return dow >= 5 ? Math.ceil(raw * 1.3) : raw;
-}
 
 function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
   location: LocationName;
@@ -631,6 +622,32 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
 
   const weekStart = toLocalDateStr(weekDays[0]);
   const weekEnd   = toLocalDateStr(weekDays[6]);
+
+  /* ── Shift usage data for this location (entered on the Shift Usage page) ── */
+  const { data: shiftUsageRows = [] } = useQuery({
+    queryKey: ['shift-usage-overview', location, weekStart, weekEnd],
+    enabled: !!weekStart,
+    staleTime: 0,
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('shift_usage')
+        .select('usage_date, item_name, quantity')
+        .eq('location_name', location)
+        .gte('usage_date', weekStart)
+        .lte('usage_date', weekEnd);
+      return (data ?? []) as { usage_date: string; item_name: string; quantity: number }[];
+    },
+  });
+
+  /* Build lookup: item → date → total (lunch + dinner) */
+  const shiftUsageByItemDate = useMemo(() => {
+    const m: Record<string, Record<string, number>> = {};
+    for (const r of shiftUsageRows) {
+      if (!m[r.item_name]) m[r.item_name] = {};
+      m[r.item_name][r.usage_date] = (m[r.item_name][r.usage_date] ?? 0) + (r.quantity ?? 0);
+    }
+    return m;
+  }, [shiftUsageRows]);
 
   // Query range: day before Mon (for Mon's Starting Inventory)
   const queryRangeStart = useMemo(() => {
@@ -735,7 +752,6 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
     }
 
     const todayStr  = toLocalDateStr(new Date());
-    const storeIdx  = STORE_INDICES[location] ?? 0;
 
     // Build per-item per-day data (7 days)
     const tableData: WeekTableData = {};
@@ -762,9 +778,10 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
           usage = start + (actual ?? 0) - ending;
         }
 
-        // For today/future: fill usage from forecast when not calculable
+        // For today/future: fill usage from Shift Usage page data when not calculable from counts
         if (isFutureOrToday && usage === null) {
-          usage = forecastUsage(itemName, day, storeIdx);
+          const suVal = shiftUsageByItemDate[itemName]?.[dk];
+          usage = suVal !== undefined ? suVal : null;
         }
 
         tableData[itemName][dk] = { start, requested, actual, ending, usage, isPartial };
@@ -790,10 +807,11 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
         const effectiveStart = d.start !== null ? d.start : (prev.ending ?? null);
         const req   = isNoDelivery ? null : d.requested;
         const act   = isNoDelivery ? null : d.actual;
-        const usage = d.usage ?? forecastUsage(itemName, day, storeIdx);
+        const suVal = shiftUsageByItemDate[itemName]?.[dk];
+        const usage = d.usage ?? (suVal !== undefined ? suVal : null);
 
-        // END = START + actual_delivery - USAGE (always compute for future days)
-        const computedEnding = effectiveStart !== null
+        // END = START + actual_delivery - USAGE (only compute when usage is known)
+        const computedEnding = effectiveStart !== null && usage !== null
           ? effectiveStart + (act ?? 0) - usage
           : null;
 
