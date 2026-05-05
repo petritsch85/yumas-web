@@ -54,22 +54,6 @@ function canonicalItemOrder<T extends { item_name: string }>(items: T[]): T[] {
 const STORES = ['Westend', 'Eschborn', 'Taunus'] as const;
 type Store = (typeof STORES)[number];
 
-/* Deterministic dummy ratio 0–1: relative item usage weight */
-function itemRatio(itemName: string, storeIdx: number): number {
-  let h = 0;
-  for (let i = 0; i < itemName.length; i++) h = (h * 31 + itemName.charCodeAt(i)) & 0xffff;
-  const raw = ((h + storeIdx * 19) % 18) + 1; // 1–18
-  return raw / 18; // 0.056–1.0
-}
-
-/* Scale usage by forecasted sales vs a €3 000 baseline */
-const BASE_SALES = 3000;
-function forecastUsage(itemName: string, storeIdx: number, dailySales: number): number {
-  if (dailySales <= 0) return 0;
-  const ratio = itemRatio(itemName, storeIdx);
-  return Math.max(1, Math.round(ratio * (dailySales / BASE_SALES) * 18));
-}
-
 /* ── Date helpers ────────────────────────────────────────────────────────── */
 function getWeekDays(offset: number): Date[] {
   const now = new Date();
@@ -464,6 +448,36 @@ export default function UsageForecastPage() {
       .map(sec => [sec, canonicalItemOrder(map.get(sec)!)] as [string, typeof rawItems]);
   }, [rawItems]);
 
+  /* ── Shift usage data for the week (entered on per-store pages) ── */
+  const { data: shiftUsageRows = [] } = useQuery({
+    queryKey: ['shift-usage-group', weekStart, weekEnd],
+    enabled: !!weekStart,
+    staleTime: 0,
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('shift_usage')
+        .select('location_name, usage_date, shift, item_name, quantity')
+        .gte('usage_date', weekStart)
+        .lte('usage_date', weekEnd);
+      return (data ?? []) as {
+        location_name: string; usage_date: string;
+        shift: string; item_name: string; quantity: number;
+      }[];
+    },
+  });
+
+  /* Build lookup: store → item → date → total (lunch + dinner) */
+  const shiftUsageByStoreItemDate = useMemo(() => {
+    const m: Record<string, Record<string, Record<string, number>>> = {};
+    for (const r of shiftUsageRows) {
+      if (!m[r.location_name]) m[r.location_name] = {};
+      if (!m[r.location_name][r.item_name]) m[r.location_name][r.item_name] = {};
+      const prev = m[r.location_name][r.item_name][r.usage_date] ?? 0;
+      m[r.location_name][r.item_name][r.usage_date] = prev + (r.quantity ?? 0);
+    }
+    return m;
+  }, [shiftUsageRows]);
+
   const COL_W = 68;
   const ITEM_W = 180;
 
@@ -472,7 +486,7 @@ export default function UsageForecastPage() {
       {/* ── Header ── */}
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-gray-900">{t('inventory.usageForecast.title')}</h1>
-        <p className="text-xs text-gray-400">Sales from Sales Reports · usage proportional to sales</p>
+        <p className="text-xs text-gray-400">Sales from Sales Reports · item usage from Shift Usage pages</p>
       </div>
 
       {/* ── Store nav buttons (Group = this page, active; stores → shift usage) ── */}
@@ -669,16 +683,14 @@ export default function UsageForecastPage() {
                           <div className="text-gray-400 text-[10px] mt-0.5">{item.unit}</div>
                         </td>
 
-                        {/* Usage cells: 7 days × 3 stores */}
+                        {/* Usage cells: 7 days × 3 stores — real data from shift_usage table */}
                         {weekDays.map((day, di) => {
                           const today = isToday(day);
                           const dk = dateKey(day);
                           const altBg = !today && di % 2 === 1 ? 'bg-gray-50/60' : '';
                           return STORES.map((store, si) => {
-                            const entry = dailySalesByStore[store][dk];
-                            const salesVal = entry?.val ?? 0;
-                            const usage = (entry !== null && entry !== undefined && salesVal > 0)
-                              ? forecastUsage(item.item_name, si, salesVal) : null;
+                            const qty = shiftUsageByStoreItemDate[store]?.[item.item_name]?.[dk];
+                            const hasQty = qty !== undefined && qty > 0;
                             return (
                               <td
                                 key={`${di}-${si}`}
@@ -687,8 +699,8 @@ export default function UsageForecastPage() {
                                 } ${today ? 'bg-green-50/20' : altBg}`}
                                 style={{ minWidth: COL_W }}
                               >
-                                {usage !== null
-                                  ? <span className="font-semibold text-[#1B5E20] text-xs">{usage}</span>
+                                {hasQty
+                                  ? <span className="font-semibold text-[#1B5E20] text-xs">{qty}</span>
                                   : <span className="text-gray-300">—</span>
                                 }
                               </td>
@@ -715,7 +727,7 @@ export default function UsageForecastPage() {
 
       <p className="text-xs text-gray-400">
         Sales figures match the Daily Total row in Sales Reports exactly (OB + Simply + Bills, actual or forecast).
-        Item quantities are proportional to forecasted sales — connect recipe/BOM data for precise amounts.
+        Item quantities are entered per shift on the individual store pages (Westend / Eschborn / Taunus).
       </p>
     </div>
   );
