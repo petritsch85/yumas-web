@@ -6,8 +6,17 @@ import { useState, useMemo, useCallback } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { useRouter, useParams } from 'next/navigation';
 import { useT } from '@/lib/i18n';
+import {
+  computeSimplyRatios,
+  computeDailyForecast,
+  currentQuarterRange,
+  type ForecastSettings,
+  type ForecastOverride,
+  type ShiftRowLite,
+  type DelivRowLite,
+} from '@/lib/forecast-utils';
 
-/* ── Canonical sort order (mirrors other inventory pages) ─────────────────── */
+/* ── Canonical sort order ─────────────────────────────────────────────────── */
 const SECTION_ORDER = ['Kühlhaus', 'Tiefkühler', 'Trockenware', 'Regale', 'Lager'];
 
 const CANONICAL_ITEMS: string[] = [
@@ -40,7 +49,7 @@ function canonicalItemOrder<T extends { item_name: string }>(items: T[]): T[] {
   });
 }
 
-/* ── Date helpers ────────────────────────────────────────────────────────── */
+/* ── Date helpers ─────────────────────────────────────────────────────────── */
 function getWeekDays(offset: number): Date[] {
   const now = new Date();
   const dow = now.getDay();
@@ -77,7 +86,7 @@ function isTodayDate(d: Date) {
     && d.getDate() === t.getDate();
 }
 
-/* ── Shift usage row type ───────────────────────────────────────────────── */
+/* ── Types ────────────────────────────────────────────────────────────────── */
 type ShiftUsageRow = {
   location_name: string;
   usage_date: string;
@@ -86,29 +95,226 @@ type ShiftUsageRow = {
   quantity: number;
 };
 
-/* ── Local state key helpers ─────────────────────────────────────────────── */
+type DayShiftSales = {
+  lunch: number;
+  dinner: number;
+  isActual: boolean; // true = uploaded data, false = forecast
+} | null; // null = closed / no data
+
 function cellKey(date: string, shift: 'lunch' | 'dinner', itemName: string): string {
   return `${date}|${shift}|${itemName}`;
 }
 
-/* ── Main page ───────────────────────────────────────────────────────────── */
+/* ── Main page ────────────────────────────────────────────────────────────── */
 export default function ShiftUsagePage() {
   const { t } = useT();
   const router = useRouter();
   const params = useParams();
   const locationSlug = (params?.location as string) ?? '';
-  // Capitalize first letter for display (westend → Westend)
   const locationName = locationSlug.charAt(0).toUpperCase() + locationSlug.slice(1);
 
   const [weekOffset, setWeekOffset] = useState(0);
   const weekDays = useMemo(() => getWeekDays(weekOffset), [weekOffset]);
-
   const weekStart = weekDays[0] ? dateKey(weekDays[0]) : '';
   const weekEnd   = weekDays[6] ? dateKey(weekDays[6]) : '';
 
   const queryClient = useQueryClient();
+  const { qStart, qEnd } = useMemo(() => currentQuarterRange(), []);
 
-  /* ── Load items from delivery_run_lines ── */
+  /* ── Locations (to resolve name → id) ── */
+  const { data: locations = [] } = useQuery({
+    queryKey: ['locations-shift-usage'],
+    queryFn: async () => {
+      const { data } = await supabase.from('locations').select('id, name').eq('is_active', true);
+      return (data ?? []) as { id: string; name: string }[];
+    },
+  });
+
+  const locId = useMemo(
+    () => locations.find(l => l.name === locationName)?.id ?? null,
+    [locations, locationName],
+  );
+
+  /* ── Forecast settings for this location ── */
+  const { data: forecastSettings = [] } = useQuery({
+    queryKey: ['forecast-settings-shift', locId],
+    enabled: !!locId,
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('forecast_settings')
+        .select('location_id,shift_type,week_base_net,growth_rate,weight_mon,weight_tue,weight_wed,weight_thu,weight_fri,weight_sat,weight_sun,closed_weekdays')
+        .eq('location_id', locId!);
+      return (data ?? []) as ForecastSettings[];
+    },
+  });
+
+  const lunchSettings  = forecastSettings.find(s => s.shift_type === 'lunch');
+  const dinnerSettings = forecastSettings.find(s => s.shift_type === 'dinner');
+
+  /* ── Quarter shift_reports (for Simply ratio) ── */
+  const { data: qShiftRows = [] } = useQuery({
+    queryKey: ['q-shift-rows-shift-usage', qStart, qEnd, locId],
+    enabled: !!locId,
+    staleTime: 5 * 60 * 1000,
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('shift_reports')
+        .select('location_id, report_date, shift_type, net_total, z_report_number')
+        .eq('location_id', locId!)
+        .gte('report_date', qStart)
+        .lte('report_date', qEnd);
+      return (data ?? []) as ShiftRowLite[];
+    },
+  });
+
+  /* ── Quarter delivery_reports (for Simply ratio) ── */
+  const { data: qDelivRows = [] } = useQuery({
+    queryKey: ['q-deliv-rows-shift-usage', qStart, qEnd, locId],
+    enabled: !!locId,
+    staleTime: 5 * 60 * 1000,
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('delivery_reports')
+        .select('location_id, report_date, shift_type, net_revenue')
+        .eq('location_id', locId!)
+        .gte('report_date', qStart)
+        .lte('report_date', qEnd);
+      return (data ?? []) as DelivRowLite[];
+    },
+  });
+
+  /* ── Simply ratios ── */
+  const simplyRatios = useMemo(
+    () => computeSimplyRatios(qShiftRows, qDelivRows),
+    [qShiftRows, qDelivRows],
+  );
+  const ratios = useMemo(
+    () => (locId ? (simplyRatios[locId] ?? { lunch: 0, dinner: 0 }) : { lunch: 0, dinner: 0 }),
+    [simplyRatios, locId],
+  );
+
+  /* ── Week actual shift_reports (with shift_type for lunch/dinner split) ── */
+  const { data: weekShiftRows = [] } = useQuery({
+    queryKey: ['shift-reports-week-shift-usage', weekStart, weekEnd, locId],
+    enabled: !!weekStart && !!locId,
+    staleTime: 0,
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('shift_reports')
+        .select('location_id, report_date, shift_type, net_total, z_report_number')
+        .eq('location_id', locId!)
+        .gte('report_date', weekStart)
+        .lte('report_date', weekEnd);
+      return (data ?? []) as ShiftRowLite[];
+    },
+  });
+
+  /* ── Week actual delivery_reports ── */
+  const { data: weekDelivRows = [] } = useQuery({
+    queryKey: ['delivery-reports-week-shift-usage', weekStart, weekEnd, locId],
+    enabled: !!weekStart && !!locId,
+    staleTime: 0,
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('delivery_reports')
+        .select('location_id, report_date, shift_type, net_revenue')
+        .eq('location_id', locId!)
+        .gte('report_date', weekStart)
+        .lte('report_date', weekEnd);
+      return (data ?? []) as DelivRowLite[];
+    },
+  });
+
+  /* ── Week forecast overrides ── */
+  const { data: weekOverrides = [] } = useQuery({
+    queryKey: ['forecast-overrides-shift-usage', weekStart, weekEnd, locId],
+    enabled: !!weekStart && !!locId,
+    staleTime: 0,
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('forecast_overrides')
+        .select('location_id, forecast_date, shift_type, net_revenue')
+        .eq('location_id', locId!)
+        .gte('forecast_date', weekStart)
+        .lte('forecast_date', weekEnd);
+      return (data ?? []) as ForecastOverride[];
+    },
+  });
+
+  /* ── Compute per-day lunch/dinner sales: actual (blue) or forecast (green) ──
+   *
+   * Actual = shift_reports (OB) + delivery_reports (Simply) for that date.
+   * OB lunch vs dinner: use shift_type tag if present, else first/second by Z-report number.
+   * Forecast = computeDailyForecast (OB) × (1 + Simply ratio) per shift.
+   */
+  const salesByDay = useMemo((): Record<string, DayShiftSales> => {
+    const m: Record<string, DayShiftSales> = {};
+
+    // Group week OB rows by date
+    const obByDate: Record<string, ShiftRowLite[]> = {};
+    for (const r of weekShiftRows) {
+      if (!obByDate[r.report_date]) obByDate[r.report_date] = [];
+      obByDate[r.report_date].push(r);
+    }
+
+    // Dates that have any actual OB data
+    const actualDates = new Set(weekShiftRows.map(r => r.report_date));
+
+    for (const day of weekDays) {
+      const dk = dateKey(day);
+
+      if (actualDates.has(dk)) {
+        // ── Actual ──
+        const obRows = obByDate[dk] ?? [];
+        let obLunch = 0, obDinner = 0;
+        const allTagged = obRows.every(r => r.shift_type === 'lunch' || r.shift_type === 'dinner');
+        if (allTagged) {
+          for (const r of obRows) {
+            if (r.shift_type === 'lunch') obLunch += r.net_total ?? 0;
+            else obDinner += r.net_total ?? 0;
+          }
+        } else {
+          const sorted = [...obRows].sort(
+            (a, b) => parseInt(a.z_report_number || '0', 10) - parseInt(b.z_report_number || '0', 10),
+          );
+          if (sorted[0]) obLunch  += sorted[0].net_total ?? 0;
+          if (sorted[1]) obDinner += sorted[1].net_total ?? 0;
+        }
+
+        // Simply actual
+        let simLunch = 0, simDinner = 0;
+        for (const r of weekDelivRows) {
+          if (r.report_date !== dk) continue;
+          if (r.shift_type === 'dinner') simDinner += r.net_revenue ?? 0;
+          else simLunch += r.net_revenue ?? 0;
+        }
+
+        m[dk] = { lunch: obLunch + simLunch, dinner: obDinner + simDinner, isActual: true };
+      } else {
+        // ── Forecast ──
+        const lunchOverride  = weekOverrides.find(o => o.forecast_date === dk && o.shift_type === 'lunch');
+        const dinnerOverride = weekOverrides.find(o => o.forecast_date === dk && o.shift_type === 'dinner');
+
+        const lOB = lunchOverride?.net_revenue
+          ?? (lunchSettings ? computeDailyForecast(dk, lunchSettings) : 0);
+        const dOB = dinnerOverride?.net_revenue
+          ?? (dinnerSettings ? computeDailyForecast(dk, dinnerSettings) : 0);
+
+        const lunchTotal  = Math.round(lOB  + lOB  * ratios.lunch);
+        const dinnerTotal = Math.round(dOB + dOB * ratios.dinner);
+
+        if (lunchTotal === 0 && dinnerTotal === 0) {
+          m[dk] = null;
+        } else {
+          m[dk] = { lunch: lunchTotal, dinner: dinnerTotal, isActual: false };
+        }
+      }
+    }
+
+    return m;
+  }, [weekDays, weekShiftRows, weekDelivRows, weekOverrides, lunchSettings, dinnerSettings, ratios]);
+
+  /* ── Shift usage item data ── */
   const { data: rawItems = [], isLoading: itemsLoading } = useQuery({
     queryKey: ['shift-usage-items'],
     queryFn: async () => {
@@ -128,7 +334,7 @@ export default function ShiftUsagePage() {
     },
   });
 
-  /* ── Load existing shift_usage data for this week + location ── */
+  /* ── Saved shift_usage rows ── */
   const { data: savedRows = [] } = useQuery({
     queryKey: ['shift-usage-data', locationName, weekStart, weekEnd],
     enabled: !!weekStart && !!locationName,
@@ -144,32 +350,24 @@ export default function ShiftUsagePage() {
     },
   });
 
-  /* ── Build saved values map: cellKey → quantity ── */
   const savedMap = useMemo(() => {
     const m: Record<string, number> = {};
-    for (const r of savedRows) {
-      m[cellKey(r.usage_date, r.shift, r.item_name)] = r.quantity;
-    }
+    for (const r of savedRows) m[cellKey(r.usage_date, r.shift, r.item_name)] = r.quantity;
     return m;
   }, [savedRows]);
 
-  /* ── Local edits (overrides saved values while editing) ── */
   const [localEdits, setLocalEdits] = useState<Record<string, string>>({});
 
-  /* ── Save mutation ── */
   const saveMutation = useMutation({
     mutationFn: async ({ date, shift, itemName, quantity }: {
       date: string; shift: 'lunch' | 'dinner'; itemName: string; quantity: number;
     }) => {
       const { error } = await supabase
         .from('shift_usage')
-        .upsert({
-          location_name: locationName,
-          usage_date: date,
-          shift,
-          item_name: itemName,
-          quantity,
-        }, { onConflict: 'location_name,usage_date,shift,item_name' });
+        .upsert(
+          { location_name: locationName, usage_date: date, shift, item_name: itemName, quantity },
+          { onConflict: 'location_name,usage_date,shift,item_name' },
+        );
       if (error) throw new Error(error.message);
     },
     onSuccess: () => {
@@ -177,7 +375,6 @@ export default function ShiftUsagePage() {
     },
   });
 
-  /* ── Get display value for a cell ── */
   const getCellValue = useCallback((date: string, shift: 'lunch' | 'dinner', itemName: string): string => {
     const k = cellKey(date, shift, itemName);
     if (k in localEdits) return localEdits[k];
@@ -185,27 +382,22 @@ export default function ShiftUsagePage() {
     return saved !== undefined && saved !== 0 ? String(saved) : '';
   }, [localEdits, savedMap]);
 
-  /* ── Handle cell change ── */
   const handleChange = useCallback((date: string, shift: 'lunch' | 'dinner', itemName: string, value: string) => {
-    const k = cellKey(date, shift, itemName);
-    setLocalEdits(prev => ({ ...prev, [k]: value }));
+    setLocalEdits(prev => ({ ...prev, [cellKey(date, shift, itemName)]: value }));
   }, []);
 
-  /* ── Handle cell blur → save ── */
   const handleBlur = useCallback((date: string, shift: 'lunch' | 'dinner', itemName: string) => {
     const k = cellKey(date, shift, itemName);
     const raw = localEdits[k];
-    if (raw === undefined) return; // not edited
+    if (raw === undefined) return;
     const quantity = parseFloat(raw) || 0;
     setLocalEdits(prev => { const n = { ...prev }; delete n[k]; return n; });
     saveMutation.mutate({ date, shift, itemName, quantity });
   }, [localEdits, saveMutation]);
 
-  /* ── Get total for a cell (lunch + dinner) ── */
   const getTotal = useCallback((date: string, itemName: string): number => {
-    const lunchVal = parseFloat(getCellValue(date, 'lunch', itemName)) || 0;
-    const dinnerVal = parseFloat(getCellValue(date, 'dinner', itemName)) || 0;
-    return lunchVal + dinnerVal;
+    return (parseFloat(getCellValue(date, 'lunch', itemName)) || 0)
+         + (parseFloat(getCellValue(date, 'dinner', itemName)) || 0);
   }, [getCellValue]);
 
   /* ── Group items by section ── */
@@ -223,10 +415,8 @@ export default function ShiftUsagePage() {
       .map(sec => [sec, canonicalItemOrder(map.get(sec)!)] as [string, typeof rawItems]);
   }, [rawItems]);
 
-  /* ── Column widths ── */
   const ITEM_W = 180;
-  const SUB_W = 52; // width per sub-column (Lunch, Dinner, Total)
-
+  const SUB_W  = 52;
   const STORES_NAV = ['Westend', 'Eschborn', 'Taunus'] as const;
 
   return (
@@ -243,7 +433,6 @@ export default function ShiftUsagePage() {
 
       {/* ── Store nav buttons ── */}
       <div className="flex items-center gap-2">
-        {/* Group = back to Usage Forecast (all stores overview) */}
         <button
           onClick={() => router.push('/inventory/usage-forecast')}
           className="px-4 py-2 rounded-lg text-sm font-semibold border border-gray-300 text-gray-500 hover:bg-gray-100 transition-colors"
@@ -271,42 +460,30 @@ export default function ShiftUsagePage() {
 
       {/* ── Week navigation ── */}
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm px-5 py-3 flex items-center gap-3">
-        <button
-          onClick={() => setWeekOffset(w => w - 1)}
-          className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500 transition-colors"
-        >
+        <button onClick={() => setWeekOffset(w => w - 1)}
+          className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500 transition-colors">
           <ChevronLeft size={16} />
         </button>
         <span className="text-sm font-semibold text-gray-800 w-40 text-center">
           {fmtWeekRange(weekDays)}
         </span>
-        <button
-          onClick={() => setWeekOffset(w => w + 1)}
-          className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500 transition-colors"
-        >
+        <button onClick={() => setWeekOffset(w => w + 1)}
+          className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500 transition-colors">
           <ChevronRight size={16} />
         </button>
         {weekOffset !== 0 && (
-          <button
-            onClick={() => setWeekOffset(0)}
-            className="text-xs text-[#1B5E20] hover:underline font-medium"
-          >
+          <button onClick={() => setWeekOffset(0)}
+            className="text-xs text-[#1B5E20] hover:underline font-medium">
             Today
           </button>
         )}
 
-        <div className="ml-auto flex items-center gap-4 text-xs font-medium text-gray-500">
-          <span className="flex items-center gap-1">
-            <span className="w-2 h-2 rounded-full bg-orange-400 inline-block" />
-            {t('inventory.shiftUsage.lunch')}
+        <div className="ml-auto flex items-center gap-4 text-xs font-medium">
+          <span className="flex items-center gap-1.5 text-blue-600 font-semibold">
+            <span className="w-3 h-3 rounded-full bg-blue-500" /> Actual (uploaded)
           </span>
-          <span className="flex items-center gap-1">
-            <span className="w-2 h-2 rounded-full bg-indigo-500 inline-block" />
-            {t('inventory.shiftUsage.dinner')}
-          </span>
-          <span className="flex items-center gap-1">
-            <span className="w-2 h-2 rounded-full bg-[#1B5E20] inline-block" />
-            {t('inventory.shiftUsage.total')}
+          <span className="flex items-center gap-1.5 text-[#1B5E20] font-semibold">
+            <span className="w-3 h-3 rounded-full bg-[#1B5E20]" /> Forecast
           </span>
         </div>
       </div>
@@ -321,17 +498,14 @@ export default function ShiftUsagePage() {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table
-              className="text-xs border-collapse"
-              style={{ minWidth: ITEM_W + 7 * 3 * SUB_W }}
-            >
+            <table className="text-xs border-collapse" style={{ minWidth: ITEM_W + 7 * 3 * SUB_W }}>
               <thead>
                 {/* ── Row 1: Day headers ── */}
                 <tr className="border-b border-gray-100">
                   <th
                     className="sticky left-0 z-20 bg-white border-r border-gray-200 px-4 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide"
                     style={{ minWidth: ITEM_W }}
-                    rowSpan={2}
+                    rowSpan={3}
                   >
                     {t('inventory.shiftUsage.item')}
                   </th>
@@ -357,35 +531,75 @@ export default function ShiftUsagePage() {
                   })}
                 </tr>
 
-                {/* ── Row 2: Lunch / Dinner / Total sub-headers ── */}
+                {/* ── Row 2: Net sales per shift (blue = actual, green = forecast) ── */}
+                <tr className="border-b border-gray-100">
+                  {weekDays.map((day, di) => {
+                    const today = isTodayDate(day);
+                    const dk    = dateKey(day);
+                    const entry = salesByDay[dk];
+                    const isActual = entry?.isActual === true;
+
+                    const lunchVal  = entry?.lunch  ?? 0;
+                    const dinnerVal = entry?.dinner ?? 0;
+                    const totalVal  = lunchVal + dinnerVal;
+
+                    const colorClass = isActual ? 'text-blue-600' : 'text-[#1B5E20]';
+                    const bgToday = today ? (isActual ? 'bg-blue-50/30' : 'bg-green-50/60') : '';
+
+                    const fmt = (v: number) =>
+                      v > 0 ? `€${(v / 1000).toFixed(1)}k` : '—';
+
+                    return (
+                      <>
+                        <th
+                          key={`${di}-sales-lunch`}
+                          className={`text-center py-1 px-1 font-semibold text-[10px] border-l-2 border-gray-300 ${colorClass} ${bgToday} ${!today && di % 2 === 1 ? 'bg-gray-50/50' : ''}`}
+                          style={{ minWidth: SUB_W }}
+                        >
+                          {fmt(lunchVal)}
+                        </th>
+                        <th
+                          key={`${di}-sales-dinner`}
+                          className={`text-center py-1 px-1 font-semibold text-[10px] border-l border-gray-100 ${colorClass} ${bgToday} ${!today && di % 2 === 1 ? 'bg-gray-50/50' : ''}`}
+                          style={{ minWidth: SUB_W }}
+                        >
+                          {fmt(dinnerVal)}
+                        </th>
+                        <th
+                          key={`${di}-sales-total`}
+                          className={`text-center py-1 px-1 font-semibold text-[10px] border-l border-gray-100 ${colorClass} ${bgToday} ${!today && di % 2 === 1 ? 'bg-gray-50/50' : ''}`}
+                          style={{ minWidth: SUB_W }}
+                        >
+                          {fmt(totalVal)}
+                        </th>
+                      </>
+                    );
+                  })}
+                </tr>
+
+                {/* ── Row 3: Lunch / Dinner / Total sub-headers ── */}
                 <tr className="border-b-2 border-gray-200">
                   {weekDays.map((day, di) => {
                     const today = isTodayDate(day);
                     return (
                       <>
                         <th
-                          key={`${di}-lunch`}
-                          className={`text-center py-1.5 text-[9px] font-bold uppercase tracking-wide border-l-2 border-gray-300 text-orange-500 ${
-                            today ? 'bg-green-50/40' : ''
-                          }`}
+                          key={`${di}-lbl-lunch`}
+                          className={`text-center py-1.5 text-[9px] font-bold uppercase tracking-wide border-l-2 border-gray-300 text-orange-500 ${today ? 'bg-green-50/40' : ''}`}
                           style={{ minWidth: SUB_W }}
                         >
                           {t('inventory.shiftUsage.lunch')}
                         </th>
                         <th
-                          key={`${di}-dinner`}
-                          className={`text-center py-1.5 text-[9px] font-bold uppercase tracking-wide border-l border-gray-100 text-indigo-500 ${
-                            today ? 'bg-green-50/40' : ''
-                          }`}
+                          key={`${di}-lbl-dinner`}
+                          className={`text-center py-1.5 text-[9px] font-bold uppercase tracking-wide border-l border-gray-100 text-indigo-500 ${today ? 'bg-green-50/40' : ''}`}
                           style={{ minWidth: SUB_W }}
                         >
                           {t('inventory.shiftUsage.dinner')}
                         </th>
                         <th
-                          key={`${di}-total`}
-                          className={`text-center py-1.5 text-[9px] font-bold uppercase tracking-wide border-l border-gray-100 text-[#1B5E20] ${
-                            today ? 'bg-green-50/40' : 'bg-gray-50/50'
-                          }`}
+                          key={`${di}-lbl-total`}
+                          className={`text-center py-1.5 text-[9px] font-bold uppercase tracking-wide border-l border-gray-100 text-[#1B5E20] ${today ? 'bg-green-50/40' : 'bg-gray-50/50'}`}
                           style={{ minWidth: SUB_W }}
                         >
                           {t('inventory.shiftUsage.total')}
@@ -399,7 +613,6 @@ export default function ShiftUsagePage() {
               <tbody>
                 {sections.map(([section, items]) => (
                   <>
-                    {/* Section header */}
                     <tr key={`sec-${section}`} className="bg-gray-50 border-y border-gray-100">
                       <td
                         className="sticky left-0 z-10 bg-gray-50 px-4 py-1.5 border-r border-gray-100"
@@ -411,39 +624,28 @@ export default function ShiftUsagePage() {
                       </td>
                     </tr>
 
-                    {/* Item rows */}
                     {items.map(item => (
-                      <tr
-                        key={item.item_name}
-                        className="border-b border-gray-50 hover:bg-gray-50/40 transition-colors"
-                      >
-                        {/* Sticky item name */}
+                      <tr key={item.item_name} className="border-b border-gray-50 hover:bg-gray-50/40 transition-colors">
                         <td
                           className="sticky left-0 z-10 bg-white border-r border-gray-100 px-4 py-1.5"
                           style={{ minWidth: ITEM_W }}
                         >
-                          <div className="font-medium text-gray-800 text-xs leading-tight">
-                            {item.item_name}
-                          </div>
+                          <div className="font-medium text-gray-800 text-xs leading-tight">{item.item_name}</div>
                           <div className="text-gray-400 text-[10px] mt-0.5">{item.unit}</div>
                         </td>
 
-                        {/* 7 days × 3 sub-columns */}
                         {weekDays.map((day, di) => {
                           const dk = dateKey(day);
                           const today = isTodayDate(day);
-                          const lunchVal = getCellValue(dk, 'lunch', item.item_name);
+                          const lunchVal  = getCellValue(dk, 'lunch',  item.item_name);
                           const dinnerVal = getCellValue(dk, 'dinner', item.item_name);
-                          const total = getTotal(dk, item.item_name);
+                          const total     = getTotal(dk, item.item_name);
 
                           return (
                             <>
-                              {/* Lunch */}
                               <td
                                 key={`${di}-lunch`}
-                                className={`text-center py-1 px-1 border-l-2 border-gray-300 ${
-                                  today ? 'bg-green-50/10' : ''
-                                }`}
+                                className={`text-center py-1 px-1 border-l-2 border-gray-300 ${today ? 'bg-green-50/10' : ''}`}
                                 style={{ minWidth: SUB_W }}
                               >
                                 <input
@@ -457,13 +659,9 @@ export default function ShiftUsagePage() {
                                   placeholder="—"
                                 />
                               </td>
-
-                              {/* Dinner */}
                               <td
                                 key={`${di}-dinner`}
-                                className={`text-center py-1 px-1 border-l border-gray-100 ${
-                                  today ? 'bg-green-50/10' : ''
-                                }`}
+                                className={`text-center py-1 px-1 border-l border-gray-100 ${today ? 'bg-green-50/10' : ''}`}
                                 style={{ minWidth: SUB_W }}
                               >
                                 <input
@@ -477,20 +675,15 @@ export default function ShiftUsagePage() {
                                   placeholder="—"
                                 />
                               </td>
-
-                              {/* Total (calculated) */}
                               <td
                                 key={`${di}-total`}
-                                className={`text-center py-1 px-1 border-l border-gray-100 ${
-                                  today ? 'bg-green-50/20' : 'bg-gray-50/40'
-                                }`}
+                                className={`text-center py-1 px-1 border-l border-gray-100 ${today ? 'bg-green-50/20' : 'bg-gray-50/40'}`}
                                 style={{ minWidth: SUB_W }}
                               >
-                                {total > 0 ? (
-                                  <span className="font-bold text-xs text-[#1B5E20]">{total}</span>
-                                ) : (
-                                  <span className="text-gray-300 text-xs">—</span>
-                                )}
+                                {total > 0
+                                  ? <span className="font-bold text-xs text-[#1B5E20]">{total}</span>
+                                  : <span className="text-gray-300 text-xs">—</span>
+                                }
                               </td>
                             </>
                           );
@@ -513,9 +706,7 @@ export default function ShiftUsagePage() {
         )}
       </div>
 
-      <p className="text-xs text-gray-400">
-        {t('inventory.shiftUsage.hint')}
-      </p>
+      <p className="text-xs text-gray-400">{t('inventory.shiftUsage.hint')}</p>
     </div>
   );
 }
