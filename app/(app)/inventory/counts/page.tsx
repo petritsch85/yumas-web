@@ -69,6 +69,7 @@ export default function CurrentInventoryPage() {
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<Record<string, number>>({});
+  const [editError, setEditError] = useState<string | null>(null);
 
   const queryClient = useQueryClient();
 
@@ -96,6 +97,10 @@ export default function CurrentInventoryPage() {
       queryClient.invalidateQueries({ queryKey: ['inventory-submissions'] });
       setEditingId(null);
       setEditDraft({});
+      setEditError(null);
+    },
+    onError: (err: unknown) => {
+      setEditError(err instanceof Error ? err.message : 'Save failed — you may not have permission to edit submissions.');
     },
   });
 
@@ -159,6 +164,7 @@ export default function CurrentInventoryPage() {
     for (const item of sub.data ?? []) draft[item.name] = item.quantity;
     setEditDraft(draft);
     setEditingId(sub.id);
+    setEditError(null);
     // Make sure the card is expanded when editing
     setExpandedIds((prev) => { const next = new Set(prev); next.add(sub.id); return next; });
   };
@@ -403,20 +409,27 @@ export default function CurrentInventoryPage() {
                                 </div>
                               )}
                               {isEditing && (
-                                <div className="px-4 py-3 border-t border-blue-100 bg-blue-50 flex gap-2 justify-end">
-                                  <button
-                                    onClick={() => { setEditingId(null); setEditDraft({}); }}
-                                    className="px-3 py-1.5 text-xs font-semibold text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
-                                  >
-                                    {t('common.cancel')}
-                                  </button>
-                                  <button
-                                    onClick={() => saveEdit(sub)}
-                                    disabled={editMutation.isPending}
-                                    className="px-3 py-1.5 text-xs font-semibold text-white bg-[#2E7D32] rounded-lg hover:bg-[#1B5E20] disabled:opacity-50 transition-colors"
-                                  >
-                                    {editMutation.isPending ? t('common.saving') : t('inventory.counts.saveChanges')}
-                                  </button>
+                                <div className="px-4 py-3 border-t border-blue-100 bg-blue-50 space-y-2">
+                                  {editError && (
+                                    <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                                      {editError}
+                                    </div>
+                                  )}
+                                  <div className="flex gap-2 justify-end">
+                                    <button
+                                      onClick={() => { setEditingId(null); setEditDraft({}); setEditError(null); }}
+                                      className="px-3 py-1.5 text-xs font-semibold text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+                                    >
+                                      {t('common.cancel')}
+                                    </button>
+                                    <button
+                                      onClick={() => saveEdit(sub)}
+                                      disabled={editMutation.isPending}
+                                      className="px-3 py-1.5 text-xs font-semibold text-white bg-[#2E7D32] rounded-lg hover:bg-[#1B5E20] disabled:opacity-50 transition-colors"
+                                    >
+                                      {editMutation.isPending ? t('common.saving') : t('inventory.counts.saveChanges')}
+                                    </button>
+                                  </div>
                                 </div>
                               )}
                             </div>
