@@ -24,9 +24,6 @@ export default function NewRecipePage() {
   const [nameEs, setNameEs] = useState('');
   const [nameTab, setNameTab] = useState<Lang>('en');
   const [categoryId, setCategoryId] = useState('');
-  const [unitId, setUnitId] = useState('');
-  const [outputQty, setOutputQty] = useState('');
-  const [yieldPct, setYieldPct] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
@@ -37,17 +34,6 @@ export default function NewRecipePage() {
       const { data } = await supabase
         .from('categories')
         .select('id, name, color_hex')
-        .order('name');
-      return data ?? [];
-    },
-  });
-
-  const { data: units = [] } = useQuery({
-    queryKey: ['units'],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from('units_of_measure')
-        .select('id, name, abbreviation')
         .order('name');
       return data ?? [];
     },
@@ -71,7 +57,6 @@ export default function NewRecipePage() {
           name_es:      nameEs.trim()  || null,
           product_type: 'semi_finished',
           category_id:  categoryId  || null,
-          unit_id:      unitId      || null,
           is_purchasable: false,
           is_produced:    true,
           is_active:      true,
@@ -85,8 +70,6 @@ export default function NewRecipePage() {
         .from('recipes')
         .insert({
           output_item_id:   newItem.id,
-          output_quantity:  outputQty !== '' ? Number(outputQty) : null,
-          yield_percent:    yieldPct  !== '' ? Number(yieldPct)  : null,
           process_steps_en: [],
           process_steps_de: [],
           process_steps_es: [],
@@ -195,55 +178,6 @@ export default function NewRecipePage() {
           </select>
         </div>
 
-        {/* Output qty + unit side by side */}
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1.5">
-              {t('recipes.outputQuantity')}
-            </label>
-            <input
-              type="number"
-              min="0"
-              step="any"
-              value={outputQty}
-              onChange={e => setOutputQty(e.target.value)}
-              placeholder="e.g. 10"
-              className="w-full border-2 border-gray-300 bg-white rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20]"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1.5">
-              {t('recipes.unit')}
-            </label>
-            <select
-              value={unitId}
-              onChange={e => setUnitId(e.target.value)}
-              className="w-full border-2 border-gray-300 bg-white rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20] text-gray-900"
-            >
-              <option value="">—</option>
-              {units.map(u => (
-                <option key={u.id} value={u.id}>{u.abbreviation || u.name}</option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        {/* Yield % */}
-        <div>
-          <label className="block text-xs font-medium text-gray-500 mb-1.5">
-            {t('recipes.yieldPercent')}
-          </label>
-          <input
-            type="number"
-            min="0"
-            max="100"
-            step="any"
-            value={yieldPct}
-            onChange={e => setYieldPct(e.target.value)}
-            placeholder="e.g. 95"
-            className="w-full border-2 border-gray-300 bg-white rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20]"
-          />
-        </div>
       </div>
 
       {/* ── Submit ── */}
