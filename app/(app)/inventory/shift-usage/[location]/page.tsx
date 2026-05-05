@@ -614,21 +614,21 @@ export default function ShiftUsagePage() {
                       <>
                         <th
                           key={`${di}-lbl-lunch`}
-                          className={`text-center py-1.5 text-[9px] font-bold uppercase tracking-wide border-l-2 border-gray-300 text-orange-500 ${today ? 'bg-green-50/40' : ''}`}
+                          className={`text-center py-1.5 text-[9px] font-bold uppercase tracking-wide border-l-2 border-gray-300 text-gray-700 ${today ? 'bg-green-50/40' : ''}`}
                           style={{ minWidth: SUB_W }}
                         >
                           {t('inventory.shiftUsage.lunch')}
                         </th>
                         <th
                           key={`${di}-lbl-dinner`}
-                          className={`text-center py-1.5 text-[9px] font-bold uppercase tracking-wide border-l border-gray-100 text-indigo-500 ${today ? 'bg-green-50/40' : ''}`}
+                          className={`text-center py-1.5 text-[9px] font-bold uppercase tracking-wide border-l border-gray-100 text-gray-700 ${today ? 'bg-green-50/40' : ''}`}
                           style={{ minWidth: SUB_W }}
                         >
                           {t('inventory.shiftUsage.dinner')}
                         </th>
                         <th
                           key={`${di}-lbl-total`}
-                          className={`text-center py-1.5 text-[9px] font-bold uppercase tracking-wide border-l border-gray-100 text-[#1B5E20] ${today ? 'bg-green-50/40' : 'bg-gray-50/50'}`}
+                          className={`text-center py-1.5 text-[9px] font-bold uppercase tracking-wide border-l border-gray-100 text-gray-700 ${today ? 'bg-green-50/40' : 'bg-gray-50/50'}`}
                           style={{ minWidth: SUB_W }}
                         >
                           {t('inventory.shiftUsage.total')}
