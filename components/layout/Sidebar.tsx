@@ -114,13 +114,7 @@ const NAV_GROUPS: NavGroup[] = [
           { labelKey: 'sidebar.nav.deliveryReports',  href: '/delivery/reports',  icon: ClipboardList },
         ],
       },
-      {
-        labelKey: 'sidebar.nav.production', href: '/production', icon: Factory, permKey: 'production',
-        children: [
-          { labelKey: 'sidebar.nav.batches', href: '/production',             icon: Factory },
-          { labelKey: 'sidebar.nav.recipes', href: '/products/semi-finished', icon: FlaskConical },
-        ],
-      },
+      { labelKey: 'sidebar.nav.recipes', href: '/products/semi-finished', icon: FlaskConical, permKey: 'production' },
       { labelKey: 'sidebar.nav.buying',      href: '/purchase-orders',         icon: ShoppingCart, permKey: 'buying' },
       { labelKey: 'sidebar.nav.controlling', href: '/coming-soon/controlling', icon: TrendingUp,   adminOnly: true },
       { labelKey: 'sidebar.nav.wasteLog',    href: '/waste',                   icon: Trash2,       permKey: 'waste_log' },
