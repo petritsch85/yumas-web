@@ -413,7 +413,8 @@ export default function UsageForecastPage() {
         if (hasActual) {
           let total = actualSalesByLocDate[actualKey]; // OB + Simply actuals uploaded so far
 
-          // If dinner hasn't been uploaded yet, add the dinner forecast to complete the day
+          // If dinner hasn't been uploaded yet, add dinner forecast to complete the day
+          const bothShiftsUploaded = shiftInfo ? (shiftInfo.hasLunch && shiftInfo.hasDinner) : true;
           if (shiftInfo && !shiftInfo.hasDinner) {
             const dinnerOverride = weekOverrides.find(
               o => o.location_id === locId && o.forecast_date === dk && o.shift_type === 'dinner',
@@ -423,7 +424,8 @@ export default function UsageForecastPage() {
             total += Math.round(dOB + dOB * ratios.dinner);
           }
 
-          result[store][dk] = { val: total, isActual: true };
+          // Blue only when the full day is uploaded; green if dinner is still forecast
+          result[store][dk] = { val: total, isActual: bothShiftsUploaded };
         } else {
           // No actuals at all — full forecast
           const lunchOverride  = weekOverrides.find(
