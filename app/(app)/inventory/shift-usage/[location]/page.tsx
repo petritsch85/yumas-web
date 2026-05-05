@@ -3,7 +3,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
 import { useState, useMemo, useCallback } from 'react';
-import { ChevronLeft, ChevronRight, ArrowLeft } from 'lucide-react';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { useRouter, useParams } from 'next/navigation';
 import { useT } from '@/lib/i18n';
 
@@ -227,23 +227,46 @@ export default function ShiftUsagePage() {
   const ITEM_W = 180;
   const SUB_W = 52; // width per sub-column (Lunch, Dinner, Total)
 
+  const STORES_NAV = ['Westend', 'Eschborn', 'Taunus'] as const;
+
   return (
     <div className="space-y-4">
       {/* ── Header ── */}
-      <div className="flex items-center gap-3">
-        <button
-          onClick={() => router.push('/inventory/usage-forecast')}
-          className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500 transition-colors"
-          title="Back to Usage Forecast"
-        >
-          <ArrowLeft size={18} />
-        </button>
+      <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">
             {t('inventory.shiftUsage.title')} — {locationName}
           </h1>
           <p className="text-xs text-gray-400 mt-0.5">{t('inventory.shiftUsage.subtitle')}</p>
         </div>
+      </div>
+
+      {/* ── Store nav buttons ── */}
+      <div className="flex items-center gap-2">
+        {/* Group = back to Usage Forecast (all stores overview) */}
+        <button
+          onClick={() => router.push('/inventory/usage-forecast')}
+          className="px-4 py-2 rounded-lg text-sm font-semibold border border-gray-300 text-gray-500 hover:bg-gray-100 transition-colors"
+        >
+          {t('inventory.shiftUsage.groupBtn')}
+        </button>
+        <span className="text-gray-300 text-sm">|</span>
+        {STORES_NAV.map(store => {
+          const isActive = store.toLowerCase() === locationSlug.toLowerCase();
+          return (
+            <button
+              key={store}
+              onClick={() => router.push(`/inventory/shift-usage/${store.toLowerCase()}`)}
+              className={`px-4 py-2 rounded-lg text-sm font-semibold border transition-colors ${
+                isActive
+                  ? 'bg-[#1B5E20] border-[#1B5E20] text-white'
+                  : 'border-[#1B5E20] text-[#1B5E20] hover:bg-[#1B5E20] hover:text-white'
+              }`}
+            >
+              {store}
+            </button>
+          );
+        })}
       </div>
 
       {/* ── Week navigation ── */}

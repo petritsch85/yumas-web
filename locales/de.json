@@ -262,7 +262,8 @@
     "usageForecast": {
       "title": "Verbrauchsprognose",
       "subtitle": "Voraussichtlicher Zutatenverbrauch basierend auf Umsätzen",
-      "shiftUsageLabel": "Schichtverbrauch:"
+      "shiftUsageLabel": "Schichtverbrauch:",
+      "groupBtn": "Gesamt"
     },
     "shiftUsage": {
       "title": "Schichtverbrauch",
@@ -272,7 +273,8 @@
       "total": "Gesamt",
       "item": "Artikel",
       "noItems": "Keine Artikel gefunden. Artikel erscheinen, sobald Lieferungen erstellt wurden.",
-      "hint": "Mengen pro Schicht eingeben. Werte werden automatisch beim Verlassen des Feldes gespeichert."
+      "hint": "Mengen pro Schicht eingeben. Werte werden automatisch beim Verlassen des Feldes gespeichert.",
+      "groupBtn": "Gesamt"
     }
   },
   "production": {

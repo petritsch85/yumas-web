@@ -425,11 +425,14 @@ export default function UsageForecastPage() {
         <p className="text-xs text-gray-400">Sales from Sales Reports · usage proportional to sales</p>
       </div>
 
-      {/* ── Shift Usage store buttons ── */}
-      <div className="flex items-center gap-3">
-        <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-          {t('inventory.usageForecast.shiftUsageLabel')}
-        </span>
+      {/* ── Store nav buttons (Group = this page, active; stores → shift usage) ── */}
+      <div className="flex items-center gap-2">
+        <button
+          className="px-4 py-2 rounded-lg text-sm font-semibold border bg-[#1B5E20] border-[#1B5E20] text-white cursor-default"
+        >
+          {t('inventory.usageForecast.groupBtn')}
+        </button>
+        <span className="text-gray-300 text-sm">|</span>
         {STORES.map(store => (
           <button
             key={store}

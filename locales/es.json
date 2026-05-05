@@ -262,7 +262,8 @@
     "usageForecast": {
       "title": "Previsión de Uso",
       "subtitle": "Uso proyectado de ingredientes según ventas",
-      "shiftUsageLabel": "Uso por Turno:"
+      "shiftUsageLabel": "Uso por Turno:",
+      "groupBtn": "Grupo"
     },
     "shiftUsage": {
       "title": "Uso por Turno",
@@ -272,7 +273,8 @@
       "total": "Total",
       "item": "Artículo",
       "noItems": "No se encontraron artículos. Aparecerán una vez creadas las entregas.",
-      "hint": "Introduce las cantidades usadas por turno. Los valores se guardan automáticamente al salir de la celda."
+      "hint": "Introduce las cantidades usadas por turno. Los valores se guardan automáticamente al salir de la celda.",
+      "groupBtn": "Grupo"
     }
   },
   "production": {
