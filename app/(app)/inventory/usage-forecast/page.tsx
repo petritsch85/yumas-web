@@ -542,8 +542,8 @@ export default function UsageForecastPage() {
           <span className="flex items-center gap-1.5 text-blue-600 font-semibold">
             <span className="w-3 h-3 rounded-full bg-blue-500" /> Actual (uploaded)
           </span>
-          <span className="flex items-center gap-1.5 text-[#1B5E20] font-semibold">
-            <span className="w-3 h-3 rounded-full bg-[#1B5E20]" /> Forecast
+          <span className="flex items-center gap-1.5 text-red-500 font-semibold">
+            <span className="w-3 h-3 rounded-full bg-red-500" /> Forecast
           </span>
           <span className="flex items-center gap-1.5 text-gray-400">
             — No data / closed
@@ -619,7 +619,7 @@ export default function UsageForecastPage() {
                               : isActual
                                 ? 'text-blue-600 hover:bg-blue-50'
                                 : hasVal
-                                  ? 'text-[#1B5E20] hover:bg-green-50'
+                                  ? 'text-red-500 hover:bg-red-50'
                                   : 'text-gray-300 hover:bg-gray-50'
                           }`}
                           style={{ minWidth: COL_W }}

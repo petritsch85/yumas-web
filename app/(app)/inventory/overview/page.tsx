@@ -860,15 +860,15 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
   function UsageCell({ v }: { v: number | null }) {
     if (v === null) return <span className="text-gray-200">—</span>;
     if (v === 0)    return <span className="text-gray-400">0</span>;
-    if (v < 0)      return <span className="text-red-500 font-semibold">{v}</span>;
-    return <span className="text-[#2E7D32] font-semibold">{v}</span>;
+    if (v < 0)      return <span className="text-orange-500 font-semibold">{v}</span>;
+    return <span className="text-blue-600 font-semibold">{v}</span>;
   }
 
-  // Forecast cells: italic purple-ish tint to signal "estimated"
+  // Forecast cells: italic red to signal "estimated"
   function ForecastCell({ v, dim }: { v: number | null; dim?: boolean }) {
     if (v === null) return <span className="text-gray-200">—</span>;
     if (v === 0)    return <span className="text-gray-300 italic">0</span>;
-    return <span className={`italic ${dim ? 'text-gray-400' : 'text-violet-500 font-semibold'}`}>{v}</span>;
+    return <span className={`italic ${dim ? 'text-red-300' : 'text-red-500 font-semibold'}`}>{v}</span>;
   }
 
   return (
@@ -903,8 +903,8 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
         <div className="ml-auto flex items-center gap-4 text-xs text-gray-400">
           <span><span className="text-gray-800 font-semibold">12</span> Start/End</span>
           <span><span className="text-blue-600 font-semibold">5</span> Confirmed delivery</span>
-          <span><span className="text-[#2E7D32] font-semibold">10</span> Usage (actual)</span>
-          <span><span className="text-violet-500 font-semibold italic">8</span> Forecast</span>
+          <span><span className="text-blue-600 font-semibold">10</span> Usage (actual)</span>
+          <span><span className="text-red-500 font-semibold italic">8</span> Forecast</span>
         </div>
       </div>
 

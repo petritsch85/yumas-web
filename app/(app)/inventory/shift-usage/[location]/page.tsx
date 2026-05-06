@@ -502,8 +502,8 @@ export default function ShiftUsagePage() {
           <span className="flex items-center gap-1.5 text-blue-600 font-semibold">
             <span className="w-3 h-3 rounded-full bg-blue-500" /> Actual (uploaded)
           </span>
-          <span className="flex items-center gap-1.5 text-[#1B5E20] font-semibold">
-            <span className="w-3 h-3 rounded-full bg-[#1B5E20]" /> Forecast
+          <span className="flex items-center gap-1.5 text-red-500 font-semibold">
+            <span className="w-3 h-3 rounded-full bg-red-500" /> Forecast
           </span>
         </div>
       </div>
@@ -577,8 +577,8 @@ export default function ShiftUsagePage() {
                         <th
                           key={`${di}-sales-lunch`}
                           className={`text-center py-1 px-1 font-semibold text-[10px] border-l-2 border-gray-300 ${
-                            lunchIsActual ? 'text-blue-600' : 'text-[#1B5E20]'
-                          } ${today ? (lunchIsActual ? 'bg-blue-50/30' : 'bg-green-50/40') : altBg}`}
+                            lunchIsActual ? 'text-blue-600' : 'text-red-500'
+                          } ${today ? (lunchIsActual ? 'bg-blue-50/30' : 'bg-red-50/40') : altBg}`}
                           style={{ minWidth: SUB_W }}
                         >
                           {fmt(lunchVal)}
@@ -586,8 +586,8 @@ export default function ShiftUsagePage() {
                         <th
                           key={`${di}-sales-dinner`}
                           className={`text-center py-1 px-1 font-semibold text-[10px] border-l border-gray-100 ${
-                            dinnerIsActual ? 'text-blue-600' : 'text-[#1B5E20]'
-                          } ${today ? (dinnerIsActual ? 'bg-blue-50/30' : 'bg-green-50/40') : altBg}`}
+                            dinnerIsActual ? 'text-blue-600' : 'text-red-500'
+                          } ${today ? (dinnerIsActual ? 'bg-blue-50/30' : 'bg-red-50/40') : altBg}`}
                           style={{ minWidth: SUB_W }}
                         >
                           {fmt(dinnerVal)}
@@ -595,8 +595,8 @@ export default function ShiftUsagePage() {
                         <th
                           key={`${di}-sales-total`}
                           className={`text-center py-1 px-1 font-semibold text-[10px] border-l border-gray-100 ${
-                            totalIsActual ? 'text-blue-600' : 'text-[#1B5E20]'
-                          } ${today ? (totalIsActual ? 'bg-blue-50/30' : 'bg-green-50/40') : altBg}`}
+                            totalIsActual ? 'text-blue-600' : 'text-red-500'
+                          } ${today ? (totalIsActual ? 'bg-blue-50/30' : 'bg-red-50/40') : altBg}`}
                           style={{ minWidth: SUB_W }}
                         >
                           {fmt(totalVal)}
