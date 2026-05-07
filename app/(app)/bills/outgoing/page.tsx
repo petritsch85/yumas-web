@@ -105,6 +105,7 @@ export default function OutgoingBillsPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { t } = useT();
 
+  const [focusedField, setFocusedField] = useState<string | null>(null);
   const [tab, setTab]               = useState<'bills' | 'upload' | 'create'>('bills');
   const [isDragging, setIsDragging] = useState(false);
   const [queue, setQueue]           = useState<QueueItem[]>([]);
@@ -908,13 +909,31 @@ export default function OutgoingBillsPage() {
               <div className="grid grid-cols-3 gap-4 mb-4">
                 <div>
                   <label className={labelCls}>Essen Brutto (€)</label>
-                  <input type="number" step="0.01" className={inputCls} placeholder="0.00"
-                    value={essenBrutto} onChange={(e) => setEssenBrutto(e.target.value)} />
+                  <input
+                    type={focusedField === 'essenBrutto' ? 'number' : 'text'}
+                    step="0.01" min="0"
+                    className={inputCls}
+                    placeholder="0,00 €"
+                    value={focusedField === 'essenBrutto'
+                      ? essenBrutto
+                      : (essenBruttoN > 0 ? fmtEur(essenBruttoN) : '')}
+                    onFocus={() => setFocusedField('essenBrutto')}
+                    onBlur={() => setFocusedField(null)}
+                    onChange={(e) => setEssenBrutto(e.target.value)} />
                 </div>
                 <div>
                   <label className={labelCls}>Getränke Brutto (€)</label>
-                  <input type="number" step="0.01" className={inputCls} placeholder="0.00"
-                    value={getraenkeBrutto} onChange={(e) => setGetraenkeBrutto(e.target.value)} />
+                  <input
+                    type={focusedField === 'getraenkeBrutto' ? 'number' : 'text'}
+                    step="0.01" min="0"
+                    className={inputCls}
+                    placeholder="0,00 €"
+                    value={focusedField === 'getraenkeBrutto'
+                      ? getraenkeBrutto
+                      : (getraenkeBruttoN > 0 ? fmtEur(getraenkeBruttoN) : '')}
+                    onFocus={() => setFocusedField('getraenkeBrutto')}
+                    onBlur={() => setFocusedField(null)}
+                    onChange={(e) => setGetraenkeBrutto(e.target.value)} />
                 </div>
                 <div>
                   <label className={labelCls}>Brutto Gesamt (€)</label>
@@ -960,8 +979,17 @@ export default function OutgoingBillsPage() {
                 </div>
                 <div>
                   <label className={labelCls}>Trinkgeld (€) — optional</label>
-                  <input type="number" step="0.01" className={inputCls} placeholder="0.00"
-                    value={trinkgeld} onChange={(e) => setTrinkgeld(e.target.value)} />
+                  <input
+                    type={focusedField === 'trinkgeld' ? 'number' : 'text'}
+                    step="0.01" min="0"
+                    className={inputCls}
+                    placeholder="0,00 €"
+                    value={focusedField === 'trinkgeld'
+                      ? trinkgeld
+                      : (trinkgeldN > 0 ? fmtEur(trinkgeldN) : '')}
+                    onFocus={() => setFocusedField('trinkgeld')}
+                    onBlur={() => setFocusedField(null)}
+                    onChange={(e) => setTrinkgeld(e.target.value)} />
                 </div>
               </div>
             </div>
