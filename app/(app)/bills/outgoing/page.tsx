@@ -136,8 +136,10 @@ export default function OutgoingBillsPage() {
   const [poNumber,          setPoNumber]          = useState('');
   const [att,               setAtt]               = useState('');
   const [introText,         setIntroText]         = useState(makeIntroDinner(''));
-  const [essenNetto,        setEssenNetto]        = useState('');
-  const [getraenkeNetto,    setGetraenkeNetto]    = useState('');
+  const [essenBrutto,       setEssenBrutto]       = useState('');
+  const [getraenkeBrutto,   setGetraenkeBrutto]   = useState('');
+  const [mwstEssen,         setMwstEssen]         = useState('7');
+  const [mwstGetraenke,     setMwstGetraenke]     = useState('19');
   const [trinkgeld,         setTrinkgeld]         = useState('');
   const [lineItems,         setLineItems]         = useState<LineItem[]>([{ qty: 1, item: '', unitPrice: 0 }]);
   const [generating,        setGenerating]        = useState(false);
@@ -178,12 +180,12 @@ export default function OutgoingBillsPage() {
     recipient: { company, extra, contact: contactName, street, postcode, city, poNumber, att },
     introText,
     lineItems:      billType === 'monthly' ? lineItems   : undefined,
-    essenNetto:     billType === 'dinner'  ? parseFloat(essenNetto)     || 0 : undefined,
-    getraenkeNetto: billType === 'dinner'  ? parseFloat(getraenkeNetto) || 0 : undefined,
+    essenNetto:     billType === 'dinner'  ? (parseFloat(essenBrutto)    || 0) / (1 + (parseFloat(mwstEssen)    || 7)  / 100) : undefined,
+    getraenkeNetto: billType === 'dinner'  ? (parseFloat(getraenkeBrutto) || 0) / (1 + (parseFloat(mwstGetraenke) || 19) / 100) : undefined,
     trinkgeld:      billType === 'dinner'  ? parseFloat(trinkgeld)      || 0 : undefined,
   }), [invoiceNumber, billDate, billEventDate, billIssuingLoc, billType, company, extra,
        contactName, street, postcode, city, poNumber, att, introText, lineItems,
-       essenNetto, getraenkeNetto, trinkgeld]);
+       essenBrutto, getraenkeBrutto, mwstEssen, mwstGetraenke, trinkgeld]);
 
   const handleGenerate = async () => {
     setGenerating(true);
@@ -208,15 +210,23 @@ export default function OutgoingBillsPage() {
     }
   };
 
-  // Live totals
-  const essenN     = parseFloat(essenNetto)     || 0;
-  const getraenkeN = parseFloat(getraenkeNetto) || 0;
-  const trinkgeldN = parseFloat(trinkgeld)      || 0;
+  // Live totals (dinner: driven by brutto inputs + mwst rates)
+  const essenBruttoN    = parseFloat(essenBrutto)    || 0;
+  const getraenkeBruttoN = parseFloat(getraenkeBrutto) || 0;
+  const mwstEssenRate   = (parseFloat(mwstEssen)    || 7)  / 100;
+  const mwstGetraenkeRate = (parseFloat(mwstGetraenke) || 19) / 100;
+  const essenN          = essenBruttoN    / (1 + mwstEssenRate);
+  const getraenkeN      = getraenkeBruttoN / (1 + mwstGetraenkeRate);
+  const bruttoGesamt    = essenBruttoN + getraenkeBruttoN;
+  const mwstVatEssen    = essenBruttoN    - essenN;
+  const mwstVatGetraenke = getraenkeBruttoN - getraenkeN;
+  const mwstGesamtPct   = bruttoGesamt > 0 ? ((mwstVatEssen + mwstVatGetraenke) / bruttoGesamt) * 100 : 0;
+  const trinkgeldN = parseFloat(trinkgeld) || 0;
   const linesTotal = lineItems.reduce((s, i) => s + i.qty * i.unitPrice, 0);
   const netto      = billType === 'monthly' ? linesTotal : essenN + getraenkeN;
-  const mwst7      = billType === 'monthly' ? netto * 0.07 : essenN * 0.07;
-  const mwst19     = billType === 'dinner'  ? getraenkeN * 0.19 : 0;
-  const brutto     = netto + mwst7 + mwst19;
+  const mwst7      = billType === 'monthly' ? netto * 0.07 : mwstVatEssen;
+  const mwst19     = billType === 'dinner'  ? mwstVatGetraenke : 0;
+  const brutto     = billType === 'monthly' ? netto + mwst7 : bruttoGesamt;
   const billTotal  = brutto + (billType === 'dinner' ? trinkgeldN : 0);
 
   const fmtEur = (n: number) =>
@@ -893,16 +903,60 @@ export default function OutgoingBillsPage() {
           {billType === 'dinner' && (
             <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
               <p className="text-sm font-bold text-gray-800 mb-4 pb-3 border-b border-gray-100">Amounts</p>
+
+              {/* Row 1: Brutto inputs */}
+              <div className="grid grid-cols-3 gap-4 mb-4">
+                <div>
+                  <label className={labelCls}>Essen Brutto (€)</label>
+                  <input type="number" step="0.01" className={inputCls} placeholder="0.00"
+                    value={essenBrutto} onChange={(e) => setEssenBrutto(e.target.value)} />
+                </div>
+                <div>
+                  <label className={labelCls}>Getränke Brutto (€)</label>
+                  <input type="number" step="0.01" className={inputCls} placeholder="0.00"
+                    value={getraenkeBrutto} onChange={(e) => setGetraenkeBrutto(e.target.value)} />
+                </div>
+                <div>
+                  <label className={labelCls}>Brutto Gesamt (€)</label>
+                  <div className={`${inputCls} bg-gray-50 text-gray-500 cursor-not-allowed select-none`}>
+                    {fmtEur(bruttoGesamt)}
+                  </div>
+                </div>
+              </div>
+
+              {/* Row 2: Mwst rate inputs */}
+              <div className="grid grid-cols-3 gap-4 mb-4">
+                <div>
+                  <label className={labelCls}>Mwst Essen (%)</label>
+                  <input type="number" step="0.1" min="0" max="100" className={inputCls}
+                    value={mwstEssen} onChange={(e) => setMwstEssen(e.target.value)} />
+                </div>
+                <div>
+                  <label className={labelCls}>Mwst Getränke (%)</label>
+                  <input type="number" step="0.1" min="0" max="100" className={inputCls}
+                    value={mwstGetraenke} onChange={(e) => setMwstGetraenke(e.target.value)} />
+                </div>
+                <div>
+                  <label className={labelCls}>Mwst Gesamt (%)</label>
+                  <div className={`${inputCls} bg-gray-50 text-gray-500 cursor-not-allowed select-none`}>
+                    {mwstGesamtPct > 0 ? mwstGesamtPct.toFixed(2) + ' %' : '—'}
+                  </div>
+                </div>
+              </div>
+
+              {/* Row 3: Netto (calculated) + Trinkgeld */}
               <div className="grid grid-cols-3 gap-4">
                 <div>
                   <label className={labelCls}>Essen Netto (€)</label>
-                  <input type="number" step="0.01" className={inputCls} placeholder="0.00"
-                    value={essenNetto} onChange={(e) => setEssenNetto(e.target.value)} />
+                  <div className={`${inputCls} bg-gray-50 text-gray-500 cursor-not-allowed select-none`}>
+                    {fmtEur(essenN)}
+                  </div>
                 </div>
                 <div>
                   <label className={labelCls}>Getränke Netto (€)</label>
-                  <input type="number" step="0.01" className={inputCls} placeholder="0.00"
-                    value={getraenkeNetto} onChange={(e) => setGetraenkeNetto(e.target.value)} />
+                  <div className={`${inputCls} bg-gray-50 text-gray-500 cursor-not-allowed select-none`}>
+                    {fmtEur(getraenkeN)}
+                  </div>
                 </div>
                 <div>
                   <label className={labelCls}>Trinkgeld (€) — optional</label>
