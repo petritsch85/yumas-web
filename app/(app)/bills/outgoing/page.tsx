@@ -175,6 +175,38 @@ export default function OutgoingBillsPage() {
   const removeLineItem = (i: number) =>
     setLineItems((prev) => prev.filter((_, idx) => idx !== i));
 
+  // Live totals (dinner: driven by brutto or netto inputs + mwst rates)
+  const mwstEssenRate     = (parseFloat(mwstEssen)    || 7)  / 100;
+  const mwstGetraenkeRate = (parseFloat(mwstGetraenke) || 19) / 100;
+
+  // In netto mode: user enters netto → brutto calculated. In brutto mode: opposite.
+  const essenBruttoN = inputMode === 'brutto'
+    ? (parseFloat(essenBrutto)    || 0)
+    : (parseFloat(essenNettoInput) || 0) * (1 + mwstEssenRate);
+  const getraenkeBruttoN = inputMode === 'brutto'
+    ? (parseFloat(getraenkeBrutto)     || 0)
+    : (parseFloat(getraenkeNettoInput) || 0) * (1 + mwstGetraenkeRate);
+  const essenN = inputMode === 'brutto'
+    ? essenBruttoN    / (1 + mwstEssenRate)
+    : (parseFloat(essenNettoInput) || 0);
+  const getraenkeN = inputMode === 'brutto'
+    ? getraenkeBruttoN / (1 + mwstGetraenkeRate)
+    : (parseFloat(getraenkeNettoInput) || 0);
+  const bruttoGesamt    = essenBruttoN + getraenkeBruttoN;
+  const mwstVatEssen    = essenBruttoN    - essenN;
+  const mwstVatGetraenke = getraenkeBruttoN - getraenkeN;
+  const mwstGesamtPct   = bruttoGesamt > 0 ? ((mwstVatEssen + mwstVatGetraenke) / bruttoGesamt) * 100 : 0;
+  const trinkgeldN = parseFloat(trinkgeld) || 0;
+  const linesTotal = lineItems.reduce((s, i) => s + i.qty * i.unitPrice, 0);
+  const netto      = billType === 'monthly' ? linesTotal : essenN + getraenkeN;
+  const mwst7      = billType === 'monthly' ? netto * 0.07 : mwstVatEssen;
+  const mwst19     = billType === 'dinner'  ? mwstVatGetraenke : 0;
+  const brutto     = billType === 'monthly' ? netto + mwst7 : bruttoGesamt;
+  const billTotal  = brutto + (billType === 'dinner' ? trinkgeldN : 0);
+
+  const fmtEur = (n: number) =>
+    n.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €';
+
   const buildBillData = useCallback((): BillData => ({
     invoiceNumber,
     date:             billDate,
@@ -217,38 +249,6 @@ export default function OutgoingBillsPage() {
       setGenerating(false);
     }
   };
-
-  // Live totals (dinner: driven by brutto or netto inputs + mwst rates)
-  const mwstEssenRate     = (parseFloat(mwstEssen)    || 7)  / 100;
-  const mwstGetraenkeRate = (parseFloat(mwstGetraenke) || 19) / 100;
-
-  // In netto mode: user enters netto → brutto calculated. In brutto mode: opposite.
-  const essenBruttoN = inputMode === 'brutto'
-    ? (parseFloat(essenBrutto)    || 0)
-    : (parseFloat(essenNettoInput) || 0) * (1 + mwstEssenRate);
-  const getraenkeBruttoN = inputMode === 'brutto'
-    ? (parseFloat(getraenkeBrutto)     || 0)
-    : (parseFloat(getraenkeNettoInput) || 0) * (1 + mwstGetraenkeRate);
-  const essenN = inputMode === 'brutto'
-    ? essenBruttoN    / (1 + mwstEssenRate)
-    : (parseFloat(essenNettoInput) || 0);
-  const getraenkeN = inputMode === 'brutto'
-    ? getraenkeBruttoN / (1 + mwstGetraenkeRate)
-    : (parseFloat(getraenkeNettoInput) || 0);
-  const bruttoGesamt    = essenBruttoN + getraenkeBruttoN;
-  const mwstVatEssen    = essenBruttoN    - essenN;
-  const mwstVatGetraenke = getraenkeBruttoN - getraenkeN;
-  const mwstGesamtPct   = bruttoGesamt > 0 ? ((mwstVatEssen + mwstVatGetraenke) / bruttoGesamt) * 100 : 0;
-  const trinkgeldN = parseFloat(trinkgeld) || 0;
-  const linesTotal = lineItems.reduce((s, i) => s + i.qty * i.unitPrice, 0);
-  const netto      = billType === 'monthly' ? linesTotal : essenN + getraenkeN;
-  const mwst7      = billType === 'monthly' ? netto * 0.07 : mwstVatEssen;
-  const mwst19     = billType === 'dinner'  ? mwstVatGetraenke : 0;
-  const brutto     = billType === 'monthly' ? netto + mwst7 : bruttoGesamt;
-  const billTotal  = brutto + (billType === 'dinner' ? trinkgeldN : 0);
-
-  const fmtEur = (n: number) =>
-    n.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €';
 
   // ── Queries ───────────────────────────────────────────────────────────────
 
