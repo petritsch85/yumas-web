@@ -137,8 +137,11 @@ export default function OutgoingBillsPage() {
   const [poNumber,          setPoNumber]          = useState('');
   const [att,               setAtt]               = useState('');
   const [introText,         setIntroText]         = useState(makeIntroDinner(''));
+  const [inputMode,         setInputMode]         = useState<'brutto' | 'netto'>('brutto');
   const [essenBrutto,       setEssenBrutto]       = useState('');
   const [getraenkeBrutto,   setGetraenkeBrutto]   = useState('');
+  const [essenNettoInput,   setEssenNettoInput]   = useState('');
+  const [getraenkeNettoInput, setGetraenkeNettoInput] = useState('');
   const [mwstEssen,         setMwstEssen]         = useState('7');
   const [mwstGetraenke,     setMwstGetraenke]     = useState('19');
   const [trinkgeld,         setTrinkgeld]         = useState('');
@@ -211,13 +214,23 @@ export default function OutgoingBillsPage() {
     }
   };
 
-  // Live totals (dinner: driven by brutto inputs + mwst rates)
-  const essenBruttoN    = parseFloat(essenBrutto)    || 0;
-  const getraenkeBruttoN = parseFloat(getraenkeBrutto) || 0;
-  const mwstEssenRate   = (parseFloat(mwstEssen)    || 7)  / 100;
+  // Live totals (dinner: driven by brutto or netto inputs + mwst rates)
+  const mwstEssenRate     = (parseFloat(mwstEssen)    || 7)  / 100;
   const mwstGetraenkeRate = (parseFloat(mwstGetraenke) || 19) / 100;
-  const essenN          = essenBruttoN    / (1 + mwstEssenRate);
-  const getraenkeN      = getraenkeBruttoN / (1 + mwstGetraenkeRate);
+
+  // In netto mode: user enters netto → brutto calculated. In brutto mode: opposite.
+  const essenBruttoN = inputMode === 'brutto'
+    ? (parseFloat(essenBrutto)    || 0)
+    : (parseFloat(essenNettoInput) || 0) * (1 + mwstEssenRate);
+  const getraenkeBruttoN = inputMode === 'brutto'
+    ? (parseFloat(getraenkeBrutto)     || 0)
+    : (parseFloat(getraenkeNettoInput) || 0) * (1 + mwstGetraenkeRate);
+  const essenN = inputMode === 'brutto'
+    ? essenBruttoN    / (1 + mwstEssenRate)
+    : (parseFloat(essenNettoInput) || 0);
+  const getraenkeN = inputMode === 'brutto'
+    ? getraenkeBruttoN / (1 + mwstGetraenkeRate)
+    : (parseFloat(getraenkeNettoInput) || 0);
   const bruttoGesamt    = essenBruttoN + getraenkeBruttoN;
   const mwstVatEssen    = essenBruttoN    - essenN;
   const mwstVatGetraenke = getraenkeBruttoN - getraenkeN;
@@ -903,37 +916,60 @@ export default function OutgoingBillsPage() {
           {/* Dinner: amounts */}
           {billType === 'dinner' && (
             <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
-              <p className="text-sm font-bold text-gray-800 mb-4 pb-3 border-b border-gray-100">Amounts</p>
+              {/* Header + mode toggle */}
+              <div className="flex items-center justify-between mb-4 pb-3 border-b border-gray-100">
+                <p className="text-sm font-bold text-gray-800">Amounts</p>
+                <div className="flex rounded-lg border border-gray-200 overflow-hidden text-xs font-semibold">
+                  <button
+                    type="button"
+                    onClick={() => setInputMode('brutto')}
+                    className={`px-3 py-1.5 transition-colors ${inputMode === 'brutto' ? 'bg-[#1B5E20] text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}
+                  >
+                    Brutto → Netto
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setInputMode('netto')}
+                    className={`px-3 py-1.5 transition-colors border-l border-gray-200 ${inputMode === 'netto' ? 'bg-[#1B5E20] text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}
+                  >
+                    Netto → Brutto
+                  </button>
+                </div>
+              </div>
 
-              {/* Row 1: Brutto inputs */}
+              {/* Row 1: Brutto */}
               <div className="grid grid-cols-3 gap-4 mb-4">
                 <div>
                   <label className={labelCls}>Essen Brutto (€)</label>
-                  <input
-                    type={focusedField === 'essenBrutto' ? 'number' : 'text'}
-                    step="0.01" min="0"
-                    className={inputCls}
-                    placeholder="0,00 €"
-                    value={focusedField === 'essenBrutto'
-                      ? essenBrutto
-                      : (essenBruttoN > 0 ? fmtEur(essenBruttoN) : '')}
-                    onFocus={() => setFocusedField('essenBrutto')}
-                    onBlur={() => setFocusedField(null)}
-                    onChange={(e) => setEssenBrutto(e.target.value)} />
+                  {inputMode === 'brutto' ? (
+                    <input
+                      type={focusedField === 'essenBrutto' ? 'number' : 'text'}
+                      step="0.01" min="0" className={inputCls} placeholder="0,00 €"
+                      value={focusedField === 'essenBrutto' ? essenBrutto : (essenBruttoN > 0 ? fmtEur(essenBruttoN) : '')}
+                      onFocus={() => setFocusedField('essenBrutto')}
+                      onBlur={() => setFocusedField(null)}
+                      onChange={(e) => setEssenBrutto(e.target.value)} />
+                  ) : (
+                    <div className={`${inputCls} !bg-gray-200 !border-gray-300 !shadow-none text-gray-500 cursor-not-allowed select-none`}>
+                      {essenBruttoN > 0 ? fmtEur(essenBruttoN) : '0,00 €'}
+                    </div>
+                  )}
                 </div>
                 <div>
                   <label className={labelCls}>Getränke Brutto (€)</label>
-                  <input
-                    type={focusedField === 'getraenkeBrutto' ? 'number' : 'text'}
-                    step="0.01" min="0"
-                    className={inputCls}
-                    placeholder="0,00 €"
-                    value={focusedField === 'getraenkeBrutto'
-                      ? getraenkeBrutto
-                      : (getraenkeBruttoN > 0 ? fmtEur(getraenkeBruttoN) : '')}
-                    onFocus={() => setFocusedField('getraenkeBrutto')}
-                    onBlur={() => setFocusedField(null)}
-                    onChange={(e) => setGetraenkeBrutto(e.target.value)} />
+                  {inputMode === 'brutto' ? (
+                    <input
+                      type={focusedField === 'getraenkeBrutto' ? 'number' : 'text'}
+                      step="0.01" min="0" className={inputCls} placeholder="0,00 €"
+                      value={focusedField === 'getraenkeBrutto' ? getraenkeBrutto : (getraenkeBruttoN > 0 ? fmtEur(getraenkeBruttoN) : '')}
+                      onFocus={() => setFocusedField('getraenkeBrutto')}
+                      onBlur={() => setFocusedField(null)}
+                      onChange={(e) => setGetraenkeBrutto(e.target.value)} />
+                  ) : (
+                    <div className={`${inputCls} !bg-gray-200 !border-gray-300 !shadow-none text-gray-500 cursor-not-allowed select-none`}>
+                      {getraenkeBruttoN > 0 ? fmtEur(getraenkeBruttoN) : '0,00 €'}
+                    </div>
+                  )}
                 </div>
                 <div>
                   <label className={labelCls}>Brutto Gesamt (€)</label>
@@ -963,19 +999,39 @@ export default function OutgoingBillsPage() {
                 </div>
               </div>
 
-              {/* Row 3: Netto (calculated) + Trinkgeld */}
+              {/* Row 3: Netto (editable in netto mode, calculated in brutto mode) + Trinkgeld */}
               <div className="grid grid-cols-3 gap-4">
                 <div>
                   <label className={labelCls}>Essen Netto (€)</label>
-                  <div className={`${inputCls} !bg-gray-200 !border-gray-300 !shadow-none text-gray-500 cursor-not-allowed select-none`}>
-                    {fmtEur(essenN)}
-                  </div>
+                  {inputMode === 'netto' ? (
+                    <input
+                      type={focusedField === 'essenNetto' ? 'number' : 'text'}
+                      step="0.01" min="0" className={inputCls} placeholder="0,00 €"
+                      value={focusedField === 'essenNetto' ? essenNettoInput : (essenN > 0 ? fmtEur(essenN) : '')}
+                      onFocus={() => setFocusedField('essenNetto')}
+                      onBlur={() => setFocusedField(null)}
+                      onChange={(e) => setEssenNettoInput(e.target.value)} />
+                  ) : (
+                    <div className={`${inputCls} !bg-gray-200 !border-gray-300 !shadow-none text-gray-500 cursor-not-allowed select-none`}>
+                      {fmtEur(essenN)}
+                    </div>
+                  )}
                 </div>
                 <div>
                   <label className={labelCls}>Getränke Netto (€)</label>
-                  <div className={`${inputCls} !bg-gray-200 !border-gray-300 !shadow-none text-gray-500 cursor-not-allowed select-none`}>
-                    {fmtEur(getraenkeN)}
-                  </div>
+                  {inputMode === 'netto' ? (
+                    <input
+                      type={focusedField === 'getraenkeNetto' ? 'number' : 'text'}
+                      step="0.01" min="0" className={inputCls} placeholder="0,00 €"
+                      value={focusedField === 'getraenkeNetto' ? getraenkeNettoInput : (getraenkeN > 0 ? fmtEur(getraenkeN) : '')}
+                      onFocus={() => setFocusedField('getraenkeNetto')}
+                      onBlur={() => setFocusedField(null)}
+                      onChange={(e) => setGetraenkeNettoInput(e.target.value)} />
+                  ) : (
+                    <div className={`${inputCls} !bg-gray-200 !border-gray-300 !shadow-none text-gray-500 cursor-not-allowed select-none`}>
+                      {fmtEur(getraenkeN)}
+                    </div>
+                  )}
                 </div>
                 <div>
                   <label className={labelCls}>Trinkgeld (€) — optional</label>
