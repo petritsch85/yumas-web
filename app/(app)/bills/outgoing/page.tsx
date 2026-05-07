@@ -918,7 +918,7 @@ export default function OutgoingBillsPage() {
                 </div>
                 <div>
                   <label className={labelCls}>Brutto Gesamt (€)</label>
-                  <div className={`${inputCls} bg-gray-200 border-gray-300 text-gray-500 cursor-not-allowed select-none shadow-none`}>
+                  <div className={`${inputCls} !bg-gray-200 !border-gray-300 !shadow-none text-gray-500 cursor-not-allowed select-none`}>
                     {fmtEur(bruttoGesamt)}
                   </div>
                 </div>
@@ -938,7 +938,7 @@ export default function OutgoingBillsPage() {
                 </div>
                 <div>
                   <label className={labelCls}>Mwst Gesamt (%)</label>
-                  <div className={`${inputCls} bg-gray-200 border-gray-300 text-gray-500 cursor-not-allowed select-none shadow-none`}>
+                  <div className={`${inputCls} !bg-gray-200 !border-gray-300 !shadow-none text-gray-500 cursor-not-allowed select-none`}>
                     {mwstGesamtPct > 0 ? mwstGesamtPct.toFixed(2) + ' %' : '—'}
                   </div>
                 </div>
@@ -948,13 +948,13 @@ export default function OutgoingBillsPage() {
               <div className="grid grid-cols-3 gap-4">
                 <div>
                   <label className={labelCls}>Essen Netto (€)</label>
-                  <div className={`${inputCls} bg-gray-200 border-gray-300 text-gray-500 cursor-not-allowed select-none shadow-none`}>
+                  <div className={`${inputCls} !bg-gray-200 !border-gray-300 !shadow-none text-gray-500 cursor-not-allowed select-none`}>
                     {fmtEur(essenN)}
                   </div>
                 </div>
                 <div>
                   <label className={labelCls}>Getränke Netto (€)</label>
-                  <div className={`${inputCls} bg-gray-200 border-gray-300 text-gray-500 cursor-not-allowed select-none shadow-none`}>
+                  <div className={`${inputCls} !bg-gray-200 !border-gray-300 !shadow-none text-gray-500 cursor-not-allowed select-none`}>
                     {fmtEur(getraenkeN)}
                   </div>
                 </div>
