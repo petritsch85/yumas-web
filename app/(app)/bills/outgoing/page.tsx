@@ -413,8 +413,8 @@ export default function OutgoingBillsPage() {
   const savedCount   = queue.filter((i) => i.saved).length;
   const activeCount  = queue.filter((i) => !i.saved).length;
 
-  const inputCls = 'w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]';
-  const labelCls = 'block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1';
+  const inputCls = 'w-full bg-white border border-gray-300 rounded-lg px-3 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 shadow-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/40 focus:border-[#1B5E20] transition-colors';
+  const labelCls = 'block text-xs font-semibold text-gray-600 uppercase tracking-wide mb-1.5';
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -738,7 +738,7 @@ export default function OutgoingBillsPage() {
         <div className="max-w-3xl space-y-5">
 
           {/* Bill type */}
-          <div className="bg-white rounded-lg border border-gray-100 shadow-sm p-5">
+          <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
             <p className={labelCls}>Bill Type</p>
             <div className="flex gap-3">
               {(['dinner', 'monthly'] as const).map((t) => (
@@ -758,8 +758,8 @@ export default function OutgoingBillsPage() {
           </div>
 
           {/* Invoice details */}
-          <div className="bg-white rounded-lg border border-gray-100 shadow-sm p-5">
-            <p className="text-sm font-bold text-gray-700 mb-4">Invoice Details</p>
+          <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
+            <p className="text-sm font-bold text-gray-800 mb-4 pb-3 border-b border-gray-100">Invoice Details</p>
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className={labelCls}>Invoice Number</label>
@@ -794,8 +794,8 @@ export default function OutgoingBillsPage() {
           </div>
 
           {/* Recipient */}
-          <div className="bg-white rounded-lg border border-gray-100 shadow-sm p-5">
-            <p className="text-sm font-bold text-gray-700 mb-4">Recipient</p>
+          <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
+            <p className="text-sm font-bold text-gray-800 mb-4 pb-3 border-b border-gray-100">Recipient</p>
             <div className="space-y-3">
               <div>
                 <label className={labelCls}>Company Name *</label>
@@ -845,7 +845,7 @@ export default function OutgoingBillsPage() {
           </div>
 
           {/* Intro text */}
-          <div className="bg-white rounded-lg border border-gray-100 shadow-sm p-5">
+          <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
             <label className={labelCls}>Intro Text</label>
             <textarea
               className={`${inputCls} resize-none`}
@@ -857,7 +857,7 @@ export default function OutgoingBillsPage() {
 
           {/* Monthly: line items */}
           {billType === 'monthly' && (
-            <div className="bg-white rounded-lg border border-gray-100 shadow-sm p-5">
+            <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
               <div className="flex items-center justify-between mb-4">
                 <p className="text-sm font-bold text-gray-700">Line Items</p>
                 <button onClick={addLineItem}
@@ -891,8 +891,8 @@ export default function OutgoingBillsPage() {
 
           {/* Dinner: amounts */}
           {billType === 'dinner' && (
-            <div className="bg-white rounded-lg border border-gray-100 shadow-sm p-5">
-              <p className="text-sm font-bold text-gray-700 mb-4">Amounts</p>
+            <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
+              <p className="text-sm font-bold text-gray-800 mb-4 pb-3 border-b border-gray-100">Amounts</p>
               <div className="grid grid-cols-3 gap-4">
                 <div>
                   <label className={labelCls}>Essen Netto (€)</label>
@@ -914,8 +914,8 @@ export default function OutgoingBillsPage() {
           )}
 
           {/* Live totals */}
-          <div className="bg-white rounded-lg border border-gray-100 shadow-sm p-5">
-            <p className="text-sm font-bold text-gray-700 mb-3">Totals Preview</p>
+          <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
+            <p className="text-sm font-bold text-gray-800 mb-3 pb-3 border-b border-gray-100">Totals Preview</p>
             <div className="space-y-1 text-sm max-w-xs ml-auto">
               {billType === 'dinner' && (
                 <>
