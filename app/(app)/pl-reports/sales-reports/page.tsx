@@ -3465,20 +3465,20 @@ export default function SalesReportsPage() {
                                 const val = billsMap[col.dateKey] ?? 0;
                                 return (
                                   <td key={ci} className="py-2 text-right tabular-nums" style={{ paddingLeft:4, paddingRight:8, backgroundColor: isCurDay ? 'rgba(59,130,246,0.04)' : undefined }}>
-                                    {val > 0 ? <span className="text-gray-700">{fmtNum(val)}</span> : <span className="text-gray-300">—</span>}
+                                    {val > 0 ? <span className="text-blue-600 font-semibold">{fmtNum(val)}</span> : <span className="text-gray-300">—</span>}
                                   </td>
                                 );
                               } else {
                                 const wTotal = col.wDateKeys.reduce((s, k) => s + (billsMap[k] ?? 0), 0);
                                 return (
                                   <td key={ci} className="py-2 text-right tabular-nums" style={{ paddingLeft:4, paddingRight:6, backgroundColor:'#fffbeb', borderLeft:'1px solid #fde68a', borderRight:'1px solid #fde68a' }}>
-                                    {wTotal > 0 ? <span className="text-gray-700">{fmtNum(wTotal)}</span> : <span className="text-gray-300">—</span>}
+                                    {wTotal > 0 ? <span className="text-blue-600 font-semibold">{fmtNum(wTotal)}</span> : <span className="text-gray-300">—</span>}
                                   </td>
                                 );
                               }
                             })}
                             <td className="py-2 text-right tabular-nums border-l border-gray-200" style={{ paddingLeft:4, paddingRight:8 }}>
-                              {qBills > 0 ? <span className="text-gray-700 font-bold">{fmtNum(qBills)}</span> : <span className="text-gray-300">—</span>}
+                              {qBills > 0 ? <span className="text-blue-600 font-bold">{fmtNum(qBills)}</span> : <span className="text-gray-300">—</span>}
                             </td>
                           </tr>
                         );
