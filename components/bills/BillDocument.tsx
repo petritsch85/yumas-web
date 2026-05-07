@@ -24,12 +24,12 @@ const PAYMENT  = 'Die Rechnung ist zahlbar innerhalb von 7 Tagen nach Rechnungse
 export type LineItem = { qty: number; item: string; unitPrice: number };
 
 export type BillData = {
-  invoiceNumber   : string;
-  date            : string;    // DD.MM.YYYY  — invoice date
-  eventDate?      : string;    // DD.MM.YYYY  — date of the event
-  issuingLocation?: string;    // 'Westend' | 'Eschborn' | 'Taunus'
-  type            : 'monthly' | 'dinner';
-  recipient       : {
+  invoiceNumber    : string;
+  date             : string;    // DD.MM.YYYY  — invoice date
+  eventDate?       : string;    // DD.MM.YYYY  — date of the event
+  issuingLocation? : string;    // 'Westend' | 'Eschborn' | 'Taunus'
+  type             : 'monthly' | 'dinner';
+  recipient        : {
     company  : string;
     extra?   : string;
     contact? : string;
@@ -39,13 +39,17 @@ export type BillData = {
     poNumber?: string;
     att?     : string;
   };
-  introText      : string;
+  introText       : string;
   // Type A – monthly orders
-  lineItems?     : LineItem[];
+  lineItems?      : LineItem[];
   // Type B – dinner / event
-  essenNetto?    : number;
-  getraenkeNetto?: number;
-  trinkgeld?     : number;
+  essenBrutto?    : number;
+  getraenkeBrutto?: number;
+  mwstEssenPct?   : number;   // e.g. 7
+  mwstGetraenkePct?: number;  // e.g. 19
+  essenNetto?     : number;
+  getraenkeNetto? : number;
+  trinkgeld?      : number;
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -136,27 +140,31 @@ export function BillDocument({ data }: { data: BillData }) {
     : DEFAULT_LOCATION;
 
   // Derived totals
-  const essen     = data.essenNetto     ?? 0;
-  const getraenke = data.getraenkeNetto ?? 0;
-  const tip       = data.trinkgeld      ?? 0;
+  const tip = data.trinkgeld ?? 0;
 
+  // Monthly
   let gesamtNetto  = 0;
-  let mwst7        = 0;
-  let mwst19       = 0;
-  let brutto       = 0;
-  let gesamtBetrag = 0;
+  let mwst7monthly = 0;
+  let bruttoMonthly = 0;
+
+  // Dinner – use passed-in values; fall back to deriving from netto if brutto not provided
+  const mwstEssenRate     = (data.mwstEssenPct    ?? 7)  / 100;
+  const mwstGetraenkeRate = (data.mwstGetraenkePct ?? 19) / 100;
+  const essenBrutto       = data.essenBrutto     ?? (data.essenNetto     ?? 0) * (1 + mwstEssenRate);
+  const getraenkeBrutto   = data.getraenkeBrutto ?? (data.getraenkeNetto ?? 0) * (1 + mwstGetraenkeRate);
+  const gesamtBrutto      = essenBrutto + getraenkeBrutto;
+  const essenNetto        = data.essenNetto     ?? essenBrutto     / (1 + mwstEssenRate);
+  const getraenkeNetto    = data.getraenkeNetto ?? getraenkeBrutto / (1 + mwstGetraenkeRate);
+  const gesamtNettoD      = essenNetto + getraenkeNetto;
+  const mwstEssenAmt      = essenBrutto     - essenNetto;
+  const mwstGetraenkeAmt  = getraenkeBrutto - getraenkeNetto;
+  const mwstGesamtAmt     = mwstEssenAmt + mwstGetraenkeAmt;
+  const gesamtBetrag      = isMonthly ? 0 : gesamtBrutto + tip;
 
   if (isMonthly && data.lineItems) {
-    gesamtNetto  = data.lineItems.reduce((s, i) => s + i.qty * i.unitPrice, 0);
-    mwst7        = gesamtNetto * 0.07;
-    brutto       = gesamtNetto + mwst7;
-    gesamtBetrag = brutto;
-  } else {
-    gesamtNetto  = essen + getraenke;
-    mwst7        = essen * 0.07;
-    mwst19       = getraenke * 0.19;
-    brutto       = gesamtNetto + mwst7 + mwst19;
-    gesamtBetrag = brutto + tip;
+    gesamtNetto   = data.lineItems.reduce((s, i) => s + i.qty * i.unitPrice, 0);
+    mwst7monthly  = gesamtNetto * 0.07;
+    bruttoMonthly = gesamtNetto + mwst7monthly;
   }
 
   return (
@@ -228,38 +236,36 @@ export function BillDocument({ data }: { data: BillData }) {
         {/* ── TYPE B: dinner amounts ───────────────────────────────── */}
         {!isMonthly && (
           <View>
-            {/* Group 1: Essen + Getränke netto */}
+            {/* Group 1: Brutto split */}
             <View style={s.groupGap}>
-              <AmtRow label="Gesamt Essen netto"    value={essen} />
-              <AmtRow label="Gesamt Getränke netto" value={getraenke} />
+              <AmtRow label="Essen Brutto (€)"    value={essenBrutto} />
+              <AmtRow label="Getränke Brutto (€)" value={getraenkeBrutto} />
+              <AmtRow label="Gesamt Brutto (€)"   value={gesamtBrutto} />
             </View>
 
-            {/* Group 2: Gesamt Netto */}
+            {/* Group 2: MwSt */}
             <View style={s.groupGap}>
-              <AmtRow label="Gesamt Netto" value={gesamtNetto} />
+              <AmtRow label={`Mwst Essen (${data.mwstEssenPct ?? 7}%)`}    value={mwstEssenAmt} />
+              <AmtRow label={`Mwst Getränke (${data.mwstGetraenkePct ?? 19}%)`} value={mwstGetraenkeAmt} />
+              <AmtRow label="Mwst Gesamt"                                   value={mwstGesamtAmt} />
             </View>
 
-            {/* Group 3: MwSt */}
+            {/* Group 3: Netto split */}
             <View style={s.groupGap}>
-              <AmtRow label="Mwst 7%"  value={mwst7} />
-              <AmtRow label="Mwst 19%" value={mwst19} />
+              <AmtRow label="Essen Netto (€)"    value={essenNetto} />
+              <AmtRow label="Getränke Netto (€)" value={getraenkeNetto} />
+              <AmtRow label="Gesamt Netto (€)"   value={gesamtNettoD} />
             </View>
 
-            {/* Group 4: Brutto */}
-            <View style={s.groupGap}>
-              <AmtRow label="Brutto (19% Mwst)" value={brutto} />
-              <AmtRow label="Gesamt Brutto"      value={brutto} />
-            </View>
-
-            {/* Group 5: Trinkgeld (only if > 0) */}
+            {/* Group 4: Trinkgeld (only if > 0) */}
             {tip > 0 && (
               <View style={s.groupGap}>
-                <AmtRow label="Trinkgeld" value={tip} />
+                <AmtRow label="Trinkgeld (€)" value={tip} />
               </View>
             )}
 
             {/* Final: Gesamtbetrag */}
-            <AmtRow label="Gesamtbetrag (zu zahlen)" value={gesamtBetrag} />
+            <AmtRow label="Gesamtbetrag (€, zu zahlen)" value={gesamtBetrag} />
           </View>
         )}
 
@@ -270,9 +276,9 @@ export function BillDocument({ data }: { data: BillData }) {
               <AmtRow label="Gesamt Netto" value={gesamtNetto} />
             </View>
             <View style={s.groupGap}>
-              <AmtRow label="Mwst 7%" value={mwst7} />
+              <AmtRow label="Mwst 7%" value={mwst7monthly} />
             </View>
-            <AmtRow label="Gesamtbetrag (zu zahlen)" value={gesamtBetrag} />
+            <AmtRow label="Gesamtbetrag (zu zahlen)" value={bruttoMonthly} />
           </View>
         )}
 

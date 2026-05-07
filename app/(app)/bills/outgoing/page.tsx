@@ -177,19 +177,23 @@ export default function OutgoingBillsPage() {
 
   const buildBillData = useCallback((): BillData => ({
     invoiceNumber,
-    date:            billDate,
-    eventDate:       billEventDate || undefined,
-    issuingLocation: billIssuingLoc || undefined,
-    type:            billType,
+    date:             billDate,
+    eventDate:        billEventDate || undefined,
+    issuingLocation:  billIssuingLoc || undefined,
+    type:             billType,
     recipient: { company, extra, contact: contactName, street, postcode, city, poNumber, att },
     introText,
-    lineItems:      billType === 'monthly' ? lineItems   : undefined,
-    essenNetto:     billType === 'dinner'  ? (parseFloat(essenBrutto)    || 0) / (1 + (parseFloat(mwstEssen)    || 7)  / 100) : undefined,
-    getraenkeNetto: billType === 'dinner'  ? (parseFloat(getraenkeBrutto) || 0) / (1 + (parseFloat(mwstGetraenke) || 19) / 100) : undefined,
-    trinkgeld:      billType === 'dinner'  ? parseFloat(trinkgeld)      || 0 : undefined,
+    lineItems:        billType === 'monthly' ? lineItems        : undefined,
+    essenBrutto:      billType === 'dinner'  ? essenBruttoN     : undefined,
+    getraenkeBrutto:  billType === 'dinner'  ? getraenkeBruttoN : undefined,
+    mwstEssenPct:     billType === 'dinner'  ? (parseFloat(mwstEssen)    || 7)  : undefined,
+    mwstGetraenkePct: billType === 'dinner'  ? (parseFloat(mwstGetraenke) || 19) : undefined,
+    essenNetto:       billType === 'dinner'  ? essenN           : undefined,
+    getraenkeNetto:   billType === 'dinner'  ? getraenkeN       : undefined,
+    trinkgeld:        billType === 'dinner'  ? trinkgeldN       : undefined,
   }), [invoiceNumber, billDate, billEventDate, billIssuingLoc, billType, company, extra,
        contactName, street, postcode, city, poNumber, att, introText, lineItems,
-       essenBrutto, getraenkeBrutto, mwstEssen, mwstGetraenke, trinkgeld]);
+       essenBruttoN, getraenkeBruttoN, essenN, getraenkeN, mwstEssen, mwstGetraenke, trinkgeldN]);
 
   const handleGenerate = async () => {
     setGenerating(true);
