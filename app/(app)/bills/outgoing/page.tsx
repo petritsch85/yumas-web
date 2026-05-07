@@ -997,43 +997,81 @@ export default function OutgoingBillsPage() {
 
           {/* Live totals */}
           <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
-            <p className="text-sm font-bold text-gray-800 mb-3 pb-3 border-b border-gray-100">Totals Preview</p>
-            <div className="space-y-1 text-sm max-w-xs ml-auto">
-              {billType === 'dinner' && (
-                <>
-                  <div className="flex justify-between text-gray-600">
-                    <span>Gesamt Essen netto</span><span>{fmtEur(essenN)}</span>
-                  </div>
-                  <div className="flex justify-between text-gray-600">
-                    <span>Gesamt Getränke netto</span><span>{fmtEur(getraenkeN)}</span>
-                  </div>
-                </>
-              )}
-              <div className="flex justify-between text-gray-600">
-                <span>Gesamt Netto</span><span>{fmtEur(netto)}</span>
-              </div>
-              <div className="flex justify-between text-gray-600">
-                <span>Mwst (7%)</span><span>{fmtEur(mwst7)}</span>
-              </div>
-              {billType === 'dinner' && (
-                <div className="flex justify-between text-gray-600">
-                  <span>Mwst (19%)</span><span>{fmtEur(mwst19)}</span>
-                </div>
-              )}
-              <div className="border-t border-gray-100 my-1" />
-              <div className="flex justify-between text-gray-600">
-                <span>Gesamt Brutto</span><span>{fmtEur(brutto)}</span>
-              </div>
-              {billType === 'dinner' && trinkgeldN > 0 && (
-                <div className="flex justify-between text-gray-600">
-                  <span>Trinkgeld</span><span>{fmtEur(trinkgeldN)}</span>
-                </div>
-              )}
-              <div className="border-t border-gray-200 my-1" />
-              <div className="flex justify-between font-bold text-gray-900">
-                <span>Gesamtbetrag</span><span>{fmtEur(billTotal)}</span>
-              </div>
-            </div>
+            <p className="text-sm font-bold text-gray-800 mb-4 pb-3 border-b border-gray-100">Totals Preview</p>
+            <table className="w-full text-sm border-collapse">
+              <tbody>
+                {/* ── Brutto block ── */}
+                {billType === 'dinner' && (<>
+                  <tr className="border-b border-gray-100">
+                    <td className="py-2 px-3 text-gray-600 bg-gray-50 border border-gray-200 rounded-tl">Essen Brutto (€)</td>
+                    <td className="py-2 px-3 text-right tabular-nums text-gray-800 bg-gray-50 border border-gray-200 rounded-tr">{fmtEur(essenBruttoN)}</td>
+                  </tr>
+                  <tr className="border-b border-gray-100">
+                    <td className="py-2 px-3 text-gray-600 border border-gray-200 border-t-0">Getränke Brutto (€)</td>
+                    <td className="py-2 px-3 text-right tabular-nums text-gray-800 border border-gray-200 border-t-0">{fmtEur(getraenkeBruttoN)}</td>
+                  </tr>
+                  <tr>
+                    <td className="py-2 px-3 font-semibold text-gray-700 bg-gray-50 border border-gray-200 border-t-0">Gesamt Brutto (€)</td>
+                    <td className="py-2 px-3 text-right tabular-nums font-semibold text-gray-900 bg-gray-50 border border-gray-200 border-t-0">{fmtEur(bruttoGesamt)}</td>
+                  </tr>
+
+                  {/* ── Mwst block ── */}
+                  <tr className="border-t-2 border-gray-300">
+                    <td className="py-2 px-3 text-gray-600 bg-gray-50 border border-gray-200">Mwst Essen ({mwstEssen || 7}%)</td>
+                    <td className="py-2 px-3 text-right tabular-nums text-gray-800 bg-gray-50 border border-gray-200">{fmtEur(mwstVatEssen)}</td>
+                  </tr>
+                  <tr>
+                    <td className="py-2 px-3 text-gray-600 border border-gray-200 border-t-0">Mwst Getränke ({mwstGetraenke || 19}%)</td>
+                    <td className="py-2 px-3 text-right tabular-nums text-gray-800 border border-gray-200 border-t-0">{fmtEur(mwstVatGetraenke)}</td>
+                  </tr>
+                  <tr>
+                    <td className="py-2 px-3 font-semibold text-gray-700 bg-gray-50 border border-gray-200 border-t-0">Mwst Gesamt</td>
+                    <td className="py-2 px-3 text-right tabular-nums font-semibold text-gray-900 bg-gray-50 border border-gray-200 border-t-0">{fmtEur(mwstVatEssen + mwstVatGetraenke)}</td>
+                  </tr>
+
+                  {/* ── Netto block ── */}
+                  <tr className="border-t-2 border-gray-300">
+                    <td className="py-2 px-3 text-gray-600 bg-gray-50 border border-gray-200">Essen Netto (€)</td>
+                    <td className="py-2 px-3 text-right tabular-nums text-gray-800 bg-gray-50 border border-gray-200">{fmtEur(essenN)}</td>
+                  </tr>
+                  <tr>
+                    <td className="py-2 px-3 text-gray-600 border border-gray-200 border-t-0">Getränke Netto (€)</td>
+                    <td className="py-2 px-3 text-right tabular-nums text-gray-800 border border-gray-200 border-t-0">{fmtEur(getraenkeN)}</td>
+                  </tr>
+                  <tr>
+                    <td className="py-2 px-3 font-semibold text-gray-700 bg-gray-50 border border-gray-200 border-t-0">Gesamt Netto (€)</td>
+                    <td className="py-2 px-3 text-right tabular-nums font-semibold text-gray-900 bg-gray-50 border border-gray-200 border-t-0">{fmtEur(netto)}</td>
+                  </tr>
+
+                  {/* ── Trinkgeld ── */}
+                  <tr className="border-t-2 border-gray-300">
+                    <td className="py-2 px-3 text-gray-600 border border-gray-200">Trinkgeld (€)</td>
+                    <td className="py-2 px-3 text-right tabular-nums text-gray-800 border border-gray-200">{trinkgeldN > 0 ? fmtEur(trinkgeldN) : <span className="text-gray-300">—</span>}</td>
+                  </tr>
+                </>)}
+
+                {billType === 'monthly' && (<>
+                  <tr>
+                    <td className="py-2 px-3 text-gray-600 bg-gray-50 border border-gray-200 rounded-t">Gesamt Netto (€)</td>
+                    <td className="py-2 px-3 text-right tabular-nums text-gray-800 bg-gray-50 border border-gray-200">{fmtEur(netto)}</td>
+                  </tr>
+                  <tr>
+                    <td className="py-2 px-3 text-gray-600 border border-gray-200 border-t-0">Mwst (7%)</td>
+                    <td className="py-2 px-3 text-right tabular-nums text-gray-800 border border-gray-200 border-t-0">{fmtEur(mwst7)}</td>
+                  </tr>
+                  <tr>
+                    <td className="py-2 px-3 font-semibold text-gray-700 bg-gray-50 border border-gray-200 border-t-0">Gesamt Brutto (€)</td>
+                    <td className="py-2 px-3 text-right tabular-nums font-semibold text-gray-900 bg-gray-50 border border-gray-200 border-t-0">{fmtEur(brutto)}</td>
+                  </tr>
+                </>)}
+
+                {/* ── Grand total ── */}
+                <tr className="border-t-2 border-gray-400">
+                  <td className="py-2.5 px-3 font-bold text-gray-900 border border-gray-300 bg-gray-100">Gesamtbetrag (€, zu zahlen)</td>
+                  <td className="py-2.5 px-3 text-right tabular-nums font-bold text-gray-900 border border-gray-300 bg-gray-100">{fmtEur(billTotal)}</td>
+                </tr>
+              </tbody>
+            </table>
           </div>
 
           {/* Generate button */}
