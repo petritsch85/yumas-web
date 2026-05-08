@@ -92,6 +92,11 @@ export async function POST() {
         if (s !== -1 && e !== -1) a = JSON.parse(raw.slice(s, e + 1));
       } catch { /* keep default */ }
 
+      // Fix contradiction: if AI says is_booking=true but type=not_booking, correct to 'other'
+      if (a.is_booking && a.booking_type === 'not_booking') {
+        a.booking_type = 'other';
+      }
+
       await supabase.from('booking_inquiries').insert({
         gmail_message_id: msg.id,
         gmail_thread_id:  full.threadId ?? null,
