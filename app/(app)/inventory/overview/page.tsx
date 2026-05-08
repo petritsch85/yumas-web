@@ -135,15 +135,15 @@ function TabBar({ active, onChange }: { active: TabView; onChange: (v: TabView) 
     { key: 'ZK',      label: 'ZK'      },
   ];
   return (
-    <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
+    <div className="flex items-center gap-1.5">
       {tabs.map(t => (
         <button
           key={t.key}
           onClick={() => onChange(t.key)}
-          className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors whitespace-nowrap ${
+          className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors whitespace-nowrap ${
             active === t.key
-              ? 'bg-white text-gray-900 shadow-sm'
-              : 'text-gray-500 hover:text-gray-700'
+              ? 'bg-[#1B5E20] text-white border-[#1B5E20] shadow-sm'
+              : 'bg-white text-gray-600 border-gray-300 hover:border-[#1B5E20] hover:text-[#1B5E20]'
           }`}
         >
           {t.label}
