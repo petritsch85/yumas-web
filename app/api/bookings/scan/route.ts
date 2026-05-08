@@ -49,7 +49,7 @@ export async function POST() {
     const { data: listData } = await gmail.users.messages.list({
       userId:     'me',
       q:          'is:unread in:inbox',
-      maxResults: 25,
+      maxResults: 10,
     });
 
     const messages = listData.messages ?? [];
@@ -72,9 +72,12 @@ export async function POST() {
 
       if (!bodyText && !subject) { processed++; continue; }
 
+      // Throttle: 1 s between Claude calls to stay within rate limits
+      if (processed > 0) await new Promise(r => setTimeout(r, 1200));
+
       const res = await anthropic.messages.create({
-        model:      'claude-opus-4-5',
-        max_tokens: 2048,
+        model:      'claude-haiku-4-5',
+        max_tokens: 1024,
         system:     SYSTEM_PROMPT,
         messages:   [{
           role:    'user',
