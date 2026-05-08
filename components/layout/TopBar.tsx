@@ -38,6 +38,8 @@ function getTitleKey(pathname: string): string {
     '/analysis/cogs':             'topbar.cogs',
     '/analysis/store-yield':      'topbar.storeYield',
     '/events':                    'topbar.events',
+    '/bookings':                  'topbar.bookings',
+    '/bookings/settings':         'topbar.bookingSettings',
     '/staff-videos':              'topbar.staffVideos',
     '/staff-videos/food-prep':    'topbar.foodPrep',
     '/staff-videos/drinks-prep':  'topbar.drinksPrep',
@@ -56,6 +58,7 @@ function getTitleKey(pathname: string): string {
     '/waste/new':                 'topbar.logWaste',
   };
   if (exact[pathname]) return exact[pathname];
+  if (pathname.startsWith('/bookings/') && !pathname.startsWith('/bookings/settings')) return 'topbar.bookings';
   if (pathname.startsWith('/purchase-orders/new')) return 'topbar.newPurchaseOrder';
   if (pathname.startsWith('/purchase-orders/'))    return 'topbar.purchaseOrderDetails';
   if (pathname.startsWith('/suppliers/'))          return 'topbar.supplierDetails';

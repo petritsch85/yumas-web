@@ -35,6 +35,8 @@ import {
   LineChart,
   TableProperties,
   PartyPopper,
+  Inbox,
+  Settings2,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase-browser';
 import { useEffect, useState } from 'react';
@@ -131,6 +133,13 @@ const NAV_GROUPS: NavGroup[] = [
     labelKey: 'sidebar.groups.events',
     items: [
       { labelKey: 'sidebar.nav.events', href: '/events', icon: PartyPopper, permKey: 'events' },
+    ],
+  },
+  {
+    labelKey: 'sidebar.groups.bookings',
+    items: [
+      { labelKey: 'sidebar.nav.bookingInbox',    href: '/bookings',          icon: Inbox,     permKey: 'events' },
+      { labelKey: 'sidebar.nav.bookingSettings', href: '/bookings/settings', icon: Settings2, adminOnly: true },
     ],
   },
   {

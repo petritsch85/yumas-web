@@ -9,6 +9,7 @@
       "plReports": "P&L REPORTS",
       "supplyChain": "SUPPLY CHAIN",
       "events": "EVENTS",
+      "bookings": "BOOKINGS",
       "inStore": "IN STORE",
       "staffing": "STAFFING",
       "analysis": "ANALYSIS",
@@ -67,7 +68,9 @@
       "other": "Other",
       "users": "Users",
       "categories": "Categories",
-      "weeklySales": "Weekly Sales"
+      "weeklySales": "Weekly Sales",
+      "bookingInbox": "Inbox",
+      "bookingSettings": "Settings"
     }
   },
   "topbar": {
@@ -120,7 +123,9 @@
     "menus": "Menus",
     "newRecipe": "New Recipe",
     "newRawMaterial": "New Raw Material",
-    "shiftUsage": "Shift Usage"
+    "shiftUsage": "Shift Usage",
+    "bookings": "Booking Requests",
+    "bookingSettings": "Booking Settings"
   },
   "common": {
     "save": "Save",
