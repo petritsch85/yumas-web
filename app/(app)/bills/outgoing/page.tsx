@@ -7,7 +7,7 @@ import {
   Upload, FileCheck, AlertCircle, Loader2,
   CheckCircle2, Clock, Banknote, Trash2,
   ChevronDown, Eye, X, Save, Pencil,
-  FilePlus, Plus, FileDown,
+  FilePlus, Plus, FileDown, Camera,
 } from 'lucide-react';
 import type { BillData, LineItem } from '@/components/bills/BillDocument';
 import { useT } from '@/lib/i18n';
@@ -101,8 +101,9 @@ function uid() { return Math.random().toString(36).slice(2); }
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function OutgoingBillsPage() {
-  const queryClient  = useQueryClient();
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const queryClient      = useQueryClient();
+  const fileInputRef     = useRef<HTMLInputElement>(null);
+  const receiptInputRef  = useRef<HTMLInputElement>(null);
   const { t } = useT();
 
   const [focusedField, setFocusedField] = useState<string | null>(null);
@@ -148,6 +149,8 @@ export default function OutgoingBillsPage() {
   const [lineItems,             setLineItems]             = useState<LineItem[]>([{ qty: 1, item: '', unitPrice: 0 }]);
   const [generating,            setGenerating]            = useState(false);
   const [invoiceNumberLocked,   setInvoiceNumberLocked]   = useState(true);
+  const [extractingReceipt,     setExtractingReceipt]     = useState(false);
+  const [receiptSuccess,        setReceiptSuccess]        = useState(false);
 
   // Auto-update intro text when event date or bill type changes
   useEffect(() => {
@@ -227,6 +230,57 @@ export default function OutgoingBillsPage() {
   }), [invoiceNumber, billDate, billEventDate, billIssuingLoc, billType, company, extra,
        contactName, street, postcode, city, poNumber, att, introText, lineItems,
        essenBruttoN, getraenkeBruttoN, essenN, getraenkeN, mwstEssen, mwstGetraenke, trinkgeldN]);
+
+  const handleReceiptImage = async (file: File) => {
+    setExtractingReceipt(true);
+    setReceiptSuccess(false);
+    try {
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          const dataUrl = e.target?.result as string;
+          resolve(dataUrl.split(',')[1]);
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+
+      const mediaType = file.type || 'image/jpeg';
+      const res  = await fetch('/api/extract-receipt-image', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ imageBase64: base64, mediaType }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? 'Extraction failed');
+
+      const d = json.data as {
+        essenBrutto:      number;
+        getraenkeBrutto:  number;
+        trinkgeld:        number;
+        eventDate:        string | null;
+        issuingLocation:  string | null;
+      };
+
+      // Populate form fields
+      setInputMode('brutto');
+      if (d.essenBrutto     > 0) setEssenBrutto(String(d.essenBrutto));
+      if (d.getraenkeBrutto > 0) setGetraenkeBrutto(String(d.getraenkeBrutto));
+      if (d.trinkgeld       > 0) setTrinkgeld(String(d.trinkgeld));
+      if (d.issuingLocation)     setBillIssuingLoc(d.issuingLocation);
+      if (d.eventDate) {
+        // Convert YYYY-MM-DD → DD.MM.YYYY for the form field
+        const [y, m, day] = d.eventDate.split('-');
+        setBillEventDate(`${day}.${m}.${y}`);
+      }
+      setReceiptSuccess(true);
+      setTimeout(() => setReceiptSuccess(false), 4000);
+    } catch (err: any) {
+      alert(`Could not read receipt: ${err?.message ?? 'Unknown error'}`);
+    } finally {
+      setExtractingReceipt(false);
+    }
+  };
 
   const handleGenerate = async () => {
     setGenerating(true);
@@ -784,6 +838,44 @@ export default function OutgoingBillsPage() {
       {/* ═══════ CREATE BILL TAB ═══════ */}
       {tab === 'create' && (
         <div className="max-w-3xl space-y-5">
+
+          {/* Receipt import banner */}
+          <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4 flex items-center justify-between gap-4">
+            <div>
+              <p className="text-sm font-semibold text-gray-800">Import from receipt photo</p>
+              <p className="text-xs text-gray-400 mt-0.5">Take a photo of the POS Kassenbon — amounts, VAT split and date are filled in automatically</p>
+            </div>
+            <div className="flex items-center gap-3 flex-shrink-0">
+              {receiptSuccess && (
+                <span className="flex items-center gap-1.5 text-xs font-semibold text-green-600">
+                  <CheckCircle2 size={14} /> Filled in!
+                </span>
+              )}
+              <button
+                type="button"
+                onClick={() => receiptInputRef.current?.click()}
+                disabled={extractingReceipt}
+                className="flex items-center gap-2 px-4 py-2 bg-[#1B5E20] text-white text-sm font-semibold rounded-lg hover:bg-[#2E7D32] disabled:opacity-60 transition-colors"
+              >
+                {extractingReceipt
+                  ? <><Loader2 size={14} className="animate-spin" /> Reading…</>
+                  : <><Camera size={14} /> Import Receipt</>
+                }
+              </button>
+              <input
+                ref={receiptInputRef}
+                type="file"
+                accept="image/*"
+                capture="environment"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) handleReceiptImage(file);
+                  e.target.value = '';
+                }}
+              />
+            </div>
+          </div>
 
           {/* Bill type */}
           <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
