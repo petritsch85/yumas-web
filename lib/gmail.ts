@@ -57,22 +57,50 @@ export async function getGmailClient() {
   return google.gmail({ version: 'v1', auth: client });
 }
 
-// Decode base64url Gmail message body, preferring text/plain
+// Decode base64url Gmail message body, preferring text/plain, falling back to text/html
 export function decodeBody(payload: any): string {
   if (!payload) return '';
-  const extract = (part: any): string => {
+
+  const decodeData = (data: string) =>
+    Buffer.from(data, 'base64').toString('utf-8');
+
+  // Walk MIME tree collecting plain and html parts
+  let plain = '';
+  let html  = '';
+
+  const extract = (part: any): void => {
     if (part.mimeType === 'text/plain' && part.body?.data) {
-      return Buffer.from(part.body.data, 'base64').toString('utf-8');
+      plain = plain || decodeData(part.body.data);
+    } else if (part.mimeType === 'text/html' && part.body?.data) {
+      html = html || decodeData(part.body.data);
     }
     if (part.parts) {
-      for (const p of part.parts) {
-        const t = extract(p);
-        if (t) return t;
-      }
+      for (const p of part.parts) extract(p);
     }
-    return '';
   };
-  return extract(payload);
+
+  extract(payload);
+
+  if (plain) return plain;
+
+  // Strip HTML tags for a readable plain-text fallback
+  if (html) {
+    return html
+      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<\/p>/gi, '\n')
+      .replace(/<[^>]+>/g, '')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+  }
+
+  return '';
 }
 
 export function extractSenderInfo(headers: any[]): { name: string; email: string } {
