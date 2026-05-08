@@ -78,10 +78,12 @@ const STATUS_STYLES: Record<string, string> = {
 };
 
 const DEFAULT_INTRO_MONTHLY = 'Wir bedanken uns für Ihren Auftrag und stellen Ihnen für die Bestellungen wie folgt eine Rechnung:';
-const makeIntroDinner = (eventDate: string) =>
-  eventDate
-    ? `Wir bedanken uns für Ihren Auftrag und stellen Ihnen für das Abendessen am ${eventDate} wie folgt eine Rechnung:`
-    : 'Wir bedanken uns für Ihren Auftrag und stellen Ihnen für das Abendessen wie folgt eine Rechnung:';
+const makeIntroDinner = (eventDate: string, location?: string) => {
+  const locPart = location ? ` im Yumas ${location}` : '';
+  return eventDate
+    ? `Wir bedanken uns für Ihren Auftrag und stellen Ihnen für Ihren Besuch am ${eventDate}${locPart} wie folgt eine Rechnung:`
+    : `Wir bedanken uns für Ihren Auftrag und stellen Ihnen für Ihren Besuch${locPart} wie folgt eine Rechnung:`;
+};
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -152,14 +154,14 @@ export default function OutgoingBillsPage() {
   const [extractingReceipt,     setExtractingReceipt]     = useState(false);
   const [receiptSuccess,        setReceiptSuccess]        = useState(false);
 
-  // Auto-update intro text when event date or bill type changes
+  // Auto-update intro text when event date, location or bill type changes
   useEffect(() => {
     if (billType === 'dinner') {
-      setIntroText(makeIntroDinner(billEventDate));
+      setIntroText(makeIntroDinner(billEventDate, billIssuingLoc || undefined));
     } else {
       setIntroText(DEFAULT_INTRO_MONTHLY);
     }
-  }, [billType, billEventDate]);
+  }, [billType, billEventDate, billIssuingLoc]);
 
   const handleBillTypeChange = (t: 'monthly' | 'dinner') => {
     setBillType(t);
