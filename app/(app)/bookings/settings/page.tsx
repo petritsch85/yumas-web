@@ -26,6 +26,9 @@ export default function BookingSettingsPage() {
   const urlError       = searchParams.get('error');
   const urlConnected   = searchParams.get('connected');
   const [reconnecting, setReconnecting] = useState(false);
+  const [scanning, setScanning]         = useState(false);
+  const [scanResult, setScanResult]     = useState<{ processed: number; bookings: number } | null>(null);
+  const [scanError, setScanError]       = useState('');
 
   const { data: status, isLoading, refetch } = useQuery<StatusResponse>({
     queryKey: ['gmail_status'],
@@ -53,13 +56,18 @@ export default function BookingSettingsPage() {
   };
 
   const handleTestScan = async () => {
+    setScanning(true);
+    setScanResult(null);
+    setScanError('');
     try {
       const res  = await fetch('/api/bookings/scan', { method: 'POST' });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      alert(`✓ Scan successful — processed ${data.processed} email(s), found ${data.bookings} booking request(s).`);
+      if (!res.ok) throw new Error(data.error ?? 'Scan failed');
+      setScanResult(data);
     } catch (e: any) {
-      alert('Error: ' + e.message);
+      setScanError(e.message);
+    } finally {
+      setScanning(false);
     }
   };
 
@@ -141,13 +149,28 @@ export default function BookingSettingsPage() {
               )}
             </div>
 
+            {scanResult && (
+              <div className="mb-3 bg-green-50 border border-green-200 rounded-lg px-4 py-2.5 text-sm text-green-800 flex items-center gap-2">
+                <CheckCircle2 size={14} className="text-green-600 flex-shrink-0" />
+                Scanned <strong>{scanResult.processed}</strong> email{scanResult.processed !== 1 ? 's' : ''} —{' '}
+                <strong>{scanResult.bookings}</strong> new booking request{scanResult.bookings !== 1 ? 's' : ''} found.
+              </div>
+            )}
+            {scanError && (
+              <div className="mb-3 bg-red-50 border border-red-200 rounded-lg px-4 py-2.5 text-sm text-red-700 flex items-start gap-2">
+                <AlertCircle size={14} className="flex-shrink-0 mt-0.5" />
+                {scanError}
+              </div>
+            )}
+
             <div className="flex items-center gap-3">
               <button
                 onClick={handleTestScan}
-                className="flex items-center gap-2 text-sm text-[#1B5E20] bg-[#1B5E20]/5 border border-[#1B5E20]/20 hover:bg-[#1B5E20]/10 px-4 py-2 rounded-lg font-medium transition-colors"
+                disabled={scanning}
+                className="flex items-center gap-2 text-sm text-[#1B5E20] bg-[#1B5E20]/5 border border-[#1B5E20]/20 hover:bg-[#1B5E20]/10 px-4 py-2 rounded-lg font-medium transition-colors disabled:opacity-60"
               >
-                <RefreshCw size={14} />
-                Test Scan Now
+                <RefreshCw size={14} className={scanning ? 'animate-spin' : ''} />
+                {scanning ? 'Scanning…' : 'Test Scan Now'}
               </button>
               <button
                 onClick={handleConnect}
