@@ -145,8 +145,9 @@ export default function OutgoingBillsPage() {
   const [mwstEssen,         setMwstEssen]         = useState('7');
   const [mwstGetraenke,     setMwstGetraenke]     = useState('19');
   const [trinkgeld,         setTrinkgeld]         = useState('');
-  const [lineItems,         setLineItems]         = useState<LineItem[]>([{ qty: 1, item: '', unitPrice: 0 }]);
-  const [generating,        setGenerating]        = useState(false);
+  const [lineItems,             setLineItems]             = useState<LineItem[]>([{ qty: 1, item: '', unitPrice: 0 }]);
+  const [generating,            setGenerating]            = useState(false);
+  const [invoiceNumberLocked,   setInvoiceNumberLocked]   = useState(true);
 
   // Auto-update intro text when event date or bill type changes
   useEffect(() => {
@@ -262,6 +263,25 @@ export default function OutgoingBillsPage() {
       return (data ?? []) as OutgoingBill[];
     },
   });
+
+  // Auto-populate next invoice number when bills load
+  useEffect(() => {
+    if (bills.length === 0 && !isLoading) {
+      // No bills yet — start at 1-YY
+      const yy = String(new Date().getFullYear()).slice(-2);
+      setInvoiceNumber(`1-${yy}`);
+      return;
+    }
+    const yy = String(new Date().getFullYear()).slice(-2);
+    const pattern = new RegExp(`^(\\d+)-${yy}$`);
+    let max = 0;
+    for (const b of bills) {
+      if (!b.invoice_number) continue;
+      const m = b.invoice_number.match(pattern);
+      if (m) max = Math.max(max, parseInt(m[1], 10));
+    }
+    setInvoiceNumber(`${max + 1}-${yy}`);
+  }, [bills, isLoading]);
 
   const uniqueMonths: { value: string; label: string }[] = Array.from(
     new Set(bills.map((b) => (b.event_date ?? b.invoice_date)?.slice(0, 7)).filter(Boolean) as string[])
@@ -791,8 +811,27 @@ export default function OutgoingBillsPage() {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className={labelCls}>Invoice Number</label>
-                <input className={inputCls} placeholder="e.g. 75-26"
-                  value={invoiceNumber} onChange={(e) => setInvoiceNumber(e.target.value)} />
+                <div className="flex items-center gap-2">
+                  <input
+                    className={invoiceNumberLocked
+                      ? `${inputCls} !bg-gray-200 !border-gray-300 !shadow-none text-gray-600 cursor-not-allowed select-none flex-1`
+                      : `${inputCls} flex-1`}
+                    readOnly={invoiceNumberLocked}
+                    value={invoiceNumber}
+                    onChange={(e) => setInvoiceNumber(e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setInvoiceNumberLocked((l) => !l)}
+                    className={`flex-shrink-0 px-3 py-2.5 text-xs font-semibold rounded-lg border transition-colors ${
+                      invoiceNumberLocked
+                        ? 'border-gray-300 text-gray-500 bg-white hover:bg-gray-50 hover:text-gray-700'
+                        : 'border-[#1B5E20] text-[#1B5E20] bg-green-50 hover:bg-green-100'
+                    }`}
+                  >
+                    {invoiceNumberLocked ? 'Edit' : 'Lock'}
+                  </button>
+                </div>
               </div>
               <div>
                 <label className={labelCls}>Invoice Date (DD.MM.YYYY)</label>
