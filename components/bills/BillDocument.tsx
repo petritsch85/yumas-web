@@ -89,11 +89,8 @@ const s = StyleSheet.create({
 
   // Recipient block
   recipient: {
-    lineHeight  : 1.3,
+    lineHeight  : 1.55,
     marginBottom: 26,
-  },
-  recipientLine: {
-    marginBottom: 1,
   },
 
   // Date + invoice number — right-aligned
@@ -187,11 +184,15 @@ export function BillDocument({ data }: { data: BillData }) {
 
         {/* ── Recipient ────────────────────────────────────────────── */}
         <View style={s.recipient}>
-          <Text style={s.recipientLine}>{data.recipient.company}</Text>
-          {data.recipient.extra   && <Text style={s.recipientLine}>{data.recipient.extra}</Text>}
-          {data.recipient.contact && <Text style={s.recipientLine}>{data.recipient.contact}</Text>}
-          <Text style={s.recipientLine}>{data.recipient.street}</Text>
-          <Text style={s.recipientLine}>{data.recipient.postcode} {data.recipient.city}</Text>
+          <Text>
+            {[
+              data.recipient.company,
+              data.recipient.extra   || null,
+              data.recipient.contact || null,
+              data.recipient.street,
+              `${data.recipient.postcode} ${data.recipient.city}`,
+            ].filter(Boolean).join('\n')}
+          </Text>
         </View>
 
         {/* ── Date + invoice number ────────────────────────────────── */}
