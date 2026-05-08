@@ -184,15 +184,15 @@ export function BillDocument({ data }: { data: BillData }) {
 
         {/* ── Recipient ────────────────────────────────────────────── */}
         <View style={s.recipient}>
-          <Text>
-            {[
-              data.recipient.company,
-              data.recipient.extra   || null,
-              data.recipient.contact || null,
-              data.recipient.street,
-              `${data.recipient.postcode} ${data.recipient.city}`,
-            ].filter(Boolean).join('\n')}
-          </Text>
+          {[
+            data.recipient.company,
+            data.recipient.extra   || null,
+            data.recipient.contact || null,
+            data.recipient.street,
+            `${data.recipient.postcode} ${data.recipient.city}`,
+          ].filter(Boolean).map((line, i) => (
+            <Text key={i} style={{ fontSize: 10, lineHeight: 1.2, marginBottom: 0 }}>{line as string}</Text>
+          ))}
         </View>
 
         {/* ── Date + invoice number ────────────────────────────────── */}
