@@ -1,13 +1,12 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { supabase } from '@/lib/supabase-browser';
+import { useSearchParams } from 'next/navigation';
 import {
   Mail, CheckCircle2, AlertCircle, ExternalLink, RefreshCw,
 } from 'lucide-react';
 
-/* ─── Types ─────────────────────────────────────────────────────────────── */
 type GmailCredential = {
   id: string;
   email: string;
@@ -16,24 +15,37 @@ type GmailCredential = {
   token_expiry: string | null;
 };
 
-/* ─── Page ───────────────────────────────────────────────────────────────── */
+type StatusResponse = {
+  connected: boolean;
+  credential: GmailCredential | null;
+  error?: string;
+};
+
 export default function BookingSettingsPage() {
+  const searchParams   = useSearchParams();
+  const urlError       = searchParams.get('error');
+  const urlConnected   = searchParams.get('connected');
   const [reconnecting, setReconnecting] = useState(false);
 
-  const { data: cred, isLoading, refetch } = useQuery({
-    queryKey: ['gmail_credentials'],
+  const { data: status, isLoading, refetch } = useQuery<StatusResponse>({
+    queryKey: ['gmail_status'],
     queryFn: async () => {
-      const { data } = await supabase
-        .from('gmail_credentials')
-        .select('id,email,created_at,updated_at,token_expiry')
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      return data as GmailCredential | null;
+      const res = await fetch('/api/bookings/gmail-status');
+      return res.json();
     },
+    // Refetch once when ?connected=true appears so the UI updates immediately
+    refetchOnMount: true,
   });
 
-  const connected = !!cred;
+  // Auto-refetch when redirected back with ?connected=true
+  useEffect(() => {
+    if (urlConnected === 'true') {
+      refetch();
+    }
+  }, [urlConnected, refetch]);
+
+  const connected = status?.connected ?? false;
+  const cred      = status?.credential ?? null;
 
   const handleConnect = () => {
     setReconnecting(true);
@@ -51,12 +63,37 @@ export default function BookingSettingsPage() {
     }
   };
 
+  // Human-readable error messages
+  const errorMessage = (() => {
+    if (!urlError) return null;
+    if (urlError === 'no_refresh_token') return 'Google did not return a refresh token. Please click "Reconnect" below to try again — make sure to click "Continue" on every screen Google shows.';
+    if (urlError === 'access_denied')    return 'Access was denied. Please try connecting again and grant all requested permissions.';
+    if (urlError === 'no_code')          return 'OAuth flow incomplete — no authorisation code received. Please try again.';
+    return `Connection error: ${urlError}`;
+  })();
+
   return (
     <div className="max-w-2xl mx-auto">
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-gray-900">Booking Settings</h1>
         <p className="text-sm text-gray-500 mt-0.5">Configure the Gmail inbox used for booking requests</p>
       </div>
+
+      {/* Error banner from OAuth redirect */}
+      {errorMessage && (
+        <div className="mb-4 bg-red-50 border border-red-200 rounded-xl px-4 py-3 flex items-start gap-2 text-sm text-red-700">
+          <AlertCircle size={16} className="flex-shrink-0 mt-0.5" />
+          <span>{errorMessage}</span>
+        </div>
+      )}
+
+      {/* Success banner */}
+      {urlConnected === 'true' && connected && (
+        <div className="mb-4 bg-green-50 border border-green-200 rounded-xl px-4 py-3 flex items-center gap-2 text-sm text-green-700">
+          <CheckCircle2 size={16} className="flex-shrink-0" />
+          Gmail connected successfully!
+        </div>
+      )}
 
       {/* Gmail Connection Card */}
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6 mb-5">
@@ -76,27 +113,27 @@ export default function BookingSettingsPage() {
           <div className="flex items-center gap-2 text-sm text-gray-400">
             <RefreshCw size={14} className="animate-spin" /> Checking connection…
           </div>
-        ) : connected ? (
+        ) : connected && cred ? (
           <>
             <div className="flex items-center gap-2 mb-4">
               <CheckCircle2 size={16} className="text-green-600 flex-shrink-0" />
               <div>
                 <span className="text-sm font-medium text-green-700">Connected</span>
-                <span className="text-sm text-gray-500 ml-2">{cred!.email}</span>
+                <span className="text-sm text-gray-500 ml-2">{cred.email}</span>
               </div>
             </div>
 
             <div className="bg-gray-50 rounded-lg px-4 py-3 text-xs text-gray-500 space-y-1 mb-4">
               <div>
                 <span className="font-medium text-gray-600">Connected since:</span>{' '}
-                {new Date(cred!.created_at).toLocaleDateString('de-DE', {
+                {new Date(cred.created_at).toLocaleDateString('de-DE', {
                   day: '2-digit', month: 'long', year: 'numeric',
                 })}
               </div>
-              {cred!.token_expiry && (
+              {cred.token_expiry && (
                 <div>
                   <span className="font-medium text-gray-600">Token valid until:</span>{' '}
-                  {new Date(cred!.token_expiry).toLocaleDateString('de-DE', {
+                  {new Date(cred.token_expiry).toLocaleDateString('de-DE', {
                     day: '2-digit', month: 'long', year: 'numeric',
                     hour: '2-digit', minute: '2-digit',
                   })}
@@ -164,7 +201,7 @@ export default function BookingSettingsPage() {
           <li className="flex items-start gap-3">
             <span className="flex-shrink-0 w-5 h-5 rounded-full bg-[#1B5E20]/10 text-[#1B5E20] text-xs font-bold flex items-center justify-center mt-0.5">3</span>
             <span>
-              Review the draft reply, edit if needed, then click <strong>Approve & Send</strong>.
+              Review the draft reply, edit if needed, then click <strong>Approve &amp; Send</strong>.
               The reply is sent via Gmail directly from your connected account.
             </span>
           </li>
