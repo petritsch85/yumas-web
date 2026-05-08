@@ -3,7 +3,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { supabase } from '@/lib/supabase-browser';
 import {
   Mail, RefreshCw, Users, MapPin, Calendar, ChevronRight,
   Inbox, CheckCircle2, Send, EyeOff, Clock,
@@ -70,13 +69,9 @@ export default function BookingsPage() {
   const { data: inquiries = [], isLoading } = useQuery({
     queryKey: ['booking_inquiries'],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('booking_inquiries')
-        .select('id,from_name,from_email,subject,received_at,booking_type,party_size,requested_date,preferred_location,language,summary,status,created_at')
-        .neq('booking_type', 'not_booking')
-        .order('received_at', { ascending: false });
-      if (error) throw error;
-      return data as Inquiry[];
+      const res = await fetch('/api/bookings/list');
+      if (!res.ok) throw new Error('Failed to load inquiries');
+      return res.json() as Promise<Inquiry[]>;
     },
   });
 
@@ -91,11 +86,12 @@ export default function BookingsPage() {
 
   const ignoreMut = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase
-        .from('booking_inquiries')
-        .update({ status: 'ignored' })
-        .eq('id', id);
-      if (error) throw error;
+      const res = await fetch(`/api/bookings/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'ignored' }),
+      });
+      if (!res.ok) throw new Error('Failed to update');
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['booking_inquiries'] }),
   });
