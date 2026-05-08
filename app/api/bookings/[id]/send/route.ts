@@ -49,21 +49,31 @@ export async function POST(
       // Proceed without In-Reply-To if original message is not accessible
     }
 
+    // RFC 2047 encode a header value if it contains non-ASCII characters
+    const encodeHeader = (str: string) =>
+      /[^\x00-\x7F]/.test(str)
+        ? `=?UTF-8?B?${Buffer.from(str, 'utf-8').toString('base64')}?=`
+        : str;
+
     // 4. Build RFC-2822 raw message
-    const subject = inquiry.subject
+    const subjectRaw = inquiry.subject
       ? (inquiry.subject.startsWith('Re:') ? inquiry.subject : `Re: ${inquiry.subject}`)
       : 'Re: Booking Enquiry';
+    const subject = encodeHeader(subjectRaw);
 
     const from = 'benjaminpeters@yumas.de';
     const to   = inquiry.from_email;
+    const toDisplay = inquiry.from_name
+      ? `${encodeHeader(inquiry.from_name)} <${to}>`
+      : to;
 
     const headers = [
       `From: Yumas GmbH <${from}>`,
-      `To: ${inquiry.from_name ? `${inquiry.from_name} <${to}>` : to}`,
+      `To: ${toDisplay}`,
       `Subject: ${subject}`,
       'MIME-Version: 1.0',
       'Content-Type: text/plain; charset=UTF-8',
-      'Content-Transfer-Encoding: 8bit',
+      'Content-Transfer-Encoding: base64',
     ];
 
     if (originalMessageId) {
@@ -75,8 +85,9 @@ export async function POST(
       // threadId is passed separately to the API, not in headers
     }
 
-    const rawMessage = headers.join('\r\n') + '\r\n\r\n' + replyBody;
-    const encoded    = Buffer.from(rawMessage)
+    const bodyEncoded = Buffer.from(replyBody, 'utf-8').toString('base64');
+    const rawMessage  = headers.join('\r\n') + '\r\n\r\n' + bodyEncoded;
+    const encoded     = Buffer.from(rawMessage)
       .toString('base64')
       .replace(/\+/g, '-')
       .replace(/\//g, '_')
