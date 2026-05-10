@@ -64,6 +64,19 @@ type OutgoingBill = {
   file_path:        string | null;
 };
 
+type Customer = {
+  id:           string;
+  company_name: string;
+  extra_line:   string | null;
+  contact_name: string | null;
+  street:       string | null;
+  postcode:     string | null;
+  city:         string | null;
+  po_number:    string | null;
+  att:          string | null;
+  updated_at:   string;
+};
+
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const LOCATIONS = ['Westend', 'Eschborn', 'Taunus', 'Other'];
@@ -154,6 +167,12 @@ export default function OutgoingBillsPage() {
   const [extractingReceipt,     setExtractingReceipt]     = useState(false);
   const [receiptSuccess,        setReceiptSuccess]        = useState(false);
 
+  // Customer CRM search
+  const [customerQuery,       setCustomerQuery]       = useState('');
+  const [customerSuggestions, setCustomerSuggestions] = useState<Customer[]>([]);
+  const [showSuggestions,     setShowSuggestions]     = useState(false);
+  const crmRef = useRef<HTMLDivElement>(null);
+
   // Auto-update intro text when event date, location or bill type changes
   useEffect(() => {
     if (billType === 'dinner') {
@@ -162,6 +181,62 @@ export default function OutgoingBillsPage() {
       setIntroText(DEFAULT_INTRO_MONTHLY);
     }
   }, [billType, billEventDate, billIssuingLoc]);
+
+  // Debounced CRM search
+  useEffect(() => {
+    if (customerQuery.length < 2) { setCustomerSuggestions([]); return; }
+    const timer = setTimeout(async () => {
+      const res  = await fetch(`/api/customers?q=${encodeURIComponent(customerQuery)}`);
+      const data = await res.json();
+      setCustomerSuggestions(Array.isArray(data) ? data : []);
+      setShowSuggestions(true);
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [customerQuery]);
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (crmRef.current && !crmRef.current.contains(e.target as Node)) {
+        setShowSuggestions(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const applyCustomer = (c: Customer) => {
+    setCompany(c.company_name);
+    setExtra(c.extra_line ?? '');
+    setContactName(c.contact_name ?? '');
+    setStreet(c.street ?? '');
+    setPostcode(c.postcode ?? '');
+    setCity(c.city ?? '');
+    setPoNumber(c.po_number ?? '');
+    setAtt(c.att ?? '');
+    setCustomerQuery('');
+    setShowSuggestions(false);
+  };
+
+  const saveCustomerSilently = async () => {
+    if (!company.trim()) return;
+    try {
+      await fetch('/api/customers', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          company_name: company,
+          extra_line:   extra       || null,
+          contact_name: contactName || null,
+          street:       street      || null,
+          postcode:     postcode    || null,
+          city:         city        || null,
+          po_number:    poNumber    || null,
+          att:          att         || null,
+        }),
+      });
+    } catch { /* silent */ }
+  };
 
   const handleBillTypeChange = (t: 'monthly' | 'dinner') => {
     setBillType(t);
@@ -299,6 +374,8 @@ export default function OutgoingBillsPage() {
       a.download = `${invoiceNumber || 'Rechnung'}.pdf`;
       a.click();
       URL.revokeObjectURL(url);
+      // Silently save/update customer in CRM
+      saveCustomerSilently();
     } catch (err: any) {
       console.error('PDF generation failed:', err);
       alert(`Could not generate PDF: ${err?.message ?? 'Unknown error'}`);
@@ -958,6 +1035,44 @@ export default function OutgoingBillsPage() {
           <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
             <p className="text-sm font-bold text-gray-800 mb-4 pb-3 border-b border-gray-100">Recipient</p>
             <div className="space-y-3">
+
+              {/* CRM customer search */}
+              <div ref={crmRef} className="relative">
+                <label className={labelCls}>Search Saved Customers</label>
+                <div className="relative">
+                  <input
+                    className={`${inputCls} pl-8`}
+                    placeholder="Type company name to search…"
+                    value={customerQuery}
+                    onChange={(e) => { setCustomerQuery(e.target.value); setShowSuggestions(true); }}
+                    onFocus={() => { if (customerSuggestions.length) setShowSuggestions(true); }}
+                  />
+                  <svg className="absolute left-2.5 top-3 text-gray-400 pointer-events-none" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+                </div>
+                {showSuggestions && customerSuggestions.length > 0 && (
+                  <div className="absolute z-50 top-full mt-1 left-0 right-0 bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden">
+                    {customerSuggestions.map((c) => (
+                      <button
+                        key={c.id}
+                        type="button"
+                        onMouseDown={() => applyCustomer(c)}
+                        className="w-full text-left px-4 py-2.5 hover:bg-gray-50 border-b border-gray-100 last:border-0 transition-colors"
+                      >
+                        <p className="text-sm font-semibold text-gray-800">{c.company_name}</p>
+                        <p className="text-xs text-gray-400 mt-0.5">
+                          {[c.street, c.postcode, c.city].filter(Boolean).join(', ')}
+                        </p>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {showSuggestions && customerQuery.length >= 2 && customerSuggestions.length === 0 && (
+                  <div className="absolute z-50 top-full mt-1 left-0 right-0 bg-white border border-gray-200 rounded-xl shadow-lg px-4 py-3 text-xs text-gray-400">
+                    No saved customers match — fill in details below to save on generate.
+                  </div>
+                )}
+              </div>
+
               <div>
                 <label className={labelCls}>Company Name *</label>
                 <input className={inputCls} placeholder="e.g. KIA Europe GmbH"
