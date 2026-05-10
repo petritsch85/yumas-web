@@ -66,7 +66,7 @@ type OutgoingBill = {
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const LOCATIONS = ['Westend', 'Eschborn', 'Taunus'];
+const LOCATIONS = ['Westend', 'Eschborn', 'Taunus', 'Other'];
 
 const isItemReady = (item: { status: string; saved?: boolean; data?: Extracted }) =>
   item.status === 'done' && !item.saved &&
