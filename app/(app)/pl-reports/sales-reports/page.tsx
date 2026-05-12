@@ -119,6 +119,12 @@ type MonthlyParseResult = {
   error?:             string;
 };
 
+type ShiftProduct = {
+  name:        string;
+  quantity:    number;
+  gross_sales: number;
+};
+
 type ShiftParseResult = {
   date:               string;
   zReportNumber:      string;
@@ -133,6 +139,7 @@ type ShiftParseResult = {
   cancellationsCount: number;
   cancellationsTotal: number;
   categories:         ShiftCat[];
+  products:           ShiftProduct[];
   error?:             string;
 };
 
@@ -441,7 +448,7 @@ function parseWeeklyCSV(raw: string): WeeklyParseResult {
 }
 
 function parseShiftCSV(raw: string): ShiftParseResult {
-  const empty: ShiftParseResult = { date:'', zReportNumber:'', grossTotal:0, grossFood:0, grossDrinks:0, netTotal:0, vatTotal:0, tips:0, inhouseTotal:0, takeawayTotal:0, cancellationsCount:0, cancellationsTotal:0, categories:[] };
+  const empty: ShiftParseResult = { date:'', zReportNumber:'', grossTotal:0, grossFood:0, grossDrinks:0, netTotal:0, vatTotal:0, tips:0, inhouseTotal:0, takeawayTotal:0, cancellationsCount:0, cancellationsTotal:0, categories:[], products:[] };
 
   const content = raw.replace(/^\uFEFF/,'').replace(/\r\n/g,'\n').replace(/\r/g,'\n');
   const lines   = content.split('\n').map(l => l.trim()).filter(l => l.length > 0);
@@ -462,6 +469,7 @@ function parseShiftCSV(raw: string): ShiftParseResult {
   let inhouseTotal = 0, takeawayTotal = 0;
   let cancellationsCount = 0, cancellationsTotal = 0;
   const categories: ShiftCat[] = [];
+  const products: ShiftProduct[] = [];
 
   for (const line of lines) {
     const cols  = split(line);
@@ -504,13 +512,20 @@ function parseShiftCSV(raw: string): ShiftParseResult {
         if (rev > 0) categories.push({ name:cols[0], isMain:false, quantity:qty, revenue:rev, inhouseRevenue:inh, takeawayRevenue:tak });
         break;
       }
+      case 'products': {
+        if (!cols[0] || first === 'total') break;
+        const qty = parseNum(cols[2]);
+        const rev = parseNum(cols[3]);
+        if (cols[0] && (qty > 0 || rev > 0)) products.push({ name:cols[0], quantity:qty, gross_sales:rev });
+        break;
+      }
     }
   }
 
   if (grossTotal === 0 && date === '')
     return { ...empty, error:'Could not parse this file as an Orderbird shift report.' };
 
-  return { date, zReportNumber, grossTotal, grossFood, grossDrinks, netTotal, vatTotal, tips, inhouseTotal, takeawayTotal, cancellationsCount, cancellationsTotal, categories };
+  return { date, zReportNumber, grossTotal, grossFood, grossDrinks, netTotal, vatTotal, tips, inhouseTotal, takeawayTotal, cancellationsCount, cancellationsTotal, categories, products };
 }
 
 function parseMonthlyCSV(raw: string): MonthlyParseResult {
@@ -1758,6 +1773,17 @@ export default function SalesReportsPage() {
             }))
           );
           if (catErr) throw catErr;
+        }
+        if (sr.products.length > 0) {
+          const { error: prodErr } = await supabase.from('shift_report_products').insert(
+            sr.products.map(p => ({
+              shift_report_id: inserted.id,
+              product_name:    p.name,
+              quantity:        p.quantity,
+              gross_sales:     p.gross_sales,
+            }))
+          );
+          if (prodErr) throw prodErr;
         }
         lastDate = effectiveDate;
         setShiftBatch(prev => prev.map(i => i === item ? { ...i, status: 'saved' } : i));

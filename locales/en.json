@@ -29,6 +29,7 @@
       "team": "Team",
       "stats": "Stats",
       "salesReports": "Sales Reports",
+      "productDetails": "Product Details",
       "inventory": "Inventory",
       "addNewInventory": "Add New Inventory",
       "currentInventory": "Current Inventory",

@@ -37,6 +37,7 @@ import {
   PartyPopper,
   Inbox,
   Settings2,
+  ShoppingBag,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase-browser';
 import { useEffect, useState } from 'react';
@@ -92,8 +93,9 @@ const NAV_GROUPS: NavGroup[] = [
   {
     labelKey: 'sidebar.groups.plReports',
     items: [
-      { labelKey: 'sidebar.nav.stats',        href: '/pl-reports/stats',         icon: BarChart3, permKey: 'pl_reports' },
-      { labelKey: 'sidebar.nav.salesReports', href: '/pl-reports/sales-reports', icon: LineChart,  permKey: 'pl_reports' },
+      { labelKey: 'sidebar.nav.stats',          href: '/pl-reports/stats',           icon: BarChart3,   permKey: 'pl_reports' },
+      { labelKey: 'sidebar.nav.salesReports',   href: '/pl-reports/sales-reports',   icon: LineChart,   permKey: 'pl_reports' },
+      { labelKey: 'sidebar.nav.productDetails', href: '/pl-reports/product-details', icon: ShoppingBag, permKey: 'pl_reports' },
     ],
   },
   {
