@@ -126,10 +126,11 @@ type ShiftProduct = {
 };
 
 type QShiftProduct = {
-  product_name:  string;
-  quantity:      number;
-  gross_sales:   number;
-  shift_reports: { report_date: string; shift_type: 'lunch' | 'dinner' | null }[];
+  product_name: string;
+  quantity:     number;
+  gross_sales:  number;
+  report_date:  string;
+  shift_type:   'lunch' | 'dinner' | null;
 };
 
 type ShiftParseResult = {
@@ -1160,7 +1161,13 @@ export default function SalesReportsPage() {
         .eq('shift_reports.location_id', location!.id)
         .gte('shift_reports.report_date', qStart)
         .lte('shift_reports.report_date', qEnd);
-      return (data ?? []) as QShiftProduct[];
+      return ((data ?? []) as any[]).map(r => ({
+        product_name: r.product_name,
+        quantity:     r.quantity,
+        gross_sales:  r.gross_sales,
+        report_date:  r.shift_reports.report_date,
+        shift_type:   r.shift_reports.shift_type,
+      })) as QShiftProduct[];
     },
   });
 
@@ -1624,17 +1631,16 @@ export default function SalesReportsPage() {
     const lm: Record<string, { guests: number; netFood: number; netDrinks: number }> = {};
     const dm: Record<string, { guests: number; netFood: number; netDrinks: number }> = {};
     for (const p of quarterShiftProducts) {
-      const sr = p.shift_reports?.[0];
-      if (!sr?.report_date || !sr.shift_type) continue;
-      const item    = finishedGoodsMap.get(p.product_name.toLowerCase());
+      if (!p.report_date || !p.shift_type) continue;
+      const item     = finishedGoodsMap.get(p.product_name.toLowerCase());
       const isDrinks = item?.menu_category === 'Drinks';
-      const net     = p.gross_sales / (isDrinks ? 1.19 : 1.07);
-      const guests  = p.quantity * (item?.guest_multiplier ?? 0);
-      const map     = sr.shift_type === 'lunch' ? lm : dm;
-      if (!map[sr.report_date]) map[sr.report_date] = { guests: 0, netFood: 0, netDrinks: 0 };
-      map[sr.report_date].guests += guests;
-      if (isDrinks) map[sr.report_date].netDrinks += net;
-      else          map[sr.report_date].netFood   += net;
+      const net      = p.gross_sales / (isDrinks ? 1.19 : 1.07);
+      const guests   = p.quantity * (item?.guest_multiplier ?? 0);
+      const map      = p.shift_type === 'lunch' ? lm : dm;
+      if (!map[p.report_date]) map[p.report_date] = { guests: 0, netFood: 0, netDrinks: 0 };
+      map[p.report_date].guests += guests;
+      if (isDrinks) map[p.report_date].netDrinks += net;
+      else          map[p.report_date].netFood   += net;
     }
     // Round guests to nearest 0.5 per day
     for (const v of [...Object.values(lm), ...Object.values(dm)]) v.guests = Math.round(v.guests * 2) / 2;
