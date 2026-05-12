@@ -1912,6 +1912,7 @@ export default function SalesReportsPage() {
       }
     }
     queryClient.invalidateQueries({ queryKey: ['shift-reports'] });
+    queryClient.invalidateQueries({ queryKey: ['shift-report-products'] });
     setImporting(false);
     if (lastDate) {
       const d = new Date(lastDate + 'T12:00:00Z');
