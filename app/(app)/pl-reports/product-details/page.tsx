@@ -468,6 +468,7 @@ export default function ProductDetailsPage() {
                     Gross Sales <SortIcon k="gross_sales" />
                   </button>
                 </th>
+                <th className="px-4 py-3 text-right text-xs font-semibold text-white/70 uppercase tracking-wide border-r border-white/10">Product Price</th>
                 <th className="px-4 py-3 text-right text-xs font-semibold text-white/70 uppercase tracking-wide">Share</th>
               </tr>
             </thead>
@@ -481,6 +482,9 @@ export default function ProductDetailsPage() {
                     {new Intl.NumberFormat('de-DE').format(row.quantity)}
                   </td>
                   <td className="px-4 py-2.5 text-right font-semibold text-gray-800 border-r border-gray-200 tabular-nums">{fmt(row.gross_sales)}</td>
+                  <td className="px-4 py-2.5 text-right text-gray-600 border-r border-gray-200 tabular-nums">
+                    {row.quantity > 0 ? fmt(row.gross_sales / row.quantity) : '—'}
+                  </td>
                   <td className="px-4 py-2.5 text-right tabular-nums">
                     <span className="inline-block min-w-[48px] text-xs font-medium text-[#1B5E20]">
                       {totals.gross_sales > 0 ? ((row.gross_sales / totals.gross_sales) * 100).toFixed(1) + ' %' : '—'}
@@ -497,6 +501,7 @@ export default function ProductDetailsPage() {
                   {new Intl.NumberFormat('de-DE').format(totals.quantity)}
                 </td>
                 <td className="px-4 py-3 text-right font-bold text-[#1B5E20] text-base border-r border-gray-200 tabular-nums">{fmt(totals.gross_sales)}</td>
+                <td className="px-4 py-3 border-r border-gray-200" />
                 <td className="px-4 py-3 text-right text-xs font-bold text-gray-500">100 %</td>
               </tr>
             </tfoot>
