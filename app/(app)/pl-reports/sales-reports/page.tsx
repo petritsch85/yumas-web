@@ -905,6 +905,7 @@ export default function SalesReportsPage() {
       cancellationsCount: parseInt(f.cancellationsCount)   || 0,
       cancellationsTotal: parseFloat(f.cancellationsTotal) || 0,
       categories: [],
+      products:   [],
     };
     setShiftBatch(prev => [...prev, {
       fileName:     `Manual entry · ${f.date}`,
