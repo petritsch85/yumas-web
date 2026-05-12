@@ -1,9 +1,9 @@
 'use client';
 
-import { useState, useMemo } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useState, useMemo, useEffect } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
-import { ShoppingBag, ChevronDown, ChevronUp, ChevronsUpDown, Euro, Utensils, Wine, Users } from 'lucide-react';
+import { ShoppingBag, ChevronDown, ChevronUp, ChevronsUpDown, Euro, Utensils, Wine, Users, Plus, X, Check, AlertTriangle } from 'lucide-react';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -29,6 +29,19 @@ type FinishedGoodLookup = {
 
 type SortKey = 'product_name' | 'quantity' | 'gross_sales';
 type SortDir = 'asc' | 'desc';
+
+type MenuCategory = 'Starter' | 'Main' | 'Drinks' | 'Salsas' | 'Dessert' | 'Other';
+
+type MissingProduct = { product_name: string; quantity: number; gross_sales: number };
+
+type MissingDraft = {
+  category:         MenuCategory;
+  vat:              '7' | '19';
+  occasion:         'L' | 'D' | 'L+D';
+  guest_multiplier: string;
+  adding:           boolean;
+  added:            boolean;
+};
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -67,27 +80,44 @@ function getWeekDateRange(year: number, week: number): [string, string] {
 
 const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
+const CATEGORY_OPTIONS: MenuCategory[] = ['Starter', 'Main', 'Drinks', 'Salsas', 'Dessert', 'Other'];
+
+const CATEGORY_STYLES: Record<MenuCategory, string> = {
+  Main:    'bg-[#1B5E20]/10 text-[#1B5E20]',
+  Starter: 'bg-amber-50 text-amber-700',
+  Drinks:  'bg-blue-50 text-blue-700',
+  Salsas:  'bg-orange-50 text-orange-700',
+  Dessert: 'bg-pink-50 text-pink-700',
+  Other:   'bg-gray-100 text-gray-500',
+};
+
+function defaultDraft(): MissingDraft {
+  return { category: 'Other', vat: '7', occasion: 'L+D', guest_multiplier: '0', adding: false, added: false };
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function ProductDetailsPage() {
-  const now          = new Date();
-  const currentYear  = now.getFullYear();
-  const currentMonth = now.getMonth() + 1;
-  const currentWeek  = getISOWeek(now);
+  const qc            = useQueryClient();
+  const now           = new Date();
+  const currentYear   = now.getFullYear();
+  const currentMonth  = now.getMonth() + 1;
+  const currentWeek   = getISOWeek(now);
 
   // ── Selectors ──────────────────────────────────────────────────────────────
   const [mode,         setMode]         = useState<Mode>('shift');
   const [locationId,   setLocationId]   = useState<string>('');
-  // shift
   const [shiftDate,    setShiftDate]    = useState(isoToday());
   const [shiftType,    setShiftType]    = useState<'lunch' | 'dinner'>('lunch');
-  // week
   const [selWeek,      setSelWeek]      = useState(currentWeek);
-  // month
   const [selMonth,     setSelMonth]     = useState(currentMonth);
-  // sort
   const [sortKey,      setSortKey]      = useState<SortKey>('gross_sales');
   const [sortDir,      setSortDir]      = useState<SortDir>('desc');
+
+  // ── Missing products panel ─────────────────────────────────────────────────
+  const [showMissing,  setShowMissing]  = useState(false);
+  const [drafts,       setDrafts]       = useState<Record<string, MissingDraft>>({});
+  const [addingAll,    setAddingAll]    = useState(false);
 
   const totalWeeks = weeksInYear(currentYear);
 
@@ -110,7 +140,6 @@ export default function ProductDetailsPage() {
         periodLabel: `KW ${selWeek}, ${currentYear}`,
       };
     }
-    // month
     const from    = `${currentYear}-${String(selMonth).padStart(2,'0')}-01`;
     const lastDay = new Date(currentYear, selMonth, 0).getDate();
     const to      = `${currentYear}-${String(selMonth).padStart(2,'0')}-${String(lastDay).padStart(2,'0')}`;
@@ -179,7 +208,7 @@ export default function ProductDetailsPage() {
     return m;
   }, [finishedGoods]);
 
-  // ── VAT helper (mirrors Finished Goods page logic) ────────────────────────
+  // ── VAT helper ────────────────────────────────────────────────────────────
   const vatForItem = (productName: string): number => {
     const item = itemMap.get(productName.toLowerCase());
     return item?.vat_rate ?? (item?.menu_category === 'Drinks' ? 0.19 : 0.07);
@@ -213,18 +242,95 @@ export default function ProductDetailsPage() {
   }), [rows, aggregated]);
 
   const summary = useMemo(() => {
-    let grossFood = 0, grossDrinks = 0, netFood = 0, netDrinks = 0, guests = 0, unmatched = 0;
+    let grossFood = 0, grossDrinks = 0, netFood = 0, netDrinks = 0, guests = 0;
+    const unmatchedMap = new Map<string, { quantity: number; gross_sales: number }>();
     for (const r of rows) {
       const item = itemMap.get(r.product_name.toLowerCase());
-      const vat  = item?.menu_category === 'Drinks' ? 0.19 : 0.07;
+      const vat  = item?.vat_rate ?? (item?.menu_category === 'Drinks' ? 0.19 : 0.07);
       const net  = r.gross_sales / (1 + vat);
-      if (!item) { unmatched++; continue; }
+      if (!item) {
+        const ex = unmatchedMap.get(r.product_name);
+        if (ex) { ex.quantity += r.quantity; ex.gross_sales += r.gross_sales; }
+        else unmatchedMap.set(r.product_name, { quantity: r.quantity, gross_sales: r.gross_sales });
+        continue;
+      }
       if (item.menu_category === 'Drinks') { grossDrinks += r.gross_sales; netDrinks += net; }
       else                                 { grossFood   += r.gross_sales; netFood   += net; }
       guests += r.quantity * (item.guest_multiplier ?? 0);
     }
-    return { grossFood, grossDrinks, netFood, netDrinks, guests: Math.round(guests * 2) / 2, unmatched };
+    const unmatchedProducts: MissingProduct[] = Array.from(unmatchedMap.entries())
+      .map(([product_name, v]) => ({ product_name, ...v }))
+      .sort((a, b) => b.gross_sales - a.gross_sales);
+    return {
+      grossFood, grossDrinks, netFood, netDrinks,
+      guests: Math.round(guests * 2) / 2,
+      unmatched: unmatchedProducts.length,
+      unmatchedProducts,
+    };
   }, [rows, itemMap]);
+
+  // Initialise / reset drafts when unmatched list changes
+  useEffect(() => {
+    setDrafts(prev => {
+      const next: Record<string, MissingDraft> = {};
+      for (const p of summary.unmatchedProducts) {
+        next[p.product_name] = prev[p.product_name] ?? defaultDraft();
+      }
+      return next;
+    });
+  }, [summary.unmatchedProducts]);
+
+  // ── Add missing helpers ────────────────────────────────────────────────────
+  const setDraft = (name: string, patch: Partial<MissingDraft>) =>
+    setDrafts(prev => ({ ...prev, [name]: { ...(prev[name] ?? defaultDraft()), ...patch } }));
+
+  const addOne = async (product_name: string) => {
+    const d = drafts[product_name] ?? defaultDraft();
+    setDraft(product_name, { adding: true });
+    const { error } = await supabase.from('items').insert({
+      name:             product_name,
+      product_type:     'finished',
+      vat_rate:         d.vat === '19' ? 0.19 : 0.07,
+      menu_category:    d.category,
+      occasion:         d.occasion,
+      guest_multiplier: parseInt(d.guest_multiplier) || 0,
+      is_active:        true,
+      is_purchasable:   false,
+      is_produced:      false,
+    });
+    if (!error) {
+      setDraft(product_name, { adding: false, added: true });
+      qc.invalidateQueries({ queryKey: ['items-finished-lookup'] });
+      qc.invalidateQueries({ queryKey: ['finished-goods-guest'] });
+      qc.invalidateQueries({ queryKey: ['items', 'finished'] });
+    } else {
+      setDraft(product_name, { adding: false });
+    }
+  };
+
+  const addAll = async () => {
+    setAddingAll(true);
+    const pending = summary.unmatchedProducts.filter(p => !drafts[p.product_name]?.added);
+    for (const p of pending) {
+      const d = drafts[p.product_name] ?? defaultDraft();
+      await supabase.from('items').insert({
+        name:             p.product_name,
+        product_type:     'finished',
+        vat_rate:         d.vat === '19' ? 0.19 : 0.07,
+        menu_category:    d.category,
+        occasion:         d.occasion,
+        guest_multiplier: parseInt(d.guest_multiplier) || 0,
+        is_active:        true,
+        is_purchasable:   false,
+        is_produced:      false,
+      });
+      setDraft(p.product_name, { added: true });
+    }
+    qc.invalidateQueries({ queryKey: ['items-finished-lookup'] });
+    qc.invalidateQueries({ queryKey: ['finished-goods-guest'] });
+    qc.invalidateQueries({ queryKey: ['items', 'finished'] });
+    setAddingAll(false);
+  };
 
   // ── Sort handler ───────────────────────────────────────────────────────────
   const handleSort = (key: SortKey) => {
@@ -238,7 +344,7 @@ export default function ProductDetailsPage() {
       : <ChevronsUpDown size={12} className="text-white/40" />;
 
   // ── Reusable button styles ─────────────────────────────────────────────────
-  const activeCls  = 'bg-[#1B5E20] text-white border-[#1B5E20]';
+  const activeCls   = 'bg-[#1B5E20] text-white border-[#1B5E20]';
   const inactiveCls = 'bg-white text-gray-600 border-gray-200 hover:border-[#1B5E20] hover:text-[#1B5E20]';
 
   // ── Render ─────────────────────────────────────────────────────────────────
@@ -287,7 +393,7 @@ export default function ProductDetailsPage() {
           )}
         </div>
 
-        {/* Row 3: Period selector (mode-dependent) */}
+        {/* Row 3: Period selector */}
         <div className="px-4 py-4">
 
           {/* ── By Shift ── */}
@@ -430,7 +536,13 @@ export default function ProductDetailsPage() {
                   {new Intl.NumberFormat('de-DE').format(summary.guests)}
                 </p>
                 {summary.unmatched > 0 && (
-                  <p className="text-xs text-amber-500 mt-0.5">{summary.unmatched} product{summary.unmatched !== 1 ? 's' : ''} not in Finished Goods</p>
+                  <button
+                    onClick={() => setShowMissing(v => !v)}
+                    className="text-xs text-amber-500 mt-0.5 hover:text-amber-700 hover:underline transition-colors flex items-center gap-1"
+                  >
+                    <AlertTriangle size={11} />
+                    {summary.unmatched} product{summary.unmatched !== 1 ? 's' : ''} not in Finished Goods
+                  </button>
                 )}
               </div>
             </div>
@@ -479,6 +591,146 @@ export default function ProductDetailsPage() {
               </div>
             </div>
           </div>
+
+          {/* ── Missing Products Panel ── */}
+          {showMissing && summary.unmatchedProducts.length > 0 && (
+            <div className="bg-white rounded-xl border border-amber-200 shadow-sm mb-5 overflow-hidden">
+
+              {/* Panel header */}
+              <div className="px-5 py-3 bg-amber-50 border-b border-amber-200 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <AlertTriangle size={15} className="text-amber-500" />
+                  <h2 className="text-xs font-bold text-amber-700 uppercase tracking-wide">
+                    {summary.unmatchedProducts.filter(p => !drafts[p.product_name]?.added).length} Products Not in Finished Goods
+                  </h2>
+                  <span className="text-xs text-amber-500">— Set category and add to Finished Goods to enable guest calculations</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={addAll}
+                    disabled={addingAll || summary.unmatchedProducts.every(p => drafts[p.product_name]?.added)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#1B5E20] text-white text-xs font-semibold hover:bg-[#2E7D32] transition-colors disabled:opacity-40"
+                  >
+                    <Plus size={12} />
+                    {addingAll ? 'Adding…' : 'Add All'}
+                  </button>
+                  <button onClick={() => setShowMissing(false)} className="text-gray-400 hover:text-gray-600 transition-colors">
+                    <X size={16} />
+                  </button>
+                </div>
+              </div>
+
+              {/* Table */}
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm border-collapse">
+                  <thead>
+                    <tr className="bg-amber-50/60 border-b border-amber-100">
+                      <th className="px-4 py-2 text-left text-xs font-semibold text-amber-700 uppercase tracking-wide">Product Name</th>
+                      <th className="px-4 py-2 text-right text-xs font-semibold text-amber-700 uppercase tracking-wide">Qty Sold</th>
+                      <th className="px-4 py-2 text-right text-xs font-semibold text-amber-700 uppercase tracking-wide">Gross Sales</th>
+                      <th className="px-4 py-2 text-center text-xs font-semibold text-amber-700 uppercase tracking-wide">Category</th>
+                      <th className="px-4 py-2 text-center text-xs font-semibold text-amber-700 uppercase tracking-wide">VAT</th>
+                      <th className="px-4 py-2 text-center text-xs font-semibold text-amber-700 uppercase tracking-wide">Occasion</th>
+                      <th className="px-4 py-2 text-center text-xs font-semibold text-amber-700 uppercase tracking-wide">Guests ×</th>
+                      <th className="px-4 py-2 text-center text-xs font-semibold text-amber-700 uppercase tracking-wide">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {summary.unmatchedProducts.map((p, i) => {
+                      const d = drafts[p.product_name] ?? defaultDraft();
+                      return (
+                        <tr key={p.product_name}
+                          className={`border-b border-gray-100 ${d.added ? 'bg-green-50/50' : i % 2 === 0 ? 'bg-white' : 'bg-gray-50/40'}`}>
+                          <td className="px-4 py-2 font-medium text-gray-800">
+                            {d.added && <Check size={13} className="inline text-green-600 mr-1.5" />}
+                            {p.product_name}
+                          </td>
+                          <td className="px-4 py-2 text-right text-gray-600 tabular-nums text-xs">
+                            {new Intl.NumberFormat('de-DE').format(p.quantity)}
+                          </td>
+                          <td className="px-4 py-2 text-right text-gray-700 tabular-nums text-xs font-semibold">
+                            {fmt(p.gross_sales)}
+                          </td>
+                          <td className="px-4 py-2 text-center">
+                            {d.added ? (
+                              <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${CATEGORY_STYLES[d.category]}`}>{d.category}</span>
+                            ) : (
+                              <select
+                                value={d.category}
+                                onChange={e => setDraft(p.product_name, { category: e.target.value as MenuCategory })}
+                                className="border border-gray-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-[#1B5E20]/40"
+                              >
+                                {CATEGORY_OPTIONS.map(c => <option key={c} value={c}>{c}</option>)}
+                              </select>
+                            )}
+                          </td>
+                          <td className="px-4 py-2 text-center">
+                            {d.added ? (
+                              <span className={`text-xs font-medium px-1.5 py-0.5 rounded ${d.vat === '19' ? 'bg-blue-50 text-blue-600' : 'bg-amber-50 text-amber-600'}`}>
+                                {d.vat === '19' ? '19 %' : '7 %'}
+                              </span>
+                            ) : (
+                              <select
+                                value={d.vat}
+                                onChange={e => setDraft(p.product_name, { vat: e.target.value as '7' | '19' })}
+                                className="border border-gray-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-[#1B5E20]/40"
+                              >
+                                <option value="7">7 %</option>
+                                <option value="19">19 %</option>
+                              </select>
+                            )}
+                          </td>
+                          <td className="px-4 py-2 text-center">
+                            {d.added ? (
+                              <span className="text-xs text-gray-500">{d.occasion}</span>
+                            ) : (
+                              <select
+                                value={d.occasion}
+                                onChange={e => setDraft(p.product_name, { occasion: e.target.value as 'L' | 'D' | 'L+D' })}
+                                className="border border-gray-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-[#1B5E20]/40"
+                              >
+                                <option value="L">L</option>
+                                <option value="D">D</option>
+                                <option value="L+D">L+D</option>
+                              </select>
+                            )}
+                          </td>
+                          <td className="px-4 py-2 text-center">
+                            {d.added ? (
+                              <span className="text-xs text-gray-500">{d.guest_multiplier}</span>
+                            ) : (
+                              <input
+                                type="number" min="0" max="10" step="1"
+                                value={d.guest_multiplier}
+                                onChange={e => setDraft(p.product_name, { guest_multiplier: e.target.value })}
+                                className="border border-gray-200 rounded-lg px-2 py-1 text-xs w-14 text-center focus:outline-none focus:ring-1 focus:ring-[#1B5E20]/40"
+                              />
+                            )}
+                          </td>
+                          <td className="px-4 py-2 text-center">
+                            {d.added ? (
+                              <span className="text-xs text-green-600 font-semibold flex items-center justify-center gap-1">
+                                <Check size={13} /> Added
+                              </span>
+                            ) : (
+                              <button
+                                onClick={() => addOne(p.product_name)}
+                                disabled={d.adding}
+                                className="px-3 py-1 rounded-lg bg-[#1B5E20] text-white text-xs font-semibold hover:bg-[#2E7D32] transition-colors disabled:opacity-40 flex items-center gap-1 mx-auto"
+                              >
+                                <Plus size={11} />
+                                {d.adding ? '…' : 'Add'}
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
 
           {/* ── Products table ── */}
           <div className="rounded-xl border border-gray-200 shadow-sm overflow-hidden">
