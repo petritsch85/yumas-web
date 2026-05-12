@@ -175,12 +175,12 @@ export default function ProductDetailsPage() {
 
   const SortIcon = ({ k }: { k: SortKey }) =>
     sortKey === k
-      ? (sortDir === 'asc' ? <ChevronUp size={12} /> : <ChevronDown size={12} />)
-      : <ChevronsUpDown size={12} className="text-gray-300" />;
+      ? (sortDir === 'asc' ? <ChevronUp size={12} className="text-white" /> : <ChevronDown size={12} className="text-white" />)
+      : <ChevronsUpDown size={12} className="text-white/40" />;
 
   const shiftBadge = (t: string | null) => t === 'lunch'
-    ? <span className="inline-flex items-center px-1.5 py-0.5 bg-amber-50 text-amber-700 text-xs rounded-full">🌤 Lunch</span>
-    : <span className="inline-flex items-center px-1.5 py-0.5 bg-indigo-50 text-indigo-700 text-xs rounded-full">🌙 Dinner</span>;
+    ? <span className="inline-flex items-center px-2 py-0.5 bg-amber-400/20 text-amber-200 text-xs font-medium rounded-full">🌤 Lunch</span>
+    : <span className="inline-flex items-center px-2 py-0.5 bg-white/15 text-white/80 text-xs font-medium rounded-full">🌙 Dinner</span>;
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
@@ -292,52 +292,55 @@ export default function ProductDetailsPage() {
       ) : groupBy === 'aggregate' ? (
 
         /* ── Aggregated view ── */
-        <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-          <table className="w-full text-sm">
+        <div className="rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+          <table className="w-full text-sm border-collapse">
             <thead>
-              <tr className="border-b border-gray-100 bg-gray-50">
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide w-8">#</th>
-                <th className="px-4 py-3 text-left">
-                  <button onClick={() => handleSort('product_name')} className="flex items-center gap-1 text-xs font-semibold text-gray-500 uppercase tracking-wide hover:text-gray-800">
+              <tr className="bg-[#1B5E20]">
+                <th className="px-4 py-3 text-left text-xs font-semibold text-white/70 uppercase tracking-wide w-12 border-r border-white/10">#</th>
+                <th className="px-4 py-3 text-left border-r border-white/10">
+                  <button onClick={() => handleSort('product_name')} className="flex items-center gap-1 text-xs font-semibold text-white/70 uppercase tracking-wide hover:text-white">
                     Product <SortIcon k="product_name" />
                   </button>
                 </th>
-                <th className="px-4 py-3 text-right">
-                  <button onClick={() => handleSort('quantity')} className="flex items-center gap-1 text-xs font-semibold text-gray-500 uppercase tracking-wide hover:text-gray-800 ml-auto">
+                <th className="px-4 py-3 text-right border-r border-white/10">
+                  <button onClick={() => handleSort('quantity')} className="flex items-center gap-1 text-xs font-semibold text-white/70 uppercase tracking-wide hover:text-white ml-auto">
                     Qty <SortIcon k="quantity" />
                   </button>
                 </th>
-                <th className="px-4 py-3 text-right">
-                  <button onClick={() => handleSort('gross_sales')} className="flex items-center gap-1 text-xs font-semibold text-gray-500 uppercase tracking-wide hover:text-gray-800 ml-auto">
+                <th className="px-4 py-3 text-right border-r border-white/10">
+                  <button onClick={() => handleSort('gross_sales')} className="flex items-center gap-1 text-xs font-semibold text-white/70 uppercase tracking-wide hover:text-white ml-auto">
                     Gross Sales <SortIcon k="gross_sales" />
                   </button>
                 </th>
-                <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Share</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold text-white/70 uppercase tracking-wide">Share</th>
               </tr>
             </thead>
             <tbody>
               {sorted.map((row, i) => (
-                <tr key={row.product_name} className="border-b border-gray-50 hover:bg-gray-50/50">
-                  <td className="px-4 py-2.5 text-xs text-gray-300 font-mono">{i + 1}</td>
-                  <td className="px-4 py-2.5 font-medium text-gray-800">{row.product_name}</td>
-                  <td className="px-4 py-2.5 text-right text-gray-600">
+                <tr key={row.product_name}
+                  className={`border-b border-gray-200 hover:bg-[#1B5E20]/5 transition-colors ${i % 2 === 0 ? 'bg-white' : 'bg-gray-50/60'}`}>
+                  <td className="px-4 py-2.5 text-xs text-gray-400 font-mono border-r border-gray-200">{i + 1}</td>
+                  <td className="px-4 py-2.5 font-medium text-gray-800 border-r border-gray-200">{row.product_name}</td>
+                  <td className="px-4 py-2.5 text-right text-gray-600 border-r border-gray-200 tabular-nums">
                     {new Intl.NumberFormat('de-DE').format(row.quantity)}
                   </td>
-                  <td className="px-4 py-2.5 text-right font-medium text-gray-800">{fmt(row.gross_sales)}</td>
-                  <td className="px-4 py-2.5 text-right text-gray-400 text-xs">
-                    {totals.gross_sales > 0 ? ((row.gross_sales / totals.gross_sales) * 100).toFixed(1) + ' %' : '—'}
+                  <td className="px-4 py-2.5 text-right font-semibold text-gray-800 border-r border-gray-200 tabular-nums">{fmt(row.gross_sales)}</td>
+                  <td className="px-4 py-2.5 text-right tabular-nums">
+                    <span className="inline-block min-w-[48px] text-xs font-medium text-[#1B5E20]">
+                      {totals.gross_sales > 0 ? ((row.gross_sales / totals.gross_sales) * 100).toFixed(1) + ' %' : '—'}
+                    </span>
                   </td>
                 </tr>
               ))}
             </tbody>
             <tfoot>
-              <tr className="bg-gray-50 border-t-2 border-gray-200">
-                <td className="px-4 py-3" />
-                <td className="px-4 py-3 text-xs font-bold text-gray-700 uppercase tracking-wide">Total</td>
-                <td className="px-4 py-3 text-right font-bold text-gray-800">
+              <tr className="bg-[#1B5E20]/10 border-t-2 border-[#1B5E20]/30">
+                <td className="px-4 py-3 border-r border-gray-200" />
+                <td className="px-4 py-3 text-xs font-bold text-gray-700 uppercase tracking-wide border-r border-gray-200">Total</td>
+                <td className="px-4 py-3 text-right font-bold text-gray-800 border-r border-gray-200 tabular-nums">
                   {new Intl.NumberFormat('de-DE').format(totals.quantity)}
                 </td>
-                <td className="px-4 py-3 text-right font-bold text-gray-900">{fmt(totals.gross_sales)}</td>
+                <td className="px-4 py-3 text-right font-bold text-[#1B5E20] text-base border-r border-gray-200 tabular-nums">{fmt(totals.gross_sales)}</td>
                 <td className="px-4 py-3 text-right text-xs font-bold text-gray-500">100 %</td>
               </tr>
             </tfoot>
@@ -352,28 +355,29 @@ export default function ProductDetailsPage() {
             const groupTotal = group.products.reduce((s, r) => s + r.gross_sales, 0);
             const byRevenue  = [...group.products].sort((a, b) => b.gross_sales - a.gross_sales);
             return (
-              <div key={group.id} className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-                <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-100 bg-gray-50">
-                  <span className="text-sm font-semibold text-gray-800">{fmtDate(group.date)}</span>
+              <div key={group.id} className="rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+                <div className="flex items-center gap-3 px-4 py-3 bg-[#1B5E20]">
+                  <span className="text-sm font-semibold text-white">{fmtDate(group.date)}</span>
                   {shiftBadge(group.shiftType)}
-                  <span className="ml-auto text-sm font-bold text-gray-800">{fmt(groupTotal)}</span>
+                  <span className="ml-auto text-sm font-bold text-white">{fmt(groupTotal)}</span>
                 </div>
-                <table className="w-full text-sm">
+                <table className="w-full text-sm border-collapse">
                   <thead>
-                    <tr className="border-b border-gray-100">
-                      <th className="px-4 py-2 text-left text-xs font-semibold text-gray-400 uppercase tracking-wide">Product</th>
-                      <th className="px-4 py-2 text-right text-xs font-semibold text-gray-400 uppercase tracking-wide">Qty</th>
-                      <th className="px-4 py-2 text-right text-xs font-semibold text-gray-400 uppercase tracking-wide">Gross Sales</th>
+                    <tr className="bg-gray-50 border-b-2 border-gray-200">
+                      <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide border-r border-gray-200">Product</th>
+                      <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide border-r border-gray-200">Qty</th>
+                      <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Gross Sales</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {byRevenue.map(r => (
-                      <tr key={r.id} className="border-b border-gray-50 hover:bg-gray-50/50">
-                        <td className="px-4 py-2 text-gray-800">{r.product_name}</td>
-                        <td className="px-4 py-2 text-right text-gray-600">
+                    {byRevenue.map((r, i) => (
+                      <tr key={r.id}
+                        className={`border-b border-gray-200 hover:bg-[#1B5E20]/5 transition-colors ${i % 2 === 0 ? 'bg-white' : 'bg-gray-50/60'}`}>
+                        <td className="px-4 py-2 text-gray-800 border-r border-gray-200">{r.product_name}</td>
+                        <td className="px-4 py-2 text-right text-gray-600 border-r border-gray-200 tabular-nums">
                           {new Intl.NumberFormat('de-DE').format(r.quantity)}
                         </td>
-                        <td className="px-4 py-2 text-right font-medium text-gray-800">{fmt(r.gross_sales)}</td>
+                        <td className="px-4 py-2 text-right font-semibold text-gray-800 tabular-nums">{fmt(r.gross_sales)}</td>
                       </tr>
                     ))}
                   </tbody>
