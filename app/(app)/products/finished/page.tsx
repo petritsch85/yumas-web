@@ -15,6 +15,7 @@ type MenuCategory = 'Starter' | 'Main' | 'Drinks' | 'Salsas' | 'Dessert' | 'Othe
 type EditState = {
   name:             string;
   gross_price:      string;
+  vat:              '7' | '19';
   occasion:         'L' | 'D' | 'L+D';
   menu_category:    MenuCategory;
   guest_multiplier: string;
@@ -106,6 +107,7 @@ export default function FinishedGoodsPage() {
     setEditState({
       name:             item.name,
       gross_price:      String(item.gross_price ?? ''),
+      vat:              item.menu_category === 'Drinks' ? '19' : '7',
       occasion:         item.occasion         ?? 'L+D',
       menu_category:    item.menu_category    ?? 'Main',
       guest_multiplier: String(item.guest_multiplier ?? '0'),
@@ -131,9 +133,18 @@ export default function FinishedGoodsPage() {
     }
   };
 
-  // Sync guest_multiplier automatically when category changes
+  // Changing VAT auto-adjusts category to keep them in sync
+  const handleVatChange = (val: '7' | '19') => {
+    setEditState(s => {
+      if (!s) return s;
+      const newCat: MenuCategory = val === '19' ? 'Drinks' : s.menu_category === 'Drinks' ? 'Main' : s.menu_category;
+      return { ...s, vat: val, menu_category: newCat, guest_multiplier: newCat === 'Main' ? '1' : '0' };
+    });
+  };
+
+  // Changing category also updates VAT and guest_multiplier
   const handleCategoryChange = (val: MenuCategory) => {
-    setEditState(s => s ? { ...s, menu_category: val, guest_multiplier: val === 'Main' ? '1' : '0' } : s);
+    setEditState(s => s ? { ...s, menu_category: val, vat: val === 'Drinks' ? '19' : '7', guest_multiplier: val === 'Main' ? '1' : '0' } : s);
   };
 
   // ── CSV download (exports ALL items, ignoring current search/filter) ────────
@@ -266,15 +277,31 @@ export default function FinishedGoodsPage() {
                     </td>
 
                     {/* VAT */}
-                    <td className="px-4 py-2.5 text-center border-r border-gray-200 tabular-nums">
-                      <span className={`text-xs font-semibold ${item.menu_category === 'Drinks' ? 'text-indigo-600' : 'text-gray-500'}`}>
-                        {fmtVat(item.menu_category)}
-                      </span>
+                    <td className="px-4 py-2.5 text-center border-r border-gray-200">
+                      {isEditing ? (
+                        <select
+                          className="border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30"
+                          value={editState!.vat}
+                          onChange={e => handleVatChange(e.target.value as '7' | '19')}
+                          onClick={e => e.stopPropagation()}
+                        >
+                          <option value="7">7 %</option>
+                          <option value="19">19 %</option>
+                        </select>
+                      ) : (
+                        <span className={`text-xs font-semibold ${item.menu_category === 'Drinks' ? 'text-indigo-600' : 'text-gray-500'}`}>
+                          {fmtVat(item.menu_category)}
+                        </span>
+                      )}
                     </td>
 
                     {/* Price (net) */}
                     <td className="px-4 py-2.5 text-right border-r border-gray-200 tabular-nums">
-                      <span className="text-gray-600">{netPrice(item.gross_price, item.menu_category)}</span>
+                      <span className="text-gray-600">
+                        {isEditing
+                          ? netPrice(parseFloat(editState!.gross_price) || 0, editState!.vat === '19' ? 'Drinks' : 'Other')
+                          : netPrice(item.gross_price, item.menu_category)}
+                      </span>
                     </td>
 
                     {/* Occasion */}
