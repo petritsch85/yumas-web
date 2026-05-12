@@ -351,7 +351,7 @@ export default function FinishedGoodsPage() {
                       ) : (
                         <button
                           onClick={e => { e.stopPropagation(); startEdit(item); }}
-                          className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-gray-100 text-gray-500 opacity-0 group-hover:opacity-100 hover:bg-[#1B5E20] hover:text-white transition-all"
+                          className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-gray-100 text-gray-500 hover:bg-[#1B5E20] hover:text-white transition-all"
                         >
                           Edit
                         </button>
