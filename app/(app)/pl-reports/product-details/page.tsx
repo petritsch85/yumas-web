@@ -307,8 +307,8 @@ export default function ProductDetailsPage() {
 
       {/* Period Summary */}
       {rows.length > 0 && (
-        <div className="bg-white rounded-xl border border-gray-200 shadow-sm mb-5 overflow-hidden">
-          <div className="px-5 py-3 border-b border-gray-100 bg-gray-50">
+        <div className="bg-white rounded-xl border border-gray-300 shadow-sm mb-5 overflow-hidden">
+          <div className="px-5 py-3 border-b border-gray-300 bg-gray-50">
             <h2 className="text-xs font-bold text-gray-600 uppercase tracking-wide">
               Period Summary
               <span className="ml-2 font-normal text-gray-400 normal-case tracking-normal">
@@ -317,7 +317,7 @@ export default function ProductDetailsPage() {
             </h2>
           </div>
           {/* Row 1: Sales figures */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 divide-x divide-gray-200 border-b border-gray-200">
+          <div className="grid grid-cols-2 sm:grid-cols-4 divide-x divide-gray-300 border-b border-gray-300">
 
             {/* Total Gross Sales */}
             <div className="px-5 py-4">
@@ -382,7 +382,7 @@ export default function ProductDetailsPage() {
           </div>
 
           {/* Row 2: Per-guest metrics */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 divide-x divide-gray-200 bg-gray-50/50">
+          <div className="grid grid-cols-2 sm:grid-cols-3 divide-x divide-gray-300 bg-gray-50">
 
             {/* Total per guest */}
             <div className="px-5 py-3">
@@ -530,7 +530,7 @@ export default function ProductDetailsPage() {
                   <span className="ml-auto text-sm font-bold text-white">{fmt(groupTotal)}</span>
                 </div>
                 {/* Shift mini-summary */}
-                <div className="grid grid-cols-3 divide-x divide-gray-100 border-b border-gray-200 bg-gray-50/70">
+                <div className="grid grid-cols-3 divide-x divide-gray-300 border-b border-gray-300 bg-gray-50">
                   <div className="px-4 py-2 flex items-center gap-2">
                     <Utensils size={12} className="text-amber-500 flex-shrink-0" />
                     <span className="text-xs text-gray-500">Food</span>
