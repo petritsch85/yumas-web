@@ -12,6 +12,11 @@ export interface Item {
   product_group: string | null; is_purchasable: boolean;
   is_produced: boolean; is_active: boolean; image_url: string | null;
   name_en?: string | null; name_de?: string | null; name_es?: string | null;
+  // Finished-goods extra fields
+  gross_price?:      number | null;
+  occasion?:         'L' | 'D' | 'L+D' | null;
+  menu_category?:    'Starter' | 'Main' | 'Drinks' | null;
+  guest_multiplier?: number | null;
   category?: { id: string; name: string; color_hex: string | null };
   unit?: { id: string; name: string; abbreviation: string };
 }
