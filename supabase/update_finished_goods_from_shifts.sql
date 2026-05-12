@@ -11,7 +11,17 @@ ALTER TABLE items
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- 2. Delete ALL existing finished goods (dummy data)
+--    Must clear dependent tables first due to FK constraints
 -- ─────────────────────────────────────────────────────────────────────────────
+DELETE FROM recipe_ingredients
+  WHERE recipe_id IN (
+    SELECT id FROM recipes
+    WHERE output_item_id IN (SELECT id FROM items WHERE product_type = 'finished')
+  );
+
+DELETE FROM recipes
+  WHERE output_item_id IN (SELECT id FROM items WHERE product_type = 'finished');
+
 DELETE FROM items WHERE product_type = 'finished';
 
 -- ─────────────────────────────────────────────────────────────────────────────
