@@ -125,6 +125,13 @@ type ShiftProduct = {
   gross_sales: number;
 };
 
+type QShiftProduct = {
+  product_name:  string;
+  quantity:      number;
+  gross_sales:   number;
+  shift_reports: { report_date: string; shift_type: 'lunch' | 'dinner' | null }[];
+};
+
 type ShiftParseResult = {
   date:               string;
   zReportNumber:      string;
@@ -1139,6 +1146,37 @@ export default function SalesReportsPage() {
     },
   });
 
+  // Shift-level product data for the current quarter — used to compute guest metrics
+  const { data: quarterShiftProducts = [] } = useQuery({
+    queryKey: ['shift-report-products', location?.id, year, quarter],
+    enabled: !!location,
+    queryFn: async () => {
+      const [firstM, , lastM] = QUARTER_MONTHS[quarter - 1];
+      const qStart = `${year}-${String(firstM).padStart(2,'0')}-01`;
+      const qEnd   = `${year}-${String(lastM).padStart(2,'0')}-${String(daysInMonth(year, lastM)).padStart(2,'0')}`;
+      const { data } = await supabase
+        .from('shift_report_products')
+        .select('product_name, quantity, gross_sales, shift_reports!inner(report_date, shift_type, location_id)')
+        .eq('shift_reports.location_id', location!.id)
+        .gte('shift_reports.report_date', qStart)
+        .lte('shift_reports.report_date', qEnd);
+      return (data ?? []) as QShiftProduct[];
+    },
+  });
+
+  // Finished goods master data — used for VAT rate + guest_multiplier lookups
+  const { data: finishedGoodsList = [] } = useQuery({
+    queryKey: ['finished-goods-guest'],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('items')
+        .select('name, menu_category, guest_multiplier')
+        .eq('product_type', 'finished')
+        .eq('is_active', true);
+      return (data ?? []) as Array<{ name: string; menu_category: string | null; guest_multiplier: number | null }>;
+    },
+  });
+
   // Sync fetched settings → draft whenever they load or location changes
   useEffect(() => {
     const ls = forecastSettings.find(s => s.shift_type === 'lunch');
@@ -1573,6 +1611,81 @@ export default function SalesReportsPage() {
       totalWeekIsForecastMap:     wTotalFcast,
     };
   }, [forecastSettings, overrideMap, closureSet, year, weekMap, yearShiftRows, cwk]);
+
+  // O(1) lookup: item name (lowercase) → { menu_category, guest_multiplier }
+  const finishedGoodsMap = useMemo(() => {
+    const m = new Map<string, { menu_category: string | null; guest_multiplier: number | null }>();
+    for (const item of finishedGoodsList) m.set(item.name.toLowerCase(), item);
+    return m;
+  }, [finishedGoodsList]);
+
+  // Per-shift-day aggregated metrics from shift_report_products
+  const { lunchMetricsMap, dinnerMetricsMap } = useMemo(() => {
+    const lm: Record<string, { guests: number; netFood: number; netDrinks: number }> = {};
+    const dm: Record<string, { guests: number; netFood: number; netDrinks: number }> = {};
+    for (const p of quarterShiftProducts) {
+      const sr = p.shift_reports?.[0];
+      if (!sr?.report_date || !sr.shift_type) continue;
+      const item    = finishedGoodsMap.get(p.product_name.toLowerCase());
+      const isDrinks = item?.menu_category === 'Drinks';
+      const net     = p.gross_sales / (isDrinks ? 1.19 : 1.07);
+      const guests  = p.quantity * (item?.guest_multiplier ?? 0);
+      const map     = sr.shift_type === 'lunch' ? lm : dm;
+      if (!map[sr.report_date]) map[sr.report_date] = { guests: 0, netFood: 0, netDrinks: 0 };
+      map[sr.report_date].guests += guests;
+      if (isDrinks) map[sr.report_date].netDrinks += net;
+      else          map[sr.report_date].netFood   += net;
+    }
+    // Round guests to nearest 0.5 per day
+    for (const v of [...Object.values(lm), ...Object.values(dm)]) v.guests = Math.round(v.guests * 2) / 2;
+    return { lunchMetricsMap: lm, dinnerMetricsMap: dm };
+  }, [quarterShiftProducts, finishedGoodsMap]);
+
+  // Per-guest derived maps for the table rows + quarter-level totals
+  const {
+    lunchGuestsMap, dinnerGuestsMap,
+    lunchNetFoodPGMap, dinnerNetFoodPGMap,
+    lunchNetDrinksPGMap, dinnerNetDrinksPGMap,
+    lunchNetTotalPGMap, dinnerNetTotalPGMap,
+    lunchQMetrics, dinnerQMetrics,
+  } = useMemo(() => {
+    const lunchGuestsMap:      Record<string, number> = {};
+    const dinnerGuestsMap:     Record<string, number> = {};
+    const lunchNetFoodPGMap:   Record<string, number> = {};
+    const dinnerNetFoodPGMap:  Record<string, number> = {};
+    const lunchNetDrinksPGMap: Record<string, number> = {};
+    const dinnerNetDrinksPGMap:Record<string, number> = {};
+    const lunchNetTotalPGMap:  Record<string, number> = {};
+    const dinnerNetTotalPGMap: Record<string, number> = {};
+    let lG = 0, lF = 0, lD = 0;
+    let dG = 0, dF = 0, dD = 0;
+    for (const [k, v] of Object.entries(lunchMetricsMap)) {
+      lG += v.guests; lF += v.netFood; lD += v.netDrinks;
+      if (v.guests > 0) {
+        lunchGuestsMap[k]      = v.guests;
+        lunchNetFoodPGMap[k]   = v.netFood   / v.guests;
+        lunchNetDrinksPGMap[k] = v.netDrinks / v.guests;
+        lunchNetTotalPGMap[k]  = (v.netFood + v.netDrinks) / v.guests;
+      }
+    }
+    for (const [k, v] of Object.entries(dinnerMetricsMap)) {
+      dG += v.guests; dF += v.netFood; dD += v.netDrinks;
+      if (v.guests > 0) {
+        dinnerGuestsMap[k]      = v.guests;
+        dinnerNetFoodPGMap[k]   = v.netFood   / v.guests;
+        dinnerNetDrinksPGMap[k] = v.netDrinks / v.guests;
+        dinnerNetTotalPGMap[k]  = (v.netFood + v.netDrinks) / v.guests;
+      }
+    }
+    return {
+      lunchGuestsMap, dinnerGuestsMap,
+      lunchNetFoodPGMap, dinnerNetFoodPGMap,
+      lunchNetDrinksPGMap, dinnerNetDrinksPGMap,
+      lunchNetTotalPGMap, dinnerNetTotalPGMap,
+      lunchQMetrics:  { guests: lG, netFood: lF, netDrinks: lD },
+      dinnerQMetrics: { guests: dG, netFood: dF, netDrinks: dD },
+    };
+  }, [lunchMetricsMap, dinnerMetricsMap]);
 
   const topCats = useMemo(() =>
     Object.entries(weeklyResult?.categoryRevenue ?? {}).sort((a,b) => b[1]-a[1]).slice(0, 12),
@@ -3574,12 +3687,60 @@ export default function SalesReportsPage() {
                         );
                       };
 
+                      // Render a lightweight metric row (guests or per-guest value, no forecast)
+                      const fmtPG = (v: number) =>
+                        new Intl.NumberFormat('de-DE', { style:'currency', currency:'EUR', minimumFractionDigits:2, maximumFractionDigits:2 }).format(v);
+
+                      const metricRow = (label: string, valMap: Record<string, number>, qVal: number | null, format: 'count' | 'currency' = 'count') => (
+                        <tr key={label} className="border-b border-gray-100 hover:bg-gray-50/60 group" style={{ backgroundColor:'#f8fafc' }}>
+                          <td className="sticky left-0 z-10 px-4 py-1 whitespace-nowrap border-r border-gray-100 bg-[#f8fafc] group-hover:bg-gray-50/60 transition-colors text-[11px] text-gray-400 italic">{label}</td>
+                          {dailyCols.map((col, ci) => {
+                            if (col.type === 'day') {
+                              const isCurDay = col.dateKey === todayKey;
+                              const val = valMap[col.dateKey] ?? null;
+                              return (
+                                <td key={ci} className="py-1 text-right tabular-nums text-[11px]" style={{ paddingLeft:4, paddingRight:8, backgroundColor: isCurDay ? 'rgba(59,130,246,0.04)' : undefined }}>
+                                  {val != null && val > 0
+                                    ? <span className="text-gray-500">{format === 'count' ? fmtNum(val) : fmtPG(val)}</span>
+                                    : <span className="text-gray-200">—</span>}
+                                </td>
+                              );
+                            } else {
+                              const wVals = col.wDateKeys.map(k => valMap[k] ?? null).filter((v): v is number => v !== null && v > 0);
+                              const wVal  = format === 'count'
+                                ? wVals.reduce((s, v) => s + v, 0)
+                                : wVals.length > 0 ? wVals.reduce((s, v) => s + v, 0) / wVals.length : 0;
+                              return (
+                                <td key={ci} className="py-1 text-right tabular-nums text-[11px]" style={{ paddingLeft:4, paddingRight:6, backgroundColor:'#fffbeb', borderLeft:'1px solid #fde68a', borderRight:'1px solid #fde68a' }}>
+                                  {wVal > 0
+                                    ? <span className="text-gray-500">{format === 'count' ? fmtNum(wVal) : fmtPG(wVal)}</span>
+                                    : <span className="text-gray-200">—</span>}
+                                </td>
+                              );
+                            }
+                          })}
+                          <td className="py-1 text-right tabular-nums text-[11px] border-l border-gray-200" style={{ paddingLeft:4, paddingRight:8 }}>
+                            {qVal != null && qVal > 0
+                              ? <span className="text-gray-600 font-medium">{format === 'count' ? fmtNum(qVal) : fmtPG(qVal)}</span>
+                              : <span className="text-gray-200">—</span>}
+                          </td>
+                        </tr>
+                      );
+
                       return (
                         <>
+                          {metricRow('↳ Est. Guests · Lunch',        lunchGuestsMap,      lunchQMetrics.guests, 'count')}
+                          {metricRow('↳ Net Food / Guest · Lunch',    lunchNetFoodPGMap,   lunchQMetrics.guests > 0 ? lunchQMetrics.netFood   / lunchQMetrics.guests : null, 'currency')}
+                          {metricRow('↳ Net Drinks / Guest · Lunch',  lunchNetDrinksPGMap, lunchQMetrics.guests > 0 ? lunchQMetrics.netDrinks / lunchQMetrics.guests : null, 'currency')}
+                          {metricRow('↳ Net Total / Guest · Lunch',   lunchNetTotalPGMap,  lunchQMetrics.guests > 0 ? (lunchQMetrics.netFood + lunchQMetrics.netDrinks) / lunchQMetrics.guests : null, 'currency')}
                           {posRow('☀️  Orderbird · Lunch',  lunchMap,  lunchForecastMap,  lunchQtrTotal)}
                           {simplyRow('🛵 Simply · Lunch', deliveryLunchMap, simplyLunchForecastMap)}
                           {billsRow('🧾 Bills · Lunch', billsLunchMap)}
                           {totalRow('☀️  Total Lunch',  lunchMap,  lunchForecastMap,  deliveryLunchMap,  lunchQtrTotal,  '#f0fdf4', '#1B5E20', billsLunchMap, simplyLunchForecastMap)}
+                          {metricRow('↳ Est. Guests · Dinner',        dinnerGuestsMap,      dinnerQMetrics.guests, 'count')}
+                          {metricRow('↳ Net Food / Guest · Dinner',   dinnerNetFoodPGMap,   dinnerQMetrics.guests > 0 ? dinnerQMetrics.netFood   / dinnerQMetrics.guests : null, 'currency')}
+                          {metricRow('↳ Net Drinks / Guest · Dinner', dinnerNetDrinksPGMap, dinnerQMetrics.guests > 0 ? dinnerQMetrics.netDrinks / dinnerQMetrics.guests : null, 'currency')}
+                          {metricRow('↳ Net Total / Guest · Dinner',  dinnerNetTotalPGMap,  dinnerQMetrics.guests > 0 ? (dinnerQMetrics.netFood + dinnerQMetrics.netDrinks) / dinnerQMetrics.guests : null, 'currency')}
                           {posRow('🌙  Orderbird · Dinner', dinnerMap, dinnerForecastMap, dinnerQtrTotal)}
                           {simplyRow('🛵 Simply · Dinner', deliveryDinnerMap, simplyDinnerForecastMap)}
                           {billsRow('🧾 Bills · Dinner', billsDinnerMap)}
