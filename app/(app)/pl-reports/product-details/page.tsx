@@ -178,16 +178,24 @@ export default function ProductDetailsPage() {
     return m;
   }, [finishedGoods]);
 
+  // ── VAT helper (mirrors Finished Goods page logic) ────────────────────────
+  const vatForItem = (productName: string): number => {
+    const item = itemMap.get(productName.toLowerCase());
+    return item?.menu_category === 'Drinks' ? 0.19 : 0.07;
+  };
+
   // ── Aggregation ────────────────────────────────────────────────────────────
   const aggregated = useMemo(() => {
-    const map = new Map<string, { quantity: number; gross_sales: number }>();
+    const map = new Map<string, { quantity: number; gross_sales: number; net_sales: number }>();
     for (const r of rows) {
-      const ex = map.get(r.product_name);
-      if (ex) { ex.quantity += r.quantity; ex.gross_sales += r.gross_sales; }
-      else map.set(r.product_name, { quantity: r.quantity, gross_sales: r.gross_sales });
+      const net = r.gross_sales / (1 + vatForItem(r.product_name));
+      const ex  = map.get(r.product_name);
+      if (ex) { ex.quantity += r.quantity; ex.gross_sales += r.gross_sales; ex.net_sales += net; }
+      else map.set(r.product_name, { quantity: r.quantity, gross_sales: r.gross_sales, net_sales: net });
     }
     return Array.from(map.entries()).map(([product_name, v]) => ({ product_name, ...v }));
-  }, [rows]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows, itemMap]);
 
   const sorted = useMemo(() => {
     return [...aggregated].sort((a, b) => {
@@ -200,18 +208,21 @@ export default function ProductDetailsPage() {
   const totals = useMemo(() => ({
     quantity:    rows.reduce((s, r) => s + r.quantity, 0),
     gross_sales: rows.reduce((s, r) => s + r.gross_sales, 0),
-  }), [rows]);
+    net_sales:   aggregated.reduce((s, r) => s + r.net_sales, 0),
+  }), [rows, aggregated]);
 
   const summary = useMemo(() => {
-    let grossFood = 0, grossDrinks = 0, guests = 0, unmatched = 0;
+    let grossFood = 0, grossDrinks = 0, netFood = 0, netDrinks = 0, guests = 0, unmatched = 0;
     for (const r of rows) {
       const item = itemMap.get(r.product_name.toLowerCase());
+      const vat  = item?.menu_category === 'Drinks' ? 0.19 : 0.07;
+      const net  = r.gross_sales / (1 + vat);
       if (!item) { unmatched++; continue; }
-      if (item.menu_category === 'Drinks') grossDrinks += r.gross_sales;
-      else grossFood += r.gross_sales;
+      if (item.menu_category === 'Drinks') { grossDrinks += r.gross_sales; netDrinks += net; }
+      else                                 { grossFood   += r.gross_sales; netFood   += net; }
       guests += r.quantity * (item.guest_multiplier ?? 0);
     }
-    return { grossFood, grossDrinks, guests: Math.round(guests * 2) / 2, unmatched };
+    return { grossFood, grossDrinks, netFood, netDrinks, guests: Math.round(guests * 2) / 2, unmatched };
   }, [rows, itemMap]);
 
   // ── Sort handler ───────────────────────────────────────────────────────────
@@ -423,7 +434,29 @@ export default function ProductDetailsPage() {
               </div>
             </div>
 
-            {/* Row 2: Per-guest */}
+            {/* Row 2: Net figures */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 divide-x divide-gray-300 border-b border-gray-300 bg-[#1B5E20]/5">
+              <div className="px-5 py-3">
+                <p className="text-xs font-semibold text-[#1B5E20] uppercase tracking-wide mb-0.5">Total Net Sales</p>
+                <p className="text-lg font-bold text-gray-900 tabular-nums">{fmt(totals.net_sales)}</p>
+              </div>
+              <div className="px-5 py-3">
+                <p className="text-xs font-semibold text-amber-600 uppercase tracking-wide mb-0.5">Net Food Sales</p>
+                <p className="text-lg font-bold text-gray-900 tabular-nums">{fmt(summary.netFood)}</p>
+                {totals.net_sales > 0 && (
+                  <p className="text-xs text-gray-400 mt-0.5">{((summary.netFood / totals.net_sales) * 100).toFixed(1)} % of net</p>
+                )}
+              </div>
+              <div className="px-5 py-3">
+                <p className="text-xs font-semibold text-blue-600 uppercase tracking-wide mb-0.5">Net Drinks Sales</p>
+                <p className="text-lg font-bold text-gray-900 tabular-nums">{fmt(summary.netDrinks)}</p>
+                {totals.net_sales > 0 && (
+                  <p className="text-xs text-gray-400 mt-0.5">{((summary.netDrinks / totals.net_sales) * 100).toFixed(1)} % of net</p>
+                )}
+              </div>
+            </div>
+
+            {/* Row 3: Per-guest */}
             <div className="grid grid-cols-2 sm:grid-cols-3 divide-x divide-gray-300 bg-gray-50">
               <div className="px-5 py-3">
                 <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-0.5">Total / Guest</p>
@@ -467,6 +500,7 @@ export default function ProductDetailsPage() {
                       Gross Sales <SortIcon k="gross_sales" />
                     </button>
                   </th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold text-white/70 uppercase tracking-wide border-r border-white/10">Net Sales</th>
                   <th className="px-4 py-3 text-right text-xs font-semibold text-white/70 uppercase tracking-wide border-r border-white/10">Product Price</th>
                   <th className="px-4 py-3 text-right text-xs font-semibold text-white/70 uppercase tracking-wide">Share</th>
                 </tr>
@@ -481,6 +515,7 @@ export default function ProductDetailsPage() {
                       {new Intl.NumberFormat('de-DE').format(row.quantity)}
                     </td>
                     <td className="px-4 py-2.5 text-right font-semibold text-gray-800 border-r border-gray-200 tabular-nums">{fmt(row.gross_sales)}</td>
+                    <td className="px-4 py-2.5 text-right text-gray-600 border-r border-gray-200 tabular-nums">{fmt(row.net_sales)}</td>
                     <td className="px-4 py-2.5 text-right text-gray-600 border-r border-gray-200 tabular-nums">
                       {row.quantity > 0 ? fmt(row.gross_sales / row.quantity) : '—'}
                     </td>
@@ -500,6 +535,7 @@ export default function ProductDetailsPage() {
                     {new Intl.NumberFormat('de-DE').format(totals.quantity)}
                   </td>
                   <td className="px-4 py-3 text-right font-bold text-[#1B5E20] text-base border-r border-gray-200 tabular-nums">{fmt(totals.gross_sales)}</td>
+                  <td className="px-4 py-3 text-right font-bold text-gray-700 border-r border-gray-200 tabular-nums">{fmt(totals.net_sales)}</td>
                   <td className="px-4 py-3 border-r border-gray-200" />
                   <td className="px-4 py-3 text-right text-xs font-bold text-gray-500">100 %</td>
                 </tr>
