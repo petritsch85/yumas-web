@@ -43,6 +43,17 @@ const OCCASION_STYLES: Record<string, string> = {
 const fmt = (n: number | null | undefined) =>
   n != null ? new Intl.NumberFormat('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n) + ' €' : '—';
 
+const vatRate = (category: string | null | undefined): number =>
+  category === 'Drinks' ? 0.19 : 0.07;
+
+const fmtVat = (category: string | null | undefined): string =>
+  category === 'Drinks' ? '19 %' : '7 %';
+
+const netPrice = (gross: number | null | undefined, category: string | null | undefined): string => {
+  if (gross == null) return '—';
+  return fmt(gross / (1 + vatRate(category)));
+};
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function FinishedGoodsPage() {
@@ -125,14 +136,20 @@ export default function FinishedGoodsPage() {
   // ── CSV download (exports ALL items, ignoring current search/filter) ────────
   const handleDownloadCSV = () => {
     const all = items ?? [];
-    const header = ['Name', 'Price (Gross)', 'Occasion', 'Category', 'Guest Multiplier'];
-    const rows = all.map(i => [
-      `"${localizedName(i, lang).replace(/"/g, '""')}"`,
-      i.gross_price != null ? String(i.gross_price).replace('.', ',') : '0',
-      i.occasion         ?? '',
-      i.menu_category    ?? '',
-      String(i.guest_multiplier ?? 0),
-    ]);
+    const header = ['Name', 'Price (Gross)', 'VAT (%)', 'Price (Net)', 'Occasion', 'Category', 'Guest Multiplier'];
+    const rows = all.map(i => {
+      const vat     = vatRate(i.menu_category);
+      const netVal  = i.gross_price != null ? i.gross_price / (1 + vat) : 0;
+      return [
+        `"${localizedName(i, lang).replace(/"/g, '""')}"`,
+        i.gross_price != null ? String(i.gross_price).replace('.', ',') : '0',
+        vat === 0.19 ? '19' : '7',
+        netVal.toFixed(2).replace('.', ','),
+        i.occasion      ?? '',
+        i.menu_category ?? '',
+        String(i.guest_multiplier ?? 0),
+      ];
+    });
     const csv = [header, ...rows].map(r => r.join(';')).join('\r\n');
     const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
     const url  = URL.createObjectURL(blob);
@@ -201,6 +218,8 @@ export default function FinishedGoodsPage() {
               <tr className="bg-[#1B5E20]">
                 <th className="px-4 py-3 text-left text-xs font-semibold text-white/70 uppercase tracking-wide border-r border-white/10">Name</th>
                 <th className="px-4 py-3 text-right text-xs font-semibold text-white/70 uppercase tracking-wide border-r border-white/10 w-28">Price (gross)</th>
+                <th className="px-4 py-3 text-center text-xs font-semibold text-white/70 uppercase tracking-wide border-r border-white/10 w-20">VAT</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold text-white/70 uppercase tracking-wide border-r border-white/10 w-28">Price (net)</th>
                 <th className="px-4 py-3 text-center text-xs font-semibold text-white/70 uppercase tracking-wide border-r border-white/10 w-24">Occasion</th>
                 <th className="px-4 py-3 text-center text-xs font-semibold text-white/70 uppercase tracking-wide border-r border-white/10 w-28">Category</th>
                 <th className="px-4 py-3 text-center text-xs font-semibold text-white/70 uppercase tracking-wide border-r border-white/10 w-28">Guest ×</th>
@@ -232,6 +251,18 @@ export default function FinishedGoodsPage() {
                       ) : (
                         <span className="font-medium text-gray-800">{fmt(item.gross_price)}</span>
                       )}
+                    </td>
+
+                    {/* VAT */}
+                    <td className="px-4 py-2.5 text-center border-r border-gray-200 tabular-nums">
+                      <span className={`text-xs font-semibold ${item.menu_category === 'Drinks' ? 'text-indigo-600' : 'text-gray-500'}`}>
+                        {fmtVat(item.menu_category)}
+                      </span>
+                    </td>
+
+                    {/* Price (net) */}
+                    <td className="px-4 py-2.5 text-right border-r border-gray-200 tabular-nums">
+                      <span className="text-gray-600">{netPrice(item.gross_price, item.menu_category)}</span>
                     </td>
 
                     {/* Occasion */}
