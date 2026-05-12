@@ -24,6 +24,7 @@ type FinishedGoodLookup = {
   name:             string;
   menu_category:    'Starter' | 'Main' | 'Drinks' | 'Salsas' | 'Dessert' | 'Other' | null;
   guest_multiplier: number;
+  vat_rate:         number | null;
 };
 
 type SortKey = 'product_name' | 'quantity' | 'gross_sales';
@@ -166,7 +167,7 @@ export default function ProductDetailsPage() {
     queryKey: ['items-finished-lookup'],
     queryFn: async () => {
       const { data } = await supabase
-        .from('items').select('name, menu_category, guest_multiplier')
+        .from('items').select('name, menu_category, guest_multiplier, vat_rate')
         .eq('product_type', 'finished').eq('is_active', true);
       return (data ?? []) as FinishedGoodLookup[];
     },
@@ -181,7 +182,7 @@ export default function ProductDetailsPage() {
   // ── VAT helper (mirrors Finished Goods page logic) ────────────────────────
   const vatForItem = (productName: string): number => {
     const item = itemMap.get(productName.toLowerCase());
-    return item?.menu_category === 'Drinks' ? 0.19 : 0.07;
+    return item?.vat_rate ?? (item?.menu_category === 'Drinks' ? 0.19 : 0.07);
   };
 
   // ── Aggregation ────────────────────────────────────────────────────────────
@@ -518,9 +519,11 @@ export default function ProductDetailsPage() {
                     <td className="px-4 py-2.5 text-right font-semibold text-gray-800 border-r border-gray-200 tabular-nums">{fmt(row.gross_sales)}</td>
                     <td className="px-4 py-2.5 text-right text-gray-600 border-r border-gray-200 tabular-nums">{fmt(row.net_sales)}</td>
                     <td className="px-4 py-2.5 text-right border-r border-gray-200 tabular-nums">
-                      <span className={`text-xs font-medium px-1.5 py-0.5 rounded ${itemMap.get(row.product_name.toLowerCase())?.menu_category === 'Drinks' ? 'bg-blue-50 text-blue-600' : 'bg-amber-50 text-amber-600'}`}>
-                        {itemMap.get(row.product_name.toLowerCase())?.menu_category === 'Drinks' ? '19 %' : '7 %'}
-                      </span>
+                      {(() => { const r = vatForItem(row.product_name); return (
+                        <span className={`text-xs font-medium px-1.5 py-0.5 rounded ${r === 0.19 ? 'bg-blue-50 text-blue-600' : 'bg-amber-50 text-amber-600'}`}>
+                          {r === 0.19 ? '19 %' : '7 %'}
+                        </span>
+                      ); })()}
                     </td>
                     <td className="px-4 py-2.5 text-right text-gray-600 border-r border-gray-200 tabular-nums">
                       {row.quantity > 0 ? fmt(row.gross_sales / row.quantity) : '—'}

@@ -14,6 +14,7 @@ export interface Item {
   name_en?: string | null; name_de?: string | null; name_es?: string | null;
   // Finished-goods extra fields
   gross_price?:      number | null;
+  vat_rate?:         number | null;
   occasion?:         'L' | 'D' | 'L+D' | null;
   menu_category?:    'Starter' | 'Main' | 'Drinks' | 'Salsas' | 'Dessert' | 'Other' | null;
   guest_multiplier?: number | null;

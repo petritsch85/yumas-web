@@ -45,15 +45,16 @@ const OCCASION_STYLES: Record<string, string> = {
 const fmt = (n: number | null | undefined) =>
   n != null ? new Intl.NumberFormat('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n) + ' €' : '—';
 
-const vatRate = (category: string | null | undefined): number =>
-  category === 'Drinks' ? 0.19 : 0.07;
+// Primary: use stored vat_rate; fall back to category-based default
+const itemVatRate = (item: { vat_rate?: number | null; menu_category?: string | null }): number =>
+  item.vat_rate ?? (item.menu_category === 'Drinks' ? 0.19 : 0.07);
 
-const fmtVat = (category: string | null | undefined): string =>
-  category === 'Drinks' ? '19 %' : '7 %';
+const fmtVatNum = (rate: number): string =>
+  rate === 0.19 ? '19 %' : '7 %';
 
-const netPrice = (gross: number | null | undefined, category: string | null | undefined): string => {
+const netPriceFromRate = (gross: number | null | undefined, rate: number): string => {
   if (gross == null) return '—';
-  return fmt(gross / (1 + vatRate(category)));
+  return fmt(gross / (1 + rate));
 };
 
 // ── Page ──────────────────────────────────────────────────────────────────────
@@ -72,7 +73,7 @@ export default function FinishedGoodsPage() {
     queryFn: async () => {
       const { data } = await supabase
         .from('items')
-        .select('*, unit:units_of_measure(id, name, abbreviation)')
+        .select('*, vat_rate, unit:units_of_measure(id, name, abbreviation)')
         .eq('product_type', 'finished')
         .eq('is_active', true)
         .order('menu_category')
@@ -107,7 +108,7 @@ export default function FinishedGoodsPage() {
     setEditState({
       name:             item.name,
       gross_price:      String(item.gross_price ?? ''),
-      vat:              item.menu_category === 'Drinks' ? '19' : '7',
+      vat:              itemVatRate(item) === 0.19 ? '19' : '7',
       occasion:         item.occasion         ?? 'L+D',
       menu_category:    item.menu_category    ?? 'Main',
       guest_multiplier: String(item.guest_multiplier ?? '0'),
@@ -122,6 +123,7 @@ export default function FinishedGoodsPage() {
     const { error } = await supabase.from('items').update({
       name:             editState.name.trim(),
       gross_price:      parseFloat(editState.gross_price)      || 0,
+      vat_rate:         editState.vat === '19' ? 0.19 : 0.07,
       occasion:         editState.occasion,
       menu_category:    editState.menu_category,
       guest_multiplier: parseInt(editState.guest_multiplier)   || 0,
@@ -133,18 +135,13 @@ export default function FinishedGoodsPage() {
     }
   };
 
-  // Changing VAT auto-adjusts category to keep them in sync
+  // VAT and category are now fully independent
   const handleVatChange = (val: '7' | '19') => {
-    setEditState(s => {
-      if (!s) return s;
-      const newCat: MenuCategory = val === '19' ? 'Drinks' : s.menu_category === 'Drinks' ? 'Main' : s.menu_category;
-      return { ...s, vat: val, menu_category: newCat, guest_multiplier: newCat === 'Main' ? '1' : '0' };
-    });
+    setEditState(s => s ? { ...s, vat: val } : s);
   };
 
-  // Changing category also updates VAT and guest_multiplier
   const handleCategoryChange = (val: MenuCategory) => {
-    setEditState(s => s ? { ...s, menu_category: val, vat: val === 'Drinks' ? '19' : '7', guest_multiplier: val === 'Main' ? '1' : '0' } : s);
+    setEditState(s => s ? { ...s, menu_category: val, guest_multiplier: val === 'Main' ? '1' : '0' } : s);
   };
 
   // ── CSV download (exports ALL items, ignoring current search/filter) ────────
@@ -152,7 +149,7 @@ export default function FinishedGoodsPage() {
     const all = items ?? [];
     const header = ['Name', 'Price (Gross)', 'VAT (%)', 'Price (Net)', 'Occasion', 'Category', 'Guest Multiplier'];
     const rows = all.map(i => {
-      const vat     = vatRate(i.menu_category);
+      const vat     = itemVatRate(i);
       const netVal  = i.gross_price != null ? i.gross_price / (1 + vat) : 0;
       return [
         `"${localizedName(i, lang).replace(/"/g, '""')}"`,
@@ -289,8 +286,8 @@ export default function FinishedGoodsPage() {
                           <option value="19">19 %</option>
                         </select>
                       ) : (
-                        <span className={`text-xs font-semibold ${item.menu_category === 'Drinks' ? 'text-indigo-600' : 'text-gray-500'}`}>
-                          {fmtVat(item.menu_category)}
+                        <span className={`text-xs font-semibold ${itemVatRate(item) === 0.19 ? 'text-indigo-600' : 'text-gray-500'}`}>
+                          {fmtVatNum(itemVatRate(item))}
                         </span>
                       )}
                     </td>
@@ -299,8 +296,8 @@ export default function FinishedGoodsPage() {
                     <td className="px-4 py-2.5 text-right border-r border-gray-200 tabular-nums">
                       <span className="text-gray-600">
                         {isEditing
-                          ? netPrice(parseFloat(editState!.gross_price) || 0, editState!.vat === '19' ? 'Drinks' : 'Other')
-                          : netPrice(item.gross_price, item.menu_category)}
+                          ? netPriceFromRate(parseFloat(editState!.gross_price) || 0, editState!.vat === '19' ? 0.19 : 0.07)
+                          : netPriceFromRate(item.gross_price, itemVatRate(item))}
                       </span>
                     </td>
 
