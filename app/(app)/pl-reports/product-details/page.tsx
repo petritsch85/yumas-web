@@ -316,7 +316,8 @@ export default function ProductDetailsPage() {
               </span>
             </h2>
           </div>
-          <div className="grid grid-cols-2 sm:grid-cols-4 divide-x divide-gray-100">
+          {/* Row 1: Sales figures */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 divide-x divide-gray-200 border-b border-gray-200">
 
             {/* Total Gross Sales */}
             <div className="px-5 py-4">
@@ -361,7 +362,7 @@ export default function ProductDetailsPage() {
               )}
             </div>
 
-            {/* Guests */}
+            {/* Est. Guests */}
             <div className="px-5 py-4">
               <div className="flex items-center gap-2 mb-1">
                 <div className="w-6 h-6 rounded-lg bg-purple-50 flex items-center justify-center flex-shrink-0">
@@ -377,6 +378,34 @@ export default function ProductDetailsPage() {
                   {summary.unmatched} product{summary.unmatched !== 1 ? 's' : ''} not in Finished Goods
                 </p>
               )}
+            </div>
+          </div>
+
+          {/* Row 2: Per-guest metrics */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 divide-x divide-gray-200 bg-gray-50/50">
+
+            {/* Total per guest */}
+            <div className="px-5 py-3">
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-0.5">Total / Guest</p>
+              <p className="text-lg font-bold text-gray-800 tabular-nums">
+                {summary.guests > 0 ? fmt(totals.gross_sales / summary.guests) : '—'}
+              </p>
+            </div>
+
+            {/* Food per guest */}
+            <div className="px-5 py-3">
+              <p className="text-xs font-semibold text-amber-500 uppercase tracking-wide mb-0.5">Food / Guest</p>
+              <p className="text-lg font-bold text-gray-800 tabular-nums">
+                {summary.guests > 0 ? fmt(summary.grossFood / summary.guests) : '—'}
+              </p>
+            </div>
+
+            {/* Drinks per guest */}
+            <div className="px-5 py-3">
+              <p className="text-xs font-semibold text-blue-500 uppercase tracking-wide mb-0.5">Drinks / Guest</p>
+              <p className="text-lg font-bold text-gray-800 tabular-nums">
+                {summary.guests > 0 ? fmt(summary.grossDrinks / summary.guests) : '—'}
+              </p>
             </div>
           </div>
         </div>
