@@ -13,6 +13,7 @@ import { localizedName } from '@/lib/localized-name';
 type MenuCategory = 'Starter' | 'Main' | 'Drinks' | 'Salsas' | 'Dessert' | 'Other';
 
 type EditState = {
+  name:             string;
   gross_price:      string;
   occasion:         'L' | 'D' | 'L+D';
   menu_category:    MenuCategory;
@@ -103,6 +104,7 @@ export default function FinishedGoodsPage() {
   const startEdit = (item: Item) => {
     setEditingId(item.id);
     setEditState({
+      name:             item.name,
       gross_price:      String(item.gross_price ?? ''),
       occasion:         item.occasion         ?? 'L+D',
       menu_category:    item.menu_category    ?? 'Main',
@@ -116,6 +118,7 @@ export default function FinishedGoodsPage() {
     if (!editState) return;
     setSaving(true);
     const { error } = await supabase.from('items').update({
+      name:             editState.name.trim(),
       gross_price:      parseFloat(editState.gross_price)      || 0,
       occasion:         editState.occasion,
       menu_category:    editState.menu_category,
@@ -229,14 +232,23 @@ export default function FinishedGoodsPage() {
             <tbody>
               {filtered.map((item, i) => {
                 const isEditing = editingId === item.id;
-                const rowCls = `border-b border-gray-200 ${i % 2 === 0 ? 'bg-white' : 'bg-gray-50/60'} ${!isEditing ? 'hover:bg-[#1B5E20]/5 cursor-pointer' : 'bg-green-50'}`;
+                const rowCls = `border-b border-gray-200 group ${i % 2 === 0 ? 'bg-white' : 'bg-gray-50/60'} ${!isEditing ? 'hover:bg-[#1B5E20]/5 cursor-pointer' : 'bg-green-50/60'}`;
 
                 return (
                   <tr key={item.id} className={rowCls} onClick={() => !isEditing && startEdit(item)}>
 
                     {/* Name */}
                     <td className="px-4 py-2.5 font-medium text-gray-800 border-r border-gray-200">
-                      {localizedName(item, lang)}
+                      {isEditing ? (
+                        <input
+                          className="w-full border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30"
+                          value={editState!.name}
+                          onChange={e => setEditState(s => s ? { ...s, name: e.target.value } : s)}
+                          onClick={e => e.stopPropagation()}
+                        />
+                      ) : (
+                        localizedName(item, lang)
+                      )}
                     </td>
 
                     {/* Price */}
@@ -337,7 +349,12 @@ export default function FinishedGoodsPage() {
                           </button>
                         </div>
                       ) : (
-                        <span className="text-xs text-gray-300 group-hover:text-gray-400">Edit</span>
+                        <button
+                          onClick={e => { e.stopPropagation(); startEdit(item); }}
+                          className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-gray-100 text-gray-500 opacity-0 group-hover:opacity-100 hover:bg-[#1B5E20] hover:text-white transition-all"
+                        >
+                          Edit
+                        </button>
                       )}
                     </td>
                   </tr>
