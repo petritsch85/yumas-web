@@ -3,7 +3,7 @@
 import { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
-import { ShoppingBag, ChevronDown, ChevronUp, ChevronsUpDown } from 'lucide-react';
+import { ShoppingBag, ChevronDown, ChevronUp, ChevronsUpDown, Euro, Utensils, Wine, Users } from 'lucide-react';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -19,6 +19,12 @@ type ProductRow = {
   report_date:     string;
   shift_type:      'lunch' | 'dinner' | null;
   location_id:     string;
+};
+
+type FinishedGoodLookup = {
+  name:             string;
+  menu_category:    'Starter' | 'Main' | 'Drinks' | null;
+  guest_multiplier: number;
 };
 
 type SortKey = 'product_name' | 'quantity' | 'gross_sales';
@@ -120,6 +126,27 @@ export default function ProductDetailsPage() {
     },
   });
 
+  // ── Finished goods lookup (name → category + multiplier) ──────────────────
+
+  const { data: finishedGoods = [] } = useQuery<FinishedGoodLookup[]>({
+    queryKey: ['items-finished-lookup'],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('items')
+        .select('name, menu_category, guest_multiplier')
+        .eq('product_type', 'finished')
+        .eq('is_active', true);
+      return (data ?? []) as FinishedGoodLookup[];
+    },
+  });
+
+  // Build name → item map for O(1) lookup
+  const itemMap = useMemo(() => {
+    const m = new Map<string, FinishedGoodLookup>();
+    for (const item of finishedGoods) m.set(item.name.toLowerCase(), item);
+    return m;
+  }, [finishedGoods]);
+
   // ── Aggregation ────────────────────────────────────────────────────────────
 
   const aggregated = useMemo(() => {
@@ -164,9 +191,32 @@ export default function ProductDetailsPage() {
   }, [aggregated, sortKey, sortDir]);
 
   const totals = useMemo(() => ({
-    quantity:   rows.reduce((s, r) => s + r.quantity, 0),
+    quantity:    rows.reduce((s, r) => s + r.quantity, 0),
     gross_sales: rows.reduce((s, r) => s + r.gross_sales, 0),
   }), [rows]);
+
+  const summary = useMemo(() => {
+    let grossFood   = 0;
+    let grossDrinks = 0;
+    let guests      = 0;
+    let unmatched   = 0;
+
+    for (const r of rows) {
+      const item = itemMap.get(r.product_name.toLowerCase());
+      if (!item) { unmatched++; continue; }
+
+      if (item.menu_category === 'Drinks') {
+        grossDrinks += r.gross_sales;
+      } else {
+        // Starter + Main both count as food
+        grossFood += r.gross_sales;
+      }
+
+      guests += r.quantity * (item.guest_multiplier ?? 0);
+    }
+
+    return { grossFood, grossDrinks, guests: Math.round(guests * 2) / 2, unmatched };
+  }, [rows, itemMap]);
 
   const handleSort = (key: SortKey) => {
     if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
@@ -254,6 +304,78 @@ export default function ProductDetailsPage() {
           ))}
         </div>
       </div>
+
+      {/* Shift Summary */}
+      {rows.length > 0 && (
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm mb-5 overflow-hidden">
+          <div className="px-5 py-3 border-b border-gray-100 bg-gray-50">
+            <h2 className="text-xs font-bold text-gray-600 uppercase tracking-wide">Shift Summary</h2>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 divide-x divide-gray-100">
+
+            {/* Total Gross Sales */}
+            <div className="px-5 py-4">
+              <div className="flex items-center gap-2 mb-1">
+                <div className="w-6 h-6 rounded-lg bg-[#1B5E20]/10 flex items-center justify-center flex-shrink-0">
+                  <Euro size={12} className="text-[#1B5E20]" />
+                </div>
+                <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Total Gross Sales</span>
+              </div>
+              <p className="text-xl font-bold text-gray-900 tabular-nums">{fmt(totals.gross_sales)}</p>
+            </div>
+
+            {/* Gross Food Sales */}
+            <div className="px-5 py-4">
+              <div className="flex items-center gap-2 mb-1">
+                <div className="w-6 h-6 rounded-lg bg-amber-50 flex items-center justify-center flex-shrink-0">
+                  <Utensils size={12} className="text-amber-600" />
+                </div>
+                <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Gross Food Sales</span>
+              </div>
+              <p className="text-xl font-bold text-gray-900 tabular-nums">{fmt(summary.grossFood)}</p>
+              {totals.gross_sales > 0 && (
+                <p className="text-xs text-gray-400 mt-0.5">
+                  {((summary.grossFood / totals.gross_sales) * 100).toFixed(1)} % of total
+                </p>
+              )}
+            </div>
+
+            {/* Gross Drinks Sales */}
+            <div className="px-5 py-4">
+              <div className="flex items-center gap-2 mb-1">
+                <div className="w-6 h-6 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0">
+                  <Wine size={12} className="text-blue-600" />
+                </div>
+                <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Gross Drinks Sales</span>
+              </div>
+              <p className="text-xl font-bold text-gray-900 tabular-nums">{fmt(summary.grossDrinks)}</p>
+              {totals.gross_sales > 0 && (
+                <p className="text-xs text-gray-400 mt-0.5">
+                  {((summary.grossDrinks / totals.gross_sales) * 100).toFixed(1)} % of total
+                </p>
+              )}
+            </div>
+
+            {/* Guests */}
+            <div className="px-5 py-4">
+              <div className="flex items-center gap-2 mb-1">
+                <div className="w-6 h-6 rounded-lg bg-purple-50 flex items-center justify-center flex-shrink-0">
+                  <Users size={12} className="text-purple-600" />
+                </div>
+                <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Est. Guests</span>
+              </div>
+              <p className="text-xl font-bold text-gray-900 tabular-nums">
+                {new Intl.NumberFormat('de-DE').format(summary.guests)}
+              </p>
+              {summary.unmatched > 0 && (
+                <p className="text-xs text-amber-500 mt-0.5">
+                  {summary.unmatched} product{summary.unmatched !== 1 ? 's' : ''} not in Finished Goods
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* View toggle */}
       <div className="flex items-center gap-3 mb-4">
