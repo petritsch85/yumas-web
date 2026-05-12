@@ -10,10 +10,12 @@ import { localizedName } from '@/lib/localized-name';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
+type MenuCategory = 'Starter' | 'Main' | 'Drinks' | 'Salsas' | 'Dessert' | 'Other';
+
 type EditState = {
   gross_price:      string;
   occasion:         'L' | 'D' | 'L+D';
-  menu_category:    'Starter' | 'Main' | 'Drinks';
+  menu_category:    MenuCategory;
   guest_multiplier: string;
 };
 
@@ -21,12 +23,15 @@ type EditState = {
 
 const OCCASION_OPTIONS: ('L' | 'D' | 'L+D')[] = ['L', 'D', 'L+D'];
 
-const CATEGORY_OPTIONS: ('Starter' | 'Main' | 'Drinks')[] = ['Starter', 'Main', 'Drinks'];
+const CATEGORY_OPTIONS: MenuCategory[] = ['Starter', 'Main', 'Drinks', 'Salsas', 'Dessert', 'Other'];
 
 const CATEGORY_STYLES: Record<string, string> = {
   Main:    'bg-[#1B5E20]/10 text-[#1B5E20]',
   Starter: 'bg-amber-50 text-amber-700',
   Drinks:  'bg-blue-50 text-blue-700',
+  Salsas:  'bg-orange-50 text-orange-700',
+  Dessert: 'bg-pink-50 text-pink-700',
+  Other:   'bg-gray-100 text-gray-500',
 };
 
 const OCCASION_STYLES: Record<string, string> = {
@@ -47,7 +52,7 @@ export default function FinishedGoodsPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editState, setEditState] = useState<EditState | null>(null);
   const [saving,    setSaving]    = useState(false);
-  const [catFilter, setCatFilter] = useState<'all' | 'Starter' | 'Main' | 'Drinks'>('all');
+  const [catFilter, setCatFilter] = useState<'all' | MenuCategory>('all');
 
   const { data: items, isLoading } = useQuery({
     queryKey: ['items', 'finished'],
@@ -72,11 +77,14 @@ export default function FinishedGoodsPage() {
 
   // ── Totals ─────────────────────────────────────────────────────────────────
 
-  const counts = {
+  const counts: Record<'all' | MenuCategory, number> = {
     all:     (items ?? []).length,
     Main:    (items ?? []).filter(i => i.menu_category === 'Main').length,
     Starter: (items ?? []).filter(i => i.menu_category === 'Starter').length,
     Drinks:  (items ?? []).filter(i => i.menu_category === 'Drinks').length,
+    Salsas:  (items ?? []).filter(i => i.menu_category === 'Salsas').length,
+    Dessert: (items ?? []).filter(i => i.menu_category === 'Dessert').length,
+    Other:   (items ?? []).filter(i => i.menu_category === 'Other').length,
   };
 
   // ── Edit helpers ───────────────────────────────────────────────────────────
@@ -110,7 +118,7 @@ export default function FinishedGoodsPage() {
   };
 
   // Sync guest_multiplier automatically when category changes
-  const handleCategoryChange = (val: 'Starter' | 'Main' | 'Drinks') => {
+  const handleCategoryChange = (val: MenuCategory) => {
     setEditState(s => s ? { ...s, menu_category: val, guest_multiplier: val === 'Main' ? '1' : '0' } : s);
   };
 
@@ -169,8 +177,8 @@ export default function FinishedGoodsPage() {
         </div>
 
         {/* Category filter tabs */}
-        <div className="flex rounded-lg border border-gray-200 overflow-hidden text-xs font-semibold">
-          {(['all', 'Main', 'Starter', 'Drinks'] as const).map(c => (
+        <div className="flex rounded-lg border border-gray-200 overflow-hidden text-xs font-semibold flex-wrap">
+          {(['all', 'Main', 'Starter', 'Drinks', 'Salsas', 'Dessert', 'Other'] as const).map(c => (
             <button key={c} onClick={() => setCatFilter(c)}
               className={`px-3 py-2 transition-colors ${catFilter === c ? 'bg-[#1B5E20] text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}>
               {c === 'all' ? `All (${counts.all})` : `${c} (${counts[c]})`}

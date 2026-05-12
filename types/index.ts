@@ -15,7 +15,7 @@ export interface Item {
   // Finished-goods extra fields
   gross_price?:      number | null;
   occasion?:         'L' | 'D' | 'L+D' | null;
-  menu_category?:    'Starter' | 'Main' | 'Drinks' | null;
+  menu_category?:    'Starter' | 'Main' | 'Drinks' | 'Salsas' | 'Dessert' | 'Other' | null;
   guest_multiplier?: number | null;
   category?: { id: string; name: string; color_hex: string | null };
   unit?: { id: string; name: string; abbreviation: string };
