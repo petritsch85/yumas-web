@@ -501,6 +501,7 @@ export default function ProductDetailsPage() {
                     </button>
                   </th>
                   <th className="px-4 py-3 text-right text-xs font-semibold text-white/70 uppercase tracking-wide border-r border-white/10">Net Sales</th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold text-white/70 uppercase tracking-wide border-r border-white/10">VAT</th>
                   <th className="px-4 py-3 text-right text-xs font-semibold text-white/70 uppercase tracking-wide border-r border-white/10">Product Price</th>
                   <th className="px-4 py-3 text-right text-xs font-semibold text-white/70 uppercase tracking-wide">Share</th>
                 </tr>
@@ -516,6 +517,11 @@ export default function ProductDetailsPage() {
                     </td>
                     <td className="px-4 py-2.5 text-right font-semibold text-gray-800 border-r border-gray-200 tabular-nums">{fmt(row.gross_sales)}</td>
                     <td className="px-4 py-2.5 text-right text-gray-600 border-r border-gray-200 tabular-nums">{fmt(row.net_sales)}</td>
+                    <td className="px-4 py-2.5 text-right border-r border-gray-200 tabular-nums">
+                      <span className={`text-xs font-medium px-1.5 py-0.5 rounded ${itemMap.get(row.product_name.toLowerCase())?.menu_category === 'Drinks' ? 'bg-blue-50 text-blue-600' : 'bg-amber-50 text-amber-600'}`}>
+                        {itemMap.get(row.product_name.toLowerCase())?.menu_category === 'Drinks' ? '19 %' : '7 %'}
+                      </span>
+                    </td>
                     <td className="px-4 py-2.5 text-right text-gray-600 border-r border-gray-200 tabular-nums">
                       {row.quantity > 0 ? fmt(row.gross_sales / row.quantity) : '—'}
                     </td>
@@ -536,6 +542,7 @@ export default function ProductDetailsPage() {
                   </td>
                   <td className="px-4 py-3 text-right font-bold text-[#1B5E20] text-base border-r border-gray-200 tabular-nums">{fmt(totals.gross_sales)}</td>
                   <td className="px-4 py-3 text-right font-bold text-gray-700 border-r border-gray-200 tabular-nums">{fmt(totals.net_sales)}</td>
+                  <td className="px-4 py-3 border-r border-gray-200" />
                   <td className="px-4 py-3 border-r border-gray-200" />
                   <td className="px-4 py-3 text-right text-xs font-bold text-gray-500">100 %</td>
                 </tr>
