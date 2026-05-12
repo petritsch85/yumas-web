@@ -11,18 +11,28 @@ ALTER TABLE items
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- 2. Delete ALL existing finished goods (dummy data)
---    Must clear dependent tables first due to FK constraints
+--    Must clear every FK-dependent table first
 -- ─────────────────────────────────────────────────────────────────────────────
-DELETE FROM recipe_ingredients
-  WHERE recipe_id IN (
-    SELECT id FROM recipes
-    WHERE output_item_id IN (SELECT id FROM items WHERE product_type = 'finished')
-  );
+DO $$
+DECLARE
+  finished_ids uuid[];
+BEGIN
+  SELECT ARRAY(SELECT id FROM items WHERE product_type = 'finished') INTO finished_ids;
 
-DELETE FROM recipes
-  WHERE output_item_id IN (SELECT id FROM items WHERE product_type = 'finished');
+  DELETE FROM recipe_ingredients         WHERE item_id        = ANY(finished_ids);
+  DELETE FROM recipe_ingredients         WHERE recipe_id IN   (SELECT id FROM recipes WHERE output_item_id = ANY(finished_ids));
+  DELETE FROM recipes                    WHERE output_item_id  = ANY(finished_ids);
+  DELETE FROM waste_logs                 WHERE item_id        = ANY(finished_ids);
+  DELETE FROM stock_movements            WHERE item_id        = ANY(finished_ids);
+  DELETE FROM inventory_count_lines      WHERE item_id        = ANY(finished_ids);
+  DELETE FROM transfer_lines             WHERE item_id        = ANY(finished_ids);
+  DELETE FROM delivery_receipt_lines     WHERE item_id        = ANY(finished_ids);
+  DELETE FROM production_batch_consumption WHERE item_id      = ANY(finished_ids);
+  DELETE FROM supplier_items             WHERE item_id        = ANY(finished_ids);
+  DELETE FROM inventory_levels           WHERE item_id        = ANY(finished_ids);
 
-DELETE FROM items WHERE product_type = 'finished';
+  DELETE FROM items WHERE product_type = 'finished';
+END $$;
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- 3. Insert distinct products from shift_report_products
