@@ -305,11 +305,16 @@ export default function ProductDetailsPage() {
         </div>
       </div>
 
-      {/* Shift Summary */}
+      {/* Period Summary */}
       {rows.length > 0 && (
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm mb-5 overflow-hidden">
           <div className="px-5 py-3 border-b border-gray-100 bg-gray-50">
-            <h2 className="text-xs font-bold text-gray-600 uppercase tracking-wide">Shift Summary</h2>
+            <h2 className="text-xs font-bold text-gray-600 uppercase tracking-wide">
+              Period Summary
+              <span className="ml-2 font-normal text-gray-400 normal-case tracking-normal">
+                ({shiftGroups.length} shift{shiftGroups.length !== 1 ? 's' : ''})
+              </span>
+            </h2>
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-4 divide-x divide-gray-100">
 
@@ -476,12 +481,44 @@ export default function ProductDetailsPage() {
           {shiftGroups.map(group => {
             const groupTotal = group.products.reduce((s, r) => s + r.gross_sales, 0);
             const byRevenue  = [...group.products].sort((a, b) => b.gross_sales - a.gross_sales);
+
+            // Per-shift summary
+            let shiftFood = 0, shiftDrinks = 0, shiftGuests = 0;
+            for (const r of group.products) {
+              const item = itemMap.get(r.product_name.toLowerCase());
+              if (!item) continue;
+              if (item.menu_category === 'Drinks') shiftDrinks += r.gross_sales;
+              else shiftFood += r.gross_sales;
+              shiftGuests += r.quantity * (item.guest_multiplier ?? 0);
+            }
+            shiftGuests = Math.round(shiftGuests * 2) / 2;
+
             return (
               <div key={group.id} className="rounded-xl border border-gray-200 shadow-sm overflow-hidden">
                 <div className="flex items-center gap-3 px-4 py-3 bg-[#1B5E20]">
                   <span className="text-sm font-semibold text-white">{fmtDate(group.date)}</span>
                   {shiftBadge(group.shiftType)}
                   <span className="ml-auto text-sm font-bold text-white">{fmt(groupTotal)}</span>
+                </div>
+                {/* Shift mini-summary */}
+                <div className="grid grid-cols-3 divide-x divide-gray-100 border-b border-gray-200 bg-gray-50/70">
+                  <div className="px-4 py-2 flex items-center gap-2">
+                    <Utensils size={12} className="text-amber-500 flex-shrink-0" />
+                    <span className="text-xs text-gray-500">Food</span>
+                    <span className="ml-auto text-xs font-semibold text-gray-800 tabular-nums">{fmt(shiftFood)}</span>
+                  </div>
+                  <div className="px-4 py-2 flex items-center gap-2">
+                    <Wine size={12} className="text-blue-500 flex-shrink-0" />
+                    <span className="text-xs text-gray-500">Drinks</span>
+                    <span className="ml-auto text-xs font-semibold text-gray-800 tabular-nums">{fmt(shiftDrinks)}</span>
+                  </div>
+                  <div className="px-4 py-2 flex items-center gap-2">
+                    <Users size={12} className="text-purple-500 flex-shrink-0" />
+                    <span className="text-xs text-gray-500">Est. Guests</span>
+                    <span className="ml-auto text-xs font-semibold text-gray-800 tabular-nums">
+                      {new Intl.NumberFormat('de-DE').format(shiftGuests)}
+                    </span>
+                  </div>
                 </div>
                 <table className="w-full text-sm border-collapse">
                   <thead>
