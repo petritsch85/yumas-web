@@ -3,7 +3,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
 import { useState } from 'react';
-import { Search, Plus, Check, X } from 'lucide-react';
+import { Search, Plus, Check, X, Download } from 'lucide-react';
 import type { Item } from '@/types';
 import { useT } from '@/lib/i18n';
 import { localizedName } from '@/lib/localized-name';
@@ -114,6 +114,26 @@ export default function FinishedGoodsPage() {
     setEditState(s => s ? { ...s, menu_category: val, guest_multiplier: val === 'Main' ? '1' : '0' } : s);
   };
 
+  // ── CSV download (exports ALL items, ignoring current search/filter) ────────
+  const handleDownloadCSV = () => {
+    const all = items ?? [];
+    const header = ['Name', 'Price (Gross)', 'Occasion', 'Category', 'Guest Multiplier'];
+    const rows = all.map(i => [
+      `"${localizedName(i, lang).replace(/"/g, '""')}"`,
+      i.gross_price != null ? String(i.gross_price).replace('.', ',') : '0',
+      i.occasion         ?? '',
+      i.menu_category    ?? '',
+      String(i.guest_multiplier ?? 0),
+    ]);
+    const csv = [header, ...rows].map(r => r.join(';')).join('\r\n');
+    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url; a.download = 'finished-goods.csv';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
@@ -121,9 +141,18 @@ export default function FinishedGoodsPage() {
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold text-gray-900">{t('products.finishedGoods')}</h1>
-        <button className="bg-[#1B5E20] text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-[#2E7D32] transition-colors flex items-center gap-2">
-          <Plus size={16} /> Add Item
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleDownloadCSV}
+            disabled={!items || items.length === 0}
+            className="border border-gray-200 text-gray-600 px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors flex items-center gap-2 disabled:opacity-40"
+          >
+            <Download size={15} /> Download CSV
+          </button>
+          <button className="bg-[#1B5E20] text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-[#2E7D32] transition-colors flex items-center gap-2">
+            <Plus size={16} /> Add Item
+          </button>
+        </div>
       </div>
 
       {/* Filters */}
