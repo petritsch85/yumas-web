@@ -1169,7 +1169,11 @@ export default function SalesReportsPage() {
     },
   });
 
-  // Shift-level product data for the current quarter — used to compute guest metrics
+  // Shift-level product data for the current quarter — used to compute guest metrics.
+  // Query starts from shift_reports (filters on location_id + date are on the primary table)
+  // then embeds shift_report_products as a nested array and flattens in JS.
+  // This avoids PostgREST embedded-resource filter quirks and the 1 000-row cap on the
+  // products table that would silently drop rows for data-heavy quarters.
   const { data: quarterShiftProducts = [] } = useQuery({
     queryKey: ['shift-report-products', location?.id, year, quarter],
     enabled: !!location,
@@ -1177,19 +1181,26 @@ export default function SalesReportsPage() {
       const [firstM, , lastM] = QUARTER_MONTHS[quarter - 1];
       const qStart = `${year}-${String(firstM).padStart(2,'0')}-01`;
       const qEnd   = `${year}-${String(lastM).padStart(2,'0')}-${String(daysInMonth(year, lastM)).padStart(2,'0')}`;
-      const { data } = await supabase
-        .from('shift_report_products')
-        .select('product_name, quantity, gross_sales, shift_reports!inner(report_date, shift_type, location_id)')
-        .eq('shift_reports.location_id', location!.id)
-        .gte('shift_reports.report_date', qStart)
-        .lte('shift_reports.report_date', qEnd);
-      return ((data ?? []) as any[]).map(r => ({
-        product_name: r.product_name,
-        quantity:     r.quantity,
-        gross_sales:  r.gross_sales,
-        report_date:  r.shift_reports.report_date,
-        shift_type:   r.shift_reports.shift_type,
-      })) as QShiftProduct[];
+      const { data, error } = await supabase
+        .from('shift_reports')
+        .select('report_date, shift_type, shift_report_products(product_name, quantity, gross_sales)')
+        .eq('location_id', location!.id)
+        .gte('report_date', qStart)
+        .lte('report_date', qEnd);
+      if (error) { console.error('[quarterShiftProducts]', error.message); return []; }
+      const flat: QShiftProduct[] = [];
+      for (const sr of (data ?? []) as any[]) {
+        for (const p of (sr.shift_report_products ?? []) as any[]) {
+          flat.push({
+            product_name: p.product_name,
+            quantity:     p.quantity,
+            gross_sales:  p.gross_sales,
+            report_date:  sr.report_date,
+            shift_type:   sr.shift_type,
+          });
+        }
+      }
+      return flat;
     },
   });
 
