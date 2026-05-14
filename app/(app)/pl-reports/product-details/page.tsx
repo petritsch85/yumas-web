@@ -602,7 +602,9 @@ export default function ProductDetailsPage() {
                   <h2 className="text-xs font-bold text-amber-700 uppercase tracking-wide">
                     {summary.unmatchedProducts.filter(p => !drafts[p.product_name]?.added).length} Products Not in Finished Goods
                   </h2>
-                  <span className="text-xs text-amber-500">— Set category and add to Finished Goods to enable guest calculations</span>
+                  <span className="text-xs text-amber-500">
+                    — {finishedGoods.length} items loaded from Finished Goods · Set category and add to enable guest calculations
+                  </span>
                 </div>
                 <div className="flex items-center gap-2">
                   <button
