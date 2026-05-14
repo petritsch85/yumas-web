@@ -1177,10 +1177,10 @@ export default function SalesReportsPage() {
     queryFn: async () => {
       const { data } = await supabase
         .from('items')
-        .select('name, menu_category, guest_multiplier, vat_rate')
+        .select('name, menu_category, guest_multiplier')
         .eq('product_type', 'finished')
         .eq('is_active', true);
-      return (data ?? []) as Array<{ name: string; menu_category: string | null; guest_multiplier: number | null; vat_rate: number | null }>;
+      return (data ?? []) as Array<{ name: string; menu_category: string | null; guest_multiplier: number | null }>;
     },
   });
 
@@ -1619,9 +1619,9 @@ export default function SalesReportsPage() {
     };
   }, [forecastSettings, overrideMap, closureSet, year, weekMap, yearShiftRows, cwk]);
 
-  // O(1) lookup: item name (lowercase) → { menu_category, guest_multiplier, vat_rate }
+  // O(1) lookup: item name (lowercase) → { menu_category, guest_multiplier }
   const finishedGoodsMap = useMemo(() => {
-    const m = new Map<string, { menu_category: string | null; guest_multiplier: number | null; vat_rate: number | null }>();
+    const m = new Map<string, { menu_category: string | null; guest_multiplier: number | null }>();
     for (const item of finishedGoodsList) m.set(item.name.toLowerCase(), item);
     return m;
   }, [finishedGoodsList]);
@@ -1631,13 +1631,14 @@ export default function SalesReportsPage() {
     const lm: Record<string, { guests: number; netFood: number; netDrinks: number }> = {};
     const dm: Record<string, { guests: number; netFood: number; netDrinks: number }> = {};
     for (const p of quarterShiftProducts) {
-      if (!p.report_date || !p.shift_type) continue;
+      if (!p.report_date) continue;
       const item    = finishedGoodsMap.get(p.product_name.toLowerCase());
-      const vat     = item?.vat_rate ?? (item?.menu_category === 'Drinks' ? 0.19 : 0.07);
+      const vat     = item?.menu_category === 'Drinks' ? 0.19 : 0.07;
       const isDrinks = vat >= 0.19;
       const net      = p.gross_sales / (1 + vat);
       const guests   = p.quantity * (item?.guest_multiplier ?? 0);
-      const map      = p.shift_type === 'lunch' ? lm : dm;
+      // null shift_type → use lunchMap (legacy untagged shifts were typically lunch)
+      const map      = p.shift_type === 'dinner' ? dm : lm;
       if (!map[p.report_date]) map[p.report_date] = { guests: 0, netFood: 0, netDrinks: 0 };
       map[p.report_date].guests += guests;
       if (isDrinks) map[p.report_date].netDrinks += net;

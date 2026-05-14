@@ -24,7 +24,6 @@ type FinishedGoodLookup = {
   name:             string;
   menu_category:    'Starter' | 'Main' | 'Drinks' | 'Salsas' | 'Dessert' | 'Other' | null;
   guest_multiplier: number;
-  vat_rate:         number | null;
 };
 
 type SortKey = 'product_name' | 'quantity' | 'gross_sales';
@@ -196,7 +195,7 @@ export default function ProductDetailsPage() {
     queryKey: ['items-finished-lookup'],
     queryFn: async () => {
       const { data } = await supabase
-        .from('items').select('name, menu_category, guest_multiplier, vat_rate')
+        .from('items').select('name, menu_category, guest_multiplier')
         .eq('product_type', 'finished').eq('is_active', true);
       return (data ?? []) as FinishedGoodLookup[];
     },
@@ -208,10 +207,10 @@ export default function ProductDetailsPage() {
     return m;
   }, [finishedGoods]);
 
-  // ── VAT helper ────────────────────────────────────────────────────────────
+  // ── VAT helper — uses category as the source of truth ───────────────────
   const vatForItem = (productName: string): number => {
     const item = itemMap.get(productName.toLowerCase());
-    return item?.vat_rate ?? (item?.menu_category === 'Drinks' ? 0.19 : 0.07);
+    return item?.menu_category === 'Drinks' ? 0.19 : 0.07;
   };
 
   // ── Aggregation ────────────────────────────────────────────────────────────
@@ -246,7 +245,7 @@ export default function ProductDetailsPage() {
     const unmatchedMap = new Map<string, { quantity: number; gross_sales: number }>();
     for (const r of rows) {
       const item = itemMap.get(r.product_name.toLowerCase());
-      const vat  = item?.vat_rate ?? (item?.menu_category === 'Drinks' ? 0.19 : 0.07);
+      const vat  = item?.menu_category === 'Drinks' ? 0.19 : 0.07;
       const net  = r.gross_sales / (1 + vat);
       if (!item) {
         const ex = unmatchedMap.get(r.product_name);

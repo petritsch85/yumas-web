@@ -73,7 +73,7 @@ export default function FinishedGoodsPage() {
     queryFn: async () => {
       const { data } = await supabase
         .from('items')
-        .select('*, vat_rate, unit:units_of_measure(id, name, abbreviation)')
+        .select('*, unit:units_of_measure(id, name, abbreviation)')
         .eq('product_type', 'finished')
         .eq('is_active', true)
         .order('menu_category')
