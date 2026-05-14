@@ -934,6 +934,11 @@ export default function SalesReportsPage() {
   // Ref for daily table — scroll handled after yearShiftRows is declared below
   const dailyScrollRef = useRef<HTMLDivElement>(null);
 
+  // Inline booking-cell editor state
+  const [editingBookingCell, setEditingBookingCell] = useState<{
+    date: string; shift: 'lunch' | 'dinner'; field: 'bookings' | 'walk_ins'; draft: string;
+  } | null>(null);
+
   // Upload state
   const [fileName,       setFileName]       = useState<string | null>(null);
   const [weeklyResult,   setWeeklyResult]   = useState<WeeklyParseResult | null>(null);
@@ -1198,6 +1203,25 @@ export default function SalesReportsPage() {
         .eq('product_type', 'finished')
         .eq('is_active', true);
       return (data ?? []) as Array<{ name: string; menu_category: string | null; guest_multiplier: number | null }>;
+    },
+  });
+
+  // ── Shift bookings (manual bookings + walk-ins per day) ───────────────────
+  type BookingRow = { booking_date: string; shift_type: string; bookings: number; walk_ins: number | null };
+  const { data: bookingsData = [] } = useQuery<BookingRow[]>({
+    queryKey: ['shift-bookings', location?.id, year, quarter],
+    enabled:  !!location,
+    queryFn: async () => {
+      const [firstM, , lastM] = QUARTER_MONTHS[quarter - 1];
+      const qStart = `${year}-${String(firstM).padStart(2,'0')}-01`;
+      const qEnd   = `${year}-${String(lastM).padStart(2,'0')}-${String(daysInMonth(year, lastM)).padStart(2,'0')}`;
+      const { data } = await supabase
+        .from('shift_bookings')
+        .select('booking_date, shift_type, bookings, walk_ins')
+        .eq('location_id', location!.id)
+        .gte('booking_date', qStart)
+        .lte('booking_date', qEnd);
+      return (data ?? []) as BookingRow[];
     },
   });
 
@@ -1711,6 +1735,52 @@ export default function SalesReportsPage() {
       dinnerQMetrics: { guests: dG, netFood: dF, netDrinks: dD },
     };
   }, [lunchMetricsMap, dinnerMetricsMap]);
+
+  // ── Bookings maps + effective guest counts ────────────────────────────────
+  const {
+    lunchBookingsMap, dinnerBookingsMap,
+    lunchWalkInsMap, dinnerWalkInsMap,
+    effectiveLunchGuestsMap, effectiveDinnerGuestsMap,
+  } = useMemo(() => {
+    const _today = new Date();
+    const tk = `${_today.getFullYear()}-${String(_today.getMonth()+1).padStart(2,'0')}-${String(_today.getDate()).padStart(2,'0')}`;
+    const lB: Record<string, number>       = {};
+    const dB: Record<string, number>       = {};
+    const lW: Record<string, number>       = {};
+    const dW: Record<string, number>       = {};
+    const effL: Record<string, number>     = { ...lunchGuestsMap };
+    const effD: Record<string, number>     = { ...dinnerGuestsMap };
+    for (const b of bookingsData) {
+      const isFuture = b.booking_date > tk;
+      if (b.shift_type === 'lunch') {
+        if (b.bookings > 0) lB[b.booking_date] = b.bookings;
+        if (isFuture) {
+          if (b.walk_ins != null) lW[b.booking_date] = b.walk_ins;
+          effL[b.booking_date] = (b.bookings ?? 0) + (b.walk_ins ?? 0);
+        } else {
+          const actual = lunchGuestsMap[b.booking_date] ?? 0;
+          if (actual > 0) lW[b.booking_date] = Math.max(0, Math.round((actual - (b.bookings ?? 0)) * 2) / 2);
+        }
+      } else {
+        if (b.bookings > 0) dB[b.booking_date] = b.bookings;
+        if (isFuture) {
+          if (b.walk_ins != null) dW[b.booking_date] = b.walk_ins;
+          effD[b.booking_date] = (b.bookings ?? 0) + (b.walk_ins ?? 0);
+        } else {
+          const actual = dinnerGuestsMap[b.booking_date] ?? 0;
+          if (actual > 0) dW[b.booking_date] = Math.max(0, Math.round((actual - (b.bookings ?? 0)) * 2) / 2);
+        }
+      }
+    }
+    return { lunchBookingsMap: lB, dinnerBookingsMap: dB, lunchWalkInsMap: lW, dinnerWalkInsMap: dW, effectiveLunchGuestsMap: effL, effectiveDinnerGuestsMap: effD };
+  }, [bookingsData, lunchGuestsMap, dinnerGuestsMap]);
+
+  const lunchQBookings  = Object.values(lunchBookingsMap).reduce((s, v) => s + v, 0);
+  const dinnerQBookings = Object.values(dinnerBookingsMap).reduce((s, v) => s + v, 0);
+  const lunchQWalkIns   = Object.values(lunchWalkInsMap).reduce((s, v) => s + v, 0);
+  const dinnerQWalkIns  = Object.values(dinnerWalkInsMap).reduce((s, v) => s + v, 0);
+  const lunchQEffGuests  = Object.values(effectiveLunchGuestsMap).reduce((s, v) => s + v, 0);
+  const dinnerQEffGuests = Object.values(effectiveDinnerGuestsMap).reduce((s, v) => s + v, 0);
 
   const topCats = useMemo(() =>
     Object.entries(weeklyResult?.categoryRevenue ?? {}).sort((a,b) => b[1]-a[1]).slice(0, 12),
@@ -2228,6 +2298,24 @@ export default function SalesReportsPage() {
     }
     return <span>{fmtNum(val)}</span>;
   };
+
+  // ── Save booking / walk-in value ──────────────────────────────────────────
+  const saveBooking = useCallback(async (date: string, shift: 'lunch' | 'dinner', field: 'bookings' | 'walk_ins', rawValue: string) => {
+    if (!location) return;
+    const val = parseInt(rawValue, 10);
+    if (isNaN(val) || val < 0) { setEditingBookingCell(null); return; }
+    const existing = bookingsData.find(b => b.booking_date === date && b.shift_type === shift);
+    const record = {
+      location_id:  location.id,
+      booking_date: date,
+      shift_type:   shift,
+      bookings:     field === 'bookings' ? val : (existing?.bookings ?? 0),
+      walk_ins:     field === 'walk_ins' ? val : (existing?.walk_ins ?? null),
+    };
+    await supabase.from('shift_bookings').upsert(record, { onConflict: 'location_id,booking_date,shift_type' });
+    queryClient.invalidateQueries({ queryKey: ['shift-bookings', location.id, year, quarter] });
+    setEditingBookingCell(null);
+  }, [location, bookingsData, year, quarter, queryClient]);
 
   // ── Shared controls UI ─────────────────────────────────────────────────────
 
@@ -3718,6 +3806,100 @@ export default function SalesReportsPage() {
                       const fmtPG = (v: number) =>
                         new Intl.NumberFormat('de-DE', { style:'currency', currency:'EUR', minimumFractionDigits:2, maximumFractionDigits:2 }).format(v);
 
+                      // ── Inline booking cell ──────────────────────────────
+                      const bookingCell = (date: string, shift: 'lunch' | 'dinner', field: 'bookings' | 'walk_ins', value: number | null) => {
+                        const isEditing = editingBookingCell?.date === date && editingBookingCell?.shift === shift && editingBookingCell?.field === field;
+                        if (isEditing) {
+                          return (
+                            <input
+                              autoFocus
+                              type="number" min="0"
+                              value={editingBookingCell.draft}
+                              onChange={e => setEditingBookingCell(prev => prev ? { ...prev, draft: e.target.value } : prev)}
+                              onBlur={() => saveBooking(date, shift, field, editingBookingCell.draft)}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') saveBooking(date, shift, field, editingBookingCell.draft);
+                                if (e.key === 'Escape') setEditingBookingCell(null);
+                              }}
+                              className="w-full text-right text-[11px] bg-transparent border-b border-blue-400 outline-none tabular-nums"
+                              style={{ padding: '0 8px 0 4px' }}
+                            />
+                          );
+                        }
+                        return (
+                          <span
+                            onClick={() => setEditingBookingCell({ date, shift, field, draft: value != null ? String(value) : '' })}
+                            className="cursor-text block w-full text-right tabular-nums text-[11px] hover:bg-indigo-50/60 rounded"
+                            style={{ padding: '0 8px 0 4px', minHeight: 16 }}
+                            title="Click to edit"
+                          >
+                            {value != null && value > 0
+                              ? <span className="text-indigo-500 font-medium">{fmtNum(value)}</span>
+                              : <span className="text-gray-200">—</span>}
+                          </span>
+                        );
+                      };
+
+                      const bookingsRow = (label: string, bMap: Record<string, number>, shift: 'lunch' | 'dinner', qTotal: number) => (
+                        <tr key={label} className="border-b border-indigo-100 hover:bg-indigo-50/30 group" style={{ backgroundColor: '#f5f3ff' }}>
+                          <td className="sticky left-0 z-10 px-4 py-0.5 whitespace-nowrap border-r border-indigo-100 bg-[#f5f3ff] group-hover:bg-indigo-50/30 transition-colors text-[11px] text-indigo-400 italic">{label}</td>
+                          {dailyCols.map((col, ci) => {
+                            if (col.type === 'day') {
+                              const isCurDay = col.dateKey === todayKey;
+                              return (
+                                <td key={ci} className="py-0.5 tabular-nums" style={{ paddingLeft:0, paddingRight:0, backgroundColor: isCurDay ? 'rgba(59,130,246,0.04)' : undefined }}>
+                                  {bookingCell(col.dateKey, shift, 'bookings', bMap[col.dateKey] ?? null)}
+                                </td>
+                              );
+                            } else {
+                              const wVal = col.wDateKeys.reduce((s, k) => s + (bMap[k] ?? 0), 0);
+                              return (
+                                <td key={ci} className="py-1 text-right tabular-nums text-[11px]" style={{ paddingLeft:4, paddingRight:6, backgroundColor:'#fffbeb', borderLeft:'1px solid #fde68a', borderRight:'1px solid #fde68a' }}>
+                                  {wVal > 0 ? <span className="text-gray-500">{fmtNum(wVal)}</span> : <span className="text-gray-200">—</span>}
+                                </td>
+                              );
+                            }
+                          })}
+                          <td className="py-1 text-right tabular-nums text-[11px] border-l border-gray-200" style={{ paddingLeft:4, paddingRight:8 }}>
+                            {qTotal > 0 ? <span className="text-gray-600 font-medium">{fmtNum(qTotal)}</span> : <span className="text-gray-200">—</span>}
+                          </td>
+                        </tr>
+                      );
+
+                      const walkInsRow = (label: string, wMap: Record<string, number>, bMap: Record<string, number>, shift: 'lunch' | 'dinner', qTotal: number) => (
+                        <tr key={label} className="border-b border-purple-100 hover:bg-purple-50/20 group" style={{ backgroundColor: '#faf5ff' }}>
+                          <td className="sticky left-0 z-10 px-4 py-0.5 whitespace-nowrap border-r border-purple-100 bg-[#faf5ff] group-hover:bg-purple-50/20 transition-colors text-[11px] text-purple-400 italic">{label}</td>
+                          {dailyCols.map((col, ci) => {
+                            if (col.type === 'day') {
+                              const isCurDay = col.dateKey === todayKey;
+                              const isFuture = col.dateKey > todayKey;
+                              const val = wMap[col.dateKey] ?? null;
+                              return (
+                                <td key={ci} className="py-0.5 tabular-nums" style={{ paddingLeft:0, paddingRight:0, backgroundColor: isCurDay ? 'rgba(59,130,246,0.04)' : undefined }}>
+                                  {isFuture
+                                    ? bookingCell(col.dateKey, shift, 'walk_ins', val)
+                                    : val != null
+                                      ? <span className="block w-full text-right text-[11px] text-gray-400 italic tabular-nums" style={{ padding: '0 8px 0 4px' }}>{fmtNum(val)}</span>
+                                      : bMap[col.dateKey] != null
+                                        ? <span className="block w-full text-right text-[11px] text-gray-300 tabular-nums" style={{ padding: '0 8px 0 4px' }}>0</span>
+                                        : <span className="block w-full text-right text-[11px] text-gray-200 tabular-nums" style={{ padding: '0 8px 0 4px' }}>—</span>}
+                                </td>
+                              );
+                            } else {
+                              const wVal = col.wDateKeys.reduce((s, k) => s + (wMap[k] ?? 0), 0);
+                              return (
+                                <td key={ci} className="py-1 text-right tabular-nums text-[11px]" style={{ paddingLeft:4, paddingRight:6, backgroundColor:'#fffbeb', borderLeft:'1px solid #fde68a', borderRight:'1px solid #fde68a' }}>
+                                  {wVal > 0 ? <span className="text-gray-500">{fmtNum(wVal)}</span> : <span className="text-gray-200">—</span>}
+                                </td>
+                              );
+                            }
+                          })}
+                          <td className="py-1 text-right tabular-nums text-[11px] border-l border-gray-200" style={{ paddingLeft:4, paddingRight:8 }}>
+                            {qTotal > 0 ? <span className="text-gray-600 font-medium">{fmtNum(qTotal)}</span> : <span className="text-gray-200">—</span>}
+                          </td>
+                        </tr>
+                      );
+
                       const metricRow = (label: string, valMap: Record<string, number>, qVal: number | null, format: 'count' | 'currency' = 'count') => (
                         <tr key={label} className="border-b border-gray-100 hover:bg-gray-50/60 group" style={{ backgroundColor:'#f8fafc' }}>
                           <td className="sticky left-0 z-10 px-4 py-1 whitespace-nowrap border-r border-gray-100 bg-[#f8fafc] group-hover:bg-gray-50/60 transition-colors text-[11px] text-gray-400 italic">{label}</td>
@@ -3756,7 +3938,9 @@ export default function SalesReportsPage() {
 
                       return (
                         <>
-                          {metricRow('↳ Est. Guests · Lunch',        lunchGuestsMap,      lunchQMetrics.guests, 'count')}
+                          {bookingsRow('↳ Bookings · Lunch',   lunchBookingsMap,  'lunch',  lunchQBookings)}
+                          {walkInsRow( '↳ Walk-ins · Lunch',  lunchWalkInsMap,  lunchBookingsMap,  'lunch',  lunchQWalkIns)}
+                          {metricRow('↳ Est. Guests · Lunch',        effectiveLunchGuestsMap,  lunchQEffGuests,  'count')}
                           {metricRow('↳ Net Food / Guest · Lunch',    lunchNetFoodPGMap,   lunchQMetrics.guests > 0 ? lunchQMetrics.netFood   / lunchQMetrics.guests : null, 'currency')}
                           {metricRow('↳ Net Drinks / Guest · Lunch',  lunchNetDrinksPGMap, lunchQMetrics.guests > 0 ? lunchQMetrics.netDrinks / lunchQMetrics.guests : null, 'currency')}
                           {metricRow('↳ Net Total / Guest · Lunch',   lunchNetTotalPGMap,  lunchQMetrics.guests > 0 ? (lunchQMetrics.netFood + lunchQMetrics.netDrinks) / lunchQMetrics.guests : null, 'currency')}
@@ -3764,7 +3948,9 @@ export default function SalesReportsPage() {
                           {simplyRow('🛵 Simply · Lunch', deliveryLunchMap, simplyLunchForecastMap)}
                           {billsRow('🧾 Bills · Lunch', billsLunchMap)}
                           {totalRow('☀️  Total Lunch',  lunchMap,  lunchForecastMap,  deliveryLunchMap,  lunchQtrTotal,  '#f0fdf4', '#1B5E20', billsLunchMap, simplyLunchForecastMap)}
-                          {metricRow('↳ Est. Guests · Dinner',        dinnerGuestsMap,      dinnerQMetrics.guests, 'count')}
+                          {bookingsRow('↳ Bookings · Dinner',  dinnerBookingsMap, 'dinner', dinnerQBookings)}
+                          {walkInsRow( '↳ Walk-ins · Dinner', dinnerWalkInsMap, dinnerBookingsMap, 'dinner', dinnerQWalkIns)}
+                          {metricRow('↳ Est. Guests · Dinner',        effectiveDinnerGuestsMap, dinnerQEffGuests, 'count')}
                           {metricRow('↳ Net Food / Guest · Dinner',   dinnerNetFoodPGMap,   dinnerQMetrics.guests > 0 ? dinnerQMetrics.netFood   / dinnerQMetrics.guests : null, 'currency')}
                           {metricRow('↳ Net Drinks / Guest · Dinner', dinnerNetDrinksPGMap, dinnerQMetrics.guests > 0 ? dinnerQMetrics.netDrinks / dinnerQMetrics.guests : null, 'currency')}
                           {metricRow('↳ Net Total / Guest · Dinner',  dinnerNetTotalPGMap,  dinnerQMetrics.guests > 0 ? (dinnerQMetrics.netFood + dinnerQMetrics.netDrinks) / dinnerQMetrics.guests : null, 'currency')}
