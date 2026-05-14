@@ -931,6 +931,9 @@ export default function SalesReportsPage() {
   const [year,     setYear]     = useState(new Date().getFullYear());
   const [quarter,  setQuarter]  = useState<number>(Math.ceil((new Date().getMonth() + 1) / 3));
 
+  // Ref for daily table — scroll handled after yearShiftRows is declared below
+  const dailyScrollRef = useRef<HTMLDivElement>(null);
+
   // Upload state
   const [fileName,       setFileName]       = useState<string | null>(null);
   const [weeklyResult,   setWeeklyResult]   = useState<WeeklyParseResult | null>(null);
@@ -1065,6 +1068,13 @@ export default function SalesReportsPage() {
       return (data ?? []) as Pick<ShiftRow, 'report_date'|'shift_type'|'net_total'|'z_report_number'>[];
     },
   });
+
+  // Scroll daily table to the most recent day when location is chosen or shift data loads
+  useEffect(() => {
+    const el = dailyScrollRef.current;
+    if (!el || !location) return;
+    el.scrollLeft = el.scrollWidth;
+  }, [location?.id, yearShiftRows.length]);
 
   // Forecast settings
   const { data: forecastSettings = [] } = useQuery({
@@ -3444,7 +3454,7 @@ export default function SalesReportsPage() {
 
           return (
             <div className="flex-1 min-h-0 flex flex-col border border-gray-200 rounded-xl overflow-hidden shadow-sm">
-              <div className="flex-1 min-h-0 overflow-x-scroll overflow-y-auto scrollbar-always">
+              <div ref={dailyScrollRef} className="flex-1 min-h-0 overflow-x-scroll overflow-y-auto scrollbar-always">
                 <table className="text-xs border-collapse" style={{ minWidth: LABEL_W + (dailyCols.length + 1) * COL_W_D }}>
                   {/* Sticky column header */}
                   <thead className="sticky top-0 z-30">
