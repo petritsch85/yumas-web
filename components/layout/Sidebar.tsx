@@ -312,9 +312,12 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
             <div className="space-y-0.5">
               {group.items.map((item) => {
                 const Icon = item.icon;
-                const active = isActive(item.href);
-                const isComingSoon = item.href.startsWith('/coming-soon');
                 const hasChildren = !!item.children?.length;
+                // For items with children, active only when a child route is active (not by prefix)
+                const active = hasChildren
+                  ? item.children!.some(c => pathname === c.href || pathname.startsWith(c.href + '/'))
+                  : isActive(item.href);
+                const isComingSoon = item.href.startsWith('/coming-soon');
                 const isExpanded = expanded.has(item.href);
 
                 return (
