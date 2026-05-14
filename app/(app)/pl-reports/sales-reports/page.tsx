@@ -1069,11 +1069,18 @@ export default function SalesReportsPage() {
     },
   });
 
-  // Scroll daily table to the most recent day when location is chosen or shift data loads
+  // Scroll daily table so today's column is centred when location is chosen or data loads
   useEffect(() => {
     const el = dailyScrollRef.current;
     if (!el || !location) return;
-    el.scrollLeft = el.scrollWidth;
+    const todayTh = el.querySelector('[data-today]') as HTMLElement | null;
+    if (todayTh) {
+      // Centre today: scroll so the middle of today's column aligns with the middle of the viewport
+      el.scrollLeft = todayTh.offsetLeft - el.clientWidth / 2 + todayTh.offsetWidth / 2;
+    } else {
+      // Today not in this period → show end of period
+      el.scrollLeft = el.scrollWidth;
+    }
   }, [location?.id, yearShiftRows.length]);
 
   // Forecast settings
@@ -3473,6 +3480,7 @@ export default function SalesReportsPage() {
                           return (
                             <th key={ci}
                               onClick={() => setActiveDayKey(col.dateKey)}
+                              {...(isCurDay ? { 'data-today': 'true' } : {})}
                               className="py-2 text-right font-bold whitespace-nowrap tabular-nums cursor-pointer select-none"
                               title={`Click to edit/delete data for ${col.dateKey}`}
                               style={{ minWidth:COL_W_D, width:COL_W_D, paddingLeft:4, paddingRight:8,
