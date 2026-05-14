@@ -1177,7 +1177,7 @@ export default function SalesReportsPage() {
     queryFn: async () => {
       const { data } = await supabase
         .from('items')
-        .select('name, menu_category, guest_multiplier')
+        .select('*')
         .eq('product_type', 'finished')
         .eq('is_active', true);
       return (data ?? []) as Array<{ name: string; menu_category: string | null; guest_multiplier: number | null }>;

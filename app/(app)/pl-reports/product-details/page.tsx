@@ -194,9 +194,10 @@ export default function ProductDetailsPage() {
   const { data: finishedGoods = [] } = useQuery<FinishedGoodLookup[]>({
     queryKey: ['items-finished-lookup'],
     queryFn: async () => {
-      const { data } = await supabase
-        .from('items').select('name, menu_category, guest_multiplier')
+      const { data, error } = await supabase
+        .from('items').select('*')
         .eq('product_type', 'finished').eq('is_active', true);
+      if (error) console.error('[items-finished-lookup]', error.message);
       return (data ?? []) as FinishedGoodLookup[];
     },
   });
