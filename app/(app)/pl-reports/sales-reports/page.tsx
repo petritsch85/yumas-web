@@ -4273,8 +4273,40 @@ export default function SalesReportsPage() {
                         );
                       };
 
+                      // Slim "CLOSED" marker row — shows a red-tinted cell with label for each closed day in a shift
+                      const closedRow = (shift: 'lunch' | 'dinner') => {
+                        const anyClosedDay = dailyCols.some(c => c.type === 'day' && closureSet.has(`${shift}:${c.dateKey}`));
+                        if (!anyClosedDay) return null;
+                        return (
+                          <tr key={`closed-marker-${shift}`} style={{ height: 18 }}>
+                            <td className="sticky left-0 z-10 px-4" style={{ backgroundColor: '#fef2f2', borderRight: '1px solid #fecaca' }}>
+                              <span className="text-[9px] text-red-400 font-bold uppercase tracking-widest">Closed shifts</span>
+                            </td>
+                            {dailyCols.map((col, ci) => {
+                              if (col.type === 'day') {
+                                const isClosed = closureSet.has(`${shift}:${col.dateKey}`);
+                                const isCurDay = col.dateKey === todayKey;
+                                return (
+                                  <td key={ci} style={{
+                                    backgroundColor: isClosed ? 'rgba(239,68,68,0.10)' : isCurDay ? 'rgba(59,130,246,0.04)' : undefined,
+                                    textAlign: 'center', padding: '0 2px',
+                                  }}>
+                                    {isClosed && <span className="text-[9px] text-red-400 font-semibold">🚫 Closed</span>}
+                                  </td>
+                                );
+                              }
+                              return (
+                                <td key={ci} style={{ backgroundColor: '#fffbeb', borderLeft: '1px solid #fde68a', borderRight: '1px solid #fde68a' }} />
+                              );
+                            })}
+                            <td style={{ borderLeft: '1px solid #e2e8f0', backgroundColor: '#fef2f2' }} />
+                          </tr>
+                        );
+                      };
+
                       return (
                         <>
+                          {closedRow('lunch')}
                           {bookingsRow('↳ Bookings · Lunch',   lunchBookingsMap,  'lunch',  lunchQBookings)}
                           {walkInsRow( '↳ Walk-ins · Lunch',  lunchWalkInsMap,  lunchBookingsMap,  'lunch',  lunchQWalkIns)}
                           {estGuestsRow('↳ Est. Guests · Lunch',       effectiveLunchGuestsMap,  'lunch', lunchQEffGuests)}
@@ -4285,6 +4317,7 @@ export default function SalesReportsPage() {
                           {simplyRow('🛵 Simply · Lunch', deliveryLunchMap, simplyLunchForecastMap)}
                           {billsRow('🧾 Bills · Lunch', billsLunchMap)}
                           {totalRow('☀️  Total Lunch',  lunchMap,  lunchForecastMap,  deliveryLunchMap,  lunchQtrTotal,  '#f0fdf4', '#1B5E20', billsLunchMap, simplyLunchForecastMap)}
+                          {closedRow('dinner')}
                           {bookingsRow('↳ Bookings · Dinner',  dinnerBookingsMap, 'dinner', dinnerQBookings)}
                           {walkInsRow( '↳ Walk-ins · Dinner', dinnerWalkInsMap, dinnerBookingsMap, 'dinner', dinnerQWalkIns)}
                           {estGuestsRow('↳ Est. Guests · Dinner',      effectiveDinnerGuestsMap, 'dinner', dinnerQEffGuests)}
