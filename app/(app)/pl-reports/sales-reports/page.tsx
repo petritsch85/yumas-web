@@ -189,12 +189,13 @@ type ShiftBatchItem = {
 };
 
 type ForecastSettings = {
-  shift_type:       'lunch' | 'dinner';
-  week_base_net:    number;
-  growth_rate:      number;
-  weight_mon:       number; weight_tue: number; weight_wed: number; weight_thu: number;
-  weight_fri:       number; weight_sat: number; weight_sun: number;
-  closed_weekdays?: string[]; // e.g. ['mon', 'sun']
+  shift_type:             'lunch' | 'dinner';
+  week_base_net:          number;
+  growth_rate:            number;
+  weight_mon:             number; weight_tue: number; weight_wed: number; weight_thu: number;
+  weight_fri:             number; weight_sat: number; weight_sun: number;
+  closed_weekdays?:       string[]; // e.g. ['mon', 'sun']
+  default_spend_per_guest: number | null;
 };
 
 // Draft: weights stored as pct strings; closedDays lists days the store is shut
@@ -203,6 +204,7 @@ type DraftSettings = {
   growthRate:  string;
   mon: string; tue: string; wed: string; thu: string; fri: string; sat: string;
   closedDays: string[]; // days of week the store is closed for this shift
+  defaultSpendPerGuest: string; // NEW
 };
 
 type ClosureDay = {
@@ -220,10 +222,18 @@ type ForecastOverride = {
   note:          string | null;
 };
 
+type DailyForecastRow = {
+  forecast_date:   string;
+  shift_type:      'lunch' | 'dinner';
+  est_guests:      number | null;
+  spend_per_guest: number | null;
+};
+
 const DEFAULT_DRAFT: DraftSettings = {
   weekBaseNet:'0', growthRate:'0',
   mon:'14.3', tue:'14.3', wed:'14.3', thu:'14.3', fri:'14.3', sat:'14.3',
   closedDays: [],
+  defaultSpendPerGuest: '',  // NEW
 };
 
 type RowType   = 'section' | 'bold' | 'normal' | 'pct';
@@ -675,6 +685,7 @@ function settingsToDraft(s: ForecastSettings): DraftSettings {
     fri: (s.weight_fri * 100).toFixed(1),
     sat: (s.weight_sat * 100).toFixed(1),
     closedDays: s.closed_weekdays ?? [],
+    defaultSpendPerGuest: s.default_spend_per_guest != null ? String(s.default_spend_per_guest) : '',
   };
 }
 
@@ -696,8 +707,9 @@ function draftToPayload(d: DraftSettings, type: 'lunch'|'dinner', locationId: st
     weight_mon: mon/total, weight_tue: tue/total, weight_wed: wed/total,
     weight_thu: thu/total, weight_fri: fri/total, weight_sat: sat/total,
     weight_sun: sun/total,
-    closed_weekdays:  [...closed],
-    updated_at:       new Date().toISOString(),
+    closed_weekdays:         [...closed],
+    default_spend_per_guest: parseFloat(d.defaultSpendPerGuest) || null,
+    updated_at:              new Date().toISOString(),
   };
 }
 
@@ -937,6 +949,10 @@ export default function SalesReportsPage() {
   // Inline booking-cell editor state
   const [editingBookingCell, setEditingBookingCell] = useState<{
     date: string; shift: 'lunch' | 'dinner'; field: 'bookings' | 'walk_ins'; draft: string;
+  } | null>(null);
+
+  const [editingFcstCell, setEditingFcstCell] = useState<{
+    date: string; shift: 'lunch' | 'dinner'; field: 'est_guests' | 'spend_per_guest'; draft: string;
   } | null>(null);
 
   // Upload state
@@ -1236,6 +1252,24 @@ export default function SalesReportsPage() {
     },
   });
 
+  // Per-day forecast inputs (Forecast Guests + Spend/Guest)
+  const { data: dailyForecastsData = [] } = useQuery<DailyForecastRow[]>({
+    queryKey: ['daily-forecasts', location?.id, year, quarter],
+    enabled:  !!location,
+    queryFn: async () => {
+      const [firstM, , lastM] = QUARTER_MONTHS[quarter - 1];
+      const qStart = `${year}-${String(firstM).padStart(2,'0')}-01`;
+      const qEnd   = `${year}-${String(lastM).padStart(2,'0')}-${String(daysInMonth(year, lastM)).padStart(2,'0')}`;
+      const { data } = await supabase
+        .from('daily_forecasts')
+        .select('forecast_date, shift_type, est_guests, spend_per_guest')
+        .eq('location_id', location!.id)
+        .gte('forecast_date', qStart)
+        .lte('forecast_date', qEnd);
+      return (data ?? []) as DailyForecastRow[];
+    },
+  });
+
   // Sync fetched settings → draft whenever they load or location changes
   useEffect(() => {
     const ls = forecastSettings.find(s => s.shift_type === 'lunch');
@@ -1489,28 +1523,46 @@ export default function SalesReportsPage() {
     return m;
   }, [forecastOverrides]);
 
-  // Forecast net revenue per day — keyed by dateKey; overrides take precedence over computed
+  // O(1) lookup for daily forecast inputs: "lunch:2026-05-20" → DailyForecastRow
+  const dailyFcstMap = useMemo(() => {
+    const m: Record<string, DailyForecastRow> = {};
+    for (const f of dailyForecastsData) m[`${f.shift_type}:${f.forecast_date}`] = f;
+    return m;
+  }, [dailyForecastsData]);
+
+  const defaultLunchSpend  = forecastSettings.find(s => s.shift_type === 'lunch')?.default_spend_per_guest ?? null;
+  const defaultDinnerSpend = forecastSettings.find(s => s.shift_type === 'dinner')?.default_spend_per_guest ?? null;
+
+  // Forecast net revenue per day — computed as Forecast Guests × Spend/Guest.
+  // Only populated for future dates where est_guests is set.
   const { lunchForecastMap, dinnerForecastMap, totalForecastMap } = useMemo(() => {
-    const lS = forecastSettings.find(s => s.shift_type === 'lunch');
-    const dS = forecastSettings.find(s => s.shift_type === 'dinner');
+    const _now = new Date();
+    const todayKey = `${_now.getFullYear()}-${String(_now.getMonth()+1).padStart(2,'0')}-${String(_now.getDate()).padStart(2,'0')}`;
     const lunchForecastMap:  Record<string, number> = {};
     const dinnerForecastMap: Record<string, number> = {};
     const totalForecastMap:  Record<string, number> = {};
     for (const col of dailyCols) {
       if (col.type !== 'day') continue;
       const dk = col.dateKey;
-      const lOverride = overrideMap[`lunch:${dk}`];
-      const dOverride = overrideMap[`dinner:${dk}`];
-      const lv = lOverride?.net_revenue
-        ?? (lS && !closureSet.has(`lunch:${dk}`)  ? computeDailyForecast(dk, lS) : 0);
-      const dv = dOverride?.net_revenue
-        ?? (dS && !closureSet.has(`dinner:${dk}`) ? computeDailyForecast(dk, dS) : 0);
-      if (lS || lOverride) lunchForecastMap[dk]  = lv;
-      if (dS || dOverride) dinnerForecastMap[dk] = dv;
-      if (lS || dS || lOverride || dOverride) totalForecastMap[dk] = lv + dv;
+      if (dk <= todayKey) continue; // only future days get a forecast
+      if (!closureSet.has(`lunch:${dk}`)) {
+        const lf = dailyFcstMap[`lunch:${dk}`];
+        const lg = lf?.est_guests;
+        const ls = lf?.spend_per_guest ?? defaultLunchSpend;
+        if (lg != null && ls != null) lunchForecastMap[dk] = Math.round(lg * ls * 100) / 100;
+      }
+      if (!closureSet.has(`dinner:${dk}`)) {
+        const df = dailyFcstMap[`dinner:${dk}`];
+        const dg = df?.est_guests;
+        const ds = df?.spend_per_guest ?? defaultDinnerSpend;
+        if (dg != null && ds != null) dinnerForecastMap[dk] = Math.round(dg * ds * 100) / 100;
+      }
+      const lv = lunchForecastMap[dk] ?? 0;
+      const dv = dinnerForecastMap[dk] ?? 0;
+      if (lv + dv > 0) totalForecastMap[dk] = lv + dv;
     }
     return { lunchForecastMap, dinnerForecastMap, totalForecastMap };
-  }, [forecastSettings, closureSet, dailyCols]);
+  }, [dailyCols, dailyFcstMap, defaultLunchSpend, defaultDinnerSpend, closureSet]);
 
   // Simply delivery forecast — derive ratio from historical days where both OB and Simply have actuals,
   // then apply that ratio to the Orderbird forecast for future days with no Simply actual.
@@ -1568,9 +1620,6 @@ export default function SalesReportsPage() {
     const wDinnerFcast: Record<number, boolean> = {};
     const wTotalFcast:  Record<number, boolean> = {};
 
-    const lS = forecastSettings.find(s => s.shift_type === 'lunch');
-    const dS = forecastSettings.find(s => s.shift_type === 'dinner');
-
     // Build actual lunch/dinner lookup using the same logic as the daily sheet:
     // explicit shift_type if set, otherwise legacy fallback (lower Z-report number = lunch)
     const byDate: Record<string, typeof yearShiftRows> = {};
@@ -1617,8 +1666,8 @@ export default function SalesReportsPage() {
         if (actualLunch[dk] !== undefined) {
           lv = actualLunch[dk];
           if (lv > 0) wLunchCnt[kw] = (wLunchCnt[kw] ?? 0) + 1;
-        } else if (lS && isTodayOrFuture && !closureSet.has(`lunch:${dk}`)) {
-          lv = overrideMap[`lunch:${dk}`]?.net_revenue ?? computeDailyForecast(dk, lS);
+        } else if (isTodayOrFuture && !closureSet.has(`lunch:${dk}`)) {
+          const _lf = dailyFcstMap[`lunch:${dk}`]; const _lg = _lf?.est_guests; const _ls = _lf?.spend_per_guest ?? defaultLunchSpend; lv = (_lg != null && _ls != null) ? Math.round(_lg * _ls * 100) / 100 : 0;
           if (lv > 0) { lFcast = true; wLunchCnt[kw] = (wLunchCnt[kw] ?? 0) + 1; }
         }
         if (lv !== 0) {
@@ -1631,8 +1680,8 @@ export default function SalesReportsPage() {
         if (actualDinner[dk] !== undefined) {
           dv = actualDinner[dk];
           if (dv > 0) wDinnerCnt[kw] = (wDinnerCnt[kw] ?? 0) + 1;
-        } else if (dS && isTodayOrFuture && !closureSet.has(`dinner:${dk}`)) {
-          dv = overrideMap[`dinner:${dk}`]?.net_revenue ?? computeDailyForecast(dk, dS);
+        } else if (isTodayOrFuture && !closureSet.has(`dinner:${dk}`)) {
+          const _df = dailyFcstMap[`dinner:${dk}`]; const _dg = _df?.est_guests; const _ds = _df?.spend_per_guest ?? defaultDinnerSpend; dv = (_dg != null && _ds != null) ? Math.round(_dg * _ds * 100) / 100 : 0;
           if (dv > 0) { dFcast = true; wDinnerCnt[kw] = (wDinnerCnt[kw] ?? 0) + 1; }
         }
         if (dv !== 0) {
@@ -1649,10 +1698,8 @@ export default function SalesReportsPage() {
 
         // ── weekForecastNetMap: for the weekly P&L section (no uploaded weekly report) ──
         if (!weekMap[kw] && isFutureOrCurrentWk) {
-          const lfNet = lS && !closureSet.has(`lunch:${dk}`)
-            ? (overrideMap[`lunch:${dk}`]?.net_revenue ?? computeDailyForecast(dk, lS)) : 0;
-          const dfNet = dS && !closureSet.has(`dinner:${dk}`)
-            ? (overrideMap[`dinner:${dk}`]?.net_revenue ?? computeDailyForecast(dk, dS)) : 0;
+          const _lfRow = dailyFcstMap[`lunch:${dk}`]; const _lfG = _lfRow?.est_guests; const _lfS = _lfRow?.spend_per_guest ?? defaultLunchSpend; const lfNet = (!closureSet.has(`lunch:${dk}`) && _lfG != null && _lfS != null) ? Math.round(_lfG * _lfS * 100) / 100 : 0;
+          const _dfRow = dailyFcstMap[`dinner:${dk}`]; const _dfG = _dfRow?.est_guests; const _dfS = _dfRow?.spend_per_guest ?? defaultDinnerSpend; const dfNet = (!closureSet.has(`dinner:${dk}`) && _dfG != null && _dfS != null) ? Math.round(_dfG * _dfS * 100) / 100 : 0;
           if (lfNet + dfNet > 0) wNet[kw] = (wNet[kw] ?? 0) + lfNet + dfNet;
         }
       }
@@ -1669,7 +1716,7 @@ export default function SalesReportsPage() {
       dinnerWeekIsForecastMap:    wDinnerFcast,
       totalWeekIsForecastMap:     wTotalFcast,
     };
-  }, [forecastSettings, overrideMap, closureSet, year, weekMap, yearShiftRows, cwk]);
+  }, [dailyFcstMap, defaultLunchSpend, defaultDinnerSpend, closureSet, year, weekMap, yearShiftRows, cwk]);
 
   // O(1) lookup: item name (lowercase) → { menu_category, guest_multiplier }
   const finishedGoodsMap = useMemo(() => {
@@ -2013,6 +2060,7 @@ export default function SalesReportsPage() {
     }
     queryClient.invalidateQueries({ queryKey: ['shift-reports'] });
     queryClient.invalidateQueries({ queryKey: ['shift-report-products'] });
+    queryClient.invalidateQueries({ queryKey: ['daily-forecasts'] });
     setImporting(false);
     if (lastDate) {
       const d = new Date(lastDate + 'T12:00:00Z');
@@ -2327,6 +2375,27 @@ export default function SalesReportsPage() {
     queryClient.invalidateQueries({ queryKey: ['shift-bookings', location.id, year, quarter] });
     setEditingBookingCell(null);
   }, [location, bookingsData, year, quarter, queryClient]);
+
+  const saveDailyForecast = useCallback(async (
+    date: string, shift: 'lunch' | 'dinner',
+    field: 'est_guests' | 'spend_per_guest', rawValue: string,
+  ) => {
+    if (!location) return;
+    const val = field === 'est_guests' ? parseInt(rawValue, 10) : parseFloat(rawValue);
+    if (isNaN(val) || val < 0) { setEditingFcstCell(null); return; }
+    const existing = dailyForecastsData.find(f => f.forecast_date === date && f.shift_type === shift);
+    const record = {
+      location_id:     location.id,
+      forecast_date:   date,
+      shift_type:      shift,
+      est_guests:      field === 'est_guests'      ? val : (existing?.est_guests      ?? null),
+      spend_per_guest: field === 'spend_per_guest' ? val : (existing?.spend_per_guest ?? null),
+      updated_at:      new Date().toISOString(),
+    };
+    await supabase.from('daily_forecasts').upsert(record, { onConflict: 'location_id,forecast_date,shift_type' });
+    queryClient.invalidateQueries({ queryKey: ['daily-forecasts', location.id, year, quarter] });
+    setEditingFcstCell(null);
+  }, [location, dailyForecastsData, year, quarter, queryClient]);
 
   // ── Shared controls UI ─────────────────────────────────────────────────────
 
@@ -3405,6 +3474,17 @@ export default function SalesReportsPage() {
                   return (
                     <div key={label} className="p-5 space-y-4">
                       <p className="text-xs font-bold text-gray-700 uppercase tracking-wider">{label}</p>
+                      <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                        <p className="text-xs font-semibold text-amber-700 mb-1">Default Spend / Guest (€)</p>
+                        <input
+                          type="number" min="0" step="0.01"
+                          value={draft.defaultSpendPerGuest}
+                          onChange={e => setDraft(d => ({ ...d, defaultSpendPerGuest: e.target.value }))}
+                          placeholder="e.g. 32.50"
+                          className="w-full text-right text-sm font-semibold border border-amber-300 rounded-lg px-3 py-2 tabular-nums focus:outline-none focus:border-amber-500 bg-white"
+                        />
+                        <p className="text-[10px] text-amber-500 mt-1">Used as fallback when no per-day override is set</p>
+                      </div>
                       <div className="space-y-2.5">
                         <div className="flex items-center gap-3">
                           <label className="text-xs text-gray-500 w-40">Weekly base net (€)</label>
@@ -3947,6 +4027,112 @@ export default function SalesReportsPage() {
                         </tr>
                       );
 
+                      // Inline editable cell for Forecast Guests / Spend per Guest
+                      const fcstCell = (date: string, shift: 'lunch' | 'dinner', field: 'est_guests' | 'spend_per_guest', storedVal: number | null, fallbackVal: number | null) => {
+                        const isFuture = date > todayKey;
+                        if (!isFuture) return <span className="block w-full text-right text-[11px] text-gray-200 tabular-nums" style={{ padding: '0 8px 0 4px' }}>—</span>;
+                        const isEditing = editingFcstCell?.date === date && editingFcstCell?.shift === shift && editingFcstCell?.field === field;
+                        if (isEditing) {
+                          return (
+                            <input
+                              autoFocus
+                              type="number" min="0" step={field === 'spend_per_guest' ? '0.01' : '1'}
+                              value={editingFcstCell.draft}
+                              onChange={e => setEditingFcstCell(prev => prev ? { ...prev, draft: e.target.value } : prev)}
+                              onBlur={() => saveDailyForecast(date, shift, field, editingFcstCell.draft)}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') saveDailyForecast(date, shift, field, editingFcstCell.draft);
+                                if (e.key === 'Escape') setEditingFcstCell(null);
+                              }}
+                              className="w-full text-right text-[11px] bg-transparent border-b border-amber-400 outline-none tabular-nums"
+                              style={{ padding: '0 8px 0 4px' }}
+                            />
+                          );
+                        }
+                        const displayVal = storedVal ?? fallbackVal;
+                        const isDefault  = storedVal == null && fallbackVal != null;
+                        const displayStr = displayVal != null ? (field === 'est_guests' ? fmtNum(displayVal) : fmtPG(displayVal)) : null;
+                        return (
+                          <span
+                            onClick={() => setEditingFcstCell({ date, shift, field, draft: storedVal != null ? String(storedVal) : '' })}
+                            className="cursor-text block w-full text-right tabular-nums text-[11px] hover:bg-amber-50/60 rounded"
+                            style={{ padding: '0 8px 0 4px', minHeight: 16 }}
+                            title={isDefault ? 'Default — click to override' : 'Click to edit'}
+                          >
+                            {displayStr
+                              ? <span className={isDefault ? 'text-amber-300' : 'text-amber-600 font-medium'}>{displayStr}</span>
+                              : <span className="text-gray-200">—</span>}
+                          </span>
+                        );
+                      };
+
+                      const fcstGuestsRow = (label: string, shift: 'lunch' | 'dinner') => {
+                        const qTotal = Object.values(dailyFcstMap)
+                          .filter(f => f.shift_type === shift && f.est_guests != null)
+                          .reduce((s, f) => s + (f.est_guests ?? 0), 0);
+                        return (
+                          <tr key={label} className="border-b border-amber-100 hover:bg-amber-50/30 group" style={{ backgroundColor: '#fffbeb' }}>
+                            <td className="sticky left-0 z-10 px-4 py-0.5 whitespace-nowrap border-r border-amber-100 bg-[#fffbeb] group-hover:bg-amber-50/30 transition-colors text-[11px] text-amber-500 italic">{label}</td>
+                            {dailyCols.map((col, ci) => {
+                              if (col.type === 'day') {
+                                const isCurDay = col.dateKey === todayKey;
+                                const f = dailyFcstMap[`${shift}:${col.dateKey}`];
+                                return (
+                                  <td key={ci} className="py-0.5 tabular-nums" style={{ paddingLeft:0, paddingRight:0, backgroundColor: isCurDay ? 'rgba(59,130,246,0.04)' : undefined }}>
+                                    {fcstCell(col.dateKey, shift, 'est_guests', f?.est_guests ?? null, null)}
+                                  </td>
+                                );
+                              } else {
+                                const wVal = col.wDateKeys.reduce((s, k) => s + (dailyFcstMap[`${shift}:${k}`]?.est_guests ?? 0), 0);
+                                return (
+                                  <td key={ci} className="py-1 text-right tabular-nums text-[11px]" style={{ paddingLeft:4, paddingRight:6, backgroundColor:'#fffbeb', borderLeft:'1px solid #fde68a', borderRight:'1px solid #fde68a' }}>
+                                    {wVal > 0 ? <span className="text-amber-600">{fmtNum(wVal)}</span> : <span className="text-gray-200">—</span>}
+                                  </td>
+                                );
+                              }
+                            })}
+                            <td className="py-1 text-right tabular-nums text-[11px] border-l border-gray-200" style={{ paddingLeft:4, paddingRight:8 }}>
+                              {qTotal > 0 ? <span className="text-gray-600 font-medium">{fmtNum(qTotal)}</span> : <span className="text-gray-200">—</span>}
+                            </td>
+                          </tr>
+                        );
+                      };
+
+                      const fcstSpendRow = (label: string, shift: 'lunch' | 'dinner', defaultSpend: number | null) => {
+                        return (
+                          <tr key={label} className="border-b border-amber-100 hover:bg-amber-50/30 group" style={{ backgroundColor: '#fffbeb' }}>
+                            <td className="sticky left-0 z-10 px-4 py-0.5 whitespace-nowrap border-r border-amber-100 bg-[#fffbeb] group-hover:bg-amber-50/30 transition-colors text-[11px] text-amber-500 italic">{label}</td>
+                            {dailyCols.map((col, ci) => {
+                              if (col.type === 'day') {
+                                const isCurDay = col.dateKey === todayKey;
+                                const f = dailyFcstMap[`${shift}:${col.dateKey}`];
+                                return (
+                                  <td key={ci} className="py-0.5 tabular-nums" style={{ paddingLeft:0, paddingRight:0, backgroundColor: isCurDay ? 'rgba(59,130,246,0.04)' : undefined }}>
+                                    {fcstCell(col.dateKey, shift, 'spend_per_guest', f?.spend_per_guest ?? null, defaultSpend)}
+                                  </td>
+                                );
+                              } else {
+                                const futureVals = col.wDateKeys
+                                  .filter(k => k > todayKey)
+                                  .map(k => dailyFcstMap[`${shift}:${k}`]?.spend_per_guest ?? defaultSpend)
+                                  .filter((v): v is number => v != null);
+                                const avg = futureVals.length > 0 ? futureVals.reduce((a, b) => a + b, 0) / futureVals.length : null;
+                                return (
+                                  <td key={ci} className="py-1 text-right tabular-nums text-[11px]" style={{ paddingLeft:4, paddingRight:6, backgroundColor:'#fffbeb', borderLeft:'1px solid #fde68a', borderRight:'1px solid #fde68a' }}>
+                                    {avg != null ? <span className="text-amber-600">{fmtPG(avg)}</span> : <span className="text-gray-200">—</span>}
+                                  </td>
+                                );
+                              }
+                            })}
+                            <td className="py-1 text-right tabular-nums text-[11px] border-l border-gray-200" style={{ paddingLeft:4, paddingRight:8 }}>
+                              {defaultSpend != null
+                                ? <span className="text-amber-300 text-[10px] italic">default {fmtPG(defaultSpend)}</span>
+                                : <span className="text-gray-200">—</span>}
+                            </td>
+                          </tr>
+                        );
+                      };
+
                       return (
                         <>
                           {bookingsRow('↳ Bookings · Lunch',   lunchBookingsMap,  'lunch',  lunchQBookings)}
@@ -3955,6 +4141,8 @@ export default function SalesReportsPage() {
                           {metricRow('↳ Net Food / Guest · Lunch',    lunchNetFoodPGMap,   lunchQMetrics.guests > 0 ? lunchQMetrics.netFood   / lunchQMetrics.guests : null, 'currency')}
                           {metricRow('↳ Net Drinks / Guest · Lunch',  lunchNetDrinksPGMap, lunchQMetrics.guests > 0 ? lunchQMetrics.netDrinks / lunchQMetrics.guests : null, 'currency')}
                           {metricRow('↳ Net Total / Guest · Lunch',   lunchNetTotalPGMap,  lunchQMetrics.guests > 0 ? (lunchQMetrics.netFood + lunchQMetrics.netDrinks) / lunchQMetrics.guests : null, 'currency')}
+                          {fcstGuestsRow('↳ Fcst. Guests · Lunch', 'lunch')}
+                          {fcstSpendRow( '↳ Spend / Guest · Lunch', 'lunch', defaultLunchSpend)}
                           {posRow('☀️  Orderbird · Lunch',  lunchMap,  lunchForecastMap,  lunchQtrTotal)}
                           {simplyRow('🛵 Simply · Lunch', deliveryLunchMap, simplyLunchForecastMap)}
                           {billsRow('🧾 Bills · Lunch', billsLunchMap)}
@@ -3965,6 +4153,8 @@ export default function SalesReportsPage() {
                           {metricRow('↳ Net Food / Guest · Dinner',   dinnerNetFoodPGMap,   dinnerQMetrics.guests > 0 ? dinnerQMetrics.netFood   / dinnerQMetrics.guests : null, 'currency')}
                           {metricRow('↳ Net Drinks / Guest · Dinner', dinnerNetDrinksPGMap, dinnerQMetrics.guests > 0 ? dinnerQMetrics.netDrinks / dinnerQMetrics.guests : null, 'currency')}
                           {metricRow('↳ Net Total / Guest · Dinner',  dinnerNetTotalPGMap,  dinnerQMetrics.guests > 0 ? (dinnerQMetrics.netFood + dinnerQMetrics.netDrinks) / dinnerQMetrics.guests : null, 'currency')}
+                          {fcstGuestsRow('↳ Fcst. Guests · Dinner', 'dinner')}
+                          {fcstSpendRow( '↳ Spend / Guest · Dinner', 'dinner', defaultDinnerSpend)}
                           {posRow('🌙  Orderbird · Dinner', dinnerMap, dinnerForecastMap, dinnerQtrTotal)}
                           {simplyRow('🛵 Simply · Dinner', deliveryDinnerMap, simplyDinnerForecastMap)}
                           {billsRow('🧾 Bills · Dinner', billsDinnerMap)}
