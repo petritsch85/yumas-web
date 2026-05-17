@@ -1536,14 +1536,26 @@ export default function SalesReportsPage() {
   }, [billsLunchMap, billsDinnerMap]);
 
   // O(1) lookup set for closed shifts: "lunch:2026-05-01", "dinner:2026-05-01"
+  // Includes both specific closure dates AND recurring weekday closures from forecast_settings
   const closureSet = useMemo(() => {
     const s = new Set<string>();
+    // Specific date closures from the closures table
     for (const c of closureDays) {
       if (c.shift_type === 'lunch'  || c.shift_type === 'all') s.add(`lunch:${c.closure_date}`);
       if (c.shift_type === 'dinner' || c.shift_type === 'all') s.add(`dinner:${c.closure_date}`);
     }
+    // Recurring weekday closures from forecast_settings
+    const dowKeys = ['sun','mon','tue','wed','thu','fri','sat'];
+    const lunchClosed  = new Set(forecastSettings.find(s => s.shift_type === 'lunch')?.closed_weekdays  ?? []);
+    const dinnerClosed = new Set(forecastSettings.find(s => s.shift_type === 'dinner')?.closed_weekdays ?? []);
+    for (const col of dailyCols) {
+      if (col.type !== 'day') continue;
+      const dow = dowKeys[new Date(col.dateKey + 'T12:00:00Z').getUTCDay()];
+      if (lunchClosed.has(dow))  s.add(`lunch:${col.dateKey}`);
+      if (dinnerClosed.has(dow)) s.add(`dinner:${col.dateKey}`);
+    }
     return s;
-  }, [closureDays]);
+  }, [closureDays, forecastSettings, dailyCols]);
 
   // Override map: "lunch:2026-04-25" → ForecastOverride
   const overrideMap = useMemo(() => {
