@@ -4073,16 +4073,26 @@ export default function SalesReportsPage() {
                         );
                       };
 
-                      const fcstGuestsRow = (label: string, shift: 'lunch' | 'dinner') => {
-                        const qTotal = Object.values(dailyFcstMap)
-                          .filter(f => f.shift_type === shift && f.est_guests != null)
-                          .reduce((s, f) => s + (f.est_guests ?? 0), 0);
+                      // Dual-mode Est. Guests row: actuals for past dates, editable forecast for future
+                      const estGuestsRow = (label: string, actualMap: Record<string, number>, shift: 'lunch' | 'dinner', qActual: number) => {
+                        const qFcst = dailyCols.filter(c => c.type === 'day' && (c as DayCol).dateKey > todayKey && !actualMap[(c as DayCol).dateKey])
+                          .reduce((s, c) => s + (dailyFcstMap[`${shift}:${(c as DayCol).dateKey}`]?.est_guests ?? 0), 0);
+                        const qTotal = qActual + qFcst;
                         return (
-                          <tr key={label} className="border-b border-amber-100 hover:bg-amber-50/30 group" style={{ backgroundColor: '#fffbeb' }}>
-                            <td className="sticky left-0 z-10 px-4 py-0.5 whitespace-nowrap border-r border-amber-100 bg-[#fffbeb] group-hover:bg-amber-50/30 transition-colors text-[11px] text-amber-500 italic">{label}</td>
+                          <tr key={label} className="border-b border-gray-100 hover:bg-gray-50/60 group" style={{ backgroundColor:'#f8fafc' }}>
+                            <td className="sticky left-0 z-10 px-4 py-1 whitespace-nowrap border-r border-gray-100 bg-[#f8fafc] group-hover:bg-gray-50/60 transition-colors text-[11px] text-gray-400 italic">{label}</td>
                             {dailyCols.map((col, ci) => {
                               if (col.type === 'day') {
                                 const isCurDay = col.dateKey === todayKey;
+                                const isFuture = col.dateKey > todayKey;
+                                const actual   = actualMap[col.dateKey] ?? null;
+                                if (!isFuture || actual != null) {
+                                  return (
+                                    <td key={ci} className="py-1 text-right tabular-nums text-[11px]" style={{ paddingLeft:4, paddingRight:8, backgroundColor: isCurDay ? 'rgba(59,130,246,0.04)' : undefined }}>
+                                      {actual != null && actual > 0 ? <span className="text-gray-500">{fmtNum(actual)}</span> : <span className="text-gray-200">—</span>}
+                                    </td>
+                                  );
+                                }
                                 const f = dailyFcstMap[`${shift}:${col.dateKey}`];
                                 return (
                                   <td key={ci} className="py-0.5 tabular-nums" style={{ paddingLeft:0, paddingRight:0, backgroundColor: isCurDay ? 'rgba(59,130,246,0.04)' : undefined }}>
@@ -4090,10 +4100,12 @@ export default function SalesReportsPage() {
                                   </td>
                                 );
                               } else {
-                                const wVal = col.wDateKeys.reduce((s, k) => s + (dailyFcstMap[`${shift}:${k}`]?.est_guests ?? 0), 0);
+                                const wActual = col.wDateKeys.reduce((s, k) => s + (actualMap[k] ?? 0), 0);
+                                const wFcst   = col.wDateKeys.filter(k => k > todayKey && !actualMap[k]).reduce((s, k) => s + (dailyFcstMap[`${shift}:${k}`]?.est_guests ?? 0), 0);
+                                const wTotal  = wActual + wFcst;
                                 return (
                                   <td key={ci} className="py-1 text-right tabular-nums text-[11px]" style={{ paddingLeft:4, paddingRight:6, backgroundColor:'#fffbeb', borderLeft:'1px solid #fde68a', borderRight:'1px solid #fde68a' }}>
-                                    {wVal > 0 ? <span className="text-amber-600">{fmtNum(wVal)}</span> : <span className="text-gray-200">—</span>}
+                                    {wTotal > 0 ? <span className="text-gray-500">{fmtNum(wTotal)}</span> : <span className="text-gray-200">—</span>}
                                   </td>
                                 );
                               }
@@ -4105,13 +4117,24 @@ export default function SalesReportsPage() {
                         );
                       };
 
-                      const fcstSpendRow = (label: string, shift: 'lunch' | 'dinner', defaultSpend: number | null) => {
+                      // Dual-mode Net Total/Guest row: actuals for past dates, editable spend/guest for future
+                      const netPerGuestRow = (label: string, actualMap: Record<string, number>, shift: 'lunch' | 'dinner', defaultSpend: number | null, qMetrics: { guests: number; netFood: number; netDrinks: number }) => {
+                        const qActualVal = qMetrics.guests > 0 ? (qMetrics.netFood + qMetrics.netDrinks) / qMetrics.guests : null;
                         return (
-                          <tr key={label} className="border-b border-amber-100 hover:bg-amber-50/30 group" style={{ backgroundColor: '#fffbeb' }}>
-                            <td className="sticky left-0 z-10 px-4 py-0.5 whitespace-nowrap border-r border-amber-100 bg-[#fffbeb] group-hover:bg-amber-50/30 transition-colors text-[11px] text-amber-500 italic">{label}</td>
+                          <tr key={label} className="border-b border-gray-100 hover:bg-gray-50/60 group" style={{ backgroundColor:'#f8fafc' }}>
+                            <td className="sticky left-0 z-10 px-4 py-1 whitespace-nowrap border-r border-gray-100 bg-[#f8fafc] group-hover:bg-gray-50/60 transition-colors text-[11px] text-gray-400 italic">{label}</td>
                             {dailyCols.map((col, ci) => {
                               if (col.type === 'day') {
                                 const isCurDay = col.dateKey === todayKey;
+                                const isFuture = col.dateKey > todayKey;
+                                const actual   = actualMap[col.dateKey] ?? null;
+                                if (!isFuture || actual != null) {
+                                  return (
+                                    <td key={ci} className="py-1 text-right tabular-nums text-[11px]" style={{ paddingLeft:4, paddingRight:8, backgroundColor: isCurDay ? 'rgba(59,130,246,0.04)' : undefined }}>
+                                      {actual != null && actual > 0 ? <span className="text-gray-500">{fmtPG(actual)}</span> : <span className="text-gray-200">—</span>}
+                                    </td>
+                                  );
+                                }
                                 const f = dailyFcstMap[`${shift}:${col.dateKey}`];
                                 return (
                                   <td key={ci} className="py-0.5 tabular-nums" style={{ paddingLeft:0, paddingRight:0, backgroundColor: isCurDay ? 'rgba(59,130,246,0.04)' : undefined }}>
@@ -4119,22 +4142,19 @@ export default function SalesReportsPage() {
                                   </td>
                                 );
                               } else {
-                                const futureVals = col.wDateKeys
-                                  .filter(k => k > todayKey)
-                                  .map(k => dailyFcstMap[`${shift}:${k}`]?.spend_per_guest ?? defaultSpend)
-                                  .filter((v): v is number => v != null);
-                                const avg = futureVals.length > 0 ? futureVals.reduce((a, b) => a + b, 0) / futureVals.length : null;
+                                const actualVals = col.wDateKeys.map(k => actualMap[k]).filter((v): v is number => v != null && v > 0);
+                                const fcstVals   = col.wDateKeys.filter(k => k > todayKey && !actualMap[k]).map(k => dailyFcstMap[`${shift}:${k}`]?.spend_per_guest ?? defaultSpend).filter((v): v is number => v != null);
+                                const allVals    = [...actualVals, ...fcstVals];
+                                const avg        = allVals.length > 0 ? allVals.reduce((a, b) => a + b, 0) / allVals.length : null;
                                 return (
                                   <td key={ci} className="py-1 text-right tabular-nums text-[11px]" style={{ paddingLeft:4, paddingRight:6, backgroundColor:'#fffbeb', borderLeft:'1px solid #fde68a', borderRight:'1px solid #fde68a' }}>
-                                    {avg != null ? <span className="text-amber-600">{fmtPG(avg)}</span> : <span className="text-gray-200">—</span>}
+                                    {avg != null ? <span className="text-gray-500">{fmtPG(avg)}</span> : <span className="text-gray-200">—</span>}
                                   </td>
                                 );
                               }
                             })}
                             <td className="py-1 text-right tabular-nums text-[11px] border-l border-gray-200" style={{ paddingLeft:4, paddingRight:8 }}>
-                              {defaultSpend != null
-                                ? <span className="text-amber-300 text-[10px] italic">default {fmtPG(defaultSpend)}</span>
-                                : <span className="text-gray-200">—</span>}
+                              {qActualVal != null ? <span className="text-gray-600 font-medium">{fmtPG(qActualVal)}</span> : <span className="text-gray-200">—</span>}
                             </td>
                           </tr>
                         );
@@ -4144,24 +4164,20 @@ export default function SalesReportsPage() {
                         <>
                           {bookingsRow('↳ Bookings · Lunch',   lunchBookingsMap,  'lunch',  lunchQBookings)}
                           {walkInsRow( '↳ Walk-ins · Lunch',  lunchWalkInsMap,  lunchBookingsMap,  'lunch',  lunchQWalkIns)}
-                          {metricRow('↳ Est. Guests · Lunch',        effectiveLunchGuestsMap,  lunchQEffGuests,  'count')}
+                          {estGuestsRow('↳ Est. Guests · Lunch',       effectiveLunchGuestsMap,  'lunch', lunchQEffGuests)}
                           {metricRow('↳ Net Food / Guest · Lunch',    lunchNetFoodPGMap,   lunchQMetrics.guests > 0 ? lunchQMetrics.netFood   / lunchQMetrics.guests : null, 'currency')}
                           {metricRow('↳ Net Drinks / Guest · Lunch',  lunchNetDrinksPGMap, lunchQMetrics.guests > 0 ? lunchQMetrics.netDrinks / lunchQMetrics.guests : null, 'currency')}
-                          {metricRow('↳ Net Total / Guest · Lunch',   lunchNetTotalPGMap,  lunchQMetrics.guests > 0 ? (lunchQMetrics.netFood + lunchQMetrics.netDrinks) / lunchQMetrics.guests : null, 'currency')}
-                          {fcstGuestsRow('↳ Fcst. Guests · Lunch', 'lunch')}
-                          {fcstSpendRow( '↳ Spend / Guest · Lunch', 'lunch', defaultLunchSpend)}
+                          {netPerGuestRow('↳ Net Total / Guest · Lunch', lunchNetTotalPGMap, 'lunch', defaultLunchSpend, lunchQMetrics)}
                           {posRow('☀️  Orderbird · Lunch',  lunchMap,  lunchForecastMap,  lunchQtrTotal)}
                           {simplyRow('🛵 Simply · Lunch', deliveryLunchMap, simplyLunchForecastMap)}
                           {billsRow('🧾 Bills · Lunch', billsLunchMap)}
                           {totalRow('☀️  Total Lunch',  lunchMap,  lunchForecastMap,  deliveryLunchMap,  lunchQtrTotal,  '#f0fdf4', '#1B5E20', billsLunchMap, simplyLunchForecastMap)}
                           {bookingsRow('↳ Bookings · Dinner',  dinnerBookingsMap, 'dinner', dinnerQBookings)}
                           {walkInsRow( '↳ Walk-ins · Dinner', dinnerWalkInsMap, dinnerBookingsMap, 'dinner', dinnerQWalkIns)}
-                          {metricRow('↳ Est. Guests · Dinner',        effectiveDinnerGuestsMap, dinnerQEffGuests, 'count')}
+                          {estGuestsRow('↳ Est. Guests · Dinner',      effectiveDinnerGuestsMap, 'dinner', dinnerQEffGuests)}
                           {metricRow('↳ Net Food / Guest · Dinner',   dinnerNetFoodPGMap,   dinnerQMetrics.guests > 0 ? dinnerQMetrics.netFood   / dinnerQMetrics.guests : null, 'currency')}
                           {metricRow('↳ Net Drinks / Guest · Dinner', dinnerNetDrinksPGMap, dinnerQMetrics.guests > 0 ? dinnerQMetrics.netDrinks / dinnerQMetrics.guests : null, 'currency')}
-                          {metricRow('↳ Net Total / Guest · Dinner',  dinnerNetTotalPGMap,  dinnerQMetrics.guests > 0 ? (dinnerQMetrics.netFood + dinnerQMetrics.netDrinks) / dinnerQMetrics.guests : null, 'currency')}
-                          {fcstGuestsRow('↳ Fcst. Guests · Dinner', 'dinner')}
-                          {fcstSpendRow( '↳ Spend / Guest · Dinner', 'dinner', defaultDinnerSpend)}
+                          {netPerGuestRow('↳ Net Total / Guest · Dinner', dinnerNetTotalPGMap, 'dinner', defaultDinnerSpend, dinnerQMetrics)}
                           {posRow('🌙  Orderbird · Dinner', dinnerMap, dinnerForecastMap, dinnerQtrTotal)}
                           {simplyRow('🛵 Simply · Dinner', deliveryDinnerMap, simplyDinnerForecastMap)}
                           {billsRow('🧾 Bills · Dinner', billsDinnerMap)}
