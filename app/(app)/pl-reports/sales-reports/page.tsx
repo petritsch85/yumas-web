@@ -4173,8 +4173,9 @@ export default function SalesReportsPage() {
                               if (col.type === 'day') {
                                 const isCurDay = col.dateKey === todayKey;
                                 const isFuture = col.dateKey > todayKey;
+                                const isClosed = closureSet.has(`${shift}:${col.dateKey}`);
                                 const actual   = actualMap[col.dateKey] ?? null;
-                                if (!isFuture || actual != null) {
+                                if (!isFuture || actual != null || isClosed) {
                                   return (
                                     <td key={ci} className="py-1 text-right tabular-nums text-[11px]" style={{ paddingLeft:4, paddingRight:8, backgroundColor: isCurDay ? 'rgba(59,130,246,0.04)' : undefined }}>
                                       {actual != null && actual > 0 ? <span className="text-gray-500">{fmtNum(actual)}</span> : <span className="text-gray-200">—</span>}
@@ -4195,7 +4196,7 @@ export default function SalesReportsPage() {
                                 );
                               } else {
                                 const wActual = col.wDateKeys.reduce((s, k) => s + (actualMap[k] ?? 0), 0);
-                                const wFcst   = col.wDateKeys.filter(k => k > todayKey && !actualMap[k]).reduce((s, k) => {
+                                const wFcst   = col.wDateKeys.filter(k => k > todayKey && !actualMap[k] && !closureSet.has(`${shift}:${k}`)).reduce((s, k) => {
                                   const stored = dailyFcstMap[`${shift}:${k}`]?.est_guests;
                                   return s + (stored ?? getDowGuests(fcstSettings, k) ?? 0);
                                 }, 0);
@@ -4224,8 +4225,9 @@ export default function SalesReportsPage() {
                               if (col.type === 'day') {
                                 const isCurDay = col.dateKey === todayKey;
                                 const isFuture = col.dateKey > todayKey;
+                                const isClosed = closureSet.has(`${shift}:${col.dateKey}`);
                                 const actual   = actualMap[col.dateKey] ?? null;
-                                if (!isFuture || actual != null) {
+                                if (!isFuture || actual != null || isClosed) {
                                   return (
                                     <td key={ci} className="py-1 text-right tabular-nums text-[11px]" style={{ paddingLeft:4, paddingRight:8, backgroundColor: isCurDay ? 'rgba(59,130,246,0.04)' : undefined }}>
                                       {actual != null && actual > 0 ? <span className="text-gray-500">{fmtPG(actual)}</span> : <span className="text-gray-200">—</span>}
@@ -4240,7 +4242,7 @@ export default function SalesReportsPage() {
                                 );
                               } else {
                                 const actualVals = col.wDateKeys.map(k => actualMap[k]).filter((v): v is number => v != null && v > 0);
-                                const fcstVals   = col.wDateKeys.filter(k => k > todayKey && !actualMap[k]).map(k => dailyFcstMap[`${shift}:${k}`]?.spend_per_guest ?? defaultSpend).filter((v): v is number => v != null);
+                                const fcstVals   = col.wDateKeys.filter(k => k > todayKey && !actualMap[k] && !closureSet.has(`${shift}:${k}`)).map(k => dailyFcstMap[`${shift}:${k}`]?.spend_per_guest ?? defaultSpend).filter((v): v is number => v != null);
                                 const allVals    = [...actualVals, ...fcstVals];
                                 const avg        = allVals.length > 0 ? allVals.reduce((a, b) => a + b, 0) / allVals.length : null;
                                 return (
