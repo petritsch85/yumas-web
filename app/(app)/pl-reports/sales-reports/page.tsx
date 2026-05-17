@@ -3513,7 +3513,7 @@ export default function SalesReportsPage() {
                   <button onClick={() => setShowForecastPanel(false)} className="text-gray-400 hover:text-gray-600 text-sm font-bold">✕</button>
                 </div>
               </div>
-              <div className="grid grid-cols-2 divide-x divide-gray-100">
+              <div className="grid grid-cols-2 divide-x divide-gray-100 overflow-y-auto max-h-[70vh]">
                 {([
                   { label:'☀️  Lunch',  draft: lunchDraft,  setDraft: setLunchDraft  },
                   { label:'🌙  Dinner', draft: dinnerDraft, setDraft: setDinnerDraft },
