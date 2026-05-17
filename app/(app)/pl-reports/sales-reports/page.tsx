@@ -3446,7 +3446,14 @@ export default function SalesReportsPage() {
                 <span className="text-xs font-bold text-gray-600 uppercase tracking-wider flex items-center gap-2">
                   <SlidersHorizontal size={13} /> Forecast Settings{location ? ` — ${location.name}` : ''}
                 </span>
-                <button onClick={() => setShowForecastPanel(false)} className="text-gray-400 hover:text-gray-600 text-sm font-bold">✕</button>
+                <div className="flex items-center gap-3">
+                  <button onClick={handleSaveForecast} disabled={savingForecast || !location}
+                    className="flex items-center gap-2 px-4 py-1.5 bg-[#1B5E20] text-white text-xs font-bold rounded-lg hover:bg-[#2E7D32] transition-colors disabled:opacity-50">
+                    {savingForecast ? <Loader2 size={12} className="animate-spin" /> : <DatabaseZap size={12} />}
+                    {savingForecast ? 'Saving…' : 'Save'}
+                  </button>
+                  <button onClick={() => setShowForecastPanel(false)} className="text-gray-400 hover:text-gray-600 text-sm font-bold">✕</button>
+                </div>
               </div>
               <div className="grid grid-cols-2 divide-x divide-gray-100">
                 {([
