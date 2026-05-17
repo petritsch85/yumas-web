@@ -709,7 +709,6 @@ function draftToPayload(d: DraftSettings, type: 'lunch'|'dinner', locationId: st
     weight_sun: sun/total,
     closed_weekdays:         [...closed],
     default_spend_per_guest: parseFloat(d.defaultSpendPerGuest) || null,
-    updated_at:              new Date().toISOString(),
   };
 }
 
@@ -1111,7 +1110,7 @@ export default function SalesReportsPage() {
     queryFn: async () => {
       const { data } = await supabase
         .from('forecast_settings')
-        .select('shift_type,week_base_net,growth_rate,weight_mon,weight_tue,weight_wed,weight_thu,weight_fri,weight_sat,weight_sun,closed_weekdays')
+        .select('shift_type,week_base_net,growth_rate,weight_mon,weight_tue,weight_wed,weight_thu,weight_fri,weight_sat,weight_sun,closed_weekdays,default_spend_per_guest')
         .eq('location_id', location!.id);
       return (data ?? []) as ForecastSettings[];
     },
