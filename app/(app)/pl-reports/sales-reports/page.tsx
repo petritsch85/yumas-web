@@ -3499,8 +3499,8 @@ export default function SalesReportsPage() {
 
           {/* ── Forecast settings panel ── */}
           {showForecastPanel && (
-            <div className="mb-4 border border-gray-200 rounded-xl bg-white shadow-sm overflow-hidden">
-              <div className="bg-gray-50 border-b border-gray-200 px-4 py-3 flex items-center justify-between">
+            <div className="mb-4 border border-gray-200 rounded-xl bg-white shadow-sm overflow-y-auto max-h-[80vh]">
+              <div className="bg-gray-50 border-b border-gray-200 px-4 py-3 flex items-center justify-between sticky top-0 z-10 rounded-t-xl">
                 <span className="text-xs font-bold text-gray-600 uppercase tracking-wider flex items-center gap-2">
                   <SlidersHorizontal size={13} /> Forecast Settings{location ? ` — ${location.name}` : ''}
                 </span>
@@ -3513,7 +3513,7 @@ export default function SalesReportsPage() {
                   <button onClick={() => setShowForecastPanel(false)} className="text-gray-400 hover:text-gray-600 text-sm font-bold">✕</button>
                 </div>
               </div>
-              <div className="grid grid-cols-2 divide-x divide-gray-100 overflow-y-auto max-h-[70vh]">
+              <div className="grid grid-cols-2 divide-x divide-gray-100">
                 {([
                   { label:'☀️  Lunch',  draft: lunchDraft,  setDraft: setLunchDraft  },
                   { label:'🌙  Dinner', draft: dinnerDraft, setDraft: setDinnerDraft },
