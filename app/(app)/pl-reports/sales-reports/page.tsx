@@ -3570,6 +3570,7 @@ export default function SalesReportsPage() {
           </div>
         ) : (() => {
           const totalCols = dailyCols.length + 2; // label + day/week cols + month total
+          const todayKey  = `${todayYear}-${String(todayMonth).padStart(2,'0')}-${String(todayDay).padStart(2,'0')}`;
 
           // Helper: render one P&L block (lunch / dinner / total) as a <tbody>
           const renderBlock = (
