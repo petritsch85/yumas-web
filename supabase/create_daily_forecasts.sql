@@ -22,3 +22,12 @@ CREATE POLICY "auth_rw_daily_forecasts"
 -- Add default spend per guest to the existing forecast_settings table
 ALTER TABLE forecast_settings
   ADD COLUMN IF NOT EXISTS default_spend_per_guest numeric(8,2) DEFAULT NULL;
+
+-- Add per-day-of-week default guest counts to forecast_settings
+ALTER TABLE forecast_settings ADD COLUMN IF NOT EXISTS guests_mon integer DEFAULT NULL;
+ALTER TABLE forecast_settings ADD COLUMN IF NOT EXISTS guests_tue integer DEFAULT NULL;
+ALTER TABLE forecast_settings ADD COLUMN IF NOT EXISTS guests_wed integer DEFAULT NULL;
+ALTER TABLE forecast_settings ADD COLUMN IF NOT EXISTS guests_thu integer DEFAULT NULL;
+ALTER TABLE forecast_settings ADD COLUMN IF NOT EXISTS guests_fri integer DEFAULT NULL;
+ALTER TABLE forecast_settings ADD COLUMN IF NOT EXISTS guests_sat integer DEFAULT NULL;
+ALTER TABLE forecast_settings ADD COLUMN IF NOT EXISTS guests_sun integer DEFAULT NULL;

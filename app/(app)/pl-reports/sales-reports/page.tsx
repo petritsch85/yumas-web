@@ -196,6 +196,9 @@ type ForecastSettings = {
   weight_fri:             number; weight_sat: number; weight_sun: number;
   closed_weekdays?:       string[]; // e.g. ['mon', 'sun']
   default_spend_per_guest: number | null;
+  guests_mon: number | null; guests_tue: number | null; guests_wed: number | null;
+  guests_thu: number | null; guests_fri: number | null; guests_sat: number | null;
+  guests_sun: number | null;
 };
 
 // Draft: weights stored as pct strings; closedDays lists days the store is shut
@@ -204,7 +207,9 @@ type DraftSettings = {
   growthRate:  string;
   mon: string; tue: string; wed: string; thu: string; fri: string; sat: string;
   closedDays: string[]; // days of week the store is closed for this shift
-  defaultSpendPerGuest: string; // NEW
+  defaultSpendPerGuest: string;
+  guestsMon: string; guestsTue: string; guestsWed: string; guestsThu: string;
+  guestsFri: string; guestsSat: string; guestsSun: string;
 };
 
 type ClosureDay = {
@@ -233,7 +238,9 @@ const DEFAULT_DRAFT: DraftSettings = {
   weekBaseNet:'0', growthRate:'0',
   mon:'14.3', tue:'14.3', wed:'14.3', thu:'14.3', fri:'14.3', sat:'14.3',
   closedDays: [],
-  defaultSpendPerGuest: '',  // NEW
+  defaultSpendPerGuest: '',
+  guestsMon: '', guestsTue: '', guestsWed: '', guestsThu: '',
+  guestsFri: '', guestsSat: '', guestsSun: '',
 };
 
 type RowType   = 'section' | 'bold' | 'normal' | 'pct';
@@ -662,6 +669,10 @@ const DOW_WEIGHT_KEYS = [
   'weight_sun','weight_mon','weight_tue','weight_wed',
   'weight_thu','weight_fri','weight_sat',
 ] as const;
+const DOW_GUEST_KEYS = [
+  'guests_sun','guests_mon','guests_tue','guests_wed',
+  'guests_thu','guests_fri','guests_sat',
+] as const;
 
 function computeDailyForecast(dateKey: string, s: ForecastSettings): number {
   if (!s.week_base_net) return 0;
@@ -686,6 +697,13 @@ function settingsToDraft(s: ForecastSettings): DraftSettings {
     sat: (s.weight_sat * 100).toFixed(1),
     closedDays: s.closed_weekdays ?? [],
     defaultSpendPerGuest: s.default_spend_per_guest != null ? String(s.default_spend_per_guest) : '',
+    guestsMon: s.guests_mon != null ? String(s.guests_mon) : '',
+    guestsTue: s.guests_tue != null ? String(s.guests_tue) : '',
+    guestsWed: s.guests_wed != null ? String(s.guests_wed) : '',
+    guestsThu: s.guests_thu != null ? String(s.guests_thu) : '',
+    guestsFri: s.guests_fri != null ? String(s.guests_fri) : '',
+    guestsSat: s.guests_sat != null ? String(s.guests_sat) : '',
+    guestsSun: s.guests_sun != null ? String(s.guests_sun) : '',
   };
 }
 
@@ -709,6 +727,13 @@ function draftToPayload(d: DraftSettings, type: 'lunch'|'dinner', locationId: st
     weight_sun: sun/total,
     closed_weekdays:         [...closed],
     default_spend_per_guest: parseFloat(d.defaultSpendPerGuest) || null,
+    guests_mon: parseInt(d.guestsMon) || null,
+    guests_tue: parseInt(d.guestsTue) || null,
+    guests_wed: parseInt(d.guestsWed) || null,
+    guests_thu: parseInt(d.guestsThu) || null,
+    guests_fri: parseInt(d.guestsFri) || null,
+    guests_sat: parseInt(d.guestsSat) || null,
+    guests_sun: parseInt(d.guestsSun) || null,
   };
 }
 
@@ -954,10 +979,6 @@ export default function SalesReportsPage() {
     date: string; shift: 'lunch' | 'dinner'; field: 'est_guests' | 'spend_per_guest'; draft: string;
   } | null>(null);
 
-  const [editingEstCell, setEditingEstCell] = useState<{
-    date: string; shift: 'lunch' | 'dinner'; draftGuests: string; draftSpend: string;
-  } | null>(null);
-
   // Upload state
   const [fileName,       setFileName]       = useState<string | null>(null);
   const [weeklyResult,   setWeeklyResult]   = useState<WeeklyParseResult | null>(null);
@@ -984,6 +1005,11 @@ export default function SalesReportsPage() {
   const [forecastDraft,         setForecastDraft]         = useState<{ netRevenue: string; note: string }>({ netRevenue: '', note: '' });
   const [savingForecastOverride,setSavingForecastOverride]= useState(false);
   const [confirmDelOverrideKey, setConfirmDelOverrideKey] = useState<string | null>(null);
+  const [dayFcstDraft, setDayFcstDraft] = useState<{
+    lunchGuests: string; lunchSpend: string;
+    dinnerGuests: string; dinnerSpend: string;
+  } | null>(null);
+  const [savingDayFcst, setSavingDayFcst] = useState(false);
 
   // Forecast
   const [showForecastPanel, setShowForecastPanel] = useState(false);
@@ -1114,7 +1140,7 @@ export default function SalesReportsPage() {
     queryFn: async () => {
       const { data } = await supabase
         .from('forecast_settings')
-        .select('shift_type,week_base_net,growth_rate,weight_mon,weight_tue,weight_wed,weight_thu,weight_fri,weight_sat,weight_sun,closed_weekdays,default_spend_per_guest')
+        .select('shift_type,week_base_net,growth_rate,weight_mon,weight_tue,weight_wed,weight_thu,weight_fri,weight_sat,weight_sun,closed_weekdays,default_spend_per_guest,guests_mon,guests_tue,guests_wed,guests_thu,guests_fri,guests_sat,guests_sun')
         .eq('location_id', location!.id);
       return (data ?? []) as ForecastSettings[];
     },
@@ -1535,6 +1561,13 @@ export default function SalesReportsPage() {
 
   const defaultLunchSpend  = forecastSettings.find(s => s.shift_type === 'lunch')?.default_spend_per_guest ?? null;
   const defaultDinnerSpend = forecastSettings.find(s => s.shift_type === 'dinner')?.default_spend_per_guest ?? null;
+  const lunchFcstSettings  = forecastSettings.find(s => s.shift_type === 'lunch');
+  const dinnerFcstSettings = forecastSettings.find(s => s.shift_type === 'dinner');
+  const getDowGuests = (s: ForecastSettings | undefined, dateKey: string): number | null => {
+    if (!s) return null;
+    const key = DOW_GUEST_KEYS[new Date(dateKey + 'T12:00:00Z').getUTCDay()];
+    return (s as any)[key] ?? null;
+  };
 
   // Forecast net revenue per day — computed as Forecast Guests × Spend/Guest.
   // Only populated for future dates where est_guests is set.
@@ -1550,13 +1583,13 @@ export default function SalesReportsPage() {
       if (dk <= todayKey) continue; // only future days get a forecast
       if (!closureSet.has(`lunch:${dk}`)) {
         const lf = dailyFcstMap[`lunch:${dk}`];
-        const lg = lf?.est_guests;
+        const lg = lf?.est_guests ?? getDowGuests(lunchFcstSettings, dk);
         const ls = lf?.spend_per_guest ?? defaultLunchSpend;
         if (lg != null && ls != null) lunchForecastMap[dk] = Math.round(lg * ls * 100) / 100;
       }
       if (!closureSet.has(`dinner:${dk}`)) {
         const df = dailyFcstMap[`dinner:${dk}`];
-        const dg = df?.est_guests;
+        const dg = df?.est_guests ?? getDowGuests(dinnerFcstSettings, dk);
         const ds = df?.spend_per_guest ?? defaultDinnerSpend;
         if (dg != null && ds != null) dinnerForecastMap[dk] = Math.round(dg * ds * 100) / 100;
       }
@@ -1565,7 +1598,7 @@ export default function SalesReportsPage() {
       if (lv + dv > 0) totalForecastMap[dk] = lv + dv;
     }
     return { lunchForecastMap, dinnerForecastMap, totalForecastMap };
-  }, [dailyCols, dailyFcstMap, defaultLunchSpend, defaultDinnerSpend, closureSet]);
+  }, [dailyCols, dailyFcstMap, defaultLunchSpend, defaultDinnerSpend, lunchFcstSettings, dinnerFcstSettings, closureSet]);
 
   // Simply delivery forecast — derive ratio from historical days where both OB and Simply have actuals,
   // then apply that ratio to the Orderbird forecast for future days with no Simply actual.
@@ -2399,25 +2432,28 @@ export default function SalesReportsPage() {
     setEditingFcstCell(null);
   }, [location, dailyForecastsData, year, quarter, queryClient]);
 
-  const saveEstCell = useCallback(async (
-    date: string, shift: 'lunch' | 'dinner',
-    rawGuests: string, rawSpend: string,
-  ) => {
-    if (!location) return;
-    const guests = parseInt(rawGuests, 10);
-    const spend  = parseFloat(rawSpend);
-    if (isNaN(guests) || guests < 0) { setEditingEstCell(null); return; }
-    const record: Record<string, unknown> = {
-      location_id:   location.id,
-      forecast_date: date,
-      shift_type:    shift,
-      est_guests:    guests,
-    };
-    if (!isNaN(spend) && spend >= 0) record.spend_per_guest = spend;
-    await supabase.from('daily_forecasts').upsert(record, { onConflict: 'location_id,forecast_date,shift_type' });
-    queryClient.invalidateQueries({ queryKey: ['daily-forecasts', location.id, year, quarter] });
-    setEditingEstCell(null);
-  }, [location, year, quarter, queryClient]);
+  const saveDayForecast = useCallback(async () => {
+    if (!location || !activeDayKey || !dayFcstDraft) return;
+    setSavingDayFcst(true);
+    try {
+      for (const shift of ['lunch', 'dinner'] as const) {
+        const rawGuests = shift === 'lunch' ? dayFcstDraft.lunchGuests : dayFcstDraft.dinnerGuests;
+        const rawSpend  = shift === 'lunch' ? dayFcstDraft.lunchSpend  : dayFcstDraft.dinnerSpend;
+        const guests = parseInt(rawGuests, 10);
+        const spend  = parseFloat(rawSpend);
+        if (!isNaN(guests) && guests >= 0) {
+          const record: Record<string, unknown> = {
+            location_id: location.id, forecast_date: activeDayKey, shift_type: shift, est_guests: guests,
+          };
+          if (!isNaN(spend) && spend >= 0) record.spend_per_guest = spend;
+          await supabase.from('daily_forecasts').upsert(record, { onConflict: 'location_id,forecast_date,shift_type' });
+        }
+      }
+      queryClient.invalidateQueries({ queryKey: ['daily-forecasts', location.id, year, quarter] });
+      setDayFcstDraft(null);
+    } catch (e: any) { alert(`Save failed: ${e.message}`); }
+    finally { setSavingDayFcst(false); }
+  }, [location, activeDayKey, dayFcstDraft, year, quarter, queryClient]);
 
   // ── Shared controls UI ─────────────────────────────────────────────────────
 
@@ -3570,6 +3606,30 @@ export default function SalesReportsPage() {
                           Total: {total.toFixed(1)}% {Math.abs(total - 100) < 0.2 ? '✓' : '⚠ open days must sum to 100%'}
                         </p>
                       </div>
+                      <div>
+                        <p className="text-xs text-gray-400 uppercase tracking-wider mb-2">Expected Guests / Day</p>
+                        <div className="grid grid-cols-7 gap-1 text-center">
+                          {ALL_DAYS.map(day => {
+                            const isClosed = closed.has(day);
+                            const dayLabel = day.charAt(0).toUpperCase()+day.slice(1);
+                            const gKey = ('guests' + day.charAt(0).toUpperCase() + day.slice(1)) as keyof DraftSettings;
+                            return (
+                              <div key={day} className="flex flex-col items-center gap-0.5">
+                                <p className={`text-xs mb-0.5 ${isClosed ? 'text-gray-300 line-through' : 'text-gray-400'}`}>{dayLabel}</p>
+                                {isClosed ? (
+                                  <div className="w-full text-center text-xs rounded px-0.5 py-1 tabular-nums border bg-gray-50 border-gray-100 text-gray-300">—</div>
+                                ) : (
+                                  <input type="number" step="1" min="0" placeholder="—"
+                                    value={draft[gKey] as string}
+                                    onChange={e => setDraft(d => ({ ...d, [gKey]: e.target.value }))}
+                                    className="w-full text-center text-xs border border-gray-200 rounded px-0.5 py-1 tabular-nums focus:outline-none focus:border-[#1B5E20]" />
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                        <p className="text-[10px] text-gray-400 mt-1 text-right">Used as default when no per-day override is set</p>
+                      </div>
                     </div>
                   );
                 })}
@@ -4096,10 +4156,15 @@ export default function SalesReportsPage() {
                         );
                       };
 
-                      // Dual-mode Est. Guests row: actuals for past dates, editable forecast for future
+                      // Dual-mode Est. Guests row: actuals for past dates, dow-default or override for future
                       const estGuestsRow = (label: string, actualMap: Record<string, number>, shift: 'lunch' | 'dinner', qActual: number) => {
+                        const fcstSettings = shift === 'lunch' ? lunchFcstSettings : dinnerFcstSettings;
                         const qFcst = dailyCols.filter(c => c.type === 'day' && (c as DayCol).dateKey > todayKey && !actualMap[(c as DayCol).dateKey])
-                          .reduce((s, c) => s + (dailyFcstMap[`${shift}:${(c as DayCol).dateKey}`]?.est_guests ?? 0), 0);
+                          .reduce((s, c) => {
+                            const dk = (c as DayCol).dateKey;
+                            const stored = dailyFcstMap[`${shift}:${dk}`]?.est_guests;
+                            return s + (stored ?? getDowGuests(fcstSettings, dk) ?? 0);
+                          }, 0);
                         const qTotal = qActual + qFcst;
                         return (
                           <tr key={label} className="border-b border-gray-100 hover:bg-gray-50/60 group" style={{ backgroundColor:'#f8fafc' }}>
@@ -4117,71 +4182,23 @@ export default function SalesReportsPage() {
                                   );
                                 }
                                 const f = dailyFcstMap[`${shift}:${col.dateKey}`];
-                                const defaultSpend = shift === 'lunch' ? defaultLunchSpend : defaultDinnerSpend;
-                                const isEditingEst = editingEstCell?.date === col.dateKey && editingEstCell?.shift === shift;
-                                if (isEditingEst) {
-                                  return (
-                                    <td key={ci} className="py-0.5" style={{ paddingLeft:2, paddingRight:2, backgroundColor: isCurDay ? 'rgba(59,130,246,0.04)' : undefined, minWidth: 80 }}>
-                                      <div className="flex flex-col gap-0.5">
-                                        <input
-                                          autoFocus
-                                          type="number" min="0" step="1" placeholder="Guests"
-                                          value={editingEstCell!.draftGuests}
-                                          onChange={e => setEditingEstCell(prev => prev ? { ...prev, draftGuests: e.target.value } : prev)}
-                                          onKeyDown={e => {
-                                            if (e.key === 'Enter') saveEstCell(col.dateKey, shift, editingEstCell!.draftGuests, editingEstCell!.draftSpend);
-                                            if (e.key === 'Escape') setEditingEstCell(null);
-                                          }}
-                                          className="w-full text-right text-[10px] bg-transparent border-b border-amber-400 outline-none tabular-nums"
-                                          style={{ padding: '0 4px' }}
-                                          title="Est. Guests"
-                                        />
-                                        <input
-                                          type="number" min="0" step="0.01" placeholder="€/guest"
-                                          value={editingEstCell!.draftSpend}
-                                          onChange={e => setEditingEstCell(prev => prev ? { ...prev, draftSpend: e.target.value } : prev)}
-                                          onKeyDown={e => {
-                                            if (e.key === 'Enter') saveEstCell(col.dateKey, shift, editingEstCell!.draftGuests, editingEstCell!.draftSpend);
-                                            if (e.key === 'Escape') setEditingEstCell(null);
-                                          }}
-                                          onBlur={() => saveEstCell(col.dateKey, shift, editingEstCell!.draftGuests, editingEstCell!.draftSpend)}
-                                          className="w-full text-right text-[10px] bg-transparent border-b border-amber-300 outline-none tabular-nums text-amber-500"
-                                          style={{ padding: '0 4px' }}
-                                          title="Spend / Guest"
-                                        />
-                                      </div>
-                                    </td>
-                                  );
-                                }
                                 const storedGuests = f?.est_guests ?? null;
-                                const storedSpend  = f?.spend_per_guest ?? null;
-                                const dispSpend    = storedSpend ?? defaultSpend;
+                                const defaultGuests = getDowGuests(fcstSettings, col.dateKey);
+                                const displayGuests = storedGuests ?? defaultGuests;
+                                const isDefault = storedGuests == null && defaultGuests != null;
                                 return (
-                                  <td key={ci} className="py-0.5 tabular-nums" style={{ paddingLeft:0, paddingRight:0, backgroundColor: isCurDay ? 'rgba(59,130,246,0.04)' : undefined }}>
-                                    <span
-                                      onClick={() => setEditingEstCell({
-                                        date: col.dateKey, shift,
-                                        draftGuests: storedGuests != null ? String(storedGuests) : '',
-                                        draftSpend:  storedSpend  != null ? String(storedSpend)  : (defaultSpend != null ? String(defaultSpend) : ''),
-                                      })}
-                                      className="cursor-text flex flex-col items-end w-full hover:bg-amber-50/60 rounded"
-                                      style={{ padding: '0 8px 0 4px', minHeight: 20 }}
-                                      title="Click to edit guests & spend/guest"
-                                    >
-                                      <span className={storedGuests != null ? 'text-amber-600 font-medium text-[11px]' : 'text-gray-200 text-[11px]'}>
-                                        {storedGuests != null ? fmtNum(storedGuests) : '—'}
-                                      </span>
-                                      {dispSpend != null && (
-                                        <span className={`text-[9px] leading-tight ${storedSpend != null ? 'text-amber-500' : 'text-amber-300'}`}>
-                                          {fmtPG(dispSpend)}
-                                        </span>
-                                      )}
-                                    </span>
+                                  <td key={ci} className="py-1 text-right tabular-nums text-[11px]" style={{ paddingLeft:4, paddingRight:8, backgroundColor: isCurDay ? 'rgba(59,130,246,0.04)' : undefined }}>
+                                    {displayGuests != null && displayGuests > 0
+                                      ? <span className={isDefault ? 'text-amber-300' : 'text-amber-600 font-medium'}>{fmtNum(displayGuests)}</span>
+                                      : <span className="text-gray-200">—</span>}
                                   </td>
                                 );
                               } else {
                                 const wActual = col.wDateKeys.reduce((s, k) => s + (actualMap[k] ?? 0), 0);
-                                const wFcst   = col.wDateKeys.filter(k => k > todayKey && !actualMap[k]).reduce((s, k) => s + (dailyFcstMap[`${shift}:${k}`]?.est_guests ?? 0), 0);
+                                const wFcst   = col.wDateKeys.filter(k => k > todayKey && !actualMap[k]).reduce((s, k) => {
+                                  const stored = dailyFcstMap[`${shift}:${k}`]?.est_guests;
+                                  return s + (stored ?? getDowGuests(fcstSettings, k) ?? 0);
+                                }, 0);
                                 const wTotal  = wActual + wFcst;
                                 return (
                                   <td key={ci} className="py-1 text-right tabular-nums text-[11px]" style={{ paddingLeft:4, paddingRight:6, backgroundColor:'#fffbeb', borderLeft:'1px solid #fde68a', borderRight:'1px solid #fde68a' }}>
@@ -4464,121 +4481,114 @@ export default function SalesReportsPage() {
                   })}
 
                   {/* ── Forecast section ── */}
-                  {(forecastSettings.length > 0 || Object.keys(overrideMap).some(k => k.endsWith(activeDayKey))) && (() => {
-                    const lS = forecastSettings.find(s => s.shift_type === 'lunch');
-                    const dS = forecastSettings.find(s => s.shift_type === 'dinner');
-                    const forecastRows: { key: string; label: string; emoji: string; computed: number; override: ForecastOverride | undefined }[] = [
-                      { key: `lunch:${activeDayKey}`,  label: 'Lunch',  emoji: '☀️',
-                        computed: lS && !closureSet.has(`lunch:${activeDayKey}`)  ? computeDailyForecast(activeDayKey, lS) : 0,
-                        override: overrideMap[`lunch:${activeDayKey}`] },
-                      { key: `dinner:${activeDayKey}`, label: 'Dinner', emoji: '🌙',
-                        computed: dS && !closureSet.has(`dinner:${activeDayKey}`) ? computeDailyForecast(activeDayKey, dS) : 0,
-                        override: overrideMap[`dinner:${activeDayKey}`] },
-                    ].filter(r => r.computed > 0 || r.override);
-                    if (forecastRows.length === 0) return null;
+                  {forecastSettings.length > 0 && (() => {
+                    const isEditingFcst = dayFcstDraft != null;
+                    const initDayDraft = () => {
+                      const lf = dailyFcstMap[`lunch:${activeDayKey}`];
+                      const df = dailyFcstMap[`dinner:${activeDayKey}`];
+                      setDayFcstDraft({
+                        lunchGuests:  lf?.est_guests      != null ? String(lf.est_guests)      : (getDowGuests(lunchFcstSettings,  activeDayKey!) != null ? String(getDowGuests(lunchFcstSettings,  activeDayKey!)) : ''),
+                        lunchSpend:   lf?.spend_per_guest != null ? String(lf.spend_per_guest)  : (defaultLunchSpend  != null ? String(defaultLunchSpend)  : ''),
+                        dinnerGuests: df?.est_guests      != null ? String(df.est_guests)       : (getDowGuests(dinnerFcstSettings, activeDayKey!) != null ? String(getDowGuests(dinnerFcstSettings, activeDayKey!)) : ''),
+                        dinnerSpend:  df?.spend_per_guest != null ? String(df.spend_per_guest)  : (defaultDinnerSpend != null ? String(defaultDinnerSpend) : ''),
+                      });
+                    };
+                    const shiftRows = [
+                      { key: 'lunch'  as const, emoji: '☀️', label: 'Lunch',
+                        storedGuests: dailyFcstMap[`lunch:${activeDayKey}`]?.est_guests   ?? null,
+                        storedSpend:  dailyFcstMap[`lunch:${activeDayKey}`]?.spend_per_guest ?? null,
+                        defGuests:    getDowGuests(lunchFcstSettings,  activeDayKey!),
+                        defSpend:     defaultLunchSpend,
+                        draftGuests:  dayFcstDraft?.lunchGuests  ?? '',
+                        draftSpend:   dayFcstDraft?.lunchSpend   ?? '',
+                        setGuests: (v: string) => setDayFcstDraft(p => p ? { ...p, lunchGuests: v }  : p),
+                        setSpend:  (v: string) => setDayFcstDraft(p => p ? { ...p, lunchSpend:  v }  : p),
+                      },
+                      { key: 'dinner' as const, emoji: '🌙', label: 'Dinner',
+                        storedGuests: dailyFcstMap[`dinner:${activeDayKey}`]?.est_guests   ?? null,
+                        storedSpend:  dailyFcstMap[`dinner:${activeDayKey}`]?.spend_per_guest ?? null,
+                        defGuests:    getDowGuests(dinnerFcstSettings, activeDayKey!),
+                        defSpend:     defaultDinnerSpend,
+                        draftGuests:  dayFcstDraft?.dinnerGuests ?? '',
+                        draftSpend:   dayFcstDraft?.dinnerSpend  ?? '',
+                        setGuests: (v: string) => setDayFcstDraft(p => p ? { ...p, dinnerGuests: v } : p),
+                        setSpend:  (v: string) => setDayFcstDraft(p => p ? { ...p, dinnerSpend:  v } : p),
+                      },
+                    ];
                     return (
-                      <div className="border border-indigo-200 rounded-xl overflow-hidden">
-                        <div className="px-4 py-3 bg-indigo-50 border-b border-indigo-100">
-                          <span className="text-sm font-bold text-indigo-700">📈 Forecast</span>
-                          <span className="text-xs text-indigo-400 ml-2">Click ✏️ to override for this specific day</span>
+                      <div className="border border-amber-200 rounded-xl overflow-hidden">
+                        <div className="px-4 py-3 bg-amber-50 border-b border-amber-100 flex items-center justify-between">
+                          <div>
+                            <span className="text-sm font-bold text-amber-800">📈 Forecast</span>
+                            <span className="text-xs text-amber-500 ml-2">Guests × Spend / Guest</span>
+                          </div>
+                          {!isEditingFcst ? (
+                            <button onClick={initDayDraft}
+                              className="text-xs px-2.5 py-1 rounded-lg border border-amber-300 text-amber-700 hover:bg-amber-100 transition-colors font-semibold">
+                              ✏️ Edit
+                            </button>
+                          ) : (
+                            <div className="flex items-center gap-2">
+                              <button onClick={() => setDayFcstDraft(null)}
+                                className="text-xs px-2.5 py-1 border border-gray-200 rounded-lg text-gray-500 hover:bg-gray-50 font-semibold transition-colors">
+                                Cancel
+                              </button>
+                              <button onClick={saveDayForecast} disabled={savingDayFcst}
+                                className="text-xs px-3 py-1 bg-[#1B5E20] text-white rounded-lg font-bold hover:bg-[#2E7D32] transition-colors disabled:opacity-50 flex items-center gap-1">
+                                {savingDayFcst ? <Loader2 size={11} className="animate-spin" /> : <DatabaseZap size={11} />}
+                                {savingDayFcst ? 'Saving…' : 'Save'}
+                              </button>
+                            </div>
+                          )}
                         </div>
-                        <div className="divide-y divide-indigo-50">
-                          {forecastRows.map(({ key, label, emoji, computed, override }) => {
-                            const isEditing  = editingForecastKey === key;
-                            const isDeleting = confirmDelOverrideKey === key;
-                            const displayVal = override?.net_revenue ?? computed;
+                        <div className="divide-y divide-amber-50">
+                          {shiftRows.map(sh => {
+                            if (closureSet.has(`${sh.key}:${activeDayKey}`)) return null;
+                            const guests = sh.storedGuests ?? sh.defGuests;
+                            const spend  = sh.storedSpend  ?? sh.defSpend;
+                            const total  = guests != null && spend != null ? guests * spend : null;
+                            const gIsDefault = sh.storedGuests == null && sh.defGuests != null;
+                            const sIsDefault = sh.storedSpend  == null && sh.defSpend  != null;
                             return (
-                              <div key={key} className="px-4 py-3">
-                                {/* Row header */}
+                              <div key={sh.key} className="px-4 py-3">
                                 <div className="flex items-center justify-between mb-2">
-                                  <div className="flex items-center gap-2">
-                                    <span className="text-sm font-semibold text-gray-700">{emoji} {label}</span>
-                                    {override
-                                      ? <span className="text-xs px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 font-semibold">Override</span>
-                                      : <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">Computed</span>}
-                                  </div>
-                                  <div className="flex items-center gap-2">
-                                    {!isEditing && !isDeleting && (
-                                      <button
-                                        onClick={() => {
-                                          setEditingForecastKey(key);
-                                          setConfirmDelOverrideKey(null);
-                                          setForecastDraft({
-                                            netRevenue: String(override?.net_revenue ?? Math.round(computed)),
-                                            note:       override?.note ?? '',
-                                          });
-                                        }}
-                                        className="text-xs px-2.5 py-1 rounded-lg border border-gray-200 text-gray-500 hover:border-indigo-400 hover:text-indigo-600 transition-colors font-semibold">
-                                        ✏️ {override ? 'Edit override' : 'Set override'}
-                                      </button>
-                                    )}
-                                    {override && !isEditing && (
-                                      isDeleting ? (
-                                        <span className="flex items-center gap-1.5">
-                                          <span className="text-xs text-red-600 font-semibold">Remove?</span>
-                                          <button onClick={() => handleDeleteForecastOverride(override.id)}
-                                            className="text-xs px-2.5 py-1 bg-red-600 text-white rounded-lg font-bold hover:bg-red-700 transition-colors">Yes</button>
-                                          <button onClick={() => setConfirmDelOverrideKey(null)}
-                                            className="text-xs px-2.5 py-1 border border-gray-200 rounded-lg text-gray-500 hover:bg-gray-50 transition-colors">No</button>
-                                        </span>
-                                      ) : (
-                                        <button onClick={() => { setConfirmDelOverrideKey(key); setEditingForecastKey(null); }}
-                                          className="text-xs px-2.5 py-1 rounded-lg border border-red-200 text-red-500 hover:bg-red-50 transition-colors font-semibold">
-                                          🗑 Reset
-                                        </button>
-                                      )
-                                    )}
-                                  </div>
+                                  <span className="text-sm font-semibold text-gray-700">{sh.emoji} {sh.label}</span>
+                                  {(sh.storedGuests != null || sh.storedSpend != null) && (
+                                    <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 font-semibold">Override</span>
+                                  )}
                                 </div>
-
-                                {/* Value display or edit form */}
-                                {isEditing ? (
-                                  <div className="space-y-2">
-                                    <div className="grid grid-cols-2 gap-3">
-                                      <div>
-                                        <p className="text-xs text-gray-400 mb-1">Net Revenue (€)</p>
-                                        <input type="number" step="0.01" min="0"
-                                          value={forecastDraft.netRevenue}
-                                          onChange={e => setForecastDraft(d => ({ ...d, netRevenue: e.target.value }))}
-                                          className="w-full text-right text-sm font-semibold border border-indigo-300 rounded-lg px-3 py-2 tabular-nums focus:outline-none focus:border-indigo-500"
-                                          autoFocus
-                                        />
-                                      </div>
-                                      <div>
-                                        <p className="text-xs text-gray-400 mb-1">Note (optional)</p>
-                                        <input type="text" placeholder="e.g. Large group booking"
-                                          value={forecastDraft.note}
-                                          onChange={e => setForecastDraft(d => ({ ...d, note: e.target.value }))}
-                                          className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-400"
-                                        />
-                                      </div>
+                                {isEditingFcst ? (
+                                  <div className="grid grid-cols-2 gap-3">
+                                    <div>
+                                      <p className="text-xs text-gray-400 mb-1">Est. Guests</p>
+                                      <input type="number" min="0" step="1"
+                                        value={sh.draftGuests}
+                                        onChange={e => sh.setGuests(e.target.value)}
+                                        className="w-full text-right text-sm font-semibold border border-amber-300 rounded-lg px-3 py-2 tabular-nums focus:outline-none focus:border-amber-500"
+                                      />
                                     </div>
-                                    <div className="flex items-center justify-between text-xs text-gray-400 pt-0.5">
-                                      <span>Computed value: {fmt(computed)}</span>
-                                      <div className="flex gap-2">
-                                        <button onClick={() => setEditingForecastKey(null)}
-                                          className="px-3 py-1.5 border border-gray-200 rounded-lg text-gray-500 hover:bg-gray-50 font-semibold transition-colors">
-                                          Cancel
-                                        </button>
-                                        <button onClick={handleSaveForecastOverride} disabled={savingForecastOverride}
-                                          className="px-3 py-1.5 bg-indigo-600 text-white rounded-lg font-bold hover:bg-indigo-700 transition-colors disabled:opacity-50 flex items-center gap-1.5">
-                                          {savingForecastOverride ? <Loader2 size={12} className="animate-spin" /> : <DatabaseZap size={12} />}
-                                          {savingForecastOverride ? 'Saving…' : 'Save override'}
-                                        </button>
-                                      </div>
+                                    <div>
+                                      <p className="text-xs text-gray-400 mb-1">Spend / Guest (€)</p>
+                                      <input type="number" min="0" step="0.01"
+                                        value={sh.draftSpend}
+                                        onChange={e => sh.setSpend(e.target.value)}
+                                        className="w-full text-right text-sm font-semibold border border-amber-300 rounded-lg px-3 py-2 tabular-nums focus:outline-none focus:border-amber-500"
+                                      />
                                     </div>
                                   </div>
                                 ) : (
-                                  <div className="flex items-baseline gap-3">
-                                    <span className={`text-lg font-bold tabular-nums ${override ? 'text-indigo-700' : 'text-amber-600'}`}>
-                                      {fmt(displayVal)}
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span className={`text-sm tabular-nums font-medium ${gIsDefault ? 'text-amber-300' : guests != null ? 'text-amber-700' : 'text-gray-300'}`}>
+                                      {guests != null ? `${fmtNum(guests)} guests` : '— guests'}
                                     </span>
-                                    {override && computed > 0 && (
-                                      <span className="text-xs text-gray-400">computed: {fmt(computed)}</span>
-                                    )}
-                                    {override?.note && (
-                                      <span className="text-xs text-indigo-500 italic">"{override.note}"</span>
-                                    )}
+                                    <span className="text-gray-300 text-xs">×</span>
+                                    <span className={`text-sm tabular-nums font-medium ${sIsDefault ? 'text-amber-300' : spend != null ? 'text-amber-700' : 'text-gray-300'}`}>
+                                      {spend != null ? fmt(spend) : '—'}
+                                    </span>
+                                    <span className="text-gray-300 text-xs">=</span>
+                                    <span className="text-lg font-bold tabular-nums text-amber-600">
+                                      {total != null ? fmt(total) : <span className="text-gray-300 text-sm font-normal">—</span>}
+                                    </span>
                                   </div>
                                 )}
                               </div>
