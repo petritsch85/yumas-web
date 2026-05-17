@@ -954,6 +954,10 @@ export default function SalesReportsPage() {
     date: string; shift: 'lunch' | 'dinner'; field: 'est_guests' | 'spend_per_guest'; draft: string;
   } | null>(null);
 
+  const [editingEstCell, setEditingEstCell] = useState<{
+    date: string; shift: 'lunch' | 'dinner'; draftGuests: string; draftSpend: string;
+  } | null>(null);
+
   // Upload state
   const [fileName,       setFileName]       = useState<string | null>(null);
   const [weeklyResult,   setWeeklyResult]   = useState<WeeklyParseResult | null>(null);
@@ -2389,12 +2393,31 @@ export default function SalesReportsPage() {
       shift_type:      shift,
       est_guests:      field === 'est_guests'      ? val : (existing?.est_guests      ?? null),
       spend_per_guest: field === 'spend_per_guest' ? val : (existing?.spend_per_guest ?? null),
-      updated_at:      new Date().toISOString(),
     };
     await supabase.from('daily_forecasts').upsert(record, { onConflict: 'location_id,forecast_date,shift_type' });
     queryClient.invalidateQueries({ queryKey: ['daily-forecasts', location.id, year, quarter] });
     setEditingFcstCell(null);
   }, [location, dailyForecastsData, year, quarter, queryClient]);
+
+  const saveEstCell = useCallback(async (
+    date: string, shift: 'lunch' | 'dinner',
+    rawGuests: string, rawSpend: string,
+  ) => {
+    if (!location) return;
+    const guests = parseInt(rawGuests, 10);
+    const spend  = parseFloat(rawSpend);
+    if (isNaN(guests) || guests < 0) { setEditingEstCell(null); return; }
+    const record: Record<string, unknown> = {
+      location_id:   location.id,
+      forecast_date: date,
+      shift_type:    shift,
+      est_guests:    guests,
+    };
+    if (!isNaN(spend) && spend >= 0) record.spend_per_guest = spend;
+    await supabase.from('daily_forecasts').upsert(record, { onConflict: 'location_id,forecast_date,shift_type' });
+    queryClient.invalidateQueries({ queryKey: ['daily-forecasts', location.id, year, quarter] });
+    setEditingEstCell(null);
+  }, [location, year, quarter, queryClient]);
 
   // ── Shared controls UI ─────────────────────────────────────────────────────
 
@@ -4094,9 +4117,66 @@ export default function SalesReportsPage() {
                                   );
                                 }
                                 const f = dailyFcstMap[`${shift}:${col.dateKey}`];
+                                const defaultSpend = shift === 'lunch' ? defaultLunchSpend : defaultDinnerSpend;
+                                const isEditingEst = editingEstCell?.date === col.dateKey && editingEstCell?.shift === shift;
+                                if (isEditingEst) {
+                                  return (
+                                    <td key={ci} className="py-0.5" style={{ paddingLeft:2, paddingRight:2, backgroundColor: isCurDay ? 'rgba(59,130,246,0.04)' : undefined, minWidth: 80 }}>
+                                      <div className="flex flex-col gap-0.5">
+                                        <input
+                                          autoFocus
+                                          type="number" min="0" step="1" placeholder="Guests"
+                                          value={editingEstCell!.draftGuests}
+                                          onChange={e => setEditingEstCell(prev => prev ? { ...prev, draftGuests: e.target.value } : prev)}
+                                          onKeyDown={e => {
+                                            if (e.key === 'Enter') saveEstCell(col.dateKey, shift, editingEstCell!.draftGuests, editingEstCell!.draftSpend);
+                                            if (e.key === 'Escape') setEditingEstCell(null);
+                                          }}
+                                          className="w-full text-right text-[10px] bg-transparent border-b border-amber-400 outline-none tabular-nums"
+                                          style={{ padding: '0 4px' }}
+                                          title="Est. Guests"
+                                        />
+                                        <input
+                                          type="number" min="0" step="0.01" placeholder="€/guest"
+                                          value={editingEstCell!.draftSpend}
+                                          onChange={e => setEditingEstCell(prev => prev ? { ...prev, draftSpend: e.target.value } : prev)}
+                                          onKeyDown={e => {
+                                            if (e.key === 'Enter') saveEstCell(col.dateKey, shift, editingEstCell!.draftGuests, editingEstCell!.draftSpend);
+                                            if (e.key === 'Escape') setEditingEstCell(null);
+                                          }}
+                                          onBlur={() => saveEstCell(col.dateKey, shift, editingEstCell!.draftGuests, editingEstCell!.draftSpend)}
+                                          className="w-full text-right text-[10px] bg-transparent border-b border-amber-300 outline-none tabular-nums text-amber-500"
+                                          style={{ padding: '0 4px' }}
+                                          title="Spend / Guest"
+                                        />
+                                      </div>
+                                    </td>
+                                  );
+                                }
+                                const storedGuests = f?.est_guests ?? null;
+                                const storedSpend  = f?.spend_per_guest ?? null;
+                                const dispSpend    = storedSpend ?? defaultSpend;
                                 return (
                                   <td key={ci} className="py-0.5 tabular-nums" style={{ paddingLeft:0, paddingRight:0, backgroundColor: isCurDay ? 'rgba(59,130,246,0.04)' : undefined }}>
-                                    {fcstCell(col.dateKey, shift, 'est_guests', f?.est_guests ?? null, null)}
+                                    <span
+                                      onClick={() => setEditingEstCell({
+                                        date: col.dateKey, shift,
+                                        draftGuests: storedGuests != null ? String(storedGuests) : '',
+                                        draftSpend:  storedSpend  != null ? String(storedSpend)  : (defaultSpend != null ? String(defaultSpend) : ''),
+                                      })}
+                                      className="cursor-text flex flex-col items-end w-full hover:bg-amber-50/60 rounded"
+                                      style={{ padding: '0 8px 0 4px', minHeight: 20 }}
+                                      title="Click to edit guests & spend/guest"
+                                    >
+                                      <span className={storedGuests != null ? 'text-amber-600 font-medium text-[11px]' : 'text-gray-200 text-[11px]'}>
+                                        {storedGuests != null ? fmtNum(storedGuests) : '—'}
+                                      </span>
+                                      {dispSpend != null && (
+                                        <span className={`text-[9px] leading-tight ${storedSpend != null ? 'text-amber-500' : 'text-amber-300'}`}>
+                                          {fmtPG(dispSpend)}
+                                        </span>
+                                      )}
+                                    </span>
                                   </td>
                                 );
                               } else {
