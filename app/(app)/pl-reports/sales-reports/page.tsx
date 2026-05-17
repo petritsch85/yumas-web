@@ -1544,15 +1544,17 @@ export default function SalesReportsPage() {
       if (c.shift_type === 'lunch'  || c.shift_type === 'all') s.add(`lunch:${c.closure_date}`);
       if (c.shift_type === 'dinner' || c.shift_type === 'all') s.add(`dinner:${c.closure_date}`);
     }
-    // Recurring weekday closures from forecast_settings
-    const dowKeys = ['sun','mon','tue','wed','thu','fri','sat'];
-    const lunchClosed  = new Set(forecastSettings.find(s => s.shift_type === 'lunch')?.closed_weekdays  ?? []);
-    const dinnerClosed = new Set(forecastSettings.find(s => s.shift_type === 'dinner')?.closed_weekdays ?? []);
-    for (const col of dailyCols) {
-      if (col.type !== 'day') continue;
-      const dow = dowKeys[new Date(col.dateKey + 'T12:00:00Z').getUTCDay()];
-      if (lunchClosed.has(dow))  s.add(`lunch:${col.dateKey}`);
-      if (dinnerClosed.has(dow)) s.add(`dinner:${col.dateKey}`);
+    // Recurring weekday closures from forecast_settings (only when settings exist for this location)
+    if (forecastSettings.length > 0) {
+      const dowKeys = ['sun','mon','tue','wed','thu','fri','sat'];
+      const lunchClosed  = new Set(forecastSettings.find(s => s.shift_type === 'lunch')?.closed_weekdays  ?? []);
+      const dinnerClosed = new Set(forecastSettings.find(s => s.shift_type === 'dinner')?.closed_weekdays ?? []);
+      for (const col of dailyCols) {
+        if (col.type !== 'day') continue;
+        const dow = dowKeys[new Date(col.dateKey + 'T12:00:00Z').getUTCDay()];
+        if (lunchClosed.has(dow))  s.add(`lunch:${col.dateKey}`);
+        if (dinnerClosed.has(dow)) s.add(`dinner:${col.dateKey}`);
+      }
     }
     return s;
   }, [closureDays, forecastSettings, dailyCols]);
