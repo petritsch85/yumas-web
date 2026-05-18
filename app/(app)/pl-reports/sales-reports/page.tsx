@@ -1596,7 +1596,7 @@ export default function SalesReportsPage() {
     for (const col of dailyCols) {
       if (col.type !== 'day') continue;
       const dk = col.dateKey;
-      if (dk <= todayKey) continue; // only future days get a forecast
+      if (dk < todayKey) continue; // today + future days get a forecast
       if (!closureSet.has(`lunch:${dk}`)) {
         const lf = dailyFcstMap[`lunch:${dk}`];
         const lg = lf?.est_guests ?? getDowGuests(lunchFcstSettings, dk);
@@ -4118,7 +4118,7 @@ export default function SalesReportsPage() {
 
                       // Inline editable cell for Forecast Guests / Spend per Guest
                       const fcstCell = (date: string, shift: 'lunch' | 'dinner', field: 'est_guests' | 'spend_per_guest', storedVal: number | null, fallbackVal: number | null) => {
-                        const isFuture = date > todayKey;
+                        const isFuture = date >= todayKey;
                         if (!isFuture) return <span className="block w-full text-right text-[11px] text-gray-200 tabular-nums" style={{ padding: '0 8px 0 4px' }}>—</span>;
                         const isEditing = editingFcstCell?.date === date && editingFcstCell?.shift === shift && editingFcstCell?.field === field;
                         if (isEditing) {
@@ -4158,7 +4158,7 @@ export default function SalesReportsPage() {
                       // Dual-mode Est. Guests row: actuals for past dates, dow-default or override for future
                       const estGuestsRow = (label: string, actualMap: Record<string, number>, shift: 'lunch' | 'dinner', qActual: number) => {
                         const fcstSettings = shift === 'lunch' ? lunchFcstSettings : dinnerFcstSettings;
-                        const qFcst = dailyCols.filter(c => c.type === 'day' && (c as DayCol).dateKey > todayKey && !actualMap[(c as DayCol).dateKey])
+                        const qFcst = dailyCols.filter(c => c.type === 'day' && (c as DayCol).dateKey >= todayKey && !actualMap[(c as DayCol).dateKey])
                           .reduce((s, c) => {
                             const dk = (c as DayCol).dateKey;
                             const stored = dailyFcstMap[`${shift}:${dk}`]?.est_guests;
@@ -4171,7 +4171,7 @@ export default function SalesReportsPage() {
                             {dailyCols.map((col, ci) => {
                               if (col.type === 'day') {
                                 const isCurDay = col.dateKey === todayKey;
-                                const isFuture = col.dateKey > todayKey;
+                                const isFuture = col.dateKey >= todayKey;
                                 const isClosed = closureSet.has(`${shift}:${col.dateKey}`);
                                 const actual   = actualMap[col.dateKey] ?? null;
                                 if (!isFuture || actual != null || isClosed) {
@@ -4195,7 +4195,7 @@ export default function SalesReportsPage() {
                                 );
                               } else {
                                 const wActual = col.wDateKeys.reduce((s, k) => s + (actualMap[k] ?? 0), 0);
-                                const wFcst   = col.wDateKeys.filter(k => k > todayKey && !actualMap[k] && !closureSet.has(`${shift}:${k}`)).reduce((s, k) => {
+                                const wFcst   = col.wDateKeys.filter(k => k >= todayKey && !actualMap[k] && !closureSet.has(`${shift}:${k}`)).reduce((s, k) => {
                                   const stored = dailyFcstMap[`${shift}:${k}`]?.est_guests;
                                   return s + (stored ?? getDowGuests(fcstSettings, k) ?? 0);
                                 }, 0);
@@ -4223,7 +4223,7 @@ export default function SalesReportsPage() {
                             {dailyCols.map((col, ci) => {
                               if (col.type === 'day') {
                                 const isCurDay = col.dateKey === todayKey;
-                                const isFuture = col.dateKey > todayKey;
+                                const isFuture = col.dateKey >= todayKey;
                                 const isClosed = closureSet.has(`${shift}:${col.dateKey}`);
                                 const actual   = actualMap[col.dateKey] ?? null;
                                 if (!isFuture || actual != null || isClosed) {
@@ -4241,7 +4241,7 @@ export default function SalesReportsPage() {
                                 );
                               } else {
                                 const actualVals = col.wDateKeys.map(k => actualMap[k]).filter((v): v is number => v != null && v > 0);
-                                const fcstVals   = col.wDateKeys.filter(k => k > todayKey && !actualMap[k] && !closureSet.has(`${shift}:${k}`)).map(k => dailyFcstMap[`${shift}:${k}`]?.spend_per_guest ?? defaultSpend).filter((v): v is number => v != null);
+                                const fcstVals   = col.wDateKeys.filter(k => k >= todayKey && !actualMap[k] && !closureSet.has(`${shift}:${k}`)).map(k => dailyFcstMap[`${shift}:${k}`]?.spend_per_guest ?? defaultSpend).filter((v): v is number => v != null);
                                 const allVals    = [...actualVals, ...fcstVals];
                                 const avg        = allVals.length > 0 ? allVals.reduce((a, b) => a + b, 0) / allVals.length : null;
                                 return (
