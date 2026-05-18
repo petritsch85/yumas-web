@@ -139,10 +139,12 @@ function PermissionsEditor({
   perms,
   onChange,
   isAdmin,
+  role,
 }: {
   perms: AppPermissions;
   onChange: (p: AppPermissions) => void;
   isAdmin?: boolean;
+  role?: string;
 }) {
   const { t } = useT();
 
@@ -204,6 +206,10 @@ function PermissionsEditor({
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
               {group.items.map(({ key, label, description }) => {
                 const checked = !!perms[key];
+                // Show role-specific description for inventory
+                const displayDesc = key === 'inventory' && role === 'staff'
+                  ? 'Add counts only'
+                  : description;
                 return (
                   <label
                     key={key}
@@ -225,7 +231,7 @@ function PermissionsEditor({
                     }
                     <div>
                       <div className={`text-xs font-semibold ${checked ? 'text-indigo-800' : 'text-gray-700'}`}>{label}</div>
-                      {description && <div className="text-xs text-gray-400 mt-0.5 leading-tight">{description}</div>}
+                      {displayDesc && <div className="text-xs text-gray-400 mt-0.5 leading-tight">{displayDesc}</div>}
                     </div>
                   </label>
                 );
@@ -510,6 +516,7 @@ export default function TeamPage() {
             perms={addPerms}
             onChange={setAddPerms}
             isAdmin={addDraft.role === 'admin'}
+            role={addDraft.role}
           />
 
           {addError && <p className="text-red-500 text-xs mt-3 font-medium">{addError}</p>}
@@ -715,6 +722,7 @@ export default function TeamPage() {
                             perms={editDraft.permissions}
                             onChange={p => setEditDraft(d => ({ ...d, permissions: p }))}
                             isAdmin={editDraft.role === 'admin'}
+                            role={editDraft.role}
                           />
 
                           <div className="flex gap-2 mt-4">
