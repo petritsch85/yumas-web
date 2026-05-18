@@ -27,6 +27,7 @@ import {
   UserSquare,
   FolderOpen,
   LogOut,
+  KeyRound,
   Truck,
   Target,
   ChevronDown,
@@ -397,6 +398,13 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
             <div className="text-white/50 text-xs capitalize">{profile.role}</div>
           </div>
         )}
+        <Link
+          href="/account"
+          className="flex items-center gap-2 text-white/70 hover:text-white text-sm transition-colors w-full mb-2"
+        >
+          <KeyRound size={15} />
+          Change Password
+        </Link>
         <button
           onClick={handleSignOut}
           className="flex items-center gap-2 text-white/70 hover:text-white text-sm transition-colors w-full"
