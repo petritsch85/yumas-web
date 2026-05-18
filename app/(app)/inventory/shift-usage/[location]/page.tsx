@@ -95,6 +95,13 @@ type ShiftUsageRow = {
   quantity: number;
 };
 
+type ForecastRule = {
+  item_name: string;
+  net_sales_from: number;
+  net_sales_to: number;
+  quantity: number;
+};
+
 type DayShiftSales = {
   lunch: number;
   lunchIsActual: boolean; // true = uploaded, false = forecast
@@ -376,6 +383,19 @@ export default function ShiftUsagePage() {
     return m;
   }, [savedRows]);
 
+  /* ── Usage forecast rules ── */
+  const { data: forecastRules = [] } = useQuery({
+    queryKey: ['usage-forecast-rules', locationName],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('usage_forecast_rules')
+        .select('item_name, net_sales_from, net_sales_to, quantity')
+        .eq('location_name', locationName)
+        .eq('shift_type', 'lunch');
+      return (data ?? []) as ForecastRule[];
+    },
+  });
+
   const [localEdits, setLocalEdits] = useState<Record<string, string>>({});
 
   const saveMutation = useMutation({
@@ -419,6 +439,16 @@ export default function ShiftUsagePage() {
     return (parseFloat(getCellValue(date, 'lunch', itemName)) || 0)
          + (parseFloat(getCellValue(date, 'dinner', itemName)) || 0);
   }, [getCellValue]);
+
+  const getLunchForecast = useCallback((itemName: string, netSales: number): number | null => {
+    if (!netSales || netSales <= 0) return null;
+    const rule = forecastRules.find(r =>
+      r.item_name === itemName &&
+      netSales >= r.net_sales_from &&
+      netSales <= r.net_sales_to
+    );
+    return rule != null ? rule.quantity : null;
+  }, [forecastRules]);
 
   /* ── Group items by section ── */
   const sections = useMemo(() => {
@@ -685,7 +715,11 @@ export default function ShiftUsagePage() {
                                   onChange={e => handleChange(dk, 'lunch', item.item_name, e.target.value)}
                                   onBlur={() => handleBlur(dk, 'lunch', item.item_name)}
                                   className="w-full text-center text-xs font-semibold text-orange-600 bg-transparent border border-transparent hover:border-orange-200 focus:border-orange-400 focus:outline-none rounded px-0.5 py-0.5 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                                  placeholder="—"
+                                  placeholder={(() => {
+                                    const sales = salesByDay[dk]?.lunch ?? 0;
+                                    const fc = getLunchForecast(item.item_name, sales);
+                                    return fc !== null ? String(fc) : '—';
+                                  })()}
                                 />
                               </td>
                               <td
