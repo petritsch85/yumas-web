@@ -130,10 +130,11 @@ export default function DashboardPage() {
     color: string;
     permKey?: keyof AppPermissions;
     adminOnly?: boolean;
+    managerOnly?: boolean; // hidden from role === 'staff'
   };
 
   const QUICK_LINKS: QuickLink[] = [
-    { labelKey: 'dashboard.quickLinks.inventory',    href: '/inventory/overview',       icon: ClipboardList,   color: '#1B5E20', permKey: 'inventory' },
+    { labelKey: 'dashboard.quickLinks.inventory',    href: '/inventory/overview',       icon: ClipboardList,   color: '#1B5E20', permKey: 'inventory', managerOnly: true },
     { labelKey: 'dashboard.quickLinks.addInventory', href: '/inventory/add',            icon: FilePlus,        color: '#2E7D32', permKey: 'inventory' },
     { labelKey: 'dashboard.quickLinks.suppliers',    href: '/suppliers',                icon: Store,           color: '#FF8F00', permKey: 'suppliers' },
     { labelKey: 'dashboard.quickLinks.menus',        href: '/products/menus',           icon: UtensilsCrossed, color: '#6D4C41', permKey: 'products' },
@@ -158,7 +159,8 @@ export default function DashboardPage() {
     { label: t('dashboard.kpi.lowStockItems'),   value: lowStockCount ?? 0, icon: AlertTriangle, color: '#C62828', loading: loadingLowStock,  show: can('analysis')  },
   ].filter((k) => k.show);
 
-  const visibleLinks = QUICK_LINKS.filter((l) => can(l.permKey, l.adminOnly));
+  const isStaff = profile?.role === 'staff';
+  const visibleLinks = QUICK_LINKS.filter((l) => can(l.permKey, l.adminOnly) && !(l.managerOnly && isStaff));
   const showPOPanel       = can('buying');
   const showLowStockPanel = can('analysis');
   const showPanelRow      = showPOPanel || showLowStockPanel;
