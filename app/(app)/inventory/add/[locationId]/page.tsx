@@ -448,6 +448,7 @@ export default function LocationInventoryFormPage({
   const [showUpload, setShowUpload] = useState(false);
   const [submitted, setSubmitted]   = useState(false);
   const [savedOffline, setSavedOffline] = useState(false);
+  const [isStaff, setIsStaff]       = useState(false);
   const [isOnline, setIsOnline]     = useState(true);
   const [queueCount, setQueueCount] = useState(0);
   const [syncing, setSyncing]       = useState(false);
@@ -475,6 +476,15 @@ export default function LocationInventoryFormPage({
     }
     return () => { if (timerInterval.current) clearInterval(timerInterval.current); };
   }, [timerRunning]);
+
+  /* ── Fetch role on mount to gate manager-only post-submit actions ── */
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (!user) return;
+      supabase.from('profiles').select('role').eq('id', user.id).single()
+        .then(({ data }) => { if (data?.role === 'staff') setIsStaff(true); });
+    });
+  }, []);
 
   /* ── Load draft on mount ── */
   useEffect(() => {
@@ -669,12 +679,14 @@ export default function LocationInventoryFormPage({
           >
             New Submission
           </button>
-          <button
-            onClick={() => router.push('/inventory/counts')}
-            className="px-4 py-2 bg-[#1B5E20] text-white rounded-lg text-sm font-medium hover:bg-[#2E7D32]"
-          >
-            View Reports
-          </button>
+          {!isStaff && (
+            <button
+              onClick={() => router.push('/inventory/counts')}
+              className="px-4 py-2 bg-[#1B5E20] text-white rounded-lg text-sm font-medium hover:bg-[#2E7D32]"
+            >
+              View Reports
+            </button>
+          )}
         </div>
       </div>
     );
@@ -698,12 +710,14 @@ export default function LocationInventoryFormPage({
           >
             New Submission
           </button>
-          <button
-            onClick={() => router.push('/inventory/counts')}
-            className="px-4 py-2 bg-[#1B5E20] text-white rounded-lg text-sm font-medium hover:bg-[#2E7D32]"
-          >
-            View Current Inventory
-          </button>
+          {!isStaff && (
+            <button
+              onClick={() => router.push('/inventory/counts')}
+              className="px-4 py-2 bg-[#1B5E20] text-white rounded-lg text-sm font-medium hover:bg-[#2E7D32]"
+            >
+              View Current Inventory
+            </button>
+          )}
         </div>
       </div>
     );
