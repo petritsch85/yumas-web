@@ -3527,11 +3527,11 @@ export default function SalesReportsPage() {
                   <button onClick={() => setShowForecastPanel(false)} className="text-gray-400 hover:text-gray-600 text-sm font-bold">✕</button>
                 </div>
               </div>
-              <div className="grid grid-cols-2 divide-x divide-gray-100">
+              <div className="grid grid-cols-2 gap-4 p-4">
                 {([
-                  { label:'☀️  Lunch',  draft: lunchDraft,  setDraft: setLunchDraft  },
-                  { label:'🌙  Dinner', draft: dinnerDraft, setDraft: setDinnerDraft },
-                ] as const).map(({ label, draft, setDraft }) => {
+                  { label:'☀️  Lunch',  draft: lunchDraft,  setDraft: setLunchDraft,  accent: 'amber'  },
+                  { label:'🌙  Dinner', draft: dinnerDraft, setDraft: setDinnerDraft, accent: 'indigo' },
+                ] as const).map(({ label, draft, setDraft, accent }) => {
                   const closed = new Set(draft.closedDays);
                   const toggleClosed = (day: string) => {
                     setDraft(d => {
@@ -3542,19 +3542,23 @@ export default function SalesReportsPage() {
                     });
                   };
                   const ALL_DAYS = ['mon','tue','wed','thu','fri','sat','sun'] as const;
+                  const isLunch = accent === 'amber';
                   return (
-                    <div key={label} className="p-5 space-y-4">
-                      <p className="text-xs font-bold text-gray-700 uppercase tracking-wider">{label}</p>
-                      <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg">
-                        <p className="text-xs font-semibold text-amber-700 mb-1">Default Spend / Guest (€)</p>
+                    <div key={label} className={`rounded-xl border-2 overflow-hidden ${isLunch ? 'border-amber-200' : 'border-indigo-200'}`}>
+                      <div className={`px-4 py-3 ${isLunch ? 'bg-amber-50 border-b border-amber-200' : 'bg-indigo-50 border-b border-indigo-200'}`}>
+                        <p className={`text-sm font-bold uppercase tracking-wider ${isLunch ? 'text-amber-700' : 'text-indigo-700'}`}>{label}</p>
+                      </div>
+                      <div className="p-4 space-y-4">
+                      <div className={`p-3 rounded-lg border ${isLunch ? 'bg-amber-50 border-amber-200' : 'bg-indigo-50 border-indigo-200'}`}>
+                        <p className={`text-xs font-semibold mb-1 ${isLunch ? 'text-amber-700' : 'text-indigo-700'}`}>Default Spend / Guest (€)</p>
                         <input
                           type="number" min="0" step="0.01"
                           value={draft.defaultSpendPerGuest}
                           onChange={e => setDraft(d => ({ ...d, defaultSpendPerGuest: e.target.value }))}
                           placeholder="e.g. 32.50"
-                          className="w-full text-right text-sm font-semibold border border-amber-300 rounded-lg px-3 py-2 tabular-nums focus:outline-none focus:border-amber-500 bg-white"
+                          className={`w-full text-right text-sm font-semibold rounded-lg px-3 py-2 tabular-nums focus:outline-none bg-white border ${isLunch ? 'border-amber-300 focus:border-amber-500' : 'border-indigo-300 focus:border-indigo-500'}`}
                         />
-                        <p className="text-[10px] text-amber-500 mt-1">Used as fallback when no per-day override is set</p>
+                        <p className={`text-[10px] mt-1 ${isLunch ? 'text-amber-500' : 'text-indigo-400'}`}>Used as fallback when no per-day override is set</p>
                       </div>
                       <div>
                         <p className="text-xs text-gray-400 uppercase tracking-wider mb-2">Open / Closed days</p>
@@ -3605,6 +3609,7 @@ export default function SalesReportsPage() {
                         </div>
                         <p className="text-[10px] text-gray-400 mt-1 text-right">Used as default when no per-day override is set</p>
                       </div>
+                    </div>
                     </div>
                   );
                 })}
