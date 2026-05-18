@@ -4253,7 +4253,7 @@ export default function SalesReportsPage() {
 
                       // Cell background helper — light grey for closed-shift columns, blue-tint for today
                       const colBg = (shift: 'lunch' | 'dinner', dk: string): string | undefined => {
-                        if (closureSet.has(`${shift}:${dk}`)) return 'rgba(0,0,0,0.04)';
+                        if (closureSet.has(`${shift}:${dk}`)) return '#eaecef';
                         if (dk === todayKey) return 'rgba(59,130,246,0.04)';
                         return undefined;
                       };
