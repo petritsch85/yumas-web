@@ -3813,7 +3813,7 @@ export default function SalesReportsPage() {
                                 const hasActual = actual > 0;
                                 const showFcast = !hasActual && isFuture && fcast !== null && fcast > 0;
                                 return (
-                                  <td key={ci} className="py-2 text-right tabular-nums" style={{ paddingLeft:4, paddingRight:8, backgroundColor: colBg(shift, col.dateKey) }}>
+                                  <td key={ci} className="py-2 text-right tabular-nums" style={{ paddingLeft:4, paddingRight:8, ...colStyle(shift, col.dateKey) }}>
                                     {hasActual ? <span className="text-blue-700">{fmtNum(actual)}</span>
                                       : showFcast ? <span className="text-amber-500 italic text-[10px]">{fmtNum(fcast!)}</span>
                                       : <span className="text-gray-300">—</span>}
@@ -3855,7 +3855,7 @@ export default function SalesReportsPage() {
                                 const fcast = !val && isFuture ? (fcastMap[col.dateKey] ?? null) : null;
                                 const showFcast = fcast !== null && fcast > 0;
                                 return (
-                                  <td key={ci} className="py-2 text-right tabular-nums" style={{ paddingLeft:4, paddingRight:8, backgroundColor: shift ? colBg(shift, col.dateKey) : col.dateKey === todayKey ? 'rgba(59,130,246,0.04)' : undefined }}>
+                                  <td key={ci} className="py-2 text-right tabular-nums" style={{ paddingLeft:4, paddingRight:8, ...colStyle(shift, col.dateKey) }}>
                                     {val > 0
                                       ? <span className="text-gray-700">{fmtNum(val)}</span>
                                       : showFcast
@@ -3896,7 +3896,7 @@ export default function SalesReportsPage() {
                               if (col.type === 'day') {
                                 const val = billsMap[col.dateKey] ?? 0;
                                 return (
-                                  <td key={ci} className="py-2 text-right tabular-nums" style={{ paddingLeft:4, paddingRight:8, backgroundColor: shift ? colBg(shift, col.dateKey) : col.dateKey === todayKey ? 'rgba(59,130,246,0.04)' : undefined }}>
+                                  <td key={ci} className="py-2 text-right tabular-nums" style={{ paddingLeft:4, paddingRight:8, ...colStyle(shift, col.dateKey) }}>
                                     {val > 0 ? <span className="text-blue-600">{fmtNum(val)}</span> : <span className="text-gray-300">—</span>}
                                   </td>
                                 );
@@ -3944,7 +3944,7 @@ export default function SalesReportsPage() {
                                 const hasMix     = actuals > 0 && forecasts > 0;
                                 const allFcast   = actuals === 0 && forecasts > 0;
                                 return (
-                                  <td key={ci} className="py-2 text-right tabular-nums font-bold" style={{ paddingLeft:4, paddingRight:8, backgroundColor: shift ? colBg(shift, col.dateKey) : col.dateKey === todayKey ? 'rgba(59,130,246,0.04)' : undefined }}>
+                                  <td key={ci} className="py-2 text-right tabular-nums font-bold" style={{ paddingLeft:4, paddingRight:8, ...colStyle(shift, col.dateKey) }}>
                                     {displayVal > 0
                                       ? hasMix
                                         ? <span className="text-amber-500 italic text-[10px]">{fmtNum(displayVal)}</span>
@@ -4022,7 +4022,7 @@ export default function SalesReportsPage() {
                           {dailyCols.map((col, ci) => {
                             if (col.type === 'day') {
                               return (
-                                <td key={ci} className="py-0.5 tabular-nums" style={{ paddingLeft:0, paddingRight:0, backgroundColor: colBg(shift, col.dateKey) }}>
+                                <td key={ci} className="py-0.5 tabular-nums" style={{ paddingLeft:0, paddingRight:0, ...colStyle(shift, col.dateKey) }}>
                                   {bookingCell(col.dateKey, shift, 'bookings', bMap[col.dateKey] ?? null)}
                                 </td>
                               );
@@ -4049,7 +4049,7 @@ export default function SalesReportsPage() {
                               const isFuture = col.dateKey > todayKey;
                               const val = wMap[col.dateKey] ?? null;
                               return (
-                                <td key={ci} className="py-0.5 tabular-nums" style={{ paddingLeft:0, paddingRight:0, backgroundColor: colBg(shift, col.dateKey) }}>
+                                <td key={ci} className="py-0.5 tabular-nums" style={{ paddingLeft:0, paddingRight:0, ...colStyle(shift, col.dateKey) }}>
                                   {isFuture
                                     ? bookingCell(col.dateKey, shift, 'walk_ins', val)
                                     : val != null
@@ -4081,7 +4081,7 @@ export default function SalesReportsPage() {
                             if (col.type === 'day') {
                               const val = valMap[col.dateKey] ?? null;
                               return (
-                                <td key={ci} className="py-1 text-right tabular-nums text-[11px]" style={{ paddingLeft:4, paddingRight:8, backgroundColor: shift ? colBg(shift, col.dateKey) : col.dateKey === todayKey ? 'rgba(59,130,246,0.04)' : undefined }}>
+                                <td key={ci} className="py-1 text-right tabular-nums text-[11px]" style={{ paddingLeft:4, paddingRight:8, ...colStyle(shift, col.dateKey) }}>
                                   {val != null && val > 0
                                     ? <span className="text-gray-500">{format === 'count' ? fmtNum(val) : fmtPG(val)}</span>
                                     : <span className="text-gray-200">—</span>}
@@ -4169,7 +4169,7 @@ export default function SalesReportsPage() {
                                 const actual   = actualMap[col.dateKey] ?? null;
                                 if (!isFuture || actual != null || isClosed) {
                                   return (
-                                    <td key={ci} className="py-1 text-right tabular-nums text-[11px]" style={{ paddingLeft:4, paddingRight:8, backgroundColor: colBg(shift, col.dateKey) }}>
+                                    <td key={ci} className="py-1 text-right tabular-nums text-[11px]" style={{ paddingLeft:4, paddingRight:8, ...colStyle(shift, col.dateKey) }}>
                                       {actual != null && actual > 0 ? <span className="text-gray-500">{fmtNum(actual)}</span> : <span className="text-gray-200">—</span>}
                                     </td>
                                   );
@@ -4180,7 +4180,7 @@ export default function SalesReportsPage() {
                                 const displayGuests = storedGuests ?? defaultGuests;
                                 const isDefault = storedGuests == null && defaultGuests != null;
                                 return (
-                                  <td key={ci} className="py-1 text-right tabular-nums text-[11px]" style={{ paddingLeft:4, paddingRight:8, backgroundColor: colBg(shift, col.dateKey) }}>
+                                  <td key={ci} className="py-1 text-right tabular-nums text-[11px]" style={{ paddingLeft:4, paddingRight:8, ...colStyle(shift, col.dateKey) }}>
                                     {displayGuests != null && displayGuests > 0
                                       ? <span className={isDefault ? 'text-amber-300' : 'text-amber-600 font-medium'}>{fmtNum(displayGuests)}</span>
                                       : <span className="text-gray-200">—</span>}
@@ -4221,14 +4221,14 @@ export default function SalesReportsPage() {
                                 const actual   = actualMap[col.dateKey] ?? null;
                                 if (!isFuture || actual != null || isClosed) {
                                   return (
-                                    <td key={ci} className="py-1 text-right tabular-nums text-[11px]" style={{ paddingLeft:4, paddingRight:8, backgroundColor: colBg(shift, col.dateKey) }}>
+                                    <td key={ci} className="py-1 text-right tabular-nums text-[11px]" style={{ paddingLeft:4, paddingRight:8, ...colStyle(shift, col.dateKey) }}>
                                       {actual != null && actual > 0 ? <span className="text-gray-500">{fmtPG(actual)}</span> : <span className="text-gray-200">—</span>}
                                     </td>
                                   );
                                 }
                                 const f = dailyFcstMap[`${shift}:${col.dateKey}`];
                                 return (
-                                  <td key={ci} className="py-0.5 tabular-nums" style={{ paddingLeft:0, paddingRight:0, backgroundColor: colBg(shift, col.dateKey) }}>
+                                  <td key={ci} className="py-0.5 tabular-nums" style={{ paddingLeft:0, paddingRight:0, ...colStyle(shift, col.dateKey) }}>
                                     {fcstCell(col.dateKey, shift, 'spend_per_guest', f?.spend_per_guest ?? null, defaultSpend)}
                                   </td>
                                 );
@@ -4251,11 +4251,13 @@ export default function SalesReportsPage() {
                         );
                       };
 
-                      // Cell background helper — light grey for closed-shift columns, blue-tint for today
-                      const colBg = (shift: 'lunch' | 'dinner', dk: string): string | undefined => {
-                        if (closureSet.has(`${shift}:${dk}`)) return '#eaecef';
-                        if (dk === todayKey) return 'rgba(59,130,246,0.04)';
-                        return undefined;
+                      // Cell style helper — diagonal stripe for closed columns, blue-tint for today
+                      const colStyle = (shift: 'lunch' | 'dinner' | undefined, dk: string): React.CSSProperties => {
+                        if (shift && closureSet.has(`${shift}:${dk}`)) return {
+                          backgroundImage: 'repeating-linear-gradient(-45deg, #e0e3e8 0px, #e0e3e8 1.5px, #f4f5f7 1.5px, #f4f5f7 7px)',
+                        };
+                        if (dk === todayKey) return { backgroundColor: 'rgba(59,130,246,0.04)' };
+                        return {};
                       };
 
                       return (
