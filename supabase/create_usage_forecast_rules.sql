@@ -13,6 +13,11 @@ CREATE TABLE IF NOT EXISTS usage_forecast_rules (
 
 ALTER TABLE usage_forecast_rules ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Authenticated users can read usage_forecast_rules"   ON usage_forecast_rules;
+DROP POLICY IF EXISTS "Authenticated users can insert usage_forecast_rules"  ON usage_forecast_rules;
+DROP POLICY IF EXISTS "Authenticated users can update usage_forecast_rules"  ON usage_forecast_rules;
+DROP POLICY IF EXISTS "Authenticated users can delete usage_forecast_rules"  ON usage_forecast_rules;
+
 CREATE POLICY "Authenticated users can read usage_forecast_rules"
   ON usage_forecast_rules FOR SELECT
   TO authenticated
