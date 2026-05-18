@@ -3,7 +3,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
 import { useState, useMemo, useCallback } from 'react';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight, X, ClipboardList } from 'lucide-react';
 import { useRouter, useParams } from 'next/navigation';
 import { useT } from '@/lib/i18n';
 import {
@@ -469,6 +469,66 @@ export default function ShiftUsagePage() {
   const SUB_W  = 52;
   const STORES_NAV = ['Westend', 'Eschborn', 'Taunus'] as const;
 
+  /* ── Forecast rules modal ── */
+  const FORECAST_TIERS = [
+    { from: 0,    to: 800,  label: '0–800'   },
+    { from: 801,  to: 1000, label: '801–1k'  },
+    { from: 1001, to: 1200, label: '1k–1.2k' },
+    { from: 1201, to: 1400, label: '1.2k–1.4k' },
+    { from: 1401, to: 1600, label: '1.4k–1.6k' },
+    { from: 1601, to: 1800, label: '1.6k–1.8k' },
+    { from: 1801, to: 2000, label: '1.8k–2k' },
+    { from: 2001, to: 2200, label: '2k–2.2k' },
+    { from: 2201, to: 2400, label: '2.2k–2.4k' },
+  ];
+
+  const [showForecastModal, setShowForecastModal] = useState(false);
+  const [modalEdits, setModalEdits] = useState<Record<string, string>>({});
+
+  const forecastModalItems = useMemo(() => {
+    const seen = new Set<string>();
+    const items: string[] = [];
+    for (const r of forecastRules) {
+      if (!seen.has(r.item_name)) { seen.add(r.item_name); items.push(r.item_name); }
+    }
+    return items.sort((a, b) => a.localeCompare(b));
+  }, [forecastRules]);
+
+  const getModalValue = useCallback((itemName: string, from: number, to: number): string => {
+    const k = `${itemName}|${from}|${to}`;
+    if (k in modalEdits) return modalEdits[k];
+    const rule = forecastRules.find(r => r.item_name === itemName && r.net_sales_from === from && r.net_sales_to === to);
+    return rule != null ? String(rule.quantity) : '';
+  }, [modalEdits, forecastRules]);
+
+  const saveForecastMutation = useMutation({
+    mutationFn: async () => {
+      const rows = forecastModalItems.flatMap(itemName =>
+        FORECAST_TIERS.map(tier => {
+          const val = getModalValue(itemName, tier.from, tier.to);
+          const qty = parseFloat(val);
+          return {
+            location_name: locationName,
+            shift_type: 'lunch',
+            item_name: itemName,
+            net_sales_from: tier.from,
+            net_sales_to: tier.to,
+            quantity: isNaN(qty) ? 0 : qty,
+          };
+        })
+      );
+      const { error } = await supabase
+        .from('usage_forecast_rules')
+        .upsert(rows, { onConflict: 'location_name,shift_type,item_name,net_sales_from,net_sales_to' });
+      if (error) throw new Error(error.message);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['usage-forecast-rules', locationName] });
+      setModalEdits({});
+      setShowForecastModal(false);
+    },
+  });
+
   return (
     <div className="space-y-4">
       {/* ── Header ── */}
@@ -479,6 +539,13 @@ export default function ShiftUsagePage() {
           </h1>
           <p className="text-xs text-gray-400 mt-0.5">{t('inventory.shiftUsage.subtitle')}</p>
         </div>
+        <button
+          onClick={() => setShowForecastModal(true)}
+          className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold bg-[#1B5E20] text-white hover:bg-[#154a18] transition-colors shadow-sm"
+        >
+          <ClipboardList size={15} />
+          Forecast Rules
+        </button>
       </div>
 
       {/* ── Store nav buttons ── */}
@@ -770,6 +837,111 @@ export default function ShiftUsagePage() {
       </div>
 
       <p className="text-xs text-gray-400">{t('inventory.shiftUsage.hint')}</p>
+
+      {/* ── Forecast Rules Modal ── */}
+      {showForecastModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          {/* Backdrop */}
+          <div
+            className="absolute inset-0 bg-black/50"
+            onClick={() => setShowForecastModal(false)}
+          />
+
+          {/* Panel */}
+          <div className="relative z-10 bg-white rounded-2xl shadow-2xl flex flex-col"
+            style={{ width: '92vw', maxWidth: 1100, height: '88vh' }}
+          >
+            {/* Modal header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 flex-shrink-0">
+              <div>
+                <h2 className="text-lg font-bold text-gray-900">Lunch Forecast Rules — {locationName}</h2>
+                <p className="text-xs text-gray-400 mt-0.5">Quantities per item based on expected net sales tier</p>
+              </div>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => saveForecastMutation.mutate()}
+                  disabled={saveForecastMutation.isPending}
+                  className="px-5 py-2 rounded-lg text-sm font-semibold bg-[#1B5E20] text-white hover:bg-[#154a18] disabled:opacity-60 transition-colors shadow-sm"
+                >
+                  {saveForecastMutation.isPending ? 'Saving…' : 'Save Changes'}
+                </button>
+                <button
+                  onClick={() => setShowForecastModal(false)}
+                  className="p-2 rounded-lg hover:bg-gray-100 text-gray-400 transition-colors"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+            </div>
+
+            {/* Table */}
+            <div className="flex-1 overflow-auto p-4">
+              {forecastModalItems.length === 0 ? (
+                <div className="flex items-center justify-center h-full text-gray-400 text-sm">
+                  No forecast rules found. Run the SQL seed file in Supabase first.
+                </div>
+              ) : (
+                <table className="text-xs border-collapse w-full">
+                  <thead className="sticky top-0 z-10">
+                    <tr className="bg-gray-50">
+                      <th className="sticky left-0 z-20 bg-gray-50 text-left px-4 py-3 font-semibold text-gray-600 border-b-2 border-gray-200 border-r border-gray-200 w-44">
+                        Item
+                      </th>
+                      {FORECAST_TIERS.map(tier => (
+                        <th
+                          key={tier.from}
+                          className="text-center px-2 py-3 font-semibold text-gray-600 border-b-2 border-gray-200 border-l border-gray-100 whitespace-nowrap min-w-[80px]"
+                        >
+                          <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wide">
+                            €{tier.label}
+                          </div>
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {forecastModalItems.map((itemName, idx) => (
+                      <tr
+                        key={itemName}
+                        className={`border-b border-gray-50 hover:bg-orange-50/30 transition-colors ${idx % 2 === 0 ? '' : 'bg-gray-50/40'}`}
+                      >
+                        <td className="sticky left-0 z-10 bg-white border-r border-gray-100 px-4 py-2 font-medium text-gray-800">
+                          {idx % 2 === 1 && <span className="absolute inset-0 bg-gray-50/40 -z-10" />}
+                          {itemName}
+                        </td>
+                        {FORECAST_TIERS.map(tier => {
+                          const k = `${itemName}|${tier.from}|${tier.to}`;
+                          const val = getModalValue(itemName, tier.from, tier.to);
+                          return (
+                            <td key={tier.from} className="text-center px-1 py-1.5 border-l border-gray-100">
+                              <input
+                                type="number"
+                                min="0"
+                                step="0.1"
+                                value={val}
+                                onChange={e => setModalEdits(prev => ({ ...prev, [k]: e.target.value }))}
+                                className="w-full text-center text-xs font-semibold text-orange-600 bg-transparent border border-transparent hover:border-orange-200 focus:border-orange-400 focus:outline-none focus:bg-orange-50/50 rounded px-1 py-1 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                placeholder="—"
+                              />
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+
+            {/* Save error */}
+            {saveForecastMutation.isError && (
+              <div className="px-6 py-2 flex-shrink-0 text-xs text-red-500 border-t border-gray-100">
+                Error saving: {(saveForecastMutation.error as Error).message}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
