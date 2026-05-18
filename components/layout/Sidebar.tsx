@@ -361,7 +361,7 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
 
                     {hasChildren && isExpanded && (
                       <div className="mt-0.5 space-y-0.5">
-                        {item.children!.filter(c => !c.managerOnly || profile?.role !== 'staff').map((child) => {
+                        {item.children!.filter(c => !c.managerOnly || !profile?.role?.startsWith('staff')).map((child) => {
                           const ChildIcon = child.icon;
                           const childActive = pathname === child.href;
                           return (
@@ -395,7 +395,15 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
         {profile && (
           <div className="mb-3">
             <div className="text-white text-sm font-medium truncate">{profile.full_name}</div>
-            <div className="text-white/50 text-xs capitalize">{profile.role}</div>
+            <div className="text-white/50 text-xs">
+              {profile.role === 'admin' ? 'Admin'
+                : profile.role === 'manager' ? 'Manager'
+                : profile.role === 'staff_food_production' ? 'Staff · Food Production'
+                : profile.role === 'staff_service' ? 'Staff · Service'
+                : profile.role === 'staff_delivery_driver' ? 'Staff · Delivery Driver'
+                : profile.role === 'staff_cook' ? 'Staff · Cook'
+                : 'Staff'}
+            </div>
           </div>
         )}
         <Link

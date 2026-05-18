@@ -94,9 +94,9 @@ const ADMIN_DEFAULTS: AppPermissions = {
 };
 
 function defaultsForRole(role: string): AppPermissions {
-  if (role === 'admin')   return { ...ADMIN_DEFAULTS };
-  if (role === 'manager') return { ...MANAGER_DEFAULTS };
-  return { ...STAFF_DEFAULTS };
+  if (role === 'admin')      return { ...ADMIN_DEFAULTS };
+  if (role === 'manager')    return { ...MANAGER_DEFAULTS };
+  return { ...STAFF_DEFAULTS }; // all staff_* variants use staff defaults
 }
 
 function mergePermissions(raw?: Partial<AppPermissions>): AppPermissions {
@@ -126,7 +126,31 @@ type EditDraft = {
   language: string;
 };
 
-const ROLES = ['staff', 'manager', 'admin'];
+const ROLES = ['staff', 'manager', 'admin']; // used for the legend only
+
+// All selectable options in the role dropdown
+const ROLE_OPTIONS: { value: string; label: string }[] = [
+  { value: 'staff_food_production',  label: 'Staff — Food Production' },
+  { value: 'staff_service',          label: 'Staff — Service' },
+  { value: 'staff_delivery_driver',  label: 'Staff — Delivery Driver' },
+  { value: 'staff_cook',             label: 'Staff — Cook' },
+  { value: 'manager',                label: 'Manager — Operational access, assigned location' },
+  { value: 'admin',                  label: 'Admin — Full access, all locations' },
+];
+
+// Human-readable label for any role value
+function roleLabel(role: string): string {
+  const map: Record<string, string> = {
+    admin:                 'Admin',
+    manager:               'Manager',
+    staff:                 'Staff',
+    staff_food_production: 'Food Production',
+    staff_service:         'Service',
+    staff_delivery_driver: 'Delivery Driver',
+    staff_cook:            'Cook',
+  };
+  return map[role] ?? role;
+}
 
 const roleColor: Record<string, string> = {
   admin:   'bg-purple-100 text-purple-700',
@@ -207,7 +231,7 @@ function PermissionsEditor({
               {group.items.map(({ key, label, description }) => {
                 const checked = !!perms[key];
                 // Show role-specific description for inventory
-                const displayDesc = key === 'inventory' && role === 'staff'
+                const displayDesc = key === 'inventory' && role?.startsWith('staff')
                   ? 'Add counts only'
                   : description;
                 return (
@@ -257,7 +281,7 @@ export default function TeamPage() {
 
   const [showAdd, setShowAdd] = useState(false);
   const [addDraft, setAddDraft] = useState<AddDraft>({
-    fullName: '', email: '', password: 'Yumas2026!', role: 'staff', locationId: '', language: 'en',
+    fullName: '', email: '', password: 'Yumas2026!', role: 'staff_food_production', locationId: '', language: 'en',
   });
   const [addPerms, setAddPerms] = useState<AppPermissions>(defaultsForRole('staff'));
   const [showPassword, setShowPassword] = useState(false);
@@ -323,7 +347,7 @@ export default function TeamPage() {
       qc.invalidateQueries({ queryKey: ['team-users'] });
       qc.invalidateQueries({ queryKey: ['team-emails'] });
       setShowAdd(false);
-      setAddDraft({ fullName: '', email: '', password: 'Yumas2026!', role: 'staff', locationId: '', language: 'en' });
+      setAddDraft({ fullName: '', email: '', password: 'Yumas2026!', role: 'staff_food_production', locationId: '', language: 'en' });
       setAddPerms(defaultsForRole('staff'));
       setAddError('');
       setShowPassword(false);
@@ -479,8 +503,8 @@ export default function TeamPage() {
                 }}
                 className="w-full border-2 border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/40 focus:border-[#1B5E20]"
               >
-                {ROLES.map(r => (
-                  <option key={r} value={r}>{r.charAt(0).toUpperCase() + r.slice(1)} — {roleHint[r]}</option>
+                {ROLE_OPTIONS.map(o => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
                 ))}
               </select>
             </div>
@@ -596,8 +620,9 @@ export default function TeamPage() {
                         {emailMap?.[user.id] ?? <span className="text-gray-300">—</span>}
                       </td>
                       <td className="px-4 py-3">
-                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium capitalize ${roleColor[user.role] ?? 'bg-gray-100 text-gray-600'}`}>
-                          {user.role}
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${roleColor[user.role.startsWith('staff') ? 'staff' : user.role] ?? 'bg-gray-100 text-gray-600'}`}>
+                          {user.role.startsWith('staff') && user.role !== 'staff' && <span className="opacity-50 mr-1">Staff ·</span>}
+                          {roleLabel(user.role)}
                         </span>
                       </td>
                       <td className="px-4 py-3 text-gray-600">
@@ -678,7 +703,11 @@ export default function TeamPage() {
                                 }}
                                 className="w-full border-2 border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/40 focus:border-[#1B5E20]"
                               >
-                                {ROLES.map(r => <option key={r} value={r}>{r.charAt(0).toUpperCase() + r.slice(1)}</option>)}
+                                {/* Include legacy 'staff' if the user currently has that role */}
+                                {editDraft.role === 'staff' && <option value="staff">Staff — General</option>}
+                                {ROLE_OPTIONS.map(o => (
+                                  <option key={o.value} value={o.value}>{o.label}</option>
+                                ))}
                               </select>
                             </div>
                             <div>

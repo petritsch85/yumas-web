@@ -482,7 +482,7 @@ export default function LocationInventoryFormPage({
     supabase.auth.getUser().then(({ data: { user } }) => {
       if (!user) return;
       supabase.from('profiles').select('role').eq('id', user.id).single()
-        .then(({ data }) => { if (data?.role === 'staff') setIsStaff(true); });
+        .then(({ data }) => { if (data?.role?.startsWith('staff')) setIsStaff(true); });
     });
   }, []);
 

@@ -1,5 +1,5 @@
 export type ProductType = 'raw_material' | 'semi_finished' | 'finished' | 'menu_item';
-export type UserRole = 'admin' | 'manager' | 'staff';
+export type UserRole = 'admin' | 'manager' | 'staff' | 'staff_food_production' | 'staff_service' | 'staff_delivery_driver' | 'staff_cook';
 export type POStatus = 'draft' | 'pending_approval' | 'approved' | 'sent' | 'confirmed' | 'partial' | 'received' | 'cancelled';
 export type TransferStatus = 'pending' | 'in_transit' | 'received';
 export type WasteReason = 'expired' | 'damaged' | 'spoiled' | 'other';

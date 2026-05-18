@@ -159,7 +159,7 @@ export default function DashboardPage() {
     { label: t('dashboard.kpi.lowStockItems'),   value: lowStockCount ?? 0, icon: AlertTriangle, color: '#C62828', loading: loadingLowStock,  show: can('analysis')  },
   ].filter((k) => k.show);
 
-  const isStaff = profile?.role === 'staff';
+  const isStaff = profile?.role?.startsWith('staff') ?? false;
   const visibleLinks = QUICK_LINKS.filter((l) => can(l.permKey, l.adminOnly) && !(l.managerOnly && isStaff));
   const showPOPanel       = can('buying');
   const showLowStockPanel = can('analysis');
