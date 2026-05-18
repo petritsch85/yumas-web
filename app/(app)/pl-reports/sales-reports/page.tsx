@@ -3541,14 +3541,6 @@ export default function SalesReportsPage() {
                       return { ...d, closedDays: [...next] };
                     });
                   };
-                  const mon = closed.has('mon') ? 0 : parseFloat(draft.mon)||0;
-                  const tue = closed.has('tue') ? 0 : parseFloat(draft.tue)||0;
-                  const wed = closed.has('wed') ? 0 : parseFloat(draft.wed)||0;
-                  const thu = closed.has('thu') ? 0 : parseFloat(draft.thu)||0;
-                  const fri = closed.has('fri') ? 0 : parseFloat(draft.fri)||0;
-                  const sat = closed.has('sat') ? 0 : parseFloat(draft.sat)||0;
-                  const sun = closed.has('sun') ? 0 : Math.max(0, 100 - mon - tue - wed - thu - fri - sat);
-                  const total = mon+tue+wed+thu+fri+sat+sun;
                   const ALL_DAYS = ['mon','tue','wed','thu','fri','sat','sun'] as const;
                   return (
                     <div key={label} className="p-5 space-y-4">
@@ -3564,47 +3556,19 @@ export default function SalesReportsPage() {
                         />
                         <p className="text-[10px] text-amber-500 mt-1">Used as fallback when no per-day override is set</p>
                       </div>
-                      <div className="space-y-2.5">
-                        <div className="flex items-center gap-3">
-                          <label className="text-xs text-gray-500 w-40">Weekly base net (€)</label>
-                          <input type="number" min="0" value={draft.weekBaseNet}
-                            onChange={e => setDraft(d => ({...d, weekBaseNet: e.target.value}))}
-                            className="w-28 text-right text-sm font-semibold border border-gray-200 rounded-lg px-2 py-1.5 tabular-nums focus:outline-none focus:border-[#1B5E20]" />
-                        </div>
-                        <div className="flex items-center gap-3">
-                          <label className="text-xs text-gray-500 w-40">Growth / week (%)</label>
-                          <input type="number" step="0.1" value={draft.growthRate}
-                            onChange={e => setDraft(d => ({...d, growthRate: e.target.value}))}
-                            className="w-28 text-right text-sm border border-gray-200 rounded-lg px-2 py-1.5 tabular-nums focus:outline-none focus:border-[#1B5E20]" />
-                        </div>
-                      </div>
                       <div>
-                        <p className="text-xs text-gray-400 uppercase tracking-wider mb-2">Day-of-week split (%)</p>
+                        <p className="text-xs text-gray-400 uppercase tracking-wider mb-2">Open / Closed days</p>
                         <div className="grid grid-cols-7 gap-1 text-center">
                           {ALL_DAYS.map(day => {
                             const isClosed = closed.has(day);
-                            const isSun = day === 'sun';
                             const dayLabel = day.charAt(0).toUpperCase()+day.slice(1);
-                            const weightVal = day === 'mon' ? mon : day === 'tue' ? tue : day === 'wed' ? wed
-                              : day === 'thu' ? thu : day === 'fri' ? fri : day === 'sat' ? sat : sun;
                             return (
                               <div key={day} className="flex flex-col items-center gap-0.5">
                                 <p className={`text-xs mb-0.5 ${isClosed ? 'text-gray-300 line-through' : 'text-gray-400'}`}>{dayLabel}</p>
-                                {isClosed || isSun ? (
-                                  <div className={`w-full text-center text-xs rounded px-0.5 py-1 tabular-nums border ${isClosed ? 'bg-gray-50 border-gray-100 text-gray-300' : 'bg-gray-50 border-gray-100 text-gray-400'}`}>
-                                    {isClosed ? '—' : sun.toFixed(1)}
-                                  </div>
-                                ) : (
-                                  <input type="number" step="0.1" min="0" max="100"
-                                    value={draft[day as 'mon'|'tue'|'wed'|'thu'|'fri'|'sat']}
-                                    onChange={e => setDraft(d => ({...d, [day]: e.target.value}))}
-                                    className="w-full text-center text-xs border border-gray-200 rounded px-0.5 py-1 tabular-nums focus:outline-none focus:border-[#1B5E20]" />
-                                )}
-                                {/* Open/closed toggle */}
                                 <button
                                   onClick={() => toggleClosed(day)}
                                   title={isClosed ? `Mark ${dayLabel} as open` : `Mark ${dayLabel} as closed`}
-                                  className={`mt-0.5 text-[9px] px-1.5 py-0.5 rounded font-semibold transition-colors ${
+                                  className={`text-[9px] px-1.5 py-1 rounded font-semibold transition-colors w-full ${
                                     isClosed
                                       ? 'bg-red-50 text-red-400 border border-red-200 hover:bg-red-100'
                                       : 'bg-green-50 text-green-600 border border-green-200 hover:bg-green-100'
@@ -3616,9 +3580,6 @@ export default function SalesReportsPage() {
                             );
                           })}
                         </div>
-                        <p className={`text-xs mt-1.5 text-right ${Math.abs(total - 100) < 0.2 ? 'text-green-600' : 'text-amber-600'}`}>
-                          Total: {total.toFixed(1)}% {Math.abs(total - 100) < 0.2 ? '✓' : '⚠ open days must sum to 100%'}
-                        </p>
                       </div>
                       <div>
                         <p className="text-xs text-gray-400 uppercase tracking-wider mb-2">Expected Guests / Day</p>
@@ -3649,7 +3610,7 @@ export default function SalesReportsPage() {
                 })}
               </div>
               <div className="border-t border-gray-100 px-5 py-3 flex items-center justify-between bg-gray-50">
-                <p className="text-xs text-gray-400">Sun auto-computed · click OPEN/CLOSED to toggle a day · weights normalise on save</p>
+                <p className="text-xs text-gray-400">Click OPEN/CLOSED to set which days each shift operates · changes apply to forecasts immediately on save</p>
                 <button onClick={handleSaveForecast} disabled={savingForecast || !location}
                   className="flex items-center gap-2 px-5 py-2 bg-[#1B5E20] text-white text-sm font-bold rounded-lg hover:bg-[#2E7D32] transition-colors disabled:opacity-50">
                   {savingForecast ? <Loader2 size={14} className="animate-spin" /> : <DatabaseZap size={14} />}
