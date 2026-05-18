@@ -365,20 +365,8 @@ export default function ProductDetailsPage() {
       {/* ── Selector panel ── */}
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden mb-5">
 
-        {/* Row 1: Mode */}
-        <div className="flex items-center gap-0 border-b border-gray-200">
-          {(['shift', 'week', 'month'] as Mode[]).map((m, i) => (
-            <button key={m} onClick={() => setMode(m)}
-              className={`flex-1 py-3 text-sm font-semibold transition-colors
-                ${mode === m ? 'bg-[#1B5E20] text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}
-                ${i > 0 ? 'border-l border-gray-200' : ''}`}>
-              {m === 'shift' ? 'By Shift' : m === 'week' ? 'By Week' : 'By Month'}
-            </button>
-          ))}
-        </div>
-
-        {/* Row 2: Location */}
-        <div className="flex items-center gap-0 border-b border-gray-200">
+        {/* Row 1: Location */}
+        <div className="flex items-center gap-0">
           {locations.length === 0 ? (
             <div className="px-4 py-3 text-sm text-gray-400">Loading locations…</div>
           ) : (
@@ -393,77 +381,94 @@ export default function ProductDetailsPage() {
           )}
         </div>
 
-        {/* Row 3: Period selector */}
-        <div className="px-4 py-4">
+        {/* Rows 2 + 3: Mode & period — only after a location is chosen */}
+        {locationId && (
+          <>
+            {/* Row 2: Mode */}
+            <div className="flex items-center gap-0 border-t border-gray-200">
+              {(['shift', 'week', 'month'] as Mode[]).map((m, i) => (
+                <button key={m} onClick={() => setMode(m)}
+                  className={`flex-1 py-3 text-sm font-semibold transition-colors
+                    ${mode === m ? 'bg-[#1B5E20] text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}
+                    ${i > 0 ? 'border-l border-gray-200' : ''}`}>
+                  {m === 'shift' ? 'By Shift' : m === 'week' ? 'By Week' : 'By Month'}
+                </button>
+              ))}
+            </div>
 
-          {/* ── By Shift ── */}
-          {mode === 'shift' && (
-            <div className="flex items-center gap-3 flex-wrap">
-              <div>
-                <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Date</label>
-                <input
-                  type="date" value={shiftDate}
-                  onChange={e => setShiftDate(e.target.value)}
-                  className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Shift</label>
-                <div className="flex rounded-lg border border-gray-200 overflow-hidden text-sm font-semibold">
-                  {(['lunch', 'dinner'] as const).map((s, i) => (
-                    <button key={s} onClick={() => setShiftType(s)}
-                      className={`px-5 py-2 transition-colors
-                        ${shiftType === s ? 'bg-[#1B5E20] text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}
-                        ${i > 0 ? 'border-l border-gray-200' : ''}`}>
-                      {s === 'lunch' ? '🌤 Lunch' : '🌙 Dinner'}
-                    </button>
-                  ))}
+            {/* Row 3: Period selector */}
+            <div className="px-4 py-4 border-t border-gray-200">
+
+              {/* ── By Shift ── */}
+              {mode === 'shift' && (
+                <div className="flex items-center gap-3 flex-wrap">
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Date</label>
+                    <input
+                      type="date" value={shiftDate}
+                      onChange={e => setShiftDate(e.target.value)}
+                      className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Shift</label>
+                    <div className="flex rounded-lg border border-gray-200 overflow-hidden text-sm font-semibold">
+                      {(['lunch', 'dinner'] as const).map((s, i) => (
+                        <button key={s} onClick={() => setShiftType(s)}
+                          className={`px-5 py-2 transition-colors
+                            ${shiftType === s ? 'bg-[#1B5E20] text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}
+                            ${i > 0 ? 'border-l border-gray-200' : ''}`}>
+                          {s === 'lunch' ? '🌤 Lunch' : '🌙 Dinner'}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 </div>
-              </div>
-            </div>
-          )}
+              )}
 
-          {/* ── By Week ── */}
-          {mode === 'week' && (
-            <div>
-              <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
-                Calendar Week — {currentYear}
-              </label>
-              <div className="flex gap-1.5 flex-wrap">
-                {Array.from({ length: totalWeeks }, (_, i) => i + 1).map(w => (
-                  <button key={w} onClick={() => setSelWeek(w)}
-                    className={`w-12 py-1.5 rounded-lg border text-xs font-semibold transition-colors
-                      ${selWeek === w ? activeCls : inactiveCls}
-                      ${w === currentWeek ? 'ring-2 ring-offset-1 ring-[#1B5E20]/40' : ''}`}>
-                    KW{w}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
+              {/* ── By Week ── */}
+              {mode === 'week' && (
+                <div>
+                  <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
+                    Calendar Week — {currentYear}
+                  </label>
+                  <div className="flex gap-1.5 flex-wrap">
+                    {Array.from({ length: totalWeeks }, (_, i) => i + 1).map(w => (
+                      <button key={w} onClick={() => setSelWeek(w)}
+                        className={`w-12 py-1.5 rounded-lg border text-xs font-semibold transition-colors
+                          ${selWeek === w ? activeCls : inactiveCls}
+                          ${w === currentWeek ? 'ring-2 ring-offset-1 ring-[#1B5E20]/40' : ''}`}>
+                        KW{w}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
 
-          {/* ── By Month ── */}
-          {mode === 'month' && (
-            <div>
-              <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
-                Month — {currentYear}
-              </label>
-              <div className="flex gap-1.5 flex-wrap">
-                {MONTH_NAMES.map((name, idx) => {
-                  const m = idx + 1;
-                  return (
-                    <button key={m} onClick={() => setSelMonth(m)}
-                      className={`px-3 py-1.5 rounded-lg border text-xs font-semibold transition-colors
-                        ${selMonth === m ? activeCls : inactiveCls}
-                        ${m === currentMonth ? 'ring-2 ring-offset-1 ring-[#1B5E20]/40' : ''}`}>
-                      {name}
-                    </button>
-                  );
-                })}
-              </div>
+              {/* ── By Month ── */}
+              {mode === 'month' && (
+                <div>
+                  <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
+                    Month — {currentYear}
+                  </label>
+                  <div className="flex gap-1.5 flex-wrap">
+                    {MONTH_NAMES.map((name, idx) => {
+                      const m = idx + 1;
+                      return (
+                        <button key={m} onClick={() => setSelMonth(m)}
+                          className={`px-3 py-1.5 rounded-lg border text-xs font-semibold transition-colors
+                            ${selMonth === m ? activeCls : inactiveCls}
+                            ${m === currentMonth ? 'ring-2 ring-offset-1 ring-[#1B5E20]/40' : ''}`}>
+                          {name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
-          )}
-        </div>
+          </>
+        )}
       </div>
 
       {/* ── No location selected ── */}
