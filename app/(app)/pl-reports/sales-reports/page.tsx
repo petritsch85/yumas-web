@@ -1010,6 +1010,8 @@ export default function SalesReportsPage() {
     dinnerGuests: string; dinnerSpend: string;
   } | null>(null);
   const [savingDayFcst, setSavingDayFcst] = useState(false);
+  const [confirmResetDayFcst, setConfirmResetDayFcst] = useState(false);
+  const [resettingDayFcst,    setResettingDayFcst]    = useState(false);
 
   // Forecast
   const [showForecastPanel, setShowForecastPanel] = useState(false);
@@ -2201,6 +2203,8 @@ export default function SalesReportsPage() {
     setEditingForecastKey(null);
     setForecastDraft({ netRevenue: '', note: '' });
     setConfirmDelOverrideKey(null);
+    setDayFcstDraft(null);
+    setConfirmResetDayFcst(false);
   }, []);
 
   const startEditShift = useCallback((shift: ShiftRow) => {
@@ -2468,6 +2472,21 @@ export default function SalesReportsPage() {
     } catch (e: any) { alert(`Save failed: ${e.message}`); }
     finally { setSavingDayFcst(false); }
   }, [location, activeDayKey, dayFcstDraft, year, quarter, queryClient]);
+
+  const resetDayForecast = useCallback(async () => {
+    if (!location || !activeDayKey) return;
+    setResettingDayFcst(true);
+    try {
+      await supabase.from('daily_forecasts')
+        .delete()
+        .eq('location_id', location.id)
+        .eq('forecast_date', activeDayKey);
+      queryClient.invalidateQueries({ queryKey: ['daily-forecasts', location.id, year, quarter] });
+      setConfirmResetDayFcst(false);
+      setDayFcstDraft(null);
+    } catch (e: any) { alert(`Reset failed: ${e.message}`); }
+    finally { setResettingDayFcst(false); }
+  }, [location, activeDayKey, year, quarter, queryClient]);
 
   // ── Shared controls UI ─────────────────────────────────────────────────────
 
@@ -4538,10 +4557,32 @@ export default function SalesReportsPage() {
                             <span className="text-xs text-amber-500 ml-2">Guests × Spend / Guest</span>
                           </div>
                           {!isEditingFcst ? (
-                            <button onClick={initDayDraft}
-                              className="text-xs px-2.5 py-1 rounded-lg border border-amber-300 text-amber-700 hover:bg-amber-100 transition-colors font-semibold">
-                              ✏️ Edit
-                            </button>
+                            <div className="flex items-center gap-2">
+                              {confirmResetDayFcst ? (
+                                <span className="flex items-center gap-1.5">
+                                  <span className="text-xs text-red-600 font-semibold">Reset to defaults?</span>
+                                  <button onClick={resetDayForecast} disabled={resettingDayFcst}
+                                    className="text-xs px-2.5 py-1 bg-red-600 text-white rounded-lg font-bold hover:bg-red-700 transition-colors disabled:opacity-50">
+                                    {resettingDayFcst ? '…' : 'Yes'}
+                                  </button>
+                                  <button onClick={() => setConfirmResetDayFcst(false)}
+                                    className="text-xs px-2.5 py-1 border border-gray-200 rounded-lg text-gray-500 hover:bg-gray-50 transition-colors">
+                                    No
+                                  </button>
+                                </span>
+                              ) : (
+                                <>
+                                  <button onClick={() => setConfirmResetDayFcst(true)}
+                                    className="text-xs px-2.5 py-1 rounded-lg border border-red-200 text-red-500 hover:bg-red-50 transition-colors font-semibold">
+                                    🔄 Reset
+                                  </button>
+                                  <button onClick={initDayDraft}
+                                    className="text-xs px-2.5 py-1 rounded-lg border border-amber-300 text-amber-700 hover:bg-amber-100 transition-colors font-semibold">
+                                    ✏️ Edit
+                                  </button>
+                                </>
+                              )}
+                            </div>
                           ) : (
                             <div className="flex items-center gap-2">
                               <button onClick={() => setDayFcstDraft(null)}
