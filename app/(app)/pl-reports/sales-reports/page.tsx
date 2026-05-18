@@ -3796,7 +3796,7 @@ export default function SalesReportsPage() {
                       const todayKey = `${todayYear}-${String(todayMonth).padStart(2,'0')}-${String(todayDay).padStart(2,'0')}`;
 
                       // Render a standard POS net-revenue row (with forecast support)
-                      const posRow = (label: string, posMap: typeof lunchMap, fcastMap: Record<string,number>, qTotal: typeof lunchQtrTotal) => {
+                      const posRow = (label: string, posMap: typeof lunchMap, fcastMap: Record<string,number>, qTotal: typeof lunchQtrTotal, shift: 'lunch' | 'dinner') => {
                         const hasFcast    = Object.keys(fcastMap).length > 0;
                         const qActualSum  = qTotal?.netTotal ?? 0;
                         const qFcastRem   = hasFcast ? dailyCols.filter(c => c.type === 'day' && c.dateKey >= todayKey && !(posMap as any)[c.dateKey]).reduce((s, c) => s + (fcastMap[(c as any).dateKey] ?? 0), 0) : 0;
@@ -3807,14 +3807,13 @@ export default function SalesReportsPage() {
                             <td className="sticky left-0 z-10 px-4 py-2 whitespace-nowrap border-r border-gray-100 group-hover:bg-gray-50/60 transition-colors text-gray-700" style={{ backgroundColor:'#ffffff' }}>{label}</td>
                             {dailyCols.map((col, ci) => {
                               if (col.type === 'day') {
-                                const isCurDay = col.dateKey === todayKey;
                                 const isFuture = col.dateKey >= todayKey;
                                 const actual   = posMap[col.dateKey]?.netTotal ?? 0;
                                 const fcast    = fcastMap[col.dateKey] ?? null;
                                 const hasActual = actual > 0;
                                 const showFcast = !hasActual && isFuture && fcast !== null && fcast > 0;
                                 return (
-                                  <td key={ci} className="py-2 text-right tabular-nums" style={{ paddingLeft:4, paddingRight:8, backgroundColor: isCurDay ? 'rgba(59,130,246,0.04)' : undefined }}>
+                                  <td key={ci} className="py-2 text-right tabular-nums" style={{ paddingLeft:4, paddingRight:8, backgroundColor: colBg(shift, col.dateKey) }}>
                                     {hasActual ? <span className="text-blue-700">{fmtNum(actual)}</span>
                                       : showFcast ? <span className="text-amber-500 italic text-[10px]">{fmtNum(fcast!)}</span>
                                       : <span className="text-gray-300">—</span>}
@@ -3840,7 +3839,7 @@ export default function SalesReportsPage() {
                       };
 
                       // Render a Simply delivery row (with forecast for future days without actuals)
-                      const simplyRow = (label: string, delivMap: Record<string,number>, fcastMap: Record<string,number> = {}) => {
+                      const simplyRow = (label: string, delivMap: Record<string,number>, fcastMap: Record<string,number> = {}, shift?: 'lunch' | 'dinner') => {
                         const hasFcast = Object.keys(fcastMap).length > 0;
                         const qDel = Object.entries(delivMap).filter(([k]) => dailyCols.some(c => c.type === 'day' && (c as any).dateKey === k)).reduce((s, [,v]) => s + v, 0);
                         const qFcastRem = hasFcast ? dailyCols.filter(c => c.type === 'day' && (c as any).dateKey >= todayKey && !(delivMap as any)[(c as any).dateKey]).reduce((s, c) => s + (fcastMap[(c as any).dateKey] ?? 0), 0) : 0;
@@ -3851,13 +3850,12 @@ export default function SalesReportsPage() {
                             <td className="sticky left-0 z-10 px-4 py-2 whitespace-nowrap border-r border-gray-100 bg-white group-hover:bg-gray-50/60 transition-colors text-gray-700">{label}</td>
                             {dailyCols.map((col, ci) => {
                               if (col.type === 'day') {
-                                const isCurDay = col.dateKey === todayKey;
                                 const isFuture = col.dateKey >= todayKey;
                                 const val = delivMap[col.dateKey] ?? 0;
                                 const fcast = !val && isFuture ? (fcastMap[col.dateKey] ?? null) : null;
                                 const showFcast = fcast !== null && fcast > 0;
                                 return (
-                                  <td key={ci} className="py-2 text-right tabular-nums" style={{ paddingLeft:4, paddingRight:8, backgroundColor: isCurDay ? 'rgba(59,130,246,0.04)' : undefined }}>
+                                  <td key={ci} className="py-2 text-right tabular-nums" style={{ paddingLeft:4, paddingRight:8, backgroundColor: shift ? colBg(shift, col.dateKey) : col.dateKey === todayKey ? 'rgba(59,130,246,0.04)' : undefined }}>
                                     {val > 0
                                       ? <span className="text-gray-700">{fmtNum(val)}</span>
                                       : showFcast
@@ -3889,17 +3887,16 @@ export default function SalesReportsPage() {
                       };
 
                       // Render a Bills row (large-group invoices, no forecast)
-                      const billsRow = (label: string, billsMap: Record<string,number>) => {
+                      const billsRow = (label: string, billsMap: Record<string,number>, shift?: 'lunch' | 'dinner') => {
                         const qBills = Object.entries(billsMap).filter(([k]) => dailyCols.some(c => c.type === 'day' && (c as any).dateKey === k)).reduce((s, [,v]) => s + v, 0);
                         return (
                           <tr key={label} className="border-b border-gray-100 hover:bg-gray-50/60 group">
                             <td className="sticky left-0 z-10 px-4 py-2 whitespace-nowrap border-r border-gray-100 bg-white group-hover:bg-gray-50/60 transition-colors text-gray-700">{label}</td>
                             {dailyCols.map((col, ci) => {
                               if (col.type === 'day') {
-                                const isCurDay = col.dateKey === todayKey;
                                 const val = billsMap[col.dateKey] ?? 0;
                                 return (
-                                  <td key={ci} className="py-2 text-right tabular-nums" style={{ paddingLeft:4, paddingRight:8, backgroundColor: isCurDay ? 'rgba(59,130,246,0.04)' : undefined }}>
+                                  <td key={ci} className="py-2 text-right tabular-nums" style={{ paddingLeft:4, paddingRight:8, backgroundColor: shift ? colBg(shift, col.dateKey) : col.dateKey === todayKey ? 'rgba(59,130,246,0.04)' : undefined }}>
                                     {val > 0 ? <span className="text-blue-600">{fmtNum(val)}</span> : <span className="text-gray-300">—</span>}
                                   </td>
                                 );
@@ -3920,7 +3917,7 @@ export default function SalesReportsPage() {
                       };
 
                       // Render a bold combined total row (POS actual/forecast + Simply actual/forecast + Bills)
-                      const totalRow = (label: string, posMap: typeof lunchMap, fcastMap: Record<string,number>, delivMap: Record<string,number>, qTotal: typeof lunchQtrTotal, bg: string, color: string, billsMap: Record<string,number> = {}, simplyFcastMap: Record<string,number> = {}) => {
+                      const totalRow = (label: string, posMap: typeof lunchMap, fcastMap: Record<string,number>, delivMap: Record<string,number>, qTotal: typeof lunchQtrTotal, bg: string, color: string, billsMap: Record<string,number> = {}, simplyFcastMap: Record<string,number> = {}, shift?: 'lunch' | 'dinner') => {
                         const hasFcast   = Object.keys(fcastMap).length > 0;
                         const qPosActual = qTotal?.netTotal ?? 0;
                         const qDel       = Object.entries(delivMap).filter(([k]) => dailyCols.some(c => c.type === 'day' && (c as any).dateKey === k)).reduce((s, [,v]) => s + v, 0);
@@ -3934,7 +3931,6 @@ export default function SalesReportsPage() {
                             <td className="sticky left-0 z-10 px-4 py-2 whitespace-nowrap border-r border-gray-100 group-hover:bg-gray-50/60 transition-colors font-bold" style={{ backgroundColor: bg, color }}>{label}</td>
                             {dailyCols.map((col, ci) => {
                               if (col.type === 'day') {
-                                const isCurDay   = col.dateKey === todayKey;
                                 const isFuture   = col.dateKey >= todayKey;
                                 const posActual  = posMap[col.dateKey]?.netTotal ?? 0;
                                 const simply     = delivMap[col.dateKey] ?? 0;
@@ -3948,7 +3944,7 @@ export default function SalesReportsPage() {
                                 const hasMix     = actuals > 0 && forecasts > 0;
                                 const allFcast   = actuals === 0 && forecasts > 0;
                                 return (
-                                  <td key={ci} className="py-2 text-right tabular-nums font-bold" style={{ paddingLeft:4, paddingRight:8, backgroundColor: isCurDay ? 'rgba(59,130,246,0.04)' : undefined }}>
+                                  <td key={ci} className="py-2 text-right tabular-nums font-bold" style={{ paddingLeft:4, paddingRight:8, backgroundColor: shift ? colBg(shift, col.dateKey) : col.dateKey === todayKey ? 'rgba(59,130,246,0.04)' : undefined }}>
                                     {displayVal > 0
                                       ? hasMix
                                         ? <span className="text-amber-500 italic text-[10px]">{fmtNum(displayVal)}</span>
@@ -4025,9 +4021,8 @@ export default function SalesReportsPage() {
                           <td className="sticky left-0 z-10 px-4 py-0.5 whitespace-nowrap border-r border-indigo-100 bg-[#f5f3ff] group-hover:bg-indigo-50/30 transition-colors text-[11px] text-indigo-400 italic">{label}</td>
                           {dailyCols.map((col, ci) => {
                             if (col.type === 'day') {
-                              const isCurDay = col.dateKey === todayKey;
                               return (
-                                <td key={ci} className="py-0.5 tabular-nums" style={{ paddingLeft:0, paddingRight:0, backgroundColor: isCurDay ? 'rgba(59,130,246,0.04)' : undefined }}>
+                                <td key={ci} className="py-0.5 tabular-nums" style={{ paddingLeft:0, paddingRight:0, backgroundColor: colBg(shift, col.dateKey) }}>
                                   {bookingCell(col.dateKey, shift, 'bookings', bMap[col.dateKey] ?? null)}
                                 </td>
                               );
@@ -4051,11 +4046,10 @@ export default function SalesReportsPage() {
                           <td className="sticky left-0 z-10 px-4 py-0.5 whitespace-nowrap border-r border-purple-100 bg-[#faf5ff] group-hover:bg-purple-50/20 transition-colors text-[11px] text-purple-400 italic">{label}</td>
                           {dailyCols.map((col, ci) => {
                             if (col.type === 'day') {
-                              const isCurDay = col.dateKey === todayKey;
                               const isFuture = col.dateKey > todayKey;
                               const val = wMap[col.dateKey] ?? null;
                               return (
-                                <td key={ci} className="py-0.5 tabular-nums" style={{ paddingLeft:0, paddingRight:0, backgroundColor: isCurDay ? 'rgba(59,130,246,0.04)' : undefined }}>
+                                <td key={ci} className="py-0.5 tabular-nums" style={{ paddingLeft:0, paddingRight:0, backgroundColor: colBg(shift, col.dateKey) }}>
                                   {isFuture
                                     ? bookingCell(col.dateKey, shift, 'walk_ins', val)
                                     : val != null
@@ -4080,15 +4074,14 @@ export default function SalesReportsPage() {
                         </tr>
                       );
 
-                      const metricRow = (label: string, valMap: Record<string, number>, qVal: number | null, format: 'count' | 'currency' = 'count') => (
+                      const metricRow = (label: string, valMap: Record<string, number>, qVal: number | null, format: 'count' | 'currency' = 'count', shift?: 'lunch' | 'dinner') => (
                         <tr key={label} className="border-b border-gray-100 hover:bg-gray-50/60 group" style={{ backgroundColor:'#f8fafc' }}>
                           <td className="sticky left-0 z-10 px-4 py-1 whitespace-nowrap border-r border-gray-100 bg-[#f8fafc] group-hover:bg-gray-50/60 transition-colors text-[11px] text-gray-400 italic">{label}</td>
                           {dailyCols.map((col, ci) => {
                             if (col.type === 'day') {
-                              const isCurDay = col.dateKey === todayKey;
                               const val = valMap[col.dateKey] ?? null;
                               return (
-                                <td key={ci} className="py-1 text-right tabular-nums text-[11px]" style={{ paddingLeft:4, paddingRight:8, backgroundColor: isCurDay ? 'rgba(59,130,246,0.04)' : undefined }}>
+                                <td key={ci} className="py-1 text-right tabular-nums text-[11px]" style={{ paddingLeft:4, paddingRight:8, backgroundColor: shift ? colBg(shift, col.dateKey) : col.dateKey === todayKey ? 'rgba(59,130,246,0.04)' : undefined }}>
                                   {val != null && val > 0
                                     ? <span className="text-gray-500">{format === 'count' ? fmtNum(val) : fmtPG(val)}</span>
                                     : <span className="text-gray-200">—</span>}
@@ -4176,7 +4169,7 @@ export default function SalesReportsPage() {
                                 const actual   = actualMap[col.dateKey] ?? null;
                                 if (!isFuture || actual != null || isClosed) {
                                   return (
-                                    <td key={ci} className="py-1 text-right tabular-nums text-[11px]" style={{ paddingLeft:4, paddingRight:8, backgroundColor: isCurDay ? 'rgba(59,130,246,0.04)' : undefined }}>
+                                    <td key={ci} className="py-1 text-right tabular-nums text-[11px]" style={{ paddingLeft:4, paddingRight:8, backgroundColor: colBg(shift, col.dateKey) }}>
                                       {actual != null && actual > 0 ? <span className="text-gray-500">{fmtNum(actual)}</span> : <span className="text-gray-200">—</span>}
                                     </td>
                                   );
@@ -4187,7 +4180,7 @@ export default function SalesReportsPage() {
                                 const displayGuests = storedGuests ?? defaultGuests;
                                 const isDefault = storedGuests == null && defaultGuests != null;
                                 return (
-                                  <td key={ci} className="py-1 text-right tabular-nums text-[11px]" style={{ paddingLeft:4, paddingRight:8, backgroundColor: isCurDay ? 'rgba(59,130,246,0.04)' : undefined }}>
+                                  <td key={ci} className="py-1 text-right tabular-nums text-[11px]" style={{ paddingLeft:4, paddingRight:8, backgroundColor: colBg(shift, col.dateKey) }}>
                                     {displayGuests != null && displayGuests > 0
                                       ? <span className={isDefault ? 'text-amber-300' : 'text-amber-600 font-medium'}>{fmtNum(displayGuests)}</span>
                                       : <span className="text-gray-200">—</span>}
@@ -4228,14 +4221,14 @@ export default function SalesReportsPage() {
                                 const actual   = actualMap[col.dateKey] ?? null;
                                 if (!isFuture || actual != null || isClosed) {
                                   return (
-                                    <td key={ci} className="py-1 text-right tabular-nums text-[11px]" style={{ paddingLeft:4, paddingRight:8, backgroundColor: isCurDay ? 'rgba(59,130,246,0.04)' : undefined }}>
+                                    <td key={ci} className="py-1 text-right tabular-nums text-[11px]" style={{ paddingLeft:4, paddingRight:8, backgroundColor: colBg(shift, col.dateKey) }}>
                                       {actual != null && actual > 0 ? <span className="text-gray-500">{fmtPG(actual)}</span> : <span className="text-gray-200">—</span>}
                                     </td>
                                   );
                                 }
                                 const f = dailyFcstMap[`${shift}:${col.dateKey}`];
                                 return (
-                                  <td key={ci} className="py-0.5 tabular-nums" style={{ paddingLeft:0, paddingRight:0, backgroundColor: isCurDay ? 'rgba(59,130,246,0.04)' : undefined }}>
+                                  <td key={ci} className="py-0.5 tabular-nums" style={{ paddingLeft:0, paddingRight:0, backgroundColor: colBg(shift, col.dateKey) }}>
                                     {fcstCell(col.dateKey, shift, 'spend_per_guest', f?.spend_per_guest ?? null, defaultSpend)}
                                   </td>
                                 );
@@ -4258,61 +4251,35 @@ export default function SalesReportsPage() {
                         );
                       };
 
-                      // Slim "CLOSED" marker row — shows a red-tinted cell with label for each closed day in a shift
-                      const closedRow = (shift: 'lunch' | 'dinner') => {
-                        const anyClosedDay = dailyCols.some(c => c.type === 'day' && closureSet.has(`${shift}:${c.dateKey}`));
-                        if (!anyClosedDay) return null;
-                        return (
-                          <tr key={`closed-marker-${shift}`} style={{ height: 18 }}>
-                            <td className="sticky left-0 z-10 px-4" style={{ backgroundColor: '#fef2f2', borderRight: '1px solid #fecaca' }}>
-                              <span className="text-[9px] text-red-400 font-bold uppercase tracking-widest">Closed shifts</span>
-                            </td>
-                            {dailyCols.map((col, ci) => {
-                              if (col.type === 'day') {
-                                const isClosed = closureSet.has(`${shift}:${col.dateKey}`);
-                                const isCurDay = col.dateKey === todayKey;
-                                return (
-                                  <td key={ci} style={{
-                                    backgroundColor: isClosed ? 'rgba(239,68,68,0.10)' : isCurDay ? 'rgba(59,130,246,0.04)' : undefined,
-                                    textAlign: 'center', padding: '0 2px',
-                                  }}>
-                                    {isClosed && <span className="text-[9px] text-red-400 font-semibold">🚫 Closed</span>}
-                                  </td>
-                                );
-                              }
-                              return (
-                                <td key={ci} style={{ backgroundColor: '#fffbeb', borderLeft: '1px solid #fde68a', borderRight: '1px solid #fde68a' }} />
-                              );
-                            })}
-                            <td style={{ borderLeft: '1px solid #e2e8f0', backgroundColor: '#fef2f2' }} />
-                          </tr>
-                        );
+                      // Cell background helper — light grey for closed-shift columns, blue-tint for today
+                      const colBg = (shift: 'lunch' | 'dinner', dk: string): string | undefined => {
+                        if (closureSet.has(`${shift}:${dk}`)) return 'rgba(0,0,0,0.04)';
+                        if (dk === todayKey) return 'rgba(59,130,246,0.04)';
+                        return undefined;
                       };
 
                       return (
                         <>
-                          {closedRow('lunch')}
                           {bookingsRow('↳ Bookings · Lunch',   lunchBookingsMap,  'lunch',  lunchQBookings)}
                           {walkInsRow( '↳ Walk-ins · Lunch',  lunchWalkInsMap,  lunchBookingsMap,  'lunch',  lunchQWalkIns)}
                           {estGuestsRow('↳ Est. Guests · Lunch',       effectiveLunchGuestsMap,  'lunch', lunchQEffGuests)}
-                          {metricRow('↳ Net Food / Guest · Lunch',    lunchNetFoodPGMap,   lunchQMetrics.guests > 0 ? lunchQMetrics.netFood   / lunchQMetrics.guests : null, 'currency')}
-                          {metricRow('↳ Net Drinks / Guest · Lunch',  lunchNetDrinksPGMap, lunchQMetrics.guests > 0 ? lunchQMetrics.netDrinks / lunchQMetrics.guests : null, 'currency')}
+                          {metricRow('↳ Net Food / Guest · Lunch',    lunchNetFoodPGMap,   lunchQMetrics.guests > 0 ? lunchQMetrics.netFood   / lunchQMetrics.guests : null, 'currency', 'lunch')}
+                          {metricRow('↳ Net Drinks / Guest · Lunch',  lunchNetDrinksPGMap, lunchQMetrics.guests > 0 ? lunchQMetrics.netDrinks / lunchQMetrics.guests : null, 'currency', 'lunch')}
                           {netPerGuestRow('↳ Net Total / Guest · Lunch', lunchNetTotalPGMap, 'lunch', defaultLunchSpend, lunchQMetrics)}
-                          {posRow('☀️  Orderbird · Lunch',  lunchMap,  lunchForecastMap,  lunchQtrTotal)}
-                          {simplyRow('🛵 Simply · Lunch', deliveryLunchMap, simplyLunchForecastMap)}
-                          {billsRow('🧾 Bills · Lunch', billsLunchMap)}
-                          {totalRow('☀️  Total Lunch',  lunchMap,  lunchForecastMap,  deliveryLunchMap,  lunchQtrTotal,  '#f0fdf4', '#1B5E20', billsLunchMap, simplyLunchForecastMap)}
-                          {closedRow('dinner')}
+                          {posRow('☀️  Orderbird · Lunch',  lunchMap,  lunchForecastMap,  lunchQtrTotal, 'lunch')}
+                          {simplyRow('🛵 Simply · Lunch', deliveryLunchMap, simplyLunchForecastMap, 'lunch')}
+                          {billsRow('🧾 Bills · Lunch', billsLunchMap, 'lunch')}
+                          {totalRow('☀️  Total Lunch',  lunchMap,  lunchForecastMap,  deliveryLunchMap,  lunchQtrTotal,  '#f0fdf4', '#1B5E20', billsLunchMap, simplyLunchForecastMap, 'lunch')}
                           {bookingsRow('↳ Bookings · Dinner',  dinnerBookingsMap, 'dinner', dinnerQBookings)}
                           {walkInsRow( '↳ Walk-ins · Dinner', dinnerWalkInsMap, dinnerBookingsMap, 'dinner', dinnerQWalkIns)}
                           {estGuestsRow('↳ Est. Guests · Dinner',      effectiveDinnerGuestsMap, 'dinner', dinnerQEffGuests)}
-                          {metricRow('↳ Net Food / Guest · Dinner',   dinnerNetFoodPGMap,   dinnerQMetrics.guests > 0 ? dinnerQMetrics.netFood   / dinnerQMetrics.guests : null, 'currency')}
-                          {metricRow('↳ Net Drinks / Guest · Dinner', dinnerNetDrinksPGMap, dinnerQMetrics.guests > 0 ? dinnerQMetrics.netDrinks / dinnerQMetrics.guests : null, 'currency')}
+                          {metricRow('↳ Net Food / Guest · Dinner',   dinnerNetFoodPGMap,   dinnerQMetrics.guests > 0 ? dinnerQMetrics.netFood   / dinnerQMetrics.guests : null, 'currency', 'dinner')}
+                          {metricRow('↳ Net Drinks / Guest · Dinner', dinnerNetDrinksPGMap, dinnerQMetrics.guests > 0 ? dinnerQMetrics.netDrinks / dinnerQMetrics.guests : null, 'currency', 'dinner')}
                           {netPerGuestRow('↳ Net Total / Guest · Dinner', dinnerNetTotalPGMap, 'dinner', defaultDinnerSpend, dinnerQMetrics)}
-                          {posRow('🌙  Orderbird · Dinner', dinnerMap, dinnerForecastMap, dinnerQtrTotal)}
-                          {simplyRow('🛵 Simply · Dinner', deliveryDinnerMap, simplyDinnerForecastMap)}
-                          {billsRow('🧾 Bills · Dinner', billsDinnerMap)}
-                          {totalRow('🌙  Total Dinner', dinnerMap, dinnerForecastMap, deliveryDinnerMap, dinnerQtrTotal, '#f0fdf4', '#1B5E20', billsDinnerMap, simplyDinnerForecastMap)}
+                          {posRow('🌙  Orderbird · Dinner', dinnerMap, dinnerForecastMap, dinnerQtrTotal, 'dinner')}
+                          {simplyRow('🛵 Simply · Dinner', deliveryDinnerMap, simplyDinnerForecastMap, 'dinner')}
+                          {billsRow('🧾 Bills · Dinner', billsDinnerMap, 'dinner')}
+                          {totalRow('🌙  Total Dinner', dinnerMap, dinnerForecastMap, deliveryDinnerMap, dinnerQtrTotal, '#f0fdf4', '#1B5E20', billsDinnerMap, simplyDinnerForecastMap, 'dinner')}
                           {totalRow('∑   Daily Total',  totalMap,  totalForecastMap,  deliveryTotalMap,  totalQtrTotal,  '#f0fdf4', '#1B5E20', billsTotalMap, simplyTotalForecastMap)}
                         </>
                       );
