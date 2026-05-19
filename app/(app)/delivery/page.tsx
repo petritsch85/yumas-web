@@ -1136,6 +1136,23 @@ export default function DeliveryPage() {
       const { error } = await supabase
         .from('delivery_targets').upsert(payload, { onConflict: 'location_name,item_name' });
       if (error) throw error;
+
+      // Sync standard_target_qty on any already-generated run lines
+      if (run) {
+        const dow = new Date(targetDate + 'T12:00:00').getDay();
+        const dKey = DAY_KEY_MAP[dow] as DayKey | undefined;
+        if (dKey) {
+          await Promise.all(payload.map(p => {
+            const newStd = Math.max(0, p[dKey as keyof typeof p] as number ?? 0);
+            return supabase
+              .from('delivery_run_lines')
+              .update({ standard_target_qty: newStd })
+              .eq('run_id', run.id)
+              .eq('location_name', p.location_name)
+              .eq('item_name', p.item_name);
+          }));
+        }
+      }
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['std-targets'] });
@@ -1150,6 +1167,15 @@ export default function DeliveryPage() {
       const { error } = await supabase
         .from('delivery_targets').delete().eq('location_name', stdStore);
       if (error) throw error;
+
+      // Zero out standard_target_qty on any already-generated run lines
+      if (run) {
+        await supabase
+          .from('delivery_run_lines')
+          .update({ standard_target_qty: 0 })
+          .eq('run_id', run.id)
+          .eq('location_name', stdStore);
+      }
     },
     onSuccess: () => {
       setStdEdits({});
