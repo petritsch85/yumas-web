@@ -1781,7 +1781,7 @@ export default function DeliveryPage() {
         {viewMode === 'manager' && (
           <div className="mb-5 p-3 bg-gray-50 border border-gray-100 rounded-xl space-y-3">
 
-            {/* Row 1: Week selector + Standard Targets + Upload Excel */}
+            {/* Row 1: Week selector */}
             <div className="flex items-center gap-3 flex-wrap">
               <div className="flex items-center gap-2">
                 <CalendarDays size={15} className="text-gray-400 flex-shrink-0" />
@@ -1796,40 +1796,9 @@ export default function DeliveryPage() {
                   ))}
                 </select>
               </div>
-
-              <div className="h-5 w-px bg-gray-200 hidden sm:block" />
-
-              <button
-                onClick={() => { setStdStore(activeStore); setShowStandards(true); }}
-                className="flex items-center gap-1.5 text-sm border border-gray-200 rounded-lg px-3 py-1.5 text-gray-600 bg-white shadow-sm hover:bg-gray-50 transition-colors"
-              >
-                <SlidersHorizontal size={14} /> Standard Targets
-              </button>
-
-              {uploadMsg && (
-                <span className={`text-xs font-medium px-2.5 py-1 rounded-lg ${uploadMsg.startsWith('Error') || uploadMsg.startsWith('Parse') ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-700'}`}>
-                  {uploadMsg}
-                </span>
-              )}
-              <div className="flex items-center gap-1 border border-gray-200 rounded-lg bg-white shadow-sm overflow-hidden">
-                <select
-                  value={uploadStore}
-                  onChange={e => setUploadStore(e.target.value as Store)}
-                  className="text-sm text-gray-600 px-2 py-1.5 bg-transparent border-r border-gray-200 focus:outline-none cursor-pointer"
-                >
-                  {STORES.map(s => <option key={s} value={s}>{s}</option>)}
-                </select>
-                <button
-                  onClick={() => fileRef.current?.click()}
-                  disabled={uploading || upsertTargets.isPending}
-                  className="flex items-center gap-1.5 text-sm px-3 py-1.5 text-gray-600 hover:bg-gray-50 transition-colors disabled:opacity-50"
-                >
-                  <Upload size={14} /> {uploading || upsertTargets.isPending ? 'Importing…' : 'Upload Excel'}
-                </button>
-              </div>
             </div>
 
-            {/* Row 2: Delivery day buttons + lock controls */}
+            {/* Row 2: Delivery day buttons + lock controls + Standard Targets + Upload Excel (right-aligned) */}
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-xs text-gray-500 font-medium whitespace-nowrap">Delivery Day:</span>
               {DELIVERY_DAY_BUTTONS.map(btn => {
@@ -1884,6 +1853,39 @@ export default function DeliveryPage() {
                   )
                 )
               )}
+
+              {/* Standard Targets + Upload Excel — right-aligned */}
+              <div className="ml-auto flex items-center gap-2 flex-wrap justify-end">
+                <button
+                  onClick={() => { setStdStore(activeStore); setShowStandards(true); }}
+                  className="flex items-center gap-1.5 text-sm border border-gray-200 rounded-lg px-3 py-1.5 text-gray-600 bg-white shadow-sm hover:bg-gray-50 transition-colors"
+                >
+                  <SlidersHorizontal size={14} /> Standard Targets
+                </button>
+
+                {uploadMsg && (
+                  <span className={`text-xs font-medium px-2.5 py-1 rounded-lg ${uploadMsg.startsWith('Error') || uploadMsg.startsWith('Parse') ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-700'}`}>
+                    {uploadMsg}
+                  </span>
+                )}
+
+                <div className="flex items-center gap-1 border border-gray-200 rounded-lg bg-white shadow-sm overflow-hidden">
+                  <select
+                    value={uploadStore}
+                    onChange={e => setUploadStore(e.target.value as Store)}
+                    className="text-sm text-gray-600 px-2 py-1.5 bg-transparent border-r border-gray-200 focus:outline-none cursor-pointer"
+                  >
+                    {STORES.map(s => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                  <button
+                    onClick={() => fileRef.current?.click()}
+                    disabled={uploading || upsertTargets.isPending}
+                    className="flex items-center gap-1.5 text-sm px-3 py-1.5 text-gray-600 hover:bg-gray-50 transition-colors disabled:opacity-50"
+                  >
+                    <Upload size={14} /> {uploading || upsertTargets.isPending ? 'Importing…' : 'Upload Excel'}
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         )}
