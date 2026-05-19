@@ -243,6 +243,23 @@ function getDefaultDeliveryDate(): string {
   return toLocalDateString(next);
 }
 
+/** Packer's current delivery: today if delivery day and before 16:00, else next delivery day. */
+function getPackerDeliveryDate(): string {
+  const now = new Date();
+  const CUTOFF_HOUR = 16; // 14:00 departs + 2 h grace
+  // If today is a delivery day and we're before the cutoff, today is still active
+  if (DELIVERY_DAYS.includes(now.getDay()) && now.getHours() < CUTOFF_HOUR) {
+    return toLocalDateString(now);
+  }
+  // Otherwise advance to the next delivery day
+  for (let i = 1; i <= 7; i++) {
+    const next = new Date(now);
+    next.setDate(now.getDate() + i);
+    if (DELIVERY_DAYS.includes(next.getDay())) return toLocalDateString(next);
+  }
+  return toLocalDateString(now);
+}
+
 /** Next N upcoming delivery dates (Mon/Tue/Wed/Fri) starting from today */
 function getUpcomingDeliveryDates(count = 24): { date: string; label: string; dow: number }[] {
   const result: { date: string; label: string; dow: number }[] = [];
@@ -968,7 +985,14 @@ export default function DeliveryPage() {
     return toLocalDateString(d);
   }, [selectedWeek, selectedDow, defaultDate]);
 
-  const targetDate = viewMode === 'manager' ? managerDate : defaultDate;
+  // Packer date: auto-advances past 16:00; re-evaluated every minute
+  const [packerDate, setPackerDate] = useState<string>(() => getPackerDeliveryDate());
+  useEffect(() => {
+    const id = setInterval(() => setPackerDate(getPackerDeliveryDate()), 60_000);
+    return () => clearInterval(id);
+  }, []);
+
+  const targetDate = viewMode === 'manager' ? managerDate : packerDate;
   const dayOfWeek = new Date(targetDate + 'T12:00:00').getDay();
   const stdDayKey = DOW_TO_STD_KEY[dayOfWeek] ?? 'mon';
 
