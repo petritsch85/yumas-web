@@ -936,6 +936,7 @@ export default function DeliveryPage() {
   /* Upload Excel */
   const [uploading, setUploading] = useState(false);
   const [uploadMsg, setUploadMsg] = useState('');
+  const [uploadStore, setUploadStore] = useState<Store>('Eschborn');
 
   const setMode = (mode: ViewMode) => {
     setViewMode(mode);
@@ -1193,7 +1194,7 @@ export default function DeliveryPage() {
   const upsertTargets = useMutation({
     mutationFn: async (rows: ParsedItem[]) => {
       const payload = rows.map(r => ({
-        location_name: activeStore,
+        location_name: uploadStore,
         section: r.section,
         item_name: r.item_name,
         unit: r.unit,
@@ -1208,7 +1209,7 @@ export default function DeliveryPage() {
     },
     onSuccess: (_, rows) => {
       qc.invalidateQueries({ queryKey: ['delivery-run', targetDate] });
-      setUploadMsg(`Imported ${rows.length} items for ${activeStore}.`);
+      setUploadMsg(`Imported ${rows.length} items for ${uploadStore}.`);
       setTimeout(() => setUploadMsg(''), 4000);
     },
     onError: (e: Error) => setUploadMsg(`Error: ${e.message}`),
@@ -1810,13 +1811,22 @@ export default function DeliveryPage() {
                   {uploadMsg}
                 </span>
               )}
-              <button
-                onClick={() => fileRef.current?.click()}
-                disabled={uploading || upsertTargets.isPending}
-                className="flex items-center gap-1.5 text-sm border border-gray-200 rounded-lg px-3 py-1.5 text-gray-600 bg-white shadow-sm hover:bg-gray-50 transition-colors disabled:opacity-50"
-              >
-                <Upload size={14} /> {uploading || upsertTargets.isPending ? 'Importing…' : 'Upload Excel'}
-              </button>
+              <div className="flex items-center gap-1 border border-gray-200 rounded-lg bg-white shadow-sm overflow-hidden">
+                <select
+                  value={uploadStore}
+                  onChange={e => setUploadStore(e.target.value as Store)}
+                  className="text-sm text-gray-600 px-2 py-1.5 bg-transparent border-r border-gray-200 focus:outline-none cursor-pointer"
+                >
+                  {STORES.map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
+                <button
+                  onClick={() => fileRef.current?.click()}
+                  disabled={uploading || upsertTargets.isPending}
+                  className="flex items-center gap-1.5 text-sm px-3 py-1.5 text-gray-600 hover:bg-gray-50 transition-colors disabled:opacity-50"
+                >
+                  <Upload size={14} /> {uploading || upsertTargets.isPending ? 'Importing…' : 'Upload Excel'}
+                </button>
+              </div>
             </div>
 
             {/* Row 2: Delivery day buttons + lock controls */}
