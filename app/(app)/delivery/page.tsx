@@ -1184,25 +1184,67 @@ export default function DeliveryPage() {
       const wb = XLSX.read(buffer, { type: 'array' });
       const ws = wb.Sheets[wb.SheetNames[0]];
       const raw: unknown[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+
+      // ── Auto-detect day-column positions ─────────────────────────────────
+      // Scan first 20 rows for a header row containing Mo / Di / Mi / Fr
+      let moCol = 3, diCol = 4, miCol = 5, frCol = 6; // legacy default (cols D-G)
+      let dataStartRow = 2;
+      for (let i = 0; i < Math.min(20, raw.length); i++) {
+        const cells = (raw[i] as unknown[]).map(c => String(c ?? '').trim());
+        const moIdx = cells.findIndex(c => c === 'Mo');
+        if (moIdx >= 0) {
+          const diIdx = cells.findIndex((c, j) => j > moIdx && c === 'Di');
+          const miIdx = cells.findIndex((c, j) => j > moIdx && c === 'Mi');
+          const frIdx = cells.findIndex((c, j) => j > moIdx && c === 'Fr');
+          if (diIdx > 0 && miIdx > 0 && frIdx > 0) {
+            moCol = moIdx; diCol = diIdx; miCol = miIdx; frCol = frIdx;
+            dataStartRow = i + 1;
+            break;
+          }
+        }
+      }
+
+      // ── Section name normalisation ────────────────────────────────────────
+      const SECTION_MAP: Record<string, string> = {
+        'kühl-/gefrierschrank': 'Kühlhaus',
+        'fleischkuehlschrank':  'Kühlhaus',
+      };
+      const SKIP_SECTIONS = new Set(['other']);
+      const STOP_SECTIONS = new Set(['zk view']); // repeated data below this row
+
       const parsed: ParsedItem[] = [];
-      let currentSection = 'Uncategorised';
-      for (let i = 2; i < raw.length; i++) {
+      let currentSection = 'Kühlhaus';
+      let skipSection = false;
+      const toNum = (v: unknown) => Math.max(0, parseFloat(String(v ?? '')) || 0);
+
+      for (let i = dataStartRow; i < raw.length; i++) {
         const row = raw[i] as unknown[];
         const colA = String(row[0] ?? '').trim();
         const colC = String(row[2] ?? '').trim();
-        const colD = row[3]; const colE = row[4]; const colF = row[5]; const colG = row[6];
         if (!colA) continue;
-        const hasUnit = colC !== '';
-        const hasNumbers = [colD, colE, colF, colG].some(v => v !== '' && !isNaN(Number(v)));
-        if (!hasUnit && !hasNumbers) { currentSection = colA; continue; }
+
+        if (colC === '') {
+          // No unit → section header or metadata
+          const key = colA.toLowerCase();
+          if (STOP_SECTIONS.has(key)) break;
+          skipSection = SKIP_SECTIONS.has(key);
+          currentSection = SECTION_MAP[key] ?? colA;
+          continue;
+        }
+
+        if (skipSection) continue;
+
         parsed.push({
-          section: currentSection, item_name: colA, unit: colC,
-          mon_target: parseFloat(String(colD)) || 0,
-          tue_target: parseFloat(String(colE)) || 0,
-          wed_target: parseFloat(String(colF)) || 0,
-          fri_target: parseFloat(String(colG)) || 0,
+          section: currentSection,
+          item_name: colA,
+          unit: colC,
+          mon_target: toNum(row[moCol]),
+          tue_target: toNum(row[diCol]),
+          wed_target: toNum(row[miCol]),
+          fri_target: toNum(row[frCol]),
         });
       }
+
       if (parsed.length === 0) setUploadMsg('No data rows found in the file.');
       else upsertTargets.mutate(parsed);
     } catch (err: unknown) {
