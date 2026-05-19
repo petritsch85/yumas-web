@@ -1639,14 +1639,23 @@ export default function DeliveryPage() {
                 {/* Footer */}
                 <div className="px-6 py-4 border-t border-gray-100 flex-shrink-0 flex items-center justify-between bg-gray-50/50 rounded-b-2xl">
                   <p className="text-xs text-gray-400">Changes update the base targets for all future runs.</p>
-                  <button
-                    onClick={() => saveStandards.mutate()}
-                    disabled={saveStandards.isPending || stdTargets.length === 0}
-                    className="flex items-center gap-2 bg-[#1B5E20] text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-[#2E7D32] transition-colors disabled:opacity-50"
-                  >
-                    <Save size={15} />
-                    {saveStandards.isPending ? 'Saving…' : 'Save Changes'}
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setStdEdits({})}
+                      disabled={saveStandards.isPending || Object.keys(stdEdits).length === 0}
+                      className="flex items-center gap-2 border border-gray-200 text-gray-500 px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-100 transition-colors disabled:opacity-40"
+                    >
+                      Reset
+                    </button>
+                    <button
+                      onClick={() => saveStandards.mutate()}
+                      disabled={saveStandards.isPending || stdTargets.length === 0}
+                      className="flex items-center gap-2 bg-[#1B5E20] text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-[#2E7D32] transition-colors disabled:opacity-50"
+                    >
+                      <Save size={15} />
+                      {saveStandards.isPending ? 'Saving…' : 'Save Changes'}
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
