@@ -1151,13 +1151,15 @@ export default function DeliveryPage() {
   });
   const canManage = profile?.role === 'admin' || profile?.role === 'manager';
 
-  // For non-managers: auto-set view based on their role/location
+  // For non-managers: auto-set view based on their role/location/permissions
   useEffect(() => {
     if (!profile || canManage) return;
+    const perms = profile.permissions as any;
     const locName = profile.locationName;
-    if ((profile.permissions as any)?.driver) { setViewMode('driver'); return; }
-    if (locName && STORES.includes(locName as Store)) { setViewMode('store'); return; }
-    setViewMode('packer');
+    if (perms?.driver)                              { setViewMode('driver'); return; }
+    if (locName && STORES.includes(locName as Store)) { setViewMode('store');  return; }
+    // packer: true explicitly OR undefined (legacy — treat as packer by default)
+    if (perms?.packer !== false)                    { setViewMode('packer'); return; }
   }, [profile?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Which store does this user belong to? (for Store Manager auto-filter)

@@ -16,6 +16,8 @@ type AppPermissions = {
   buying:       boolean;
   waste_log:    boolean;
   delivery:     boolean;
+  packer:       boolean; // delivery sub-role: auto-routes to Packer view
+  driver:       boolean; // delivery sub-role: auto-routes to Driver view
   analysis:     boolean;
   events:       boolean;
   staff_videos: boolean;
@@ -77,19 +79,22 @@ const MODULE_GROUPS: ModuleGroup[] = [
 
 const STAFF_DEFAULTS: AppPermissions = {
   inventory: true, production: false, buying: false, waste_log: true,
-  delivery: false, analysis: false, events: false, staff_videos: true,
+  delivery: false, packer: true, driver: false,
+  analysis: false, events: false, staff_videos: true,
   bills: false, pl_reports: false, suppliers: false, products: false,
 };
 
 const MANAGER_DEFAULTS: AppPermissions = {
   inventory: true, production: true, buying: true, waste_log: true,
-  delivery: true, analysis: true, events: true, staff_videos: true,
+  delivery: true, packer: false, driver: false,
+  analysis: true, events: true, staff_videos: true,
   bills: false, pl_reports: true, suppliers: true, products: true,
 };
 
 const ADMIN_DEFAULTS: AppPermissions = {
   inventory: true, production: true, buying: true, waste_log: true,
-  delivery: true, analysis: true, events: true, staff_videos: true,
+  delivery: true, packer: false, driver: false,
+  analysis: true, events: true, staff_videos: true,
   bills: true, pl_reports: true, suppliers: true, products: true,
 };
 
@@ -230,34 +235,69 @@ function PermissionsEditor({
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
               {group.items.map(({ key, label, description }) => {
                 const checked = !!perms[key];
-                // Show role-specific description for inventory
                 const displayDesc = key === 'inventory' && role?.startsWith('staff')
                   ? 'Add counts only'
                   : description;
+                const isNonManager = !role || (role !== 'admin' && role !== 'manager');
                 return (
-                  <label
-                    key={key}
-                    className={`flex items-start gap-2.5 p-3 rounded-xl border cursor-pointer transition-all select-none ${
-                      checked
-                        ? 'bg-indigo-50 border-indigo-300 text-indigo-900'
-                        : 'bg-white border-gray-200 text-gray-600 hover:border-indigo-200 hover:bg-gray-50'
-                    }`}
-                  >
-                    <input
-                      type="checkbox"
-                      className="sr-only"
-                      checked={checked}
-                      onChange={() => toggle(key)}
-                    />
-                    {checked
-                      ? <CheckSquare size={15} className="text-indigo-600 flex-shrink-0 mt-0.5" />
-                      : <Square size={15} className="text-gray-300 flex-shrink-0 mt-0.5" />
-                    }
-                    <div>
-                      <div className={`text-xs font-semibold ${checked ? 'text-indigo-800' : 'text-gray-700'}`}>{label}</div>
-                      {displayDesc && <div className="text-xs text-gray-400 mt-0.5 leading-tight">{displayDesc}</div>}
-                    </div>
-                  </label>
+                  <div key={key}>
+                    <label
+                      className={`flex items-start gap-2.5 p-3 rounded-xl border cursor-pointer transition-all select-none ${
+                        checked
+                          ? 'bg-indigo-50 border-indigo-300 text-indigo-900'
+                          : 'bg-white border-gray-200 text-gray-600 hover:border-indigo-200 hover:bg-gray-50'
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        className="sr-only"
+                        checked={checked}
+                        onChange={() => toggle(key)}
+                      />
+                      {checked
+                        ? <CheckSquare size={15} className="text-indigo-600 flex-shrink-0 mt-0.5" />
+                        : <Square size={15} className="text-gray-300 flex-shrink-0 mt-0.5" />
+                      }
+                      <div>
+                        <div className={`text-xs font-semibold ${checked ? 'text-indigo-800' : 'text-gray-700'}`}>{label}</div>
+                        {displayDesc && <div className="text-xs text-gray-400 mt-0.5 leading-tight">{displayDesc}</div>}
+                      </div>
+                    </label>
+
+                    {/* Delivery sub-roles: only for non-manager/admin when delivery is enabled */}
+                    {key === 'delivery' && checked && isNonManager && (
+                      <div className="mt-1.5 ml-3 flex gap-2">
+                        {([
+                          { flag: 'packer' as PermKey, label: '📦 Packer' },
+                          { flag: 'driver' as PermKey, label: '🚚 Driver' },
+                        ] as { flag: PermKey; label: string }[]).map(({ flag, label: subLabel }) => {
+                          const subChecked = !!perms[flag];
+                          return (
+                            <label
+                              key={flag}
+                              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs cursor-pointer transition-all select-none ${
+                                subChecked
+                                  ? 'bg-indigo-100 border-indigo-300 text-indigo-800 font-semibold'
+                                  : 'bg-white border-gray-200 text-gray-500 hover:border-indigo-200'
+                              }`}
+                            >
+                              <input
+                                type="checkbox"
+                                className="sr-only"
+                                checked={subChecked}
+                                onChange={() => onChange({ ...perms, [flag]: !subChecked })}
+                              />
+                              {subChecked
+                                ? <CheckSquare size={12} className="text-indigo-600 flex-shrink-0" />
+                                : <Square size={12} className="text-gray-300 flex-shrink-0" />
+                              }
+                              {subLabel}
+                            </label>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
                 );
               })}
             </div>
