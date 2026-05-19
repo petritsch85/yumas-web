@@ -7,7 +7,8 @@ import {
   RefreshCw, CheckCircle2, AlertCircle, Package, TrendingUp,
   Eye, Settings2, Truck, Play, Timer, Flag, XCircle,
   Upload, SlidersHorizontal, Save, X, CalendarDays,
-  Navigation, Store, ClipboardCheck, Clock,
+  Navigation, Store, ClipboardCheck, Clock, Lock, LockOpen,
+  ClipboardList,
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import type { Profile } from '@/types';
@@ -98,6 +99,11 @@ type DeliveryRun = {
   delivery_finished_by: string | null;
   lists_checked_at: string | null;
   lists_checked_by: string | null;
+  list_confirmed_eschborn_at: string | null;
+  list_confirmed_taunus_at:   string | null;
+  list_confirmed_westend_at:  string | null;
+  day_locked_at:  string | null;
+  day_locked_by:  string | null;
 };
 
 type StoreReceipt = {
@@ -193,6 +199,12 @@ type WeeklyForecast = {
 /* ─── Constants ──────────────────────────────────────────────────────────── */
 const STORES = ['Eschborn', 'Taunus', 'Westend'] as const;
 type Store = typeof STORES[number];
+
+const STORE_CONFIRM_COL: Record<Store, keyof DeliveryRun> = {
+  Eschborn: 'list_confirmed_eschborn_at',
+  Taunus:   'list_confirmed_taunus_at',
+  Westend:  'list_confirmed_westend_at',
+};
 
 const SECTIONS = ['Kühlhaus', 'Tiefkühler', 'Trockenware', 'Regale', 'Lager'];
 
@@ -957,6 +969,8 @@ export default function DeliveryPage() {
   const [startingDelivery, setStartingDelivery] = useState(false);
   const [finishingDelivery, setFinishingDelivery] = useState(false);
   const [confirmingList, setConfirmingList] = useState(false);
+  const [confirmingStore, setConfirmingStore] = useState<Store | null>(null);
+  const [lockingDay, setLockingDay] = useState(false);
 
   useEffect(() => {
     return () => { if (packingInterval.current) clearInterval(packingInterval.current); };
@@ -1370,6 +1384,57 @@ export default function DeliveryPage() {
     }
   };
 
+  const confirmStore = async (store: Store) => {
+    if (!run) return;
+    setConfirmingStore(store);
+    try {
+      const col = STORE_CONFIRM_COL[store];
+      const now = new Date().toISOString();
+      await supabase.from('delivery_runs').update({ [col]: now }).eq('id', run.id);
+      qc.invalidateQueries({ queryKey: ['delivery-run', targetDate] });
+    } finally {
+      setConfirmingStore(null);
+    }
+  };
+
+  const lockDay = async () => {
+    if (!run) return;
+    setLockingDay(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      await supabase.from('delivery_runs').update({
+        day_locked_at: new Date().toISOString(),
+        day_locked_by: user?.id ?? null,
+        lists_checked_at: new Date().toISOString(),
+        lists_checked_by: user?.id ?? null,
+      }).eq('id', run.id);
+      qc.invalidateQueries({ queryKey: ['delivery-run', targetDate] });
+    } finally {
+      setLockingDay(false);
+    }
+  };
+
+  const unlockDay = async () => {
+    if (!run) return;
+    setLockingDay(true);
+    try {
+      await supabase.from('delivery_runs').update({
+        day_locked_at: null,
+        day_locked_by: null,
+      }).eq('id', run.id);
+      qc.invalidateQueries({ queryKey: ['delivery-run', targetDate] });
+    } finally {
+      setLockingDay(false);
+    }
+  };
+
+  /* ─ Per-store confirmation derived state ─ */
+  const storeConfirmedAt = (store: Store): string | null =>
+    run ? (run[STORE_CONFIRM_COL[store]] as string | null) : null;
+  const allStoresConfirmed = STORES.every(s => !!storeConfirmedAt(s));
+  const dayLocked = !!run?.day_locked_at;
+  const deliveryStarted = !!run?.delivery_started_at;
+
   /* ─ Receipt status (for driver live view) ─ */
   const { data: receiptStatus = {} } = useQuery<Partial<Record<Store, boolean>>>({
     queryKey: ['store-receipts-status', run?.id],
@@ -1640,8 +1705,12 @@ export default function DeliveryPage() {
         <div className="flex items-start justify-between mb-4">
           <div>
             <div className="flex items-center gap-2 mb-1">
-              <Truck size={20} className="text-[#1B5E20]" />
-              <h1 className="text-2xl font-bold text-gray-900">Packing</h1>
+              {viewMode === 'manager'
+                ? <ClipboardList size={20} className="text-[#1B5E20]" />
+                : <Truck size={20} className="text-[#1B5E20]" />}
+              <h1 className="text-2xl font-bold text-gray-900">
+                {viewMode === 'manager' ? 'List confirmation' : 'Packing'}
+              </h1>
             </div>
             <p className="text-sm text-gray-500">Mon · Tue · Wed · Fri — departs ZK at 14:00</p>
           </div>
@@ -1686,7 +1755,12 @@ export default function DeliveryPage() {
 
             {/* Manager: Generate */}
             {viewMode === 'manager' && (
-              <button onClick={handleGenerate} disabled={generating} className="flex items-center gap-2 bg-[#1B5E20] text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-[#2E7D32] transition-colors disabled:opacity-60 shadow-sm">
+              <button
+                onClick={handleGenerate}
+                disabled={generating || dayLocked}
+                title={dayLocked ? 'Day is locked — unlock to regenerate' : undefined}
+                className="flex items-center gap-2 bg-[#1B5E20] text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-[#2E7D32] transition-colors disabled:opacity-60 shadow-sm"
+              >
                 {generating ? <><RefreshCw size={15} className="animate-spin" /> Generating…</> : <><RefreshCw size={15} /> {run ? 'Regenerate' : 'Generate List'}</>}
               </button>
             )}
@@ -1736,12 +1810,12 @@ export default function DeliveryPage() {
               </button>
             </div>
 
-            {/* Row 2: Delivery day buttons */}
-            <div className="flex items-center gap-2">
+            {/* Row 2: Delivery day buttons + lock controls */}
+            <div className="flex items-center gap-2 flex-wrap">
               <span className="text-xs text-gray-500 font-medium whitespace-nowrap">Delivery Day:</span>
               {DELIVERY_DAY_BUTTONS.map(btn => {
                 const isActive = selectedDow === btn.dow;
-                // Compute the actual date for this button to show the date label
+                const isLocked = isActive && dayLocked;
                 const d = new Date(selectedWeek + 'T12:00:00');
                 d.setDate(d.getDate() + btn.offset);
                 const dayNum = d.getDate();
@@ -1750,17 +1824,47 @@ export default function DeliveryPage() {
                   <button
                     key={btn.dow}
                     onClick={() => setSelectedDow(btn.dow)}
-                    className={`flex flex-col items-center px-5 py-2 rounded-lg text-sm font-semibold border transition-colors ${
+                    className={`relative flex flex-col items-center px-5 py-2 rounded-lg text-sm font-semibold border transition-colors ${
                       isActive
-                        ? 'bg-[#1B5E20] border-[#1B5E20] text-white shadow-sm'
+                        ? isLocked
+                          ? 'bg-gray-700 border-gray-700 text-white shadow-sm'
+                          : 'bg-[#1B5E20] border-[#1B5E20] text-white shadow-sm'
                         : 'border-gray-200 text-gray-600 bg-white hover:border-[#1B5E20] hover:text-[#1B5E20]'
                     }`}
                   >
-                    <span className="text-[11px] font-bold uppercase tracking-wide leading-tight">{btn.label}</span>
-                    <span className={`text-[10px] leading-tight mt-0.5 ${isActive ? 'text-green-200' : 'text-gray-400'}`}>{dayNum} {monAbbr}</span>
+                    <span className="flex items-center gap-1 text-[11px] font-bold uppercase tracking-wide leading-tight">
+                      {isLocked && <Lock size={9} />}
+                      {btn.label}
+                    </span>
+                    <span className={`text-[10px] leading-tight mt-0.5 ${isActive ? 'text-gray-200' : 'text-gray-400'}`}>{dayNum} {monAbbr}</span>
                   </button>
                 );
               })}
+
+              {/* Lock / Unlock controls */}
+              {run && !isPreview && (
+                dayLocked ? (
+                  !deliveryStarted && (
+                    <button
+                      onClick={unlockDay}
+                      disabled={lockingDay}
+                      className="flex items-center gap-1.5 text-sm border border-gray-300 rounded-lg px-3 py-2 text-gray-600 bg-white shadow-sm hover:bg-gray-50 transition-colors disabled:opacity-50 ml-2"
+                    >
+                      <LockOpen size={13} /> {lockingDay ? 'Unlocking…' : 'Unlock'}
+                    </button>
+                  )
+                ) : (
+                  allStoresConfirmed && (
+                    <button
+                      onClick={lockDay}
+                      disabled={lockingDay}
+                      className="flex items-center gap-1.5 text-sm border border-gray-700 rounded-lg px-3 py-2 text-gray-700 bg-white shadow-sm hover:bg-gray-700 hover:text-white transition-colors disabled:opacity-50 ml-2"
+                    >
+                      <Lock size={13} /> {lockingDay ? 'Locking…' : 'Lock Day'}
+                    </button>
+                  )
+                )
+              )}
             </div>
           </div>
         )}
@@ -1847,63 +1951,80 @@ export default function DeliveryPage() {
                 </div>
               )}
 
-              {/* Store tabs */}
-              <div className="flex gap-1 mb-5 bg-gray-100 rounded-xl p-1 w-fit">
+              {/* Store tabs — with per-store confirmation badges */}
+              <div className="flex gap-1 mb-3 bg-gray-100 rounded-xl p-1 w-fit">
                 {STORES.map(store => {
                   const { full, total, complete } = storePackStats(store);
                   const isActive = activeStore === store;
                   const isPacker = viewMode === 'packer';
+                  const confirmed = !!storeConfirmedAt(store);
                   return (
                     <button key={store} onClick={() => setActiveStore(store)}
                       className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 ${isActive ? 'bg-white text-[#1B5E20] shadow-sm font-semibold' : 'text-gray-500 hover:text-gray-700'}`}
                     >
                       {store}
-                      {isPacker && packingStarted ? (
+                      {/* Manager view: show confirmation checkmark */}
+                      {viewMode === 'manager' && run && !isPreview && (
+                        confirmed
+                          ? <CheckCircle2 size={13} className={isActive ? 'text-[#1B5E20]' : 'text-green-500'} />
+                          : <span className={`w-2 h-2 rounded-full ${isActive ? 'bg-amber-400' : 'bg-gray-300'}`} />
+                      )}
+                      {/* Packer view: show item counts */}
+                      {isPacker && packingStarted && (
                         complete
                           ? <CheckCircle2 size={14} className="text-[#1B5E20]" />
-                          : <span className={`text-xs rounded-full px-1.5 py-0.5 font-bold leading-none ${isActive ? 'bg-[#1B5E20] text-white' : 'bg-gray-300 text-gray-600'}`}>{full}/{total}</span>
-                      ) : (
-                        total > 0 && <span className={`text-xs rounded-full px-1.5 py-0.5 font-bold leading-none ${isActive ? 'bg-[#1B5E20] text-white' : 'bg-gray-300 text-gray-600'}`}>{total}</span>
+                          : total > 0 && <span className={`text-xs rounded-full px-1.5 py-0.5 font-bold leading-none ${isActive ? 'bg-[#1B5E20] text-white' : 'bg-gray-300 text-gray-600'}`}>{full}/{total}</span>
+                      )}
+                      {!isPacker && (viewMode !== 'manager' || isPreview || !run) && total > 0 && (
+                        <span className={`text-xs rounded-full px-1.5 py-0.5 font-bold leading-none ${isActive ? 'bg-[#1B5E20] text-white' : 'bg-gray-300 text-gray-600'}`}>{total}</span>
                       )}
                     </button>
                   );
                 })}
               </div>
 
-              {/* ── Confirm packing list (manager only, run exists, not preview) ── */}
-              {viewMode === 'manager' && run && !isPreview && (
-                run.lists_checked_at ? (
-                  <div className="mb-4 flex items-center gap-3 px-4 py-3 bg-green-50 border border-green-200 rounded-xl">
-                    <CheckCircle2 size={16} className="text-green-600 flex-shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <span className="text-sm font-semibold text-green-800">Packing list confirmed</span>
-                      <span className="text-xs text-green-600 ml-2">
-                        {new Date(run.lists_checked_at).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}
-                      </span>
+              {/* ── Per-store confirm banner (manager only, run exists, not preview, not locked) ── */}
+              {viewMode === 'manager' && run && !isPreview && (() => {
+                const confirmedAt = storeConfirmedAt(activeStore);
+                if (confirmedAt) {
+                  return (
+                    <div className="mb-4 flex items-center gap-3 px-4 py-3 bg-green-50 border border-green-200 rounded-xl">
+                      <CheckCircle2 size={16} className="text-green-600 flex-shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <span className="text-sm font-semibold text-green-800">{activeStore} confirmed</span>
+                        <span className="text-xs text-green-600 ml-2">
+                          {new Date(confirmedAt).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                      </div>
+                      {!dayLocked && (
+                        <button
+                          onClick={() => confirmStore(activeStore)}
+                          disabled={confirmingStore === activeStore}
+                          className="text-xs text-green-600 hover:text-green-800 underline whitespace-nowrap"
+                        >
+                          Re-confirm
+                        </button>
+                      )}
                     </div>
-                    <button
-                      onClick={confirmList}
-                      disabled={confirmingList}
-                      className="text-xs text-green-600 hover:text-green-800 underline whitespace-nowrap"
-                    >
-                      Re-confirm
-                    </button>
-                  </div>
-                ) : (
+                  );
+                }
+                return (
                   <div className="mb-4 flex items-center gap-3 px-4 py-3 bg-white border border-gray-200 rounded-xl shadow-sm">
                     <AlertCircle size={16} className="text-amber-500 flex-shrink-0" />
-                    <p className="text-sm text-gray-700 flex-1">Review the suggested packing quantities, then confirm the list is ready for packing.</p>
+                    <p className="text-sm text-gray-700 flex-1">
+                      Review the {activeStore} packing quantities, then confirm the list.
+                    </p>
                     <button
-                      onClick={confirmList}
-                      disabled={confirmingList}
+                      onClick={() => confirmStore(activeStore)}
+                      disabled={confirmingStore === activeStore}
                       className="flex items-center gap-1.5 bg-[#1B5E20] text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-[#2E7D32] transition-colors disabled:opacity-60 whitespace-nowrap shadow-sm"
                     >
                       <CheckCircle2 size={14} />
-                      {confirmingList ? 'Confirming…' : 'Confirm List'}
+                      {confirmingStore === activeStore ? 'Confirming…' : `Confirm ${activeStore}`}
                     </button>
                   </div>
-                )
-              )}
+                );
+              })()}
 
               {/* Store lists */}
               {STORES.map(store => (
