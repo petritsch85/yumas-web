@@ -116,7 +116,6 @@ const NAV_GROUPS: NavGroup[] = [
         labelKey: 'sidebar.nav.delivery', href: '/delivery', icon: Truck, permKey: 'delivery',
         children: [
           { labelKey: 'sidebar.nav.stages',           href: '/delivery',          icon: Truck },
-          { labelKey: 'sidebar.nav.salesForecast',    href: '/delivery/forecast', icon: TrendingUp },
           { labelKey: 'sidebar.nav.deliveryReports',  href: '/delivery/reports',  icon: ClipboardList },
         ],
       },

@@ -31,7 +31,6 @@ function getTitleKey(pathname: string): string {
     '/settings/locations':        'topbar.locations',
     '/settings/categories':       'topbar.categories',
     '/delivery':                  'topbar.delivery',
-    '/delivery/forecast':         'topbar.salesForecast',
     '/delivery/reports':          'topbar.deliveryReports',
     '/delivery/targets':          'topbar.deliveryTargets',
     '/analysis':                  'topbar.analysis',
