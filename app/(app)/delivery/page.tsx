@@ -1464,7 +1464,7 @@ export default function DeliveryPage() {
           allLines.push({
             run_id: runId, location_name: store, section: target.section,
             item_name: target.item_name, unit: target.unit,
-            standard_target_qty: baseTarget, target_qty: effectiveTarget,
+            standard_target_qty: effectiveTarget, target_qty: effectiveTarget,
             reported_qty: reportedQty, delivery_qty: deliveryQty,
             is_packed: false, packed_qty: null,
           });
