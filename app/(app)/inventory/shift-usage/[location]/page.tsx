@@ -8,13 +8,22 @@ import { useRouter, useParams } from 'next/navigation';
 import { useT } from '@/lib/i18n';
 import {
   computeSimplyRatios,
-  computeDailyForecast,
   currentQuarterRange,
   type ForecastSettings,
-  type ForecastOverride,
   type ShiftRowLite,
   type DelivRowLite,
 } from '@/lib/forecast-utils';
+
+/* ── DOW guest helper (mirrors Sales Reports logic) ──────────────────────── */
+const DOW_GUEST_KEYS = [
+  'guests_sun','guests_mon','guests_tue','guests_wed',
+  'guests_thu','guests_fri','guests_sat',
+] as const;
+function getDowGuests(s: import('@/lib/forecast-utils').ForecastSettings | undefined, dateKey: string): number | null {
+  if (!s) return null;
+  const key = DOW_GUEST_KEYS[new Date(dateKey + 'T12:00:00Z').getUTCDay()];
+  return (s as Record<string, unknown>)[key] as number ?? null;
+}
 
 /* ── Canonical sort order ─────────────────────────────────────────────────── */
 const SECTION_ORDER = ['Kühlhaus', 'Tiefkühler', 'Trockenware', 'Regale', 'Lager'];
@@ -109,6 +118,19 @@ type DayShiftSales = {
   dinnerIsActual: boolean; // true = uploaded, false = forecast
 } | null; // null = no settings / no data
 
+type DailyForecastRow = {
+  forecast_date:   string;
+  shift_type:      'lunch' | 'dinner';
+  est_guests:      number | null;
+  spend_per_guest: number | null;
+};
+
+type OutgoingBillRow = {
+  event_date: string;
+  shift_type: 'lunch' | 'dinner' | null;
+  net_total:  number;
+};
+
 function cellKey(date: string, shift: 'lunch' | 'dinner', itemName: string): string {
   return `${date}|${shift}|${itemName}`;
 }
@@ -150,7 +172,7 @@ export default function ShiftUsagePage() {
     queryFn: async () => {
       const { data } = await supabase
         .from('forecast_settings')
-        .select('location_id,shift_type,week_base_net,growth_rate,weight_mon,weight_tue,weight_wed,weight_thu,weight_fri,weight_sat,weight_sun,closed_weekdays')
+        .select('location_id,shift_type,week_base_net,growth_rate,weight_mon,weight_tue,weight_wed,weight_thu,weight_fri,weight_sat,weight_sun,closed_weekdays,default_spend_per_guest,guests_mon,guests_tue,guests_wed,guests_thu,guests_fri,guests_sat,guests_sun')
         .eq('location_id', locId!);
       return (data ?? []) as ForecastSettings[];
     },
@@ -233,49 +255,85 @@ export default function ShiftUsagePage() {
     },
   });
 
-  /* ── Week forecast overrides ── */
-  const { data: weekOverrides = [] } = useQuery({
-    queryKey: ['forecast-overrides-shift-usage', weekStart, weekEnd, locId],
+  /* ── Week daily forecasts (est_guests × spend_per_guest — same source as P&L) ── */
+  const { data: weekDailyForecasts = [] } = useQuery({
+    queryKey: ['daily-forecasts-shift-usage', weekStart, weekEnd, locId],
     enabled: !!weekStart && !!locId,
     staleTime: 0,
     queryFn: async () => {
       const { data } = await supabase
-        .from('forecast_overrides')
-        .select('location_id, forecast_date, shift_type, net_revenue')
+        .from('daily_forecasts')
+        .select('forecast_date, shift_type, est_guests, spend_per_guest')
         .eq('location_id', locId!)
         .gte('forecast_date', weekStart)
         .lte('forecast_date', weekEnd);
-      return (data ?? []) as ForecastOverride[];
+      return (data ?? []) as DailyForecastRow[];
+    },
+  });
+
+  /* ── Week outgoing bills (large-group invoices — included in P&L Total) ── */
+  const { data: weekBills = [] } = useQuery({
+    queryKey: ['outgoing-bills-shift-usage', weekStart, weekEnd, locationName],
+    enabled: !!weekStart && !!locationName,
+    staleTime: 0,
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('outgoing_bills')
+        .select('event_date, shift_type, net_total')
+        .eq('issuing_location', locationName)
+        .gte('event_date', weekStart)
+        .lte('event_date', weekEnd);
+      return (data ?? []) as OutgoingBillRow[];
     },
   });
 
   /* ── Compute per-day, per-shift sales ─────────────────────────────────────
    *
-   * Each shift is evaluated independently:
-   *   - If OB data exists for that shift → actual (blue)
-   *   - Otherwise → forecast (green)
-   *
-   * This means within a single day, lunch can be blue (uploaded) while
-   * dinner is still green (forecast, not yet done).
+   * Mirrors the P&L Sales Reports "Total Lunch / Total Dinner" exactly:
+   *   Actual  = OB (shift_reports) + Simply (delivery_reports) + Bills (outgoing_bills)
+   *   Forecast = est_guests × spend_per_guest  +  obForecast × simplyRatio
    */
   const salesByDay = useMemo((): Record<string, DayShiftSales> => {
     const m: Record<string, DayShiftSales> = {};
+    const today    = new Date();
+    const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
 
-    // Determine which OB shifts are uploaded per date
+    // OB actuals per date
     const obByDate: Record<string, ShiftRowLite[]> = {};
     for (const r of weekShiftRows) {
       if (!obByDate[r.report_date]) obByDate[r.report_date] = [];
       obByDate[r.report_date].push(r);
     }
 
-    for (const day of weekDays) {
-      const dk = dateKey(day);
-      const obRows = obByDate[dk] ?? [];
+    // Simply actuals per date/shift
+    const simLunchByDate: Record<string, number>  = {};
+    const simDinnerByDate: Record<string, number> = {};
+    for (const r of weekDelivRows) {
+      if (r.shift_type === 'dinner') simDinnerByDate[r.report_date] = (simDinnerByDate[r.report_date] ?? 0) + (r.net_revenue ?? 0);
+      else                           simLunchByDate[r.report_date]  = (simLunchByDate[r.report_date]  ?? 0) + (r.net_revenue ?? 0);
+    }
 
-      // Determine which OB shifts exist for this date
+    // Bills actuals per date/shift
+    const billsLunchByDate:  Record<string, number> = {};
+    const billsDinnerByDate: Record<string, number> = {};
+    for (const b of weekBills) {
+      if (!b.event_date) continue;
+      if (b.shift_type === 'dinner') billsDinnerByDate[b.event_date] = (billsDinnerByDate[b.event_date] ?? 0) + (b.net_total ?? 0);
+      else                           billsLunchByDate[b.event_date]  = (billsLunchByDate[b.event_date]  ?? 0) + (b.net_total ?? 0);
+    }
+
+    // Daily forecast overrides (est_guests / spend_per_guest)
+    const dailyFcstMap: Record<string, DailyForecastRow> = {};
+    for (const f of weekDailyForecasts) dailyFcstMap[`${f.shift_type}:${f.forecast_date}`] = f;
+
+    for (const day of weekDays) {
+      const dk       = dateKey(day);
+      const isFuture = dk >= todayKey;
+      const obRows   = obByDate[dk] ?? [];
+
+      // ── OB actual breakdown ──
       let obLunchActual = 0, obDinnerActual = 0;
       let hasObLunch = false, hasObDinner = false;
-
       if (obRows.length > 0) {
         const allTagged = obRows.every(r => r.shift_type === 'lunch' || r.shift_type === 'dinner');
         if (allTagged) {
@@ -284,7 +342,6 @@ export default function ShiftUsagePage() {
             else                          { obDinnerActual += r.net_total ?? 0; hasObDinner = true; }
           }
         } else {
-          // Legacy Z-report order: first = lunch, second = dinner
           const sorted = [...obRows].sort(
             (a, b) => parseInt(a.z_report_number || '0', 10) - parseInt(b.z_report_number || '0', 10),
           );
@@ -293,53 +350,40 @@ export default function ShiftUsagePage() {
         }
       }
 
-      // Simply actuals for this date (split by shift_type)
-      let simLunchActual = 0, simDinnerActual = 0;
-      for (const r of weekDelivRows) {
-        if (r.report_date !== dk) continue;
-        if (r.shift_type === 'dinner') simDinnerActual += r.net_revenue ?? 0;
-        else                           simLunchActual  += r.net_revenue ?? 0;
-      }
+      const simLunchActual  = simLunchByDate[dk]   ?? 0;
+      const simDinnerActual = simDinnerByDate[dk]  ?? 0;
+      const billsLunch      = billsLunchByDate[dk]  ?? 0;
+      const billsDinner     = billsDinnerByDate[dk] ?? 0;
 
-      // Forecast overrides
-      const lunchOverride  = weekOverrides.find(o => o.forecast_date === dk && o.shift_type === 'lunch');
-      const dinnerOverride = weekOverrides.find(o => o.forecast_date === dk && o.shift_type === 'dinner');
+      // ── Forecast (guests × spend + Simply ratio) — only for future shifts without actuals ──
+      const lf = dailyFcstMap[`lunch:${dk}`];
+      const lg = lf?.est_guests      ?? getDowGuests(lunchSettings,  dk);
+      const ls = lf?.spend_per_guest ?? lunchSettings?.default_spend_per_guest ?? null;
+      const obLunchForecast = (!hasObLunch && isFuture && lg != null && ls != null)
+        ? Math.round(lg * ls) : 0;
+      const simLunchForecast = (!simLunchActual && isFuture)
+        ? Math.round(obLunchForecast * ratios.lunch) : 0;
 
-      // ── Lunch: actual if OB uploaded, otherwise forecast ──
-      let lunchVal: number;
-      let lunchIsActual: boolean;
-      if (hasObLunch) {
-        lunchVal      = obLunchActual + simLunchActual;
-        lunchIsActual = true;
-      } else {
-        const lOB = lunchOverride?.net_revenue
-          ?? (lunchSettings ? computeDailyForecast(dk, lunchSettings) : 0);
-        lunchVal      = Math.round(lOB + lOB * ratios.lunch);
-        lunchIsActual = false;
-      }
+      const df = dailyFcstMap[`dinner:${dk}`];
+      const dg = df?.est_guests      ?? getDowGuests(dinnerSettings, dk);
+      const ds = df?.spend_per_guest ?? dinnerSettings?.default_spend_per_guest ?? null;
+      const obDinnerForecast = (!hasObDinner && isFuture && dg != null && ds != null)
+        ? Math.round(dg * ds) : 0;
+      const simDinnerForecast = (!simDinnerActual && isFuture)
+        ? Math.round(obDinnerForecast * ratios.dinner) : 0;
 
-      // ── Dinner: actual if OB uploaded, otherwise forecast ──
-      let dinnerVal: number;
-      let dinnerIsActual: boolean;
-      if (hasObDinner) {
-        dinnerVal      = obDinnerActual + simDinnerActual;
-        dinnerIsActual = true;
-      } else {
-        const dOB = dinnerOverride?.net_revenue
-          ?? (dinnerSettings ? computeDailyForecast(dk, dinnerSettings) : 0);
-        dinnerVal      = Math.round(dOB + dOB * ratios.dinner);
-        dinnerIsActual = false;
-      }
+      const lunchVal  = obLunchActual  + simLunchActual  + billsLunch  + obLunchForecast  + simLunchForecast;
+      const dinnerVal = obDinnerActual + simDinnerActual + billsDinner + obDinnerForecast + simDinnerForecast;
 
       if (lunchVal === 0 && dinnerVal === 0) {
         m[dk] = null;
       } else {
-        m[dk] = { lunch: lunchVal, lunchIsActual, dinner: dinnerVal, dinnerIsActual };
+        m[dk] = { lunch: lunchVal, lunchIsActual: hasObLunch, dinner: dinnerVal, dinnerIsActual: hasObDinner };
       }
     }
 
     return m;
-  }, [weekDays, weekShiftRows, weekDelivRows, weekOverrides, lunchSettings, dinnerSettings, ratios]);
+  }, [weekDays, weekShiftRows, weekDelivRows, weekBills, weekDailyForecasts, lunchSettings, dinnerSettings, ratios]);
 
   /* ── Shift usage item data ── */
   const { data: rawItems = [], isLoading: itemsLoading } = useQuery({

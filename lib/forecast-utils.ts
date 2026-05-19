@@ -11,6 +11,11 @@ export type ForecastSettings = {
   weight_mon: number; weight_tue: number; weight_wed: number; weight_thu: number;
   weight_fri: number; weight_sat: number; weight_sun: number;
   closed_weekdays?: string[];
+  // Guest-based forecast fields (newer Sales Reports approach)
+  default_spend_per_guest?: number | null;
+  guests_sun?: number | null; guests_mon?: number | null; guests_tue?: number | null;
+  guests_wed?: number | null; guests_thu?: number | null; guests_fri?: number | null;
+  guests_sat?: number | null;
 };
 
 export type ForecastOverride = {
