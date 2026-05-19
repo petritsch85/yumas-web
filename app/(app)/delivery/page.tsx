@@ -351,7 +351,7 @@ function StoreDeliveryList({
   store, lines, hasSubmission, isActive, onPackedQtyBlur,
   forecast, standard, viewMode, editingTargets, editingPackedQty,
   onTargetChange, onTargetBlur, onPackedQtyChange, packingStarted, isPreview,
-  storeInventory, storeTimestamp, stdScaleMode, onScaleChange, scalingTargets,
+  storeInventory, storeTimestamp, stdScaleMode, onScaleChange, scalingTargets, storeConfirmed,
 }: {
   store: Store;
   lines: DeliveryLine[];
@@ -373,6 +373,7 @@ function StoreDeliveryList({
   stdScaleMode: 'low' | 'std' | 'high';
   onScaleChange: (mode: 'low' | 'std' | 'high') => void;
   scalingTargets?: boolean;
+  storeConfirmed?: boolean;
 }) {
   if (!hasSubmission) {
     return (
@@ -441,8 +442,9 @@ function StoreDeliveryList({
                           <button
                             key={mode}
                             onClick={() => onScaleChange(mode)}
-                            disabled={scalingTargets}
-                            className={`px-3 py-1 rounded-lg text-xs font-semibold transition-colors ${
+                            disabled={scalingTargets || storeConfirmed}
+                            title={storeConfirmed ? 'De-confirm the store to change scale' : undefined}
+                            className={`px-3 py-1 rounded-lg text-xs font-semibold transition-colors disabled:opacity-40 ${
                               active
                                 ? 'bg-[#1B5E20] text-white shadow-sm'
                                 : 'text-gray-500 hover:bg-gray-200'
@@ -533,8 +535,10 @@ function StoreDeliveryList({
                               {Math.round(line.standard_target_qty * 1.25)}
                             </td>
                             <td className="px-3 md:px-4 py-2.5 text-center">
-                              {isPreview ? (
-                                <span className="tabular-nums text-gray-400">{line.target_qty}</span>
+                              {isPreview || storeConfirmed ? (
+                                <span className={`tabular-nums ${storeConfirmed ? 'text-gray-500' : 'text-gray-400'}`}>
+                                  {line.target_qty}
+                                </span>
                               ) : (
                                 <input
                                   type="number" min="0"
@@ -1522,6 +1526,19 @@ export default function DeliveryPage() {
     }
   };
 
+  const [deconfirmingStore, setDeconfirmingStore] = useState<Store | null>(null);
+  const deconfirmStore = async (store: Store) => {
+    if (!run) return;
+    setDeconfirmingStore(store);
+    try {
+      const col = STORE_CONFIRM_COL[store];
+      await supabase.from('delivery_runs').update({ [col]: null }).eq('id', run.id);
+      qc.invalidateQueries({ queryKey: ['delivery-run', targetDate] });
+    } finally {
+      setDeconfirmingStore(null);
+    }
+  };
+
   const lockDay = async () => {
     if (!run) return;
     setLockingDay(true);
@@ -2137,15 +2154,25 @@ export default function DeliveryPage() {
                         <span className="text-xs text-green-600 ml-2">
                           {new Date(confirmedAt).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}
                         </span>
+                        <span className="text-xs text-green-500 ml-2">· Table locked</span>
                       </div>
                       {!dayLocked && (
-                        <button
-                          onClick={() => confirmStore(activeStore)}
-                          disabled={confirmingStore === activeStore}
-                          className="text-xs text-green-600 hover:text-green-800 underline whitespace-nowrap"
-                        >
-                          Re-confirm
-                        </button>
+                        <div className="flex items-center gap-3">
+                          <button
+                            onClick={() => confirmStore(activeStore)}
+                            disabled={confirmingStore === activeStore || deconfirmingStore === activeStore}
+                            className="text-xs text-green-600 hover:text-green-800 underline whitespace-nowrap"
+                          >
+                            Re-confirm
+                          </button>
+                          <button
+                            onClick={() => deconfirmStore(activeStore)}
+                            disabled={confirmingStore === activeStore || deconfirmingStore === activeStore}
+                            className="text-xs text-red-500 hover:text-red-700 underline whitespace-nowrap"
+                          >
+                            {deconfirmingStore === activeStore ? 'De-confirming…' : 'De-confirm'}
+                          </button>
+                        </div>
                       )}
                     </div>
                   );
@@ -2192,6 +2219,7 @@ export default function DeliveryPage() {
                     stdScaleMode={stdScaleMode[store]}
                     onScaleChange={mode => handleScaleChange(store, mode)}
                     scalingTargets={scaleTargets.isPending}
+                    storeConfirmed={!!storeConfirmedAt(store)}
                   />
                 </div>
               ))}
