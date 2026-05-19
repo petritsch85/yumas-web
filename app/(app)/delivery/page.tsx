@@ -1641,8 +1641,17 @@ export default function DeliveryPage() {
                   <p className="text-xs text-gray-400">Changes update the base targets for all future runs.</p>
                   <div className="flex items-center gap-2">
                     <button
-                      onClick={() => setStdEdits({})}
-                      disabled={saveStandards.isPending || Object.keys(stdEdits).length === 0}
+                      onClick={() => {
+                        const restored: Record<string, { mon: number; tue: number; wed: number; fri: number }> = {};
+                        for (const t of stdTargets) {
+                          restored[t.id] = { mon: t.mon_target, tue: t.tue_target, wed: t.wed_target, fri: t.fri_target };
+                        }
+                        setStdEdits(restored);
+                      }}
+                      disabled={saveStandards.isPending || !stdTargets.some(t => {
+                        const e = stdEdits[t.id];
+                        return e && (e.mon !== t.mon_target || e.tue !== t.tue_target || e.wed !== t.wed_target || e.fri !== t.fri_target);
+                      })}
                       className="flex items-center gap-2 border border-gray-200 text-gray-500 px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-100 transition-colors disabled:opacity-40"
                     >
                       Reset
