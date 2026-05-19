@@ -87,6 +87,8 @@ export interface AppPermissions {
   suppliers:    boolean;
   products:     boolean;
   recipe_edit:  boolean;
+  packer:       boolean;
+  driver:       boolean;
 }
 
 export interface Profile {
