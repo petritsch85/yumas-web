@@ -1144,6 +1144,20 @@ export default function DeliveryPage() {
     },
   });
 
+  /* ─ Delete all Standard Targets for current store ─ */
+  const deleteStandards = useMutation({
+    mutationFn: async () => {
+      const { error } = await supabase
+        .from('delivery_targets').delete().eq('location_name', stdStore);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      setStdEdits({});
+      qc.invalidateQueries({ queryKey: ['std-targets', stdStore] });
+      qc.invalidateQueries({ queryKey: ['delivery-run', targetDate] });
+    },
+  });
+
   const setStdEdit = (id: string, day: 'mon' | 'tue' | 'wed' | 'fri', val: string) => {
     const num = parseFloat(val);
     setStdEdits(prev => ({ ...prev, [id]: { ...prev[id], [day]: isNaN(num) ? 0 : num } }));
@@ -1642,16 +1656,13 @@ export default function DeliveryPage() {
                   <div className="flex items-center gap-2">
                     <button
                       onClick={() => {
-                        const restored: Record<string, { mon: number; tue: number; wed: number; fri: number }> = {};
-                        for (const t of stdTargets) {
-                          restored[t.id] = { mon: t.mon_target, tue: t.tue_target, wed: t.wed_target, fri: t.fri_target };
-                        }
-                        setStdEdits(restored);
+                        if (!window.confirm(`Delete ALL standard targets for ${stdStore}? This cannot be undone.`)) return;
+                        deleteStandards.mutate();
                       }}
-                      disabled={saveStandards.isPending || stdTargets.length === 0}
-                      className="flex items-center gap-2 border border-gray-200 text-gray-500 px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-100 transition-colors disabled:opacity-40"
+                      disabled={saveStandards.isPending || deleteStandards.isPending || stdTargets.length === 0}
+                      className="flex items-center gap-2 border border-red-200 text-red-500 px-4 py-2 rounded-lg text-sm font-medium hover:bg-red-50 transition-colors disabled:opacity-40"
                     >
-                      Reset
+                      {deleteStandards.isPending ? 'Deleting…' : 'Reset'}
                     </button>
                     <button
                       onClick={() => saveStandards.mutate()}
