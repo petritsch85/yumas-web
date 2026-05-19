@@ -351,7 +351,7 @@ function StoreDeliveryList({
   store, lines, hasSubmission, isActive, onPackedQtyBlur,
   forecast, standard, viewMode, editingTargets, editingPackedQty,
   onTargetChange, onTargetBlur, onPackedQtyChange, packingStarted, isPreview,
-  storeInventory, storeTimestamp,
+  storeInventory, storeTimestamp, stdScaleMode, onScaleChange, scalingTargets,
 }: {
   store: Store;
   lines: DeliveryLine[];
@@ -368,8 +368,11 @@ function StoreDeliveryList({
   onPackedQtyChange: (id: string, value: string) => void;
   packingStarted: boolean;
   isPreview: boolean;
-  storeInventory: Record<string, number>; // item_name_lower → qty, always live
-  storeTimestamp?: string; // ISO timestamp of latest inventory submission
+  storeInventory: Record<string, number>;
+  storeTimestamp?: string;
+  stdScaleMode: 'low' | 'std' | 'high';
+  onScaleChange: (mode: 'low' | 'std' | 'high') => void;
+  scalingTargets?: boolean;
 }) {
   if (!hasSubmission) {
     return (
@@ -382,7 +385,7 @@ function StoreDeliveryList({
 
   const isManager = viewMode === 'manager';
   const canPack = !isPreview && (isManager || packingStarted);
-  const colCount = isManager ? 6 : 5;
+  const colCount = isManager ? 8 : 5;
 
   // Live current inventory for this item (latest submission, always fresh)
   const getLiveInventory = (line: DeliveryLine): number =>
@@ -425,6 +428,36 @@ function StoreDeliveryList({
         <div className={isManager ? 'overflow-x-auto' : ''}>
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b border-gray-100">
+              {/* Row 1 (manager only): scale toggle spanning the 3 STD columns */}
+              {isManager && (
+                <tr className="border-b border-gray-100">
+                  <th colSpan={3} />
+                  <th colSpan={3} className="px-3 py-2">
+                    <div className="flex items-center justify-center gap-1">
+                      {(['low', 'std', 'high'] as const).map(mode => {
+                        const label = mode === 'low' ? 'STD −25%' : mode === 'high' ? 'STD +25%' : 'STD';
+                        const active = stdScaleMode === mode;
+                        return (
+                          <button
+                            key={mode}
+                            onClick={() => onScaleChange(mode)}
+                            disabled={scalingTargets}
+                            className={`px-3 py-1 rounded-lg text-xs font-semibold transition-colors ${
+                              active
+                                ? 'bg-[#1B5E20] text-white shadow-sm'
+                                : 'text-gray-500 hover:bg-gray-200'
+                            }`}
+                          >
+                            {label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </th>
+                  <th colSpan={2} />
+                </tr>
+              )}
+              {/* Row 2: column headers */}
               <tr>
                 <th className="px-3 md:px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Item</th>
                 {isManager
@@ -440,7 +473,9 @@ function StoreDeliveryList({
                       </div>
                     )}
                   </th>
-                  <th className="px-3 md:px-4 py-3 text-center text-xs font-semibold text-gray-400 uppercase tracking-wide">Std Target</th>
+                  <th className={`px-3 md:px-4 py-3 text-center text-xs font-semibold uppercase tracking-wide ${stdScaleMode === 'low' ? 'text-[#1B5E20]' : 'text-gray-400'}`}>STD −25%</th>
+                  <th className={`px-3 md:px-4 py-3 text-center text-xs font-semibold uppercase tracking-wide ${stdScaleMode === 'std' ? 'text-[#1B5E20]' : 'text-gray-400'}`}>Std Target</th>
+                  <th className={`px-3 md:px-4 py-3 text-center text-xs font-semibold uppercase tracking-wide ${stdScaleMode === 'high' ? 'text-[#1B5E20]' : 'text-gray-400'}`}>STD +25%</th>
                   <th className="px-3 md:px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wide">Target Today</th>
                 </>}
                 <th className="px-3 md:px-4 py-3 text-center text-xs font-semibold text-[#1B5E20] uppercase tracking-wide">To Pack</th>
@@ -485,8 +520,17 @@ function StoreDeliveryList({
                                   : <span className="text-gray-300">0</span>;
                               })()}
                             </td>
-                            <td className="px-3 md:px-4 py-2.5 text-center text-gray-400 tabular-nums">
+                            {/* STD −25% */}
+                            <td className={`px-3 md:px-4 py-2.5 text-center tabular-nums ${stdScaleMode === 'low' ? 'text-[#1B5E20] font-semibold' : 'text-gray-400'}`}>
+                              {Math.round(line.standard_target_qty * 0.75)}
+                            </td>
+                            {/* STD TARGET */}
+                            <td className={`px-3 md:px-4 py-2.5 text-center tabular-nums ${stdScaleMode === 'std' ? 'text-[#1B5E20] font-semibold' : 'text-gray-400'}`}>
                               {line.standard_target_qty}
+                            </td>
+                            {/* STD +25% */}
+                            <td className={`px-3 md:px-4 py-2.5 text-center tabular-nums ${stdScaleMode === 'high' ? 'text-[#1B5E20] font-semibold' : 'text-gray-400'}`}>
+                              {Math.round(line.standard_target_qty * 1.25)}
                             </td>
                             <td className="px-3 md:px-4 py-2.5 text-center">
                               {isPreview ? (
@@ -1188,6 +1232,35 @@ export default function DeliveryPage() {
   const setStdEdit = (id: string, day: 'mon' | 'tue' | 'wed' | 'fri', val: string) => {
     const num = parseFloat(val);
     setStdEdits(prev => ({ ...prev, [id]: { ...prev[id], [day]: isNaN(num) ? 0 : num } }));
+  };
+
+  /* ─ Std scale mode (per store) ─ */
+  type ScaleMode = 'low' | 'std' | 'high';
+  const [stdScaleMode, setStdScaleMode] = useState<Record<Store, ScaleMode>>({
+    Eschborn: 'std', Taunus: 'std', Westend: 'std',
+  });
+
+  const scaleTargets = useMutation({
+    mutationFn: async ({ store, mode }: { store: Store; mode: ScaleMode }) => {
+      if (!run) return;
+      const factor = mode === 'low' ? 0.75 : mode === 'high' ? 1.25 : 1.0;
+      const storeInv = liveInventory[store] ?? {};
+      const storeLines = lines.filter(l => l.location_name === store);
+      await Promise.all(storeLines.map(l => {
+        const newTarget = Math.round(l.standard_target_qty * factor);
+        const inv = storeInv[l.item_name.trim().toLowerCase()] ?? l.reported_qty;
+        const newDelivery = Math.max(0, newTarget - inv);
+        return supabase.from('delivery_run_lines')
+          .update({ target_qty: newTarget, delivery_qty: newDelivery })
+          .eq('id', l.id);
+      }));
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['delivery-run', targetDate] }),
+  });
+
+  const handleScaleChange = (store: Store, mode: ScaleMode) => {
+    setStdScaleMode(prev => ({ ...prev, [store]: mode }));
+    scaleTargets.mutate({ store, mode });
   };
 
   /* ─ Upload Excel ─ */
@@ -2068,6 +2141,9 @@ export default function DeliveryPage() {
                     isPreview={isPreview}
                     storeInventory={liveInventory[store] ?? {}}
                     storeTimestamp={liveInventoryTimestamps[store]}
+                    stdScaleMode={stdScaleMode[store]}
+                    onScaleChange={mode => handleScaleChange(store, mode)}
+                    scalingTargets={scaleTargets.isPending}
                   />
                 </div>
               ))}
