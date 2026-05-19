@@ -1973,7 +1973,7 @@ export default function DeliveryPage() {
             </div>
 
             {/* Confirmation status card */}
-            {dayLocked ? (
+            {allStoresConfirmed ? (
               <div className="flex items-center gap-3 rounded-xl border border-green-200 bg-green-50 shadow-sm p-4 flex-1 min-w-[220px]">
                 <div className="w-9 h-9 rounded-full bg-green-100 flex items-center justify-center flex-shrink-0">
                   <CheckCircle2 size={20} className="text-green-600" />
@@ -1991,6 +1991,7 @@ export default function DeliveryPage() {
                 <div>
                   <p className="text-xs font-semibold text-red-500 uppercase tracking-wide mb-0.5">Status</p>
                   <p className="text-base font-bold text-red-700">Delivery NOT confirmed yet</p>
+                  <p className="text-xs text-red-400 mt-0.5">{STORES.filter(s => !!storeConfirmedAt(s)).length} of 3 stores confirmed</p>
                 </div>
               </div>
             )}
@@ -2102,6 +2103,27 @@ export default function DeliveryPage() {
                   );
                 })}
               </div>
+
+              {/* ── Overall confirmation status banner (manager only, run exists, not preview) ── */}
+              {viewMode === 'manager' && run && !isPreview && (
+                allStoresConfirmed ? (
+                  <div className="mb-4 flex items-center gap-3 px-4 py-3 bg-green-50 border border-green-200 rounded-xl">
+                    <CheckCircle2 size={18} className="text-green-600 flex-shrink-0" />
+                    <div className="flex-1">
+                      <span className="text-sm font-bold text-green-800">All stores confirmed ✓</span>
+                      <span className="text-xs text-green-600 ml-2">Ready to lock the day</span>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="mb-4 flex items-center gap-3 px-4 py-3 bg-red-50 border border-red-200 rounded-xl">
+                    <AlertCircle size={18} className="text-red-500 flex-shrink-0" />
+                    <div className="flex-1">
+                      <span className="text-sm font-bold text-red-700">Delivery NOT confirmed yet</span>
+                      <span className="text-xs text-red-400 ml-2">{STORES.filter(s => !!storeConfirmedAt(s)).length} of 3 stores confirmed</span>
+                    </div>
+                  </div>
+                )
+              )}
 
               {/* ── Per-store confirm banner (manager only, run exists, not preview, not locked) ── */}
               {viewMode === 'manager' && run && !isPreview && (() => {
