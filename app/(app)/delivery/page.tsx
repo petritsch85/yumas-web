@@ -199,6 +199,13 @@ const SECTIONS = ['Kühlhaus', 'Tiefkühler', 'Trockenware', 'Regale', 'Lager'];
 const DELIVERY_DAYS = [1, 2, 3, 5]; // Mon=1 Tue=2 Wed=3 Fri=5
 type DayKey = 'mon_target' | 'tue_target' | 'wed_target' | 'fri_target';
 
+const DELIVERY_DAY_BUTTONS = [
+  { dow: 1, label: 'Mon', offset: 0 },
+  { dow: 2, label: 'Tue', offset: 1 },
+  { dow: 3, label: 'Wed', offset: 2 },
+  { dow: 5, label: 'Fri', offset: 4 },
+] as const;
+
 const DAY_KEY_MAP: Record<number, DayKey> = {
   1: 'mon_target', 2: 'tue_target', 3: 'wed_target', 5: 'fri_target',
 };
@@ -243,6 +250,46 @@ function getUpcomingDeliveryDates(count = 24): { date: string; label: string; do
     d.setDate(d.getDate() + 1);
   }
   return result;
+}
+
+function getMondayOfWeek(dateStr: string): string {
+  const d = new Date(dateStr + 'T12:00:00');
+  const dow = d.getDay();
+  d.setDate(d.getDate() - (dow === 0 ? 6 : dow - 1));
+  return toLocalDateString(d);
+}
+
+function getISOWeek(d: Date): number {
+  const utc = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  utc.setUTCDate(utc.getUTCDate() + 4 - (utc.getUTCDay() || 7));
+  const yearStart = new Date(Date.UTC(utc.getUTCFullYear(), 0, 1));
+  return Math.ceil(((utc.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
+}
+
+/** Returns surrounding delivery weeks: 2 past + current + 4 future */
+function getDeliveryWeeks(): { weekStart: string; label: string }[] {
+  const now  = new Date();
+  const curMonday = new Date(now);
+  const curDow = now.getDay();
+  curMonday.setDate(now.getDate() - (curDow === 0 ? 6 : curDow - 1));
+  curMonday.setHours(0, 0, 0, 0);
+
+  const weeks = [];
+  for (let i = -2; i <= 4; i++) {
+    const mon = new Date(curMonday);
+    mon.setDate(curMonday.getDate() + i * 7);
+    const sun = new Date(mon);
+    sun.setDate(mon.getDate() + 6);
+    const weekNum = getISOWeek(mon);
+    const monLbl  = mon.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+    const sunLbl  = sun.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+    const isCur   = i === 0;
+    weeks.push({
+      weekStart: toLocalDateString(mon),
+      label: `W${weekNum} — ${monLbl} – ${sunLbl}${isCur ? '  (this week)' : ''}`,
+    });
+  }
+  return weeks;
 }
 
 function fmtDate(dateStr: string): string {
@@ -864,11 +911,21 @@ export default function DeliveryPage() {
     return 'packer';
   });
 
-  const defaultDate = useMemo(() => getDefaultDeliveryDate(), []);
-  const deliveryDateOptions = useMemo(() => getUpcomingDeliveryDates(24), []);
+  const defaultDate  = useMemo(() => getDefaultDeliveryDate(), []);
+  const deliveryWeeks = useMemo(() => getDeliveryWeeks(), []);
 
-  /* Manager-selected delivery date; packer always uses default */
-  const [managerDate, setManagerDate] = useState<string>(defaultDate);
+  /* Manager date selection: week + day-of-week */
+  const [selectedWeek, setSelectedWeek] = useState<string>(() => getMondayOfWeek(getDefaultDeliveryDate()));
+  const [selectedDow,  setSelectedDow]  = useState<number>(() => new Date(getDefaultDeliveryDate() + 'T12:00:00').getDay());
+
+  const managerDate = useMemo(() => {
+    const btn = DELIVERY_DAY_BUTTONS.find(b => b.dow === selectedDow);
+    if (!btn) return defaultDate;
+    const d = new Date(selectedWeek + 'T12:00:00');
+    d.setDate(d.getDate() + btn.offset);
+    return toLocalDateString(d);
+  }, [selectedWeek, selectedDow, defaultDate]);
+
   const targetDate = viewMode === 'manager' ? managerDate : defaultDate;
   const dayOfWeek = new Date(targetDate + 'T12:00:00').getDay();
   const stdDayKey = DOW_TO_STD_KEY[dayOfWeek] ?? 'mon';
@@ -1636,47 +1693,75 @@ export default function DeliveryPage() {
           </div>
         </div>
 
-        {/* ── Manager toolbar: date picker + Standard Targets + Upload Excel ── */}
+        {/* ── Manager toolbar: week + day picker + Standard Targets + Upload Excel ── */}
         {viewMode === 'manager' && (
-          <div className="flex items-center gap-3 flex-wrap mb-5 p-3 bg-gray-50 border border-gray-100 rounded-xl">
-            {/* Date picker */}
-            <div className="flex items-center gap-2">
-              <CalendarDays size={15} className="text-gray-400 flex-shrink-0" />
-              <label className="text-xs text-gray-500 font-medium whitespace-nowrap">Delivery Date:</label>
-              <select
-                value={managerDate}
-                onChange={e => setManagerDate(e.target.value)}
-                className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 text-gray-700 bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 min-w-[180px]"
+          <div className="mb-5 p-3 bg-gray-50 border border-gray-100 rounded-xl space-y-3">
+
+            {/* Row 1: Week selector + Standard Targets + Upload Excel */}
+            <div className="flex items-center gap-3 flex-wrap">
+              <div className="flex items-center gap-2">
+                <CalendarDays size={15} className="text-gray-400 flex-shrink-0" />
+                <label className="text-xs text-gray-500 font-medium whitespace-nowrap">Week:</label>
+                <select
+                  value={selectedWeek}
+                  onChange={e => setSelectedWeek(e.target.value)}
+                  className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 text-gray-700 bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 min-w-[220px]"
+                >
+                  {deliveryWeeks.map(w => (
+                    <option key={w.weekStart} value={w.weekStart}>{w.label}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="h-5 w-px bg-gray-200 hidden sm:block" />
+
+              <button
+                onClick={() => { setStdStore(activeStore); setShowStandards(true); }}
+                className="flex items-center gap-1.5 text-sm border border-gray-200 rounded-lg px-3 py-1.5 text-gray-600 bg-white shadow-sm hover:bg-gray-50 transition-colors"
               >
-                {deliveryDateOptions.map(opt => (
-                  <option key={opt.date} value={opt.date}>{opt.label}</option>
-                ))}
-              </select>
+                <SlidersHorizontal size={14} /> Standard Targets
+              </button>
+
+              {uploadMsg && (
+                <span className={`text-xs font-medium px-2.5 py-1 rounded-lg ${uploadMsg.startsWith('Error') || uploadMsg.startsWith('Parse') ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-700'}`}>
+                  {uploadMsg}
+                </span>
+              )}
+              <button
+                onClick={() => fileRef.current?.click()}
+                disabled={uploading || upsertTargets.isPending}
+                className="flex items-center gap-1.5 text-sm border border-gray-200 rounded-lg px-3 py-1.5 text-gray-600 bg-white shadow-sm hover:bg-gray-50 transition-colors disabled:opacity-50"
+              >
+                <Upload size={14} /> {uploading || upsertTargets.isPending ? 'Importing…' : 'Upload Excel'}
+              </button>
             </div>
 
-            <div className="h-5 w-px bg-gray-200 hidden sm:block" />
-
-            {/* Standard Targets */}
-            <button
-              onClick={() => { setStdStore(activeStore); setShowStandards(true); }}
-              className="flex items-center gap-1.5 text-sm border border-gray-200 rounded-lg px-3 py-1.5 text-gray-600 bg-white shadow-sm hover:bg-gray-50 transition-colors"
-            >
-              <SlidersHorizontal size={14} /> Standard Targets
-            </button>
-
-            {/* Upload Excel */}
-            {uploadMsg && (
-              <span className={`text-xs font-medium px-2.5 py-1 rounded-lg ${uploadMsg.startsWith('Error') || uploadMsg.startsWith('Parse') ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-700'}`}>
-                {uploadMsg}
-              </span>
-            )}
-            <button
-              onClick={() => fileRef.current?.click()}
-              disabled={uploading || upsertTargets.isPending}
-              className="flex items-center gap-1.5 text-sm border border-gray-200 rounded-lg px-3 py-1.5 text-gray-600 bg-white shadow-sm hover:bg-gray-50 transition-colors disabled:opacity-50"
-            >
-              <Upload size={14} /> {uploading || upsertTargets.isPending ? 'Importing…' : 'Upload Excel'}
-            </button>
+            {/* Row 2: Delivery day buttons */}
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-gray-500 font-medium whitespace-nowrap">Delivery Day:</span>
+              {DELIVERY_DAY_BUTTONS.map(btn => {
+                const isActive = selectedDow === btn.dow;
+                // Compute the actual date for this button to show the date label
+                const d = new Date(selectedWeek + 'T12:00:00');
+                d.setDate(d.getDate() + btn.offset);
+                const dayNum = d.getDate();
+                const monAbbr = d.toLocaleDateString('en-GB', { month: 'short' });
+                return (
+                  <button
+                    key={btn.dow}
+                    onClick={() => setSelectedDow(btn.dow)}
+                    className={`flex flex-col items-center px-5 py-2 rounded-lg text-sm font-semibold border transition-colors ${
+                      isActive
+                        ? 'bg-[#1B5E20] border-[#1B5E20] text-white shadow-sm'
+                        : 'border-gray-200 text-gray-600 bg-white hover:border-[#1B5E20] hover:text-[#1B5E20]'
+                    }`}
+                  >
+                    <span className="text-[11px] font-bold uppercase tracking-wide leading-tight">{btn.label}</span>
+                    <span className={`text-[10px] leading-tight mt-0.5 ${isActive ? 'text-green-200' : 'text-gray-400'}`}>{dayNum} {monAbbr}</span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
         )}
 
