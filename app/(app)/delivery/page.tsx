@@ -1963,11 +1963,37 @@ export default function DeliveryPage() {
           </div>
         )}
 
-        {/* ── Date banner (packer view) ── */}
+        {/* ── Date + confirmation banner (packer view) ── */}
         {viewMode === 'packer' && (
-          <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 mb-5">
-            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-0.5">Delivery Date</p>
-            <p className="text-base font-semibold text-gray-900">{fmtDate(targetDate)}</p>
+          <div className="flex gap-3 mb-5 flex-wrap">
+            {/* Date card */}
+            <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 flex-1 min-w-[160px]">
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-0.5">Delivery Date</p>
+              <p className="text-base font-semibold text-gray-900">{fmtDate(targetDate)}</p>
+            </div>
+
+            {/* Confirmation status card */}
+            {dayLocked ? (
+              <div className="flex items-center gap-3 rounded-xl border border-green-200 bg-green-50 shadow-sm p-4 flex-1 min-w-[220px]">
+                <div className="w-9 h-9 rounded-full bg-green-100 flex items-center justify-center flex-shrink-0">
+                  <CheckCircle2 size={20} className="text-green-600" />
+                </div>
+                <div>
+                  <p className="text-xs font-semibold text-green-600 uppercase tracking-wide mb-0.5">Status</p>
+                  <p className="text-base font-bold text-green-800">Delivery confirmed ✓</p>
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center gap-3 rounded-xl border border-red-200 bg-red-50 shadow-sm p-4 flex-1 min-w-[220px]">
+                <div className="w-9 h-9 rounded-full bg-red-100 flex items-center justify-center flex-shrink-0">
+                  <AlertCircle size={20} className="text-red-500" />
+                </div>
+                <div>
+                  <p className="text-xs font-semibold text-red-500 uppercase tracking-wide mb-0.5">Status</p>
+                  <p className="text-base font-bold text-red-700">Delivery NOT confirmed yet</p>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
