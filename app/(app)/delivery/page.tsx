@@ -1847,6 +1847,29 @@ export default function DeliveryPage() {
                 </div>
               )}
 
+              {/* Store tabs */}
+              <div className="flex gap-1 mb-5 bg-gray-100 rounded-xl p-1 w-fit">
+                {STORES.map(store => {
+                  const { full, total, complete } = storePackStats(store);
+                  const isActive = activeStore === store;
+                  const isPacker = viewMode === 'packer';
+                  return (
+                    <button key={store} onClick={() => setActiveStore(store)}
+                      className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 ${isActive ? 'bg-white text-[#1B5E20] shadow-sm font-semibold' : 'text-gray-500 hover:text-gray-700'}`}
+                    >
+                      {store}
+                      {isPacker && packingStarted ? (
+                        complete
+                          ? <CheckCircle2 size={14} className="text-[#1B5E20]" />
+                          : <span className={`text-xs rounded-full px-1.5 py-0.5 font-bold leading-none ${isActive ? 'bg-[#1B5E20] text-white' : 'bg-gray-300 text-gray-600'}`}>{full}/{total}</span>
+                      ) : (
+                        total > 0 && <span className={`text-xs rounded-full px-1.5 py-0.5 font-bold leading-none ${isActive ? 'bg-[#1B5E20] text-white' : 'bg-gray-300 text-gray-600'}`}>{total}</span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+
               {/* ── Confirm packing list (manager only, run exists, not preview) ── */}
               {viewMode === 'manager' && run && !isPreview && (
                 run.lists_checked_at ? (
@@ -1881,29 +1904,6 @@ export default function DeliveryPage() {
                   </div>
                 )
               )}
-
-              {/* Store tabs */}
-              <div className="flex gap-1 mb-5 bg-gray-100 rounded-xl p-1 w-fit">
-                {STORES.map(store => {
-                  const { full, total, complete } = storePackStats(store);
-                  const isActive = activeStore === store;
-                  const isPacker = viewMode === 'packer';
-                  return (
-                    <button key={store} onClick={() => setActiveStore(store)}
-                      className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 ${isActive ? 'bg-white text-[#1B5E20] shadow-sm font-semibold' : 'text-gray-500 hover:text-gray-700'}`}
-                    >
-                      {store}
-                      {isPacker && packingStarted ? (
-                        complete
-                          ? <CheckCircle2 size={14} className="text-[#1B5E20]" />
-                          : <span className={`text-xs rounded-full px-1.5 py-0.5 font-bold leading-none ${isActive ? 'bg-[#1B5E20] text-white' : 'bg-gray-300 text-gray-600'}`}>{full}/{total}</span>
-                      ) : (
-                        total > 0 && <span className={`text-xs rounded-full px-1.5 py-0.5 font-bold leading-none ${isActive ? 'bg-[#1B5E20] text-white' : 'bg-gray-300 text-gray-600'}`}>{total}</span>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
 
               {/* Store lists */}
               {STORES.map(store => (
