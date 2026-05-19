@@ -1648,10 +1648,7 @@ export default function DeliveryPage() {
                         }
                         setStdEdits(restored);
                       }}
-                      disabled={saveStandards.isPending || !stdTargets.some(t => {
-                        const e = stdEdits[t.id];
-                        return e && (e.mon !== t.mon_target || e.tue !== t.tue_target || e.wed !== t.wed_target || e.fri !== t.fri_target);
-                      })}
+                      disabled={saveStandards.isPending || stdTargets.length === 0}
                       className="flex items-center gap-2 border border-gray-200 text-gray-500 px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-100 transition-colors disabled:opacity-40"
                     >
                       Reset
