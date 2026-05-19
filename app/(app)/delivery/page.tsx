@@ -1110,7 +1110,7 @@ export default function DeliveryPage() {
   /* Initialise std edits when data loads */
   useEffect(() => {
     if (!stdTargetsData || stdTargetsData.length === 0) return;
-    const initial: Record<string, { mon: number; tue: number; wed: number; fri: number; scales: boolean; scaleFactor: number }> = {};
+    const initial: Record<string, { mon: number; tue: number; wed: number; fri: number }> = {};
     for (const t of stdTargetsData) {
       initial[t.id] = {
         mon: t.mon_target, tue: t.tue_target, wed: t.wed_target, fri: t.fri_target,
