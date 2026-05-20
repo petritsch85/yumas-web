@@ -36,6 +36,7 @@ type InventoryItem = {
 };
 
 type TargetRow = {
+  id?:         string;
   item_name:   string;
   mon_target:  number;
   tue_target:  number;
@@ -234,7 +235,7 @@ export default function InventoryListsPage() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('delivery_targets')
-        .select('item_name, mon_target, tue_target, wed_target, fri_target')
+        .select('id, item_name, mon_target, tue_target, wed_target, fri_target')
         .eq('location_name', activeStore);
       if (error) throw error;
       return (data ?? []) as TargetRow[];
@@ -427,13 +428,27 @@ export default function InventoryListsPage() {
     },
   });
 
-  // Upsert a single item's targets for the active store
+  // Save targets: UPDATE if row already exists, INSERT if new
   const saveTargetMutation = useMutation({
     mutationFn: async ({ itemName, unit, t }: { itemName: string; unit: string; t: LocalTarget }) => {
-      const { error } = await supabase
-        .from('delivery_targets')
-        .upsert(
-          {
+      const existingId = targetMap.get(itemName)?.id;
+      if (existingId) {
+        // Row exists — update it by id (no unique constraint needed)
+        const { error } = await supabase
+          .from('delivery_targets')
+          .update({
+            mon_target: t.mon_target,
+            tue_target: t.tue_target,
+            wed_target: t.wed_target,
+            fri_target: t.fri_target,
+          })
+          .eq('id', existingId);
+        if (error) throw error;
+      } else {
+        // No row yet — insert one
+        const { error } = await supabase
+          .from('delivery_targets')
+          .insert({
             location_name: activeStore,
             item_name:     itemName,
             unit,
@@ -441,15 +456,19 @@ export default function InventoryListsPage() {
             tue_target:    t.tue_target,
             wed_target:    t.wed_target,
             fri_target:    t.fri_target,
-          },
-          { onConflict: 'location_name,item_name' },
-        );
-      if (error) throw error;
+          });
+        if (error) throw error;
+      }
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['inventory-lists-targets', activeStore] }),
   });
 
   /* ── Target edit helpers ─────────────────────────────────────────────────── */
+
+  // Ref so handleTargetBlur always reads the latest localTargets without stale closures
+  const localTargetsRef = useRef(localTargets);
+  useEffect(() => { localTargetsRef.current = localTargets; }, [localTargets]);
+
   function getLocalVal(itemName: string, key: DayKey): number {
     return localTargets.get(itemName)?.[key] ?? targetMap.get(itemName)?.[key] ?? 0;
   }
@@ -465,11 +484,12 @@ export default function InventoryListsPage() {
   }, []);
 
   const handleTargetBlur = useCallback((item: InventoryItem) => {
-    const t = localTargets.get(item.name);
+    // Always read from ref to avoid stale closure capturing old localTargets
+    const t = localTargetsRef.current.get(item.name);
     if (t !== undefined) {
       saveTargetMutation.mutate({ itemName: item.name, unit: item.unit, t });
     }
-  }, [localTargets, saveTargetMutation]);
+  }, [saveTargetMutation]);
 
   const colSpan = editMode ? 8 : 6;
 
