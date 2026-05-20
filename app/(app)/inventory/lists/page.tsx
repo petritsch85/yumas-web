@@ -39,18 +39,127 @@ type TargetRow = {
   fri_target:  number;
 };
 
-type AddForm = { name: string; unit: string };
+type AddForm = { section: string; name: string; unit: string };
+
+/* ─── Add Item Modal ─────────────────────────────────────────────────────────── */
+function AddItemModal({
+  onClose,
+  onSubmit,
+  isPending,
+}: {
+  onClose:   () => void;
+  onSubmit:  (form: AddForm) => void;
+  isPending: boolean;
+}) {
+  const [form, setForm] = useState<AddForm>({ section: SECTION_ORDER[0], name: '', unit: '' });
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!form.name.trim() || !form.unit.trim()) return;
+    onSubmit({ section: form.section, name: form.name.trim(), unit: form.unit.trim() });
+  }
+
+  return (
+    /* Backdrop */
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+      onClick={e => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      {/* Dialog */}
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
+
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+          <h2 className="text-base font-bold text-gray-900">Add New Item</h2>
+          <button
+            onClick={onClose}
+            className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        {/* Form */}
+        <form onSubmit={handleSubmit} className="px-6 py-5 space-y-4">
+
+          {/* Section */}
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">
+              Section
+            </label>
+            <select
+              value={form.section}
+              onChange={e => setForm(f => ({ ...f, section: e.target.value }))}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm text-gray-800 focus:outline-none focus:border-[#1B5E20] focus:ring-1 focus:ring-[#1B5E20] bg-white"
+            >
+              {SECTION_ORDER.map(s => (
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Item name */}
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">
+              Item Name
+            </label>
+            <input
+              autoFocus
+              type="text"
+              placeholder="e.g. Jalapeños eingelegt"
+              value={form.name}
+              onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm text-gray-800 placeholder-gray-400 focus:outline-none focus:border-[#1B5E20] focus:ring-1 focus:ring-[#1B5E20]"
+            />
+          </div>
+
+          {/* Unit */}
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">
+              Unit
+            </label>
+            <input
+              type="text"
+              placeholder="e.g. Beutel (1.0kg)"
+              value={form.unit}
+              onChange={e => setForm(f => ({ ...f, unit: e.target.value }))}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm text-gray-800 placeholder-gray-400 focus:outline-none focus:border-[#1B5E20] focus:ring-1 focus:ring-[#1B5E20]"
+            />
+          </div>
+
+          {/* Actions */}
+          <div className="flex items-center gap-3 pt-1">
+            <button
+              type="submit"
+              disabled={!form.name.trim() || !form.unit.trim() || isPending}
+              className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg bg-[#1B5E20] text-white text-sm font-semibold disabled:opacity-50 hover:bg-[#2E7D32] transition-colors"
+            >
+              <Plus size={15} />
+              {isPending ? 'Adding…' : 'Add Item'}
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 py-2.5 rounded-lg bg-white text-gray-600 border border-gray-300 text-sm font-semibold hover:bg-gray-50 transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
 
 /* ─── Page ───────────────────────────────────────────────────────────────────── */
 export default function InventoryListsPage() {
-  useT(); // side-effect: sets up i18n
+  useT();
   const qc = useQueryClient();
 
-  const [activeStore,      setActiveStore]      = useState<Store>('Eschborn');
-  const [editMode,         setEditMode]         = useState(false);
-  const [confirmReset,     setConfirmReset]     = useState(false);
-  const [addingToSection,  setAddingToSection]  = useState<string | null>(null);
-  const [addForm,          setAddForm]          = useState<AddForm>({ name: '', unit: '' });
+  const [activeStore,  setActiveStore]  = useState<Store>('Eschborn');
+  const [editMode,     setEditMode]     = useState(false);
+  const [confirmReset, setConfirmReset] = useState(false);
+  const [showAddModal, setShowAddModal] = useState(false);
 
   /* ── Queries ─────────────────────────────────────────────────────────────── */
   const { data: items = [], isLoading: itemsLoading } = useQuery({
@@ -88,8 +197,8 @@ export default function InventoryListsPage() {
     });
     return SECTION_ORDER
       .map(title => ({ title, items: grouped.get(title) ?? [] }))
-      .filter(s => s.items.length > 0 || editMode);
-  }, [items, editMode]);
+      .filter(s => s.items.length > 0);
+  }, [items]);
 
   const targetMap = useMemo(
     () => new Map(targets.map(t => [t.item_name, t])),
@@ -97,8 +206,6 @@ export default function InventoryListsPage() {
   );
 
   /* ── Mutations ───────────────────────────────────────────────────────────── */
-
-  // Reset: delete all delivery_targets for active store
   const resetMutation = useMutation({
     mutationFn: async () => {
       const { error } = await supabase
@@ -113,7 +220,6 @@ export default function InventoryListsPage() {
     },
   });
 
-  // Delete item from inventory_items
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
       const { error } = await supabase
@@ -125,17 +231,10 @@ export default function InventoryListsPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['inventory-items'] }),
   });
 
-  // Move item up / down within section (swap sort_order values)
   const moveMutation = useMutation({
     mutationFn: async ({
-      item,
-      direction,
-      sectionItems,
-    }: {
-      item: InventoryItem;
-      direction: 'up' | 'down';
-      sectionItems: InventoryItem[];
-    }) => {
+      item, direction, sectionItems,
+    }: { item: InventoryItem; direction: 'up' | 'down'; sectionItems: InventoryItem[] }) => {
       const idx     = sectionItems.findIndex(i => i.id === item.id);
       const swapIdx = direction === 'up' ? idx - 1 : idx + 1;
       if (swapIdx < 0 || swapIdx >= sectionItems.length) return;
@@ -148,9 +247,8 @@ export default function InventoryListsPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['inventory-items'] }),
   });
 
-  // Add new item at end of its section
   const addMutation = useMutation({
-    mutationFn: async ({ section, name, unit }: { section: string; name: string; unit: string }) => {
+    mutationFn: async ({ section, name, unit }: AddForm) => {
       const sectionItems = items.filter(i => i.section === section);
       const maxOrder     = sectionItems.length > 0
         ? Math.max(...sectionItems.map(i => i.sort_order))
@@ -162,34 +260,24 @@ export default function InventoryListsPage() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['inventory-items'] });
-      setAddingToSection(null);
-      setAddForm({ name: '', unit: '' });
+      setShowAddModal(false);
     },
   });
 
-  /* ── Helpers ─────────────────────────────────────────────────────────────── */
   const colSpan = editMode ? 8 : 6;
-
-  function openAddForm(section: string) {
-    setAddingToSection(section);
-    setAddForm({ name: '', unit: '' });
-  }
-
-  function cancelAdd() {
-    setAddingToSection(null);
-    setAddForm({ name: '', unit: '' });
-  }
-
-  function submitAdd(section: string) {
-    const name = addForm.name.trim();
-    const unit = addForm.unit.trim();
-    if (!name || !unit) return;
-    addMutation.mutate({ section, name, unit });
-  }
 
   /* ── Render ──────────────────────────────────────────────────────────────── */
   return (
     <div>
+
+      {/* Add Item Modal */}
+      {showAddModal && (
+        <AddItemModal
+          onClose={() => setShowAddModal(false)}
+          onSubmit={form => addMutation.mutate(form)}
+          isPending={addMutation.isPending}
+        />
+      )}
 
       {/* ── Header ──────────────────────────────────────────────────────────── */}
       <div className="flex items-start justify-between gap-4 mb-6 flex-wrap">
@@ -200,7 +288,6 @@ export default function InventoryListsPage() {
           </p>
         </div>
 
-        {/* Controls row */}
         <div className="flex items-center gap-2 flex-wrap">
 
           {/* Store tabs */}
@@ -218,10 +305,20 @@ export default function InventoryListsPage() {
             </button>
           ))}
 
-          {/* Divider */}
           <span className="w-px h-6 bg-gray-200" />
 
-          {/* Reset – only visible outside edit mode */}
+          {/* Add Item – only in edit mode */}
+          {editMode && (
+            <button
+              onClick={() => setShowAddModal(true)}
+              className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-semibold bg-[#1B5E20] text-white border border-[#1B5E20] hover:bg-[#2E7D32] transition-colors shadow-sm"
+            >
+              <Plus size={15} />
+              Add Item
+            </button>
+          )}
+
+          {/* Reset – only outside edit mode */}
           {!editMode && (
             confirmReset ? (
               <div className="flex items-center gap-1.5">
@@ -253,16 +350,12 @@ export default function InventoryListsPage() {
             )
           )}
 
-          {/* Edit / Done toggle */}
+          {/* Edit / Done */}
           <button
-            onClick={() => {
-              setEditMode(e => !e);
-              setConfirmReset(false);
-              setAddingToSection(null);
-            }}
+            onClick={() => { setEditMode(e => !e); setConfirmReset(false); }}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold border transition-colors ${
               editMode
-                ? 'bg-[#1B5E20] text-white border-[#1B5E20]'
+                ? 'bg-white text-[#1B5E20] border-[#1B5E20]'
                 : 'bg-white text-gray-600 border-gray-300 hover:border-[#1B5E20] hover:text-[#1B5E20]'
             }`}
           >
@@ -330,8 +423,8 @@ export default function InventoryListsPage() {
 
                     {/* Item rows */}
                     {section.items.map((item, idx) => {
-                      const target = targetMap.get(item.name);
-                      const isEven = idx % 2 === 0;
+                      const target  = targetMap.get(item.name);
+                      const isEven  = idx % 2 === 0;
                       const isFirst = idx === 0;
                       const isLast  = idx === section.items.length - 1;
                       return (
@@ -339,24 +432,19 @@ export default function InventoryListsPage() {
                           key={item.id}
                           className={`border-b border-gray-50 ${isEven ? 'bg-white' : 'bg-gray-50/40'}`}
                         >
-                          {/* Move buttons */}
                           {editMode && (
                             <td className="px-2 py-1.5">
                               <div className="flex items-center justify-center gap-0.5">
                                 <button
                                   disabled={isFirst || moveMutation.isPending}
-                                  onClick={() =>
-                                    moveMutation.mutate({ item, direction: 'up', sectionItems: section.items })
-                                  }
+                                  onClick={() => moveMutation.mutate({ item, direction: 'up', sectionItems: section.items })}
                                   className="p-1 rounded text-gray-400 hover:text-gray-700 hover:bg-gray-100 disabled:opacity-25 disabled:cursor-not-allowed transition-colors"
                                 >
                                   <ChevronUp size={14} />
                                 </button>
                                 <button
                                   disabled={isLast || moveMutation.isPending}
-                                  onClick={() =>
-                                    moveMutation.mutate({ item, direction: 'down', sectionItems: section.items })
-                                  }
+                                  onClick={() => moveMutation.mutate({ item, direction: 'down', sectionItems: section.items })}
                                   className="p-1 rounded text-gray-400 hover:text-gray-700 hover:bg-gray-100 disabled:opacity-25 disabled:cursor-not-allowed transition-colors"
                                 >
                                   <ChevronDown size={14} />
@@ -380,7 +468,6 @@ export default function InventoryListsPage() {
                             );
                           })}
 
-                          {/* Delete button */}
                           {editMode && (
                             <td className="px-2 py-1.5 text-center">
                               <button
@@ -396,74 +483,6 @@ export default function InventoryListsPage() {
                       );
                     })}
 
-                    {/* Add item (edit mode) */}
-                    {editMode && (
-                      addingToSection === section.title ? (
-                        <tr className="bg-amber-50 border-b border-amber-100">
-                          {/* move col placeholder */}
-                          <td className="px-2 py-2" />
-                          <td className="px-4 py-2">
-                            <input
-                              autoFocus
-                              type="text"
-                              placeholder="Item name"
-                              value={addForm.name}
-                              onChange={e => setAddForm(f => ({ ...f, name: e.target.value }))}
-                              onKeyDown={e => {
-                                if (e.key === 'Enter') submitAdd(section.title);
-                                if (e.key === 'Escape') cancelAdd();
-                              }}
-                              className="w-full border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:border-[#1B5E20]"
-                            />
-                          </td>
-                          <td className="px-4 py-2">
-                            <input
-                              type="text"
-                              placeholder="Unit"
-                              value={addForm.unit}
-                              onChange={e => setAddForm(f => ({ ...f, unit: e.target.value }))}
-                              onKeyDown={e => {
-                                if (e.key === 'Enter') submitAdd(section.title);
-                                if (e.key === 'Escape') cancelAdd();
-                              }}
-                              className="w-full border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:border-[#1B5E20]"
-                            />
-                          </td>
-                          <td colSpan={4} className="px-4 py-2">
-                            <div className="flex items-center gap-2">
-                              <button
-                                onClick={() => submitAdd(section.title)}
-                                disabled={!addForm.name.trim() || !addForm.unit.trim() || addMutation.isPending}
-                                className="flex items-center gap-1 px-3 py-1 rounded bg-[#1B5E20] text-white text-xs font-semibold disabled:opacity-50 hover:bg-[#2E7D32] transition-colors"
-                              >
-                                <Check size={12} />
-                                {addMutation.isPending ? 'Saving…' : 'Add'}
-                              </button>
-                              <button
-                                onClick={cancelAdd}
-                                className="flex items-center gap-1 px-3 py-1 rounded bg-white text-gray-600 border border-gray-300 text-xs font-semibold hover:border-gray-400 transition-colors"
-                              >
-                                <X size={12} />
-                                Cancel
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ) : (
-                        <tr className="border-b border-gray-50 bg-white">
-                          <td colSpan={colSpan} className="px-4 py-1.5">
-                            <button
-                              onClick={() => openAddForm(section.title)}
-                              className="flex items-center gap-1.5 text-xs text-[#2E7D32] font-medium hover:text-[#1B5E20] transition-colors"
-                            >
-                              <Plus size={13} />
-                              Add item to {section.title}
-                            </button>
-                          </td>
-                        </tr>
-                      )
-                    )}
-
                   </React.Fragment>
                 ))
               )}
@@ -471,7 +490,6 @@ export default function InventoryListsPage() {
           </table>
         </div>
 
-        {/* Footer */}
         {!isLoading && items.length > 0 && (
           <div className="px-4 py-3 border-t border-gray-100 bg-gray-50">
             <p className="text-xs text-gray-400">
