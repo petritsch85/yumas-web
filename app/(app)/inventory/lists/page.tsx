@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
 import { useT } from '@/lib/i18n';
@@ -22,6 +22,8 @@ const DAY_COLS = [
   { key: 'fri_target' as const, label: 'FRI' },
 ];
 
+type DayKey = 'mon_target' | 'tue_target' | 'wed_target' | 'fri_target';
+
 /* ─── Types ──────────────────────────────────────────────────────────────────── */
 type InventoryItem = {
   id:         string;
@@ -38,6 +40,8 @@ type TargetRow = {
   wed_target:  number;
   fri_target:  number;
 };
+
+type LocalTarget = Record<DayKey, number>;
 
 type AddForm = { section: string; name: string; unit: string };
 
@@ -60,15 +64,11 @@ function AddItemModal({
   }
 
   return (
-    /* Backdrop */
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
       onClick={e => { if (e.target === e.currentTarget) onClose(); }}
     >
-      {/* Dialog */}
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
-
-        {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
           <h2 className="text-base font-bold text-gray-900">Add New Item</h2>
           <button
@@ -79,10 +79,7 @@ function AddItemModal({
           </button>
         </div>
 
-        {/* Form */}
         <form onSubmit={handleSubmit} className="px-6 py-5 space-y-4">
-
-          {/* Section */}
           <div>
             <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">
               Section
@@ -98,7 +95,6 @@ function AddItemModal({
             </select>
           </div>
 
-          {/* Item name */}
           <div>
             <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">
               Item Name
@@ -113,7 +109,6 @@ function AddItemModal({
             />
           </div>
 
-          {/* Unit */}
           <div>
             <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">
               Unit
@@ -127,7 +122,6 @@ function AddItemModal({
             />
           </div>
 
-          {/* Actions */}
           <div className="flex items-center gap-3 pt-1">
             <button
               type="submit"
@@ -161,6 +155,9 @@ export default function InventoryListsPage() {
   const [confirmReset, setConfirmReset] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
 
+  // Local editable targets: item_name → {mon_target, tue_target, wed_target, fri_target}
+  const [localTargets, setLocalTargets] = useState<Map<string, LocalTarget>>(new Map());
+
   /* ── Queries ─────────────────────────────────────────────────────────────── */
   const { data: items = [], isLoading: itemsLoading } = useQuery({
     queryKey: ['inventory-items'],
@@ -187,6 +184,23 @@ export default function InventoryListsPage() {
   });
 
   const isLoading = itemsLoading || targetsLoading;
+
+  /* ── Seed local targets when entering edit mode ──────────────────────────── */
+  useEffect(() => {
+    if (editMode) {
+      const map = new Map<string, LocalTarget>();
+      targets.forEach(t => {
+        map.set(t.item_name, {
+          mon_target: t.mon_target ?? 0,
+          tue_target: t.tue_target ?? 0,
+          wed_target: t.wed_target ?? 0,
+          fri_target: t.fri_target ?? 0,
+        });
+      });
+      setLocalTargets(map);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editMode]); // only re-init when toggling edit mode, not on every targets refetch
 
   /* ── Derived data ────────────────────────────────────────────────────────── */
   const sections = useMemo(() => {
@@ -264,13 +278,56 @@ export default function InventoryListsPage() {
     },
   });
 
+  // Upsert a single item's targets for the active store
+  const saveTargetMutation = useMutation({
+    mutationFn: async ({ itemName, unit, t }: { itemName: string; unit: string; t: LocalTarget }) => {
+      const { error } = await supabase
+        .from('delivery_targets')
+        .upsert(
+          {
+            location_name: activeStore,
+            item_name:     itemName,
+            unit,
+            mon_target:    t.mon_target,
+            tue_target:    t.tue_target,
+            wed_target:    t.wed_target,
+            fri_target:    t.fri_target,
+          },
+          { onConflict: 'location_name,item_name' },
+        );
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['inventory-lists-targets', activeStore] }),
+  });
+
+  /* ── Target edit helpers ─────────────────────────────────────────────────── */
+  function getLocalVal(itemName: string, key: DayKey): number {
+    return localTargets.get(itemName)?.[key] ?? targetMap.get(itemName)?.[key] ?? 0;
+  }
+
+  const handleTargetChange = useCallback((itemName: string, key: DayKey, raw: string) => {
+    const num = raw === '' ? 0 : Math.max(0, parseInt(raw, 10) || 0);
+    setLocalTargets(prev => {
+      const copy     = new Map(prev);
+      const existing = copy.get(itemName) ?? { mon_target: 0, tue_target: 0, wed_target: 0, fri_target: 0 };
+      copy.set(itemName, { ...existing, [key]: num });
+      return copy;
+    });
+  }, []);
+
+  const handleTargetBlur = useCallback((item: InventoryItem) => {
+    const t = localTargets.get(item.name);
+    if (t !== undefined) {
+      saveTargetMutation.mutate({ itemName: item.name, unit: item.unit, t });
+    }
+  }, [localTargets, saveTargetMutation]);
+
   const colSpan = editMode ? 8 : 6;
 
   /* ── Render ──────────────────────────────────────────────────────────────── */
   return (
     <div>
 
-      {/* Add Item Modal */}
       {showAddModal && (
         <AddItemModal
           onClose={() => setShowAddModal(false)}
@@ -289,8 +346,6 @@ export default function InventoryListsPage() {
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
-
-          {/* Store tabs */}
           {STORES.map(store => (
             <button
               key={store}
@@ -307,7 +362,6 @@ export default function InventoryListsPage() {
 
           <span className="w-px h-6 bg-gray-200" />
 
-          {/* Add Item – only in edit mode */}
           {editMode && (
             <button
               onClick={() => setShowAddModal(true)}
@@ -318,7 +372,6 @@ export default function InventoryListsPage() {
             </button>
           )}
 
-          {/* Reset – only outside edit mode */}
           {!editMode && (
             confirmReset ? (
               <div className="flex items-center gap-1.5">
@@ -350,7 +403,6 @@ export default function InventoryListsPage() {
             )
           )}
 
-          {/* Edit / Done */}
           <button
             onClick={() => { setEditMode(e => !e); setConfirmReset(false); }}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold border transition-colors ${
@@ -381,7 +433,7 @@ export default function InventoryListsPage() {
                   Unit
                 </th>
                 {DAY_COLS.map(d => (
-                  <th key={d.key} className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase tracking-wide min-w-[64px]">
+                  <th key={d.key} className="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase tracking-wide min-w-[72px]">
                     {d.label}
                   </th>
                 ))}
@@ -403,7 +455,7 @@ export default function InventoryListsPage() {
               ) : items.length === 0 ? (
                 <tr>
                   <td colSpan={colSpan} className="px-4 py-12 text-center text-sm text-gray-400">
-                    No items found. Run the SQL migration in{' '}
+                    No items found. Run{' '}
                     <code className="font-mono text-xs bg-gray-100 px-1 py-0.5 rounded">
                       supabase/create_inventory_items.sql
                     </code>{' '}
@@ -414,14 +466,12 @@ export default function InventoryListsPage() {
                 sections.map(section => (
                   <React.Fragment key={section.title}>
 
-                    {/* Section header */}
                     <tr className="bg-[#F1F8E9] border-y border-green-100">
                       <td colSpan={colSpan} className="px-4 py-2 text-xs font-bold text-[#2E7D32] uppercase tracking-wider">
                         {section.title}
                       </td>
                     </tr>
 
-                    {/* Item rows */}
                     {section.items.map((item, idx) => {
                       const target  = targetMap.get(item.name);
                       const isEven  = idx % 2 === 0;
@@ -432,6 +482,7 @@ export default function InventoryListsPage() {
                           key={item.id}
                           className={`border-b border-gray-50 ${isEven ? 'bg-white' : 'bg-gray-50/40'}`}
                         >
+                          {/* Move up/down */}
                           {editMode && (
                             <td className="px-2 py-1.5">
                               <div className="flex items-center justify-center gap-0.5">
@@ -456,18 +507,28 @@ export default function InventoryListsPage() {
                           <td className="px-4 py-2.5 font-medium text-gray-800">{item.name}</td>
                           <td className="px-4 py-2.5 text-xs text-gray-400">{item.unit}</td>
 
-                          {DAY_COLS.map(d => {
-                            const val = target?.[d.key];
-                            return (
-                              <td key={d.key} className="px-4 py-2.5 text-center tabular-nums">
-                                {val == null || val === 0
+                          {/* Day target cells */}
+                          {DAY_COLS.map(d => (
+                            <td key={d.key} className="px-2 py-1.5 text-center tabular-nums">
+                              {editMode ? (
+                                <input
+                                  type="number"
+                                  min="0"
+                                  value={getLocalVal(item.name, d.key) || ''}
+                                  placeholder="—"
+                                  onChange={e => handleTargetChange(item.name, d.key, e.target.value)}
+                                  onBlur={() => handleTargetBlur(item)}
+                                  className="w-14 text-center border border-gray-200 rounded-md px-1 py-1 text-sm font-semibold text-[#2E7D32] bg-white focus:outline-none focus:border-[#1B5E20] focus:ring-1 focus:ring-[#1B5E20] tabular-nums [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                />
+                              ) : (
+                                (target?.[d.key] == null || target[d.key] === 0)
                                   ? <span className="text-gray-300">—</span>
-                                  : <span className="font-semibold text-[#2E7D32]">{val}</span>
-                                }
-                              </td>
-                            );
-                          })}
+                                  : <span className="font-semibold text-[#2E7D32]">{target[d.key]}</span>
+                              )}
+                            </td>
+                          ))}
 
+                          {/* Delete */}
                           {editMode && (
                             <td className="px-2 py-1.5 text-center">
                               <button
@@ -493,8 +554,9 @@ export default function InventoryListsPage() {
         {!isLoading && items.length > 0 && (
           <div className="px-4 py-3 border-t border-gray-100 bg-gray-50">
             <p className="text-xs text-gray-400">
-              Standard targets are set via the Delivery page → Standard Targets.
-              Items with no targets show —.
+              {editMode
+                ? 'Click any number to edit it — changes save automatically when you leave the field.'
+                : 'Standard targets are set here. Items with no targets show —.'}
             </p>
           </div>
         )}
