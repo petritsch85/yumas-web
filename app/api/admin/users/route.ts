@@ -18,7 +18,7 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    const { fullName, email, password, role, locationId, permissions, language } = await request.json();
+    const { fullName, email, password, role, jobRole, locationId, permissions, language } = await request.json();
 
     if (!fullName || !email || !password || !role) {
       return NextResponse.json({ error: 'Name, email, password and role are required' }, { status: 400 });
@@ -46,6 +46,7 @@ export async function POST(request: Request) {
       id: data.user.id,
       full_name: fullName,
       role,
+      job_role: jobRole || null,
       location_id: locationId || null,
       is_active: true,
     };

@@ -28,13 +28,14 @@ export async function PATCH(
 ) {
   try {
     const { id } = await params;
-    const { role, locationId, isActive, permissions, newPassword, newEmail, language } = await request.json();
+    const { role, jobRole, locationId, isActive, permissions, newPassword, newEmail, language } = await request.json();
 
     const admin = getSupabaseAdmin();
 
     // Update profile fields
     const updatePayload: Record<string, any> = {
       role,
+      job_role: jobRole ?? null,
       location_id: locationId || null,
       is_active: isActive,
     };

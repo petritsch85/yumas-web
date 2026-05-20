@@ -114,6 +114,7 @@ type UserRow = {
   id: string;
   full_name: string;
   role: string;
+  job_role?: string | null;
   location_id: string | null;
   is_active: boolean;
   language?: string;
@@ -123,39 +124,44 @@ type UserRow = {
 
 type AddDraft = {
   fullName: string; email: string; password: string;
-  role: string; locationId: string; language: string;
+  role: string; jobRole: string; locationId: string; language: string;
 };
 
 type EditDraft = {
-  role: string; locationId: string; isActive: boolean;
+  role: string; jobRole: string; locationId: string; isActive: boolean;
   permissions: AppPermissions; newPassword: string; newEmail: string;
   language: string;
 };
 
 const ROLES = ['staff', 'manager', 'admin']; // used for the legend only
 
-// All selectable options in the role dropdown
-const ROLE_OPTIONS: { value: string; label: string }[] = [
-  { value: 'staff_food_production',  label: 'Staff — Food Production' },
-  { value: 'staff_service',          label: 'Staff — Service' },
-  { value: 'staff_delivery_driver',  label: 'Staff — Delivery Driver' },
-  { value: 'staff_cook',             label: 'Staff — Cook' },
-  { value: 'manager',                label: 'Manager — Operational access, assigned location' },
-  { value: 'admin',                  label: 'Admin — Full access, all locations' },
+// Category (access level) options
+const CATEGORY_OPTIONS: { value: string; label: string }[] = [
+  { value: 'staff',   label: 'Staff' },
+  { value: 'manager', label: 'Manager' },
+  { value: 'admin',   label: 'Admin' },
 ];
 
-// Human-readable label for any role value
-function roleLabel(role: string): string {
-  const map: Record<string, string> = {
-    admin:                 'Admin',
-    manager:               'Manager',
-    staff:                 'Staff',
-    staff_food_production: 'Food Production',
-    staff_service:         'Service',
-    staff_delivery_driver: 'Delivery Driver',
-    staff_cook:            'Cook',
-  };
-  return map[role] ?? role;
+// Job-role options (alphabetically sorted)
+const JOB_ROLE_OPTIONS: { value: string; label: string }[] = [
+  { value: 'cook',          label: 'Cook' },
+  { value: 'food_production', label: 'Food Production' },
+  { value: 'other',         label: 'Other' },
+  { value: 'service',       label: 'Service' },
+  { value: 'shift_manager', label: 'Shift Manager' },
+  { value: 'store_manager', label: 'Store Manager' },
+];
+
+// Normalise legacy combined role values → category
+function categoryFromRole(role: string): string {
+  if (role === 'admin') return 'admin';
+  if (role === 'manager') return 'manager';
+  return 'staff'; // 'staff', 'staff_*' all map to staff
+}
+
+// Human-readable job_role label
+function jobRoleLabel(jobRole: string | null | undefined): string {
+  return JOB_ROLE_OPTIONS.find(o => o.value === jobRole)?.label ?? '';
 }
 
 const roleColor: Record<string, string> = {
@@ -323,7 +329,7 @@ export default function TeamPage() {
 
   const [showAdd, setShowAdd] = useState(false);
   const [addDraft, setAddDraft] = useState<AddDraft>({
-    fullName: '', email: '', password: 'Yumas2026!', role: 'staff_food_production', locationId: '', language: 'en',
+    fullName: '', email: '', password: 'Yumas2026!', role: 'staff', jobRole: 'food_production', locationId: '', language: 'en',
   });
   const [addPerms, setAddPerms] = useState<AppPermissions>(defaultsForRole('staff'));
   const [showPassword, setShowPassword] = useState(false);
@@ -331,7 +337,7 @@ export default function TeamPage() {
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<EditDraft>({
-    role: 'staff', locationId: '', isActive: true,
+    role: 'staff', jobRole: '', locationId: '', isActive: true,
     permissions: { ...STAFF_DEFAULTS }, newPassword: '', newEmail: '', language: 'en',
   });
 
@@ -340,7 +346,7 @@ export default function TeamPage() {
     queryFn: async () => {
       const { data } = await supabase
         .from('profiles')
-        .select('*, location:locations(name), language')
+        .select('*, job_role, location:locations(name), language')
         .order('full_name');
       return (data ?? []) as UserRow[];
     },
@@ -377,6 +383,7 @@ export default function TeamPage() {
           email:       draft.email,
           password:    draft.password,
           role:        draft.role,
+          jobRole:     draft.jobRole || null,
           locationId:  draft.locationId || null,
           permissions: draft.role !== 'admin' ? perms : null,
           language:    draft.language || 'en',
@@ -389,7 +396,7 @@ export default function TeamPage() {
       qc.invalidateQueries({ queryKey: ['team-users'] });
       qc.invalidateQueries({ queryKey: ['team-emails'] });
       setShowAdd(false);
-      setAddDraft({ fullName: '', email: '', password: 'Yumas2026!', role: 'staff_food_production', locationId: '', language: 'en' });
+      setAddDraft({ fullName: '', email: '', password: 'Yumas2026!', role: 'staff', jobRole: 'food_production', locationId: '', language: 'en' });
       setAddPerms(defaultsForRole('staff'));
       setAddError('');
       setShowPassword(false);
@@ -401,6 +408,7 @@ export default function TeamPage() {
     mutationFn: async ({ id, draft }: { id: string; draft: EditDraft }) => {
       const body: Record<string, any> = {
         role:       draft.role,
+        jobRole:    draft.jobRole || null,
         locationId: draft.locationId || null,
         isActive:   draft.isActive,
         language:   draft.language || 'en',
@@ -443,7 +451,8 @@ export default function TeamPage() {
   const startEdit = (user: UserRow) => {
     setEditingId(user.id);
     setEditDraft({
-      role:        user.role,
+      role:        categoryFromRole(user.role),
+      jobRole:     user.job_role ?? '',
       locationId:  user.location_id ?? '',
       isActive:    user.is_active,
       permissions: mergePermissions(user.permissions),
@@ -545,7 +554,21 @@ export default function TeamPage() {
                 }}
                 className="w-full border-2 border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/40 focus:border-[#1B5E20]"
               >
-                {ROLE_OPTIONS.map(o => (
+                {CATEGORY_OPTIONS.map(o => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">{t('team.form.jobRole')}</label>
+              <select
+                value={addDraft.jobRole}
+                onChange={e => setAddDraft(d => ({ ...d, jobRole: e.target.value }))}
+                className="w-full border-2 border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/40 focus:border-[#1B5E20]"
+              >
+                <option value="">— Select —</option>
+                {JOB_ROLE_OPTIONS.map(o => (
                   <option key={o.value} value={o.value}>{o.label}</option>
                 ))}
               </select>
@@ -662,10 +685,14 @@ export default function TeamPage() {
                         {emailMap?.[user.id] ?? <span className="text-gray-300">—</span>}
                       </td>
                       <td className="px-4 py-3">
-                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${roleColor[user.role.startsWith('staff') ? 'staff' : user.role] ?? 'bg-gray-100 text-gray-600'}`}>
-                          {user.role.startsWith('staff') && user.role !== 'staff' && <span className="opacity-50 mr-1">Staff ·</span>}
-                          {roleLabel(user.role)}
-                        </span>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium capitalize ${roleColor[categoryFromRole(user.role)] ?? 'bg-gray-100 text-gray-600'}`}>
+                            {categoryFromRole(user.role)}
+                          </span>
+                          {user.job_role && (
+                            <span className="text-xs text-gray-500">{jobRoleLabel(user.job_role)}</span>
+                          )}
+                        </div>
                       </td>
                       <td className="px-4 py-3 text-gray-600">
                         {(user as any).location?.name ?? <span className="text-gray-400 text-xs font-medium">All</span>}
@@ -745,9 +772,20 @@ export default function TeamPage() {
                                 }}
                                 className="w-full border-2 border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/40 focus:border-[#1B5E20]"
                               >
-                                {/* Include legacy 'staff' if the user currently has that role */}
-                                {editDraft.role === 'staff' && <option value="staff">Staff — General</option>}
-                                {ROLE_OPTIONS.map(o => (
+                                {CATEGORY_OPTIONS.map(o => (
+                                  <option key={o.value} value={o.value}>{o.label}</option>
+                                ))}
+                              </select>
+                            </div>
+                            <div>
+                              <label className="block text-xs font-medium text-gray-500 mb-1">{t('team.form.jobRole')}</label>
+                              <select
+                                value={editDraft.jobRole}
+                                onChange={e => setEditDraft(d => ({ ...d, jobRole: e.target.value }))}
+                                className="w-full border-2 border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/40 focus:border-[#1B5E20]"
+                              >
+                                <option value="">— Select —</option>
+                                {JOB_ROLE_OPTIONS.map(o => (
                                   <option key={o.value} value={o.value}>{o.label}</option>
                                 ))}
                               </select>
