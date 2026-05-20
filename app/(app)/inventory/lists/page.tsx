@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
 import { useT } from '@/lib/i18n';
@@ -46,6 +46,12 @@ type TargetRow = {
 type LocalTarget = Record<DayKey, number>;
 
 type AddForm = { section: string; name: string; unit: string; stores: string[] };
+
+const LOCK_PAGE_KEY     = 'inventory-lists';
+const LOCK_RENEW_MS     = 2.5 * 60 * 1000; // renew every 2.5 min
+const LOCK_POLL_MS      = 15  * 1000;       // re-check lock every 15 s (view mode)
+
+type LockInfo = { locked_by_name: string; locked_at: string } | null;
 
 /* ─── Add Item Modal ─────────────────────────────────────────────────────────── */
 function AddItemModal({
@@ -203,6 +209,12 @@ export default function InventoryListsPage() {
   // Local editable targets: item_name → {mon_target, tue_target, wed_target, fri_target}
   const [localTargets, setLocalTargets] = useState<Map<string, LocalTarget>>(new Map());
 
+  // ── Edit lock ──────────────────────────────────────────────────────────────
+  const [currentUser,  setCurrentUser]  = useState<{ id: string; name: string } | null>(null);
+  const [activeLock,   setActiveLock]   = useState<LockInfo>(null); // lock held by someone ELSE
+  const iOwnLock = useRef(false);   // true while this tab holds the lock
+  const renewTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+
   /* ── Queries ─────────────────────────────────────────────────────────────── */
   const { data: items = [], isLoading: itemsLoading } = useQuery({
     queryKey: ['inventory-items', activeStore],
@@ -230,6 +242,76 @@ export default function InventoryListsPage() {
   });
 
   const isLoading = itemsLoading || targetsLoading;
+
+  /* ── Fetch current user profile ─────────────────────────────────────────── */
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (!user) return;
+      supabase
+        .from('profiles')
+        .select('id, full_name')
+        .eq('id', user.id)
+        .single()
+        .then(({ data }) => {
+          setCurrentUser({
+            id:   user.id,
+            name: data?.full_name ?? user.email?.split('@')[0] ?? 'Someone',
+          });
+        });
+    });
+  }, []);
+
+  /* ── Poll lock status (view mode, every 15 s) ────────────────────────────── */
+  useEffect(() => {
+    if (editMode) return; // don't poll while we own the lock
+    async function checkLock() {
+      const { data } = await supabase
+        .from('editing_locks')
+        .select('locked_by, locked_by_name, locked_at, expires_at')
+        .eq('page_key', LOCK_PAGE_KEY)
+        .single();
+      if (
+        data &&
+        new Date(data.expires_at) > new Date() &&
+        data.locked_by !== currentUser?.id
+      ) {
+        setActiveLock({ locked_by_name: data.locked_by_name, locked_at: data.locked_at });
+      } else {
+        setActiveLock(null);
+      }
+    }
+    checkLock();
+    const id = setInterval(checkLock, LOCK_POLL_MS);
+    return () => clearInterval(id);
+  }, [editMode, currentUser]);
+
+  /* ── Keepalive: renew lock every 2.5 min while editing ───────────────────── */
+  useEffect(() => {
+    if (!editMode || !currentUser) return;
+    renewTimer.current = setInterval(() => {
+      supabase.rpc('renew_edit_lock', {
+        p_page_key: LOCK_PAGE_KEY,
+        p_user_id:  currentUser.id,
+      });
+    }, LOCK_RENEW_MS);
+    return () => {
+      if (renewTimer.current) clearInterval(renewTimer.current);
+    };
+  }, [editMode, currentUser]);
+
+  /* ── Release lock on component unmount ──────────────────────────────────── */
+  useEffect(() => {
+    return () => {
+      if (iOwnLock.current && currentUser) {
+        supabase.rpc('release_edit_lock', {
+          p_page_key: LOCK_PAGE_KEY,
+          p_user_id:  currentUser.id,
+        });
+        iOwnLock.current = false;
+      }
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser]);
 
   /* ── Seed local targets when entering edit mode ──────────────────────────── */
   useEffect(() => {
@@ -395,6 +477,21 @@ export default function InventoryListsPage() {
   return (
     <div>
 
+      {/* ── Lock banner ─────────────────────────────────────────────────────── */}
+      {activeLock && (
+        <div className="flex items-center gap-3 mb-5 px-4 py-3 bg-amber-50 border border-amber-200 rounded-lg">
+          <span className="text-amber-500 text-lg">🔒</span>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-amber-800">
+              {activeLock.locked_by_name} is currently editing this page
+            </p>
+            <p className="text-xs text-amber-600 mt-0.5">
+              Editing is locked to prevent conflicting changes. It will unlock automatically when they finish.
+            </p>
+          </div>
+        </div>
+      )}
+
       {showAddModal && (
         <AddItemModal
           onClose={() => setShowAddModal(false)}
@@ -471,11 +568,46 @@ export default function InventoryListsPage() {
           )}
 
           <button
-            onClick={() => { setEditMode(e => !e); setConfirmReset(false); }}
+            disabled={!editMode && !!activeLock}
+            onClick={async () => {
+              if (editMode) {
+                // Release lock and exit edit mode
+                if (currentUser) {
+                  await supabase.rpc('release_edit_lock', {
+                    p_page_key: LOCK_PAGE_KEY,
+                    p_user_id:  currentUser.id,
+                  });
+                  iOwnLock.current = false;
+                }
+                setEditMode(false);
+                setConfirmReset(false);
+              } else {
+                // Try to acquire lock
+                if (!currentUser) return;
+                const { data } = await supabase.rpc('acquire_edit_lock', {
+                  p_page_key:  LOCK_PAGE_KEY,
+                  p_user_id:   currentUser.id,
+                  p_user_name: currentUser.name,
+                });
+                if (data?.success) {
+                  iOwnLock.current = true;
+                  setActiveLock(null);
+                  setEditMode(true);
+                } else {
+                  // Lock acquired by someone else between poll intervals
+                  setActiveLock({
+                    locked_by_name: data?.locked_by_name ?? 'Someone',
+                    locked_at:      data?.locked_at ?? new Date().toISOString(),
+                  });
+                }
+              }
+            }}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold border transition-colors ${
               editMode
                 ? 'bg-white text-[#1B5E20] border-[#1B5E20]'
-                : 'bg-white text-gray-600 border-gray-300 hover:border-[#1B5E20] hover:text-[#1B5E20]'
+                : activeLock
+                  ? 'bg-white text-gray-400 border-gray-200 cursor-not-allowed'
+                  : 'bg-white text-gray-600 border-gray-300 hover:border-[#1B5E20] hover:text-[#1B5E20]'
             }`}
           >
             {editMode
