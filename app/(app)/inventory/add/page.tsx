@@ -24,6 +24,7 @@ export default function AddInventoryPage() {
         .from('locations')
         .select('id, name, type')
         .eq('is_active', true)
+        .neq('name', 'ZK')
         .order('name');
       return data ?? [];
     },
