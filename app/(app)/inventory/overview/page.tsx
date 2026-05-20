@@ -8,62 +8,33 @@ import { useT } from '@/lib/i18n';
 
 const LOCATIONS = ['Eschborn', 'Taunus', 'Westend', 'ZK'] as const;
 
-/* ─── Canonical item order (mirrors inventory form SECTIONS) ────────────────── */
-const SECTION_ORDER = ['Kühlhaus', 'Tiefkühler', 'Trockenware', 'Regale', 'Lager'];
+/* ─── Fallback section order (used while DB loads) ──────────────────────────── */
+const SECTION_ORDER_FALLBACK = ['Kühlhaus', 'Tiefkühler', 'Trockenware', 'Regale', 'Lager'];
 
-const CANONICAL_ITEMS: string[] = [
-  // Kühlhaus
-  'Guacamole','Schärfemix','Maissalsa','Tomatensalsa','Sour Cream','Marinade Chicken',
-  'Pico de Gallo','Crema Nogada','Käse Gouda','Gouda Scheiben Gringa','Ciabatta','Brownie',
-  'Carlota de Limon','Schoko- Avocado Mousse','Mole','Marinade Al Pastor','Barbacoa',
-  'Chili con Carne','Cochinita','Kartoffel Würfel','Vinaigrette','Honig Sesam / Senf',
-  'Pozole','Zwiebeln karamellisiert','Karotten karamellisiert','Bohnencreme',
-  'Alambre - Zwiebel','Weizen Tortillas 12cm','Tortillas 30cm','Frische Habaneros',
-  'Salsa Habanero','Salsa Verde','Chipotle SourCream','Salsa de Jamaica','Salsa Torta',
-  'Humo Salsa','Fuego Salsa','Oliven entkernt','Chiles Poblanos','Salsa Pitaya',
-  'Mais Tortillas 12cm','Blau Mais Tortillas 15cm','Queso Cotija','Queso Oaxaca',
-  'Queso Chihuahua','Rinderfilet Steak','Filetspitzen','Hähnchenkeule (ganz)','Mole Rojo',
-  'Chorizo','Carne Vegetal','Costilla de Res','Salsa für Costilla de Res',
-  'Rote Zwiebeln eingelegt','Pulpo (Chipulpotle)','Salsa Pulpo','Birria','Salsa Birria',
-  'Füllung Nogada','H-Milch 3,5%',
-  // Tiefkühler
-  'Alambre - Paprika Streifen','Gambas','Weizentortillas 20cm',
-  // Trockenware
-  'Reis','Schwarze Bohnen','Salz','Zucker','Brauner Zucker','Pfeffer','Pfeffer geschrotet',
-  'Rapsöl','Tajin','Limettensaft (750ml Metro)',
-  // Regale
-  'Große Bowl togo Schale','Große Bowl togo Deckel','Kleine Bowl togo Schale',
-  'Kleine Bowl togo Deckel','Dressingsbecher Schale','Dressingsbecher Deckel','Alufolie',
-  'Backpapier','Trayliner Papier','Weiße Serviette','Zig-Zag Papier','Müllbeutel Blau 120L',
-  'Handschuhe M','Handschuhe L','Mehrwegbowl',
-  // Lager
-  'Große Togo Tüte','Kleine Togo Tüte','Schwarze Serviette','Nachos','Spüli','Essigessenz',
-  'Topfschwamm','Edelstahlschwamm','Reinigungshandschuhe','Blaue Rolle','Toilettenpapier',
-  'Glasreiniger','WC Reiniger','Desinfektionsreiniger','Gastro Universal Reiniger',
-  'Kalkreiniger','Laminat - Parkett-Reiniger','B100N','B200S','F8500','F420E',
-  'Spülmaschine Salz - Etolit',
-];
+/* ─── DB types ──────────────────────────────────────────────────────────────── */
+type DbSection = { id: string; name: string; sort_order: number };
+type DbItem    = { id: string; name: string; section: string; unit: string; sort_order: number; store_sort_orders: Record<string, number> | null };
 
-const ITEM_RANK: Record<string, number> = Object.fromEntries(
-  CANONICAL_ITEMS.map((name, i) => [name, i])
-);
-
-function sortSections<T extends { title: string; items: unknown[] }>(sections: T[]): T[] {
-  return sections
-    .sort((a, b) => {
-      const ia = SECTION_ORDER.indexOf(a.title);
-      const ib = SECTION_ORDER.indexOf(b.title);
-      return (ia < 0 ? 999 : ia) - (ib < 0 ? 999 : ib);
-    });
+/* ─── Sorting helpers (DB-driven order passed as params) ────────────────────── */
+function sortSections<T extends { title: string; items: unknown[] }>(
+  sections: T[],
+  sectionOrder: string[],
+): T[] {
+  return sections.slice().sort((a, b) => {
+    const ia = sectionOrder.indexOf(a.title);
+    const ib = sectionOrder.indexOf(b.title);
+    return (ia < 0 ? 999 : ia) - (ib < 0 ? 999 : ib);
+  });
 }
 
-function sortItemNames(names: string[]): string[] {
+function sortItemNames(names: string[], itemRank: Record<string, number>): string[] {
   return names.slice().sort((a, b) => {
-    const ia = ITEM_RANK[a] ?? 9999;
-    const ib = ITEM_RANK[b] ?? 9999;
+    const ia = itemRank[a] ?? 9999;
+    const ib = itemRank[b] ?? 9999;
     return ia !== ib ? ia - ib : a.localeCompare(b);
   });
 }
+
 type LocationName = (typeof LOCATIONS)[number];
 type TabView = 'group' | LocationName;
 
@@ -97,14 +68,13 @@ function toLocalDateStr(d: Date): string {
 }
 
 function localDateStrFromIso(iso: string): string {
-  const d = new Date(iso);
-  return toLocalDateStr(d);
+  return toLocalDateStr(new Date(iso));
 }
 
 /** Returns Mon–Sun of the week at the given offset (0 = current week) */
 function getWeekDays(offset: number): Date[] {
   const now = new Date();
-  const dow = now.getDay(); // 0 Sun … 6 Sat
+  const dow = now.getDay();
   const diffToMonday = dow === 0 ? -6 : 1 - dow;
   const monday = new Date(now);
   monday.setDate(now.getDate() + diffToMonday + offset * 7);
@@ -128,11 +98,11 @@ function fmtWeekRange(days: Date[]): string {
 /* ─── Tab bar ──────────────────────────────────────────────────────────────── */
 function TabBar({ active, onChange }: { active: TabView; onChange: (v: TabView) => void }) {
   const tabs: { key: TabView; label: string }[] = [
-    { key: 'group',   label: 'Group'   },
-    { key: 'Westend', label: 'Westend' },
-    { key: 'Eschborn',label: 'Eschborn'},
-    { key: 'Taunus',  label: 'Taunus'  },
-    { key: 'ZK',      label: 'ZK'      },
+    { key: 'group',    label: 'Group'   },
+    { key: 'Westend',  label: 'Westend' },
+    { key: 'Eschborn', label: 'Eschborn'},
+    { key: 'Taunus',   label: 'Taunus'  },
+    { key: 'ZK',       label: 'ZK'      },
   ];
   return (
     <div className="flex items-center gap-1.5">
@@ -153,7 +123,7 @@ function TabBar({ active, onChange }: { active: TabView; onChange: (v: TabView) 
   );
 }
 
-/* ─── Group View (current view) ─────────────────────────────────────────────── */
+/* ─── Group View ─────────────────────────────────────────────────────────────── */
 type ItemRow = {
   section: string;
   name: string;
@@ -161,10 +131,40 @@ type ItemRow = {
   quantities: Partial<Record<LocationName, number>>;
   total: number;
 };
-
 type SectionGroup = { title: string; items: ItemRow[] };
 
 function GroupView() {
+  /* ── DB: canonical sections + items ── */
+  const { data: dbSections = [] } = useQuery<DbSection[]>({
+    queryKey: ['inventory-sections'],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('inventory_sections')
+        .select('id, name, sort_order')
+        .order('sort_order', { ascending: true });
+      return (data ?? []) as DbSection[];
+    },
+    staleTime: 60_000,
+  });
+
+  const { data: dbItems = [] } = useQuery<DbItem[]>({
+    queryKey: ['inventory-items-all'],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('inventory_items')
+        .select('id, name, section, unit, sort_order, store_sort_orders')
+        .order('sort_order', { ascending: true });
+      return (data ?? []) as DbItem[];
+    },
+    staleTime: 60_000,
+  });
+
+  const sectionOrder = useMemo(
+    () => dbSections.length > 0 ? dbSections.map(s => s.name) : SECTION_ORDER_FALLBACK,
+    [dbSections],
+  );
+
+  /* ── Latest submissions per location ── */
   const { data, isLoading, isFetching, dataUpdatedAt, refetch } = useQuery({
     queryKey: ['inventory-overview'],
     staleTime: 0,
@@ -183,38 +183,87 @@ function GroupView() {
           latestByLocation[loc] = { submitted_at: sub.submitted_at, data: sub.data ?? [] };
         }
       }
-
-      const sectionMap: Record<string, Record<string, { unit: string; quantities: Partial<Record<LocationName, number>> }>> = {};
-      for (const loc of LOCATIONS) {
-        const sub = latestByLocation[loc];
-        if (!sub) continue;
-        for (const item of sub.data) {
-          if (!sectionMap[item.section]) sectionMap[item.section] = {};
-          if (!sectionMap[item.section][item.name]) {
-            sectionMap[item.section][item.name] = { unit: item.unit, quantities: {} };
-          }
-          sectionMap[item.section][item.name].quantities[loc] = item.quantity;
-        }
-      }
-
-      const sections: SectionGroup[] = sortSections(
-        Object.entries(sectionMap).map(([title, items]) => ({
-          title,
-          items: sortItemNames(Object.keys(items)).map((name) => {
-            const { unit, quantities } = items[name];
-            return {
-              section: title, name, unit, quantities,
-              total: Object.values(quantities).reduce((s, q) => s + (q ?? 0), 0),
-            };
-          }),
-        }))
-      );
-
-      return { sections, latestByLocation };
+      return { latestByLocation };
     },
   });
 
-  const sections = data?.sections ?? [];
+  /* ── Build section groups: DB as canonical, quantities from submissions ── */
+  const sections = useMemo<SectionGroup[]>(() => {
+    const latestByLocation = data?.latestByLocation ?? {};
+
+    // Quantity lookup: itemName -> location -> qty
+    const quantityMap: Record<string, Partial<Record<LocationName, number>>> = {};
+    // Unit lookup from submissions (for legacy items not in DB)
+    const subUnitMap: Record<string, string> = {};
+    // Section lookup from submissions (for legacy items)
+    const subSectionMap: Record<string, string> = {};
+
+    for (const loc of LOCATIONS) {
+      const sub = latestByLocation[loc];
+      if (!sub) continue;
+      for (const item of sub.data) {
+        if (!quantityMap[item.name]) quantityMap[item.name] = {};
+        quantityMap[item.name][loc] = item.quantity;
+        if (!subUnitMap[item.name])    subUnitMap[item.name]    = item.unit;
+        if (!subSectionMap[item.name]) subSectionMap[item.name] = item.section;
+      }
+    }
+
+    // DB items grouped by section, sorted by sort_order
+    const dbItemsBySec: Record<string, DbItem[]> = {};
+    for (const item of dbItems) {
+      if (!dbItemsBySec[item.section]) dbItemsBySec[item.section] = [];
+      dbItemsBySec[item.section].push(item);
+    }
+    const dbItemNames = new Set(dbItems.map(i => i.name));
+
+    // Build sections in DB order
+    const result: SectionGroup[] = [];
+    for (const secName of sectionOrder) {
+      const secItems = (dbItemsBySec[secName] ?? [])
+        .slice()
+        .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+
+      const rows: ItemRow[] = secItems.map(dbItem => {
+        const quantities = quantityMap[dbItem.name] ?? {};
+        return {
+          section: secName,
+          name: dbItem.name,
+          unit: dbItem.unit,
+          quantities,
+          total: Object.values(quantities).reduce((s, q) => s + (q ?? 0), 0),
+        };
+      });
+
+      if (rows.length > 0) result.push({ title: secName, items: rows });
+    }
+
+    // Append legacy items from submissions not present in DB
+    const legacyBySec: Record<string, ItemRow[]> = {};
+    for (const [itemName, quantities] of Object.entries(quantityMap)) {
+      if (dbItemNames.has(itemName)) continue;
+      const secName = subSectionMap[itemName] ?? 'Other';
+      if (!legacyBySec[secName]) legacyBySec[secName] = [];
+      legacyBySec[secName].push({
+        section: secName,
+        name: itemName,
+        unit: subUnitMap[itemName] ?? '',
+        quantities,
+        total: Object.values(quantities).reduce((s, q) => s + (q ?? 0), 0),
+      });
+    }
+    for (const [secName, rows] of Object.entries(legacyBySec)) {
+      const existing = result.find(s => s.title === secName);
+      if (existing) {
+        existing.items.push(...rows);
+      } else {
+        result.push({ title: secName, items: rows });
+      }
+    }
+
+    return result;
+  }, [data, dbItems, sectionOrder]);
+
   const latestByLocation = data?.latestByLocation ?? {};
 
   return (
@@ -316,22 +365,22 @@ type DeliveryLineEdit = {
   item_name: string;
   section: string;
   unit: string;
-  delivery_qty: number;   // REQ
-  packed_qty: number | null; // ACT
+  delivery_qty: number;
+  packed_qty: number | null;
 };
 
 function DayEditModal({
-  target, onClose, onDeleted,
+  target, onClose, onDeleted, itemRank,
 }: {
   target: DayEditTarget;
   onClose: () => void;
   onDeleted: () => void;
+  itemRank: Record<string, number>;
 }) {
   const [tab, setTab] = useState<EditTab>('items');
   const [deleting, setDeleting] = useState<'delivery' | 'inventory' | 'both' | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // ── Edit items state ──────────────────────────────────────────────────────
   const [edits, setEdits] = useState<Record<string, { req: string; act: string; assumed: boolean }>>({});
   const [saving, setSaving] = useState(false);
   const [saveOk, setSaveOk] = useState(false);
@@ -351,17 +400,14 @@ function DayEditModal({
         .in('run_id', runIds)
         .eq('location_name', target.location);
       return ((lines ?? []) as DeliveryLineEdit[]).sort((a, b) => {
-        const ia = ITEM_RANK[a.item_name] ?? 9999;
-        const ib = ITEM_RANK[b.item_name] ?? 9999;
+        const ia = itemRank[a.item_name] ?? 9999;
+        const ib = itemRank[b.item_name] ?? 9999;
         return ia !== ib ? ia - ib : a.item_name.localeCompare(b.item_name);
       });
     },
     enabled: tab === 'items',
   });
 
-  // Initialise edit state when lines load.
-  // ACT defaults to delivery_qty when packed_qty is null (mirrors the overview's fallback).
-  // We track `assumed` to style assumed values differently from confirmed ones.
   const initEdits = () => {
     const init: Record<string, { req: string; act: string; assumed: boolean }> = {};
     for (const l of deliveryLines) {
@@ -377,7 +423,6 @@ function DayEditModal({
     if (Object.keys(init).length > 0) setEdits(prev => ({ ...init, ...prev }));
   };
 
-  // Run init whenever lines arrive
   useMemo(initEdits, [deliveryLines]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSave = async () => {
@@ -389,7 +434,6 @@ function DayEditModal({
         const e = edits[line.id];
         if (!e) continue;
         const newReq = Math.max(0, parseInt(e.req) || 0);
-        // If still assumed (user never touched ACT), keep packed_qty as null
         const newAct = e.assumed ? null : (e.act.trim() === '' ? null : Math.max(0, parseInt(e.act) || 0));
         if (newReq === line.delivery_qty && newAct === line.packed_qty) continue;
         const { error: err } = await supabase
@@ -399,7 +443,7 @@ function DayEditModal({
         if (err) throw new Error(err.message);
       }
       setSaveOk(true);
-      onDeleted(); // reuse to trigger table refresh
+      onDeleted();
       setTimeout(() => setSaveOk(false), 2000);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Save failed');
@@ -408,7 +452,6 @@ function DayEditModal({
     }
   };
 
-  // ── Delete ────────────────────────────────────────────────────────────────
   const handleDelete = async (what: 'delivery' | 'inventory' | 'both') => {
     setDeleting(what);
     setError(null);
@@ -451,7 +494,6 @@ function DayEditModal({
         style={{ maxHeight: '85vh' }}
         onClick={e => e.stopPropagation()}
       >
-        {/* Header */}
         <div className="flex items-start justify-between px-5 pt-4 pb-3 border-b border-gray-100">
           <div>
             <h3 className="font-bold text-gray-900 text-base">Edit Day Data</h3>
@@ -464,17 +506,16 @@ function DayEditModal({
           </button>
         </div>
 
-        {/* Tabs */}
         <div className="flex border-b border-gray-100 px-5">
-          {([['items', 'Edit Items'], ['delete', 'Delete']] as [EditTab, string][]).map(([key, label]) => (
+          {([['items', 'Edit Items'], ['delete', 'Delete']] as [EditTab, string][]).map(([key, lbl]) => (
             <button
               key={key}
-              onClick={() => { setTab(key); setError(null); }}
+              onClick={() => { setTab(key as EditTab); setError(null); }}
               className={`py-2.5 px-1 mr-5 text-sm font-medium border-b-2 -mb-px transition-colors ${
                 tab === key ? 'border-[#1B5E20] text-[#1B5E20]' : 'border-transparent text-gray-400 hover:text-gray-600'
               }`}
             >
-              {label}
+              {lbl}
             </button>
           ))}
         </div>
@@ -485,7 +526,6 @@ function DayEditModal({
           </div>
         )}
 
-        {/* ── EDIT ITEMS TAB ── */}
         {tab === 'items' && (
           <>
             <div className="flex-1 overflow-y-auto px-5 py-3">
@@ -556,7 +596,6 @@ function DayEditModal({
           </>
         )}
 
-        {/* ── DELETE TAB ── */}
         {tab === 'delete' && (
           <div className="px-5 py-4 space-y-2">
             <p className="text-xs text-gray-400 mb-3">Permanently remove data for this location and date.</p>
@@ -593,19 +632,17 @@ function DayEditModal({
 
 /* ─── Store Weekly View ─────────────────────────────────────────────────────── */
 type DayData = {
-  start:       number | null; // Starting Inventory (from previous day's count)
-  usageLunch:  number | null; // Lunch shift usage (from shift_usage table)
-  delivery:    number | null; // Confirmed delivery (packed_qty)
-  usageDinner: number | null; // Dinner shift usage (from shift_usage table)
-  ending:      number | null; // Ending Inventory (from count upload, or calculated)
+  start:       number | null;
+  usageLunch:  number | null;
+  delivery:    number | null;
+  usageDinner: number | null;
+  ending:      number | null;
 };
 
-type WeekTableData = Record<string, Record<string, DayData>>; // itemName -> dateStr -> DayData
+type WeekTableData    = Record<string, Record<string, DayData>>;
 type WeekSectionGroup = { title: string; items: string[] };
 
 const DAY_COLS = ['Start', 'Lunch', 'Delivery', 'Dinner', 'End'] as const;
-
-/* ─── Delivery day helper ───────────────────────────────────────────────────── */
 const NO_DELIVERY_DAYS = new Set(['saturday', 'sunday']);
 
 function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
@@ -616,13 +653,52 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
   const qc = useQueryClient();
   const [editDay, setEditDay] = useState<DayEditTarget | null>(null);
 
-  // Show current week only (7 days)
   const weekDays = useMemo(() => getWeekDays(weekOffset), [weekOffset]);
-
   const weekStart = toLocalDateStr(weekDays[0]);
   const weekEnd   = toLocalDateStr(weekDays[6]);
 
-  /* ── Shift usage data for this location (entered on the Shift Usage page) ── */
+  /* ── DB: canonical sections + items for this location ── */
+  const { data: dbSections = [] } = useQuery<DbSection[]>({
+    queryKey: ['inventory-sections', location],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('inventory_sections')
+        .select('id, name, sort_order')
+        .contains('stores', [location])
+        .order('sort_order', { ascending: true });
+      return (data ?? []) as DbSection[];
+    },
+    staleTime: 60_000,
+  });
+
+  const { data: dbItems = [] } = useQuery<DbItem[]>({
+    queryKey: ['inventory-items', location],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('inventory_items')
+        .select('id, name, section, unit, sort_order, store_sort_orders')
+        .contains('stores', [location])
+        .order('sort_order', { ascending: true });
+      return (data ?? []) as DbItem[];
+    },
+    staleTime: 60_000,
+  });
+
+  const sectionOrder = useMemo(
+    () => dbSections.length > 0 ? dbSections.map(s => s.name) : SECTION_ORDER_FALLBACK,
+    [dbSections],
+  );
+
+  /* Item rank: prefer store-specific sort order, fall back to global sort_order */
+  const itemRank = useMemo<Record<string, number>>(() => {
+    const rank: Record<string, number> = {};
+    for (const item of dbItems) {
+      rank[item.name] = (item.store_sort_orders as Record<string, number> | null)?.[location] ?? item.sort_order ?? 9999;
+    }
+    return rank;
+  }, [dbItems, location]);
+
+  /* ── Shift usage ── */
   const { data: shiftUsageRows = [] } = useQuery({
     queryKey: ['shift-usage-overview', location, weekStart, weekEnd],
     enabled: !!weekStart,
@@ -638,7 +714,6 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
     },
   });
 
-  /* Build per-shift lookups: item → date → quantity */
   const shiftUsageLunch = useMemo(() => {
     const m: Record<string, Record<string, number>> = {};
     for (const r of shiftUsageRows.filter(r => r.shift === 'lunch')) {
@@ -657,7 +732,6 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
     return m;
   }, [shiftUsageRows]);
 
-  // Query range: day before Mon (for Mon's Starting Inventory)
   const queryRangeStart = useMemo(() => {
     const d = new Date(weekDays[0]);
     d.setDate(d.getDate() - 1);
@@ -668,7 +742,6 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
     queryKey: ['inventory-weekly', location, weekStart, weekEnd],
     staleTime: 60_000,
     queryFn: async () => {
-      // 1. Inventory submissions for this location in extended range
       const { data: submissions } = await supabase
         .from('inventory_submissions')
         .select('submitted_at, data')
@@ -677,7 +750,6 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
         .lte('submitted_at', `${weekEnd}T23:59:59`)
         .order('submitted_at', { ascending: true });
 
-      // 2. Delivery runs in the week
       const { data: runs } = await supabase
         .from('delivery_runs')
         .select('id, delivery_date')
@@ -689,7 +761,6 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
         (runs ?? []).map(r => [r.id, r.delivery_date])
       );
 
-      // 3. Delivery lines for those runs, filtered by location
       let lines: { run_id: string; item_name: string; section: string; unit: string; delivery_qty: number; packed_qty: number | null }[] = [];
       if (runIds.length > 0) {
         const { data: linesData } = await supabase
@@ -706,17 +777,20 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
   });
 
   /* ── Process into table data ── */
-  const { tableData, sections, itemUnit } = useMemo<{ tableData: WeekTableData; sections: WeekSectionGroup[]; itemUnit: Record<string, string> }>(() => {
+  const { tableData, sections, itemUnit } = useMemo<{
+    tableData: WeekTableData;
+    sections: WeekSectionGroup[];
+    itemUnit: Record<string, string>;
+  }>(() => {
     if (!data) return { tableData: {}, sections: [], itemUnit: {} };
     const { submissions, lines, runDateMap } = data;
 
-    // Group submissions by local date; sorted ascending so last = latest
     const subsByDate: Record<string, { items: Record<string, number>; meta: Record<string, { section: string; unit: string }> }[]> = {};
     for (const sub of submissions) {
       const dk = localDateStrFromIso(sub.submitted_at);
       if (!subsByDate[dk]) subsByDate[dk] = [];
       const items: Record<string, number> = {};
-      const meta: Record<string, { section: string; unit: string }> = {};
+      const meta:  Record<string, { section: string; unit: string }> = {};
       for (const item of (sub.data ?? []) as { section: string; name: string; unit: string; quantity: number }[]) {
         items[item.name] = item.quantity;
         meta[item.name]  = { section: item.section, unit: item.unit };
@@ -730,7 +804,6 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
       return subs[subs.length - 1].items;
     };
 
-    // Delivery data by date and item — store only confirmed packed_qty
     const deliveryByDate: Record<string, Record<string, { packedQty: number | null }>> = {};
     for (const line of lines) {
       const dk = runDateMap[line.run_id];
@@ -739,7 +812,7 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
       deliveryByDate[dk][line.item_name] = { packedQty: line.packed_qty };
     }
 
-    // Master item list from all submissions in range
+    // Master item list: from submissions + delivery lines
     const allItems = new Map<string, { section: string; unit: string }>();
     for (const subs of Object.values(subsByDate)) {
       for (const sub of subs) {
@@ -754,39 +827,32 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
       }
     }
 
-    const todayStr  = toLocalDateStr(new Date());
+    const todayStr = toLocalDateStr(new Date());
 
-    // Build per-item per-day data (7 days)
     const tableData: WeekTableData = {};
     for (const [itemName] of allItems) {
       tableData[itemName] = {};
       for (const day of weekDays) {
-        const dk     = toLocalDateStr(day);
-        const prevDk = toLocalDateStr(new Date(day.getTime() - 86_400_000));
+        const dk      = toLocalDateStr(day);
+        const prevDk  = toLocalDateStr(new Date(day.getTime() - 86_400_000));
         const dayName = day.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase();
         const isNoDelivery = NO_DELIVERY_DAYS.has(dayName);
 
-        const start  = getInventory(prevDk)?.[itemName] ?? null;
-        const ending = getInventory(dk)?.[itemName]    ?? null;
-        const del    = isNoDelivery ? null : (deliveryByDate[dk]?.[itemName] ?? null);
-
-        // Delivery = confirmed packed_qty only (null = not yet confirmed)
+        const start   = getInventory(prevDk)?.[itemName] ?? null;
+        const ending  = getInventory(dk)?.[itemName]    ?? null;
+        const del     = isNoDelivery ? null : (deliveryByDate[dk]?.[itemName] ?? null);
         const delivery = del?.packedQty ?? null;
-
-        // Per-shift usage from the Shift Usage page
         const usageLunch  = shiftUsageLunch[itemName]?.[dk]  ?? null;
         const usageDinner = shiftUsageDinner[itemName]?.[dk] ?? null;
 
         tableData[itemName][dk] = { start, usageLunch, delivery, usageDinner, ending };
       }
 
-      // ── Second pass: for every future day, chain START and always compute END ──
       for (let i = 1; i < weekDays.length; i++) {
         const day    = weekDays[i];
         const dk     = toLocalDateStr(day);
         const prevDk = toLocalDateStr(weekDays[i - 1]);
         const isFutureOrToday = dk >= todayStr;
-
         if (!isFutureOrToday) continue;
 
         const d    = tableData[itemName][dk];
@@ -796,13 +862,11 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
         const dayName      = day.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase();
         const isNoDelivery = NO_DELIVERY_DAYS.has(dayName);
 
-        // Chain START: use real value if available, otherwise carry forward prev END
         const effectiveStart = d.start !== null ? d.start : (prev.ending ?? null);
         const deliveryVal    = isNoDelivery ? null : d.delivery;
         const lunchVal       = shiftUsageLunch[itemName]?.[dk]  ?? d.usageLunch;
         const dinnerVal      = shiftUsageDinner[itemName]?.[dk] ?? d.usageDinner;
 
-        // END = START − usageLunch + delivery − usageDinner
         const computedEnding = effectiveStart !== null
           ? effectiveStart - (lunchVal ?? 0) + (deliveryVal ?? 0) - (dinnerVal ?? 0)
           : null;
@@ -817,7 +881,7 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
       }
     }
 
-    // Build section groups
+    // Build section groups using DB order
     const sectionMap: Record<string, string[]> = {};
     for (const [name, { section }] of allItems) {
       if (!sectionMap[section]) sectionMap[section] = [];
@@ -826,35 +890,30 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
     const sections: WeekSectionGroup[] = sortSections(
       Object.entries(sectionMap).map(([title, items]) => ({
         title,
-        items: sortItemNames(items),
-      }))
+        items: sortItemNames(items, itemRank),
+      })),
+      sectionOrder,
     );
 
-    // Unit lookup map (itemName → unit string)
     const itemUnit: Record<string, string> = {};
     for (const [name, { unit }] of allItems) itemUnit[name] = unit;
 
     return { tableData, sections, itemUnit };
-  }, [data, weekDays, location, shiftUsageLunch, shiftUsageDinner]);
+  }, [data, weekDays, location, shiftUsageLunch, shiftUsageDinner, sectionOrder, itemRank]);
 
-  const isEmpty = sections.length === 0 && !isLoading;
-  const todayStr = toLocalDateStr(new Date());
+  const isEmpty   = sections.length === 0 && !isLoading;
+  const todayStr  = toLocalDateStr(new Date());
 
-  /* ── Cell renderers ── */
   function InvCell({ v }: { v: number | null }) {
     if (v === null) return <span className="text-gray-200">—</span>;
     if (v === 0)    return <span className="text-gray-300">0</span>;
     return <span className="text-gray-800 font-semibold">{v}</span>;
   }
 
-  function DelivCell({ v, isPartial }: { v: number | null; isPartial?: boolean }) {
+  function DelivCell({ v }: { v: number | null }) {
     if (v === null) return <span className="text-gray-200">—</span>;
     if (v === 0)    return <span className="text-gray-300">0</span>;
-    return (
-      <span className={isPartial ? 'text-amber-600 font-semibold' : 'text-blue-600 font-semibold'}>
-        {v}
-      </span>
-    );
+    return <span className="text-blue-600 font-semibold">{v}</span>;
   }
 
   function UsageCell({ v }: { v: number | null }) {
@@ -864,7 +923,6 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
     return <span className="text-blue-600 font-semibold">{v}</span>;
   }
 
-  // Forecast cells: italic red to signal "estimated"
   function ForecastCell({ v, dim }: { v: number | null; dim?: boolean }) {
     if (v === null) return <span className="text-gray-200">—</span>;
     if (v === 0)    return <span className="text-gray-300 italic">0</span>;
@@ -873,7 +931,6 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
 
   return (
     <>
-      {/* Week navigation */}
       <div className="flex items-center gap-3 mb-5">
         <button
           onClick={() => onOffsetChange(weekOffset - 1)}
@@ -898,8 +955,6 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
             This week
           </button>
         )}
-
-        {/* Legend */}
         <div className="ml-auto flex items-center gap-4 text-xs text-gray-400">
           <span><span className="text-gray-800 font-semibold">12</span> Start/End</span>
           <span><span className="text-blue-600 font-semibold">5</span> Confirmed delivery</span>
@@ -922,7 +977,6 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
         <div className="bg-white rounded-lg shadow-sm border border-gray-100 overflow-hidden">
           <div className="overflow-x-auto">
             <table className="text-xs border-collapse">
-              {/* ── Column groups for visual separation ── */}
               <colgroup>
                 <col style={{ minWidth: 130 }} />
                 {weekDays.map((_, di) => (
@@ -937,13 +991,12 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
               </colgroup>
 
               <thead>
-                {/* Row 1: Day headers */}
                 <tr className="bg-gray-50 border-b border-gray-200">
                   <th className="sticky left-0 z-20 bg-gray-50 px-4 py-2.5 text-left text-xs font-semibold text-gray-600 uppercase tracking-wide" rowSpan={2}>
                     Item
                   </th>
                   {weekDays.map((day, di) => {
-                    const dk = toLocalDateStr(day);
+                    const dk      = toLocalDateStr(day);
                     const isToday = dk === todayStr;
                     return (
                       <th
@@ -973,24 +1026,20 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
                   })}
                 </tr>
 
-                {/* Row 2: Sub-column headers */}
                 <tr className="bg-gray-50 border-b border-gray-200">
                   {weekDays.map((day, di) => {
-                    const dk = toLocalDateStr(day);
+                    const dk      = toLocalDateStr(day);
                     const isToday = dk === todayStr;
-                    return DAY_COLS.map((col, ci) => {
-                      const isFirst = ci === 0;
-                      return (
-                        <th
-                          key={`${di}-${col}`}
-                          className={`px-1 py-1.5 text-center font-medium uppercase tracking-wide whitespace-nowrap ${
-                            isFirst ? 'border-l-2 border-gray-300' : ''
-                          } ${isToday ? 'bg-[#F1F8E9] text-gray-400' : 'text-gray-400'}`}
-                        >
-                          {col}
-                        </th>
-                      );
-                    });
+                    return DAY_COLS.map((col, ci) => (
+                      <th
+                        key={`${di}-${col}`}
+                        className={`px-1 py-1.5 text-center font-medium uppercase tracking-wide whitespace-nowrap ${
+                          ci === 0 ? 'border-l-2 border-gray-300' : ''
+                        } ${isToday ? 'bg-[#F1F8E9] text-gray-400' : 'text-gray-400'}`}
+                      >
+                        {col}
+                      </th>
+                    ));
                   })}
                 </tr>
               </thead>
@@ -998,7 +1047,6 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
               <tbody>
                 {sections.map((section) => (
                   <>
-                    {/* Section header */}
                     <tr key={`s-${section.title}`} className="bg-[#F1F8E9] border-y border-green-100">
                       <td className="sticky left-0 px-4 py-1.5 text-xs font-bold text-[#2E7D32] uppercase tracking-wider bg-[#F1F8E9]">
                         {section.title}
@@ -1013,11 +1061,10 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
                       )}
                     </tr>
 
-                    {/* Item rows */}
                     {section.items.map((itemName, idx) => {
                       const isEven = idx % 2 === 0;
-                      const rowBg = isEven ? 'bg-white' : 'bg-gray-50/40';
-                      const unit = itemUnit[itemName] ?? '';
+                      const rowBg  = isEven ? 'bg-white' : 'bg-gray-50/40';
+                      const unit   = itemUnit[itemName] ?? '';
 
                       return (
                         <tr key={itemName} className={`border-b border-gray-50 hover:bg-blue-50/20 transition-colors ${rowBg}`}>
@@ -1027,36 +1074,27 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
                           </td>
 
                           {weekDays.map((day, di) => {
-                            const dk = toLocalDateStr(day);
-                            const d  = tableData[itemName]?.[dk];
+                            const dk         = toLocalDateStr(day);
+                            const d          = tableData[itemName]?.[dk];
                             const isToday    = dk === todayStr;
                             const isForecast = dk >= todayStr;
-                            const dayBg  = isToday ? 'bg-[#F1F8E9]/60' : '';
-                            const borderL = 'border-l-2 border-gray-300';
+                            const dayBg      = isToday ? 'bg-[#F1F8E9]/60' : '';
+                            const borderL    = 'border-l-2 border-gray-300';
 
                             return (
                               <>
-                                {/* Start */}
                                 <td key={`${di}-s`}  className={`px-1 py-2 text-center tabular-nums ${borderL} ${dayBg}`}>
                                   <InvCell v={d?.start ?? null} />
                                 </td>
-                                {/* Usage Lunch */}
                                 <td key={`${di}-lu`} className={`px-1 py-2 text-center tabular-nums ${dayBg}`}>
-                                  {isForecast
-                                    ? <ForecastCell v={d?.usageLunch ?? null} />
-                                    : <UsageCell v={d?.usageLunch ?? null} />}
+                                  {isForecast ? <ForecastCell v={d?.usageLunch ?? null} /> : <UsageCell v={d?.usageLunch ?? null} />}
                                 </td>
-                                {/* Delivery (confirmed packed_qty) */}
                                 <td key={`${di}-dl`} className={`px-1 py-2 text-center tabular-nums ${dayBg}`}>
                                   <DelivCell v={d?.delivery ?? null} />
                                 </td>
-                                {/* Usage Dinner */}
                                 <td key={`${di}-di`} className={`px-1 py-2 text-center tabular-nums ${dayBg}`}>
-                                  {isForecast
-                                    ? <ForecastCell v={d?.usageDinner ?? null} />
-                                    : <UsageCell v={d?.usageDinner ?? null} />}
+                                  {isForecast ? <ForecastCell v={d?.usageDinner ?? null} /> : <UsageCell v={d?.usageDinner ?? null} />}
                                 </td>
-                                {/* End */}
                                 <td key={`${di}-e`}  className={`px-1 py-2 text-center tabular-nums ${dayBg}`}>
                                   {isForecast && d?.ending !== null
                                     ? <ForecastCell v={d?.ending ?? null} dim />
@@ -1080,6 +1118,7 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
         <DayEditModal
           target={editDay}
           onClose={() => setEditDay(null)}
+          itemRank={itemRank}
           onDeleted={() => {
             qc.invalidateQueries({ queryKey: ['inventory-weekly', location, weekStart, weekEnd] });
           }}
@@ -1093,12 +1132,11 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
 export default function InventoryOverviewPage() {
   const qc = useQueryClient();
   const { t } = useT();
-  const [activeTab, setActiveTab] = useState<TabView>('group');
-  const [weekOffset, setWeekOffset] = useState(0);
-  const [refreshedAt, setRefreshedAt] = useState<number>(Date.now());
+  const [activeTab,    setActiveTab]    = useState<TabView>('group');
+  const [weekOffset,   setWeekOffset]   = useState(0);
+  const [refreshedAt,  setRefreshedAt]  = useState<number>(Date.now());
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  // Compute weekStart here so main page can build the correct store query key
   const weekStart = useMemo(() => toLocalDateStr(getWeekDays(weekOffset)[0]), [weekOffset]);
 
   const handleRefresh = async () => {
