@@ -26,12 +26,13 @@ type DayKey = 'mon_target' | 'tue_target' | 'wed_target' | 'fri_target';
 
 /* ─── Types ──────────────────────────────────────────────────────────────────── */
 type InventoryItem = {
-  id:         string;
-  section:    string;
-  name:       string;
-  unit:       string;
-  sort_order: number;
-  stores:     string[];
+  id:                 string;
+  section:            string;
+  name:               string;
+  unit:               string;
+  sort_order:         number;
+  stores:             string[];
+  store_sort_orders:  Record<string, number>;
 };
 
 type TargetRow = {
@@ -208,7 +209,7 @@ export default function InventoryListsPage() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('inventory_items')
-        .select('id, section, name, unit, sort_order, stores')
+        .select('id, section, name, unit, sort_order, stores, store_sort_orders')
         .contains('stores', [activeStore])
         .order('sort_order', { ascending: true });
       if (error) throw error;
@@ -255,9 +256,18 @@ export default function InventoryListsPage() {
       grouped.get(item.section)!.push(item);
     });
     return SECTION_ORDER
-      .map(title => ({ title, items: grouped.get(title) ?? [] }))
+      .map(title => {
+        const sectionItems = [...(grouped.get(title) ?? [])];
+        // Sort by this store's specific order, falling back to global sort_order
+        sectionItems.sort((a, b) => {
+          const aOrd = a.store_sort_orders?.[activeStore] ?? a.sort_order;
+          const bOrd = b.store_sort_orders?.[activeStore] ?? b.sort_order;
+          return aOrd - bOrd;
+        });
+        return { title, items: sectionItems };
+      })
       .filter(s => s.items.length > 0);
-  }, [items]);
+  }, [items, activeStore]);
 
   const targetMap = useMemo(
     () => new Map(targets.map(t => [t.item_name, t])),
@@ -279,17 +289,19 @@ export default function InventoryListsPage() {
     },
   });
 
+  // Remove item from the ACTIVE STORE only (other stores unaffected)
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase
-        .from('inventory_items')
-        .delete()
-        .eq('id', id);
+      const { error } = await supabase.rpc('remove_item_from_store', {
+        p_item_id:       id,
+        p_location_name: activeStore,
+      });
       if (error) throw error;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['inventory-items'] as const }),
   });
 
+  // Swap sort order for the ACTIVE STORE only
   const moveMutation = useMutation({
     mutationFn: async ({
       item, direction, sectionItems,
@@ -297,10 +309,16 @@ export default function InventoryListsPage() {
       const idx     = sectionItems.findIndex(i => i.id === item.id);
       const swapIdx = direction === 'up' ? idx - 1 : idx + 1;
       if (swapIdx < 0 || swapIdx >= sectionItems.length) return;
-      const other = sectionItems[swapIdx];
+      const other     = sectionItems[swapIdx];
+      const itemOrd   = item.store_sort_orders?.[activeStore]  ?? item.sort_order;
+      const otherOrd  = other.store_sort_orders?.[activeStore] ?? other.sort_order;
       await Promise.all([
-        supabase.from('inventory_items').update({ sort_order: other.sort_order }).eq('id', item.id),
-        supabase.from('inventory_items').update({ sort_order: item.sort_order }).eq('id', other.id),
+        supabase.rpc('set_item_store_sort_order', {
+          p_item_id: item.id, p_location_name: activeStore, p_sort_order: otherOrd,
+        }),
+        supabase.rpc('set_item_store_sort_order', {
+          p_item_id: other.id, p_location_name: activeStore, p_sort_order: itemOrd,
+        }),
       ]);
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['inventory-items'] as const }),
