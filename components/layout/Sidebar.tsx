@@ -61,6 +61,7 @@ type NavItem = {
   children?: ChildItem[];
   permKey?: keyof AppPermissions;
   adminOnly?: boolean;
+  managerOnly?: boolean; // hidden from staff roles
 };
 
 type NavGroup = {
@@ -73,7 +74,7 @@ const NAV_GROUPS: NavGroup[] = [
   {
     labelKey: 'sidebar.groups.overview',
     items: [
-      { labelKey: 'sidebar.nav.dashboard', href: '/', icon: LayoutDashboard },
+      { labelKey: 'sidebar.nav.dashboard', href: '/', icon: LayoutDashboard, managerOnly: true },
     ],
   },
   {
@@ -107,10 +108,10 @@ const NAV_GROUPS: NavGroup[] = [
       {
         labelKey: 'sidebar.nav.inventory', href: '/inventory', icon: ClipboardList, permKey: 'inventory',
         children: [
-          { labelKey: 'sidebar.nav.inventoryLists',   href: '/inventory/lists',          icon: LayoutList },
+          { labelKey: 'sidebar.nav.inventoryLists',   href: '/inventory/lists',          icon: LayoutList,   managerOnly: true },
           { labelKey: 'sidebar.nav.addNewInventory',  href: '/inventory/add',            icon: FilePlus },
           { labelKey: 'sidebar.nav.currentInventory', href: '/inventory/overview',        icon: BarChart3,    managerOnly: true },
-          { labelKey: 'sidebar.nav.inventoryReports', href: '/inventory/counts',          icon: ClipboardList },
+          { labelKey: 'sidebar.nav.inventoryReports', href: '/inventory/counts',          icon: ClipboardList, managerOnly: true },
           { labelKey: 'sidebar.nav.usageForecast',    href: '/inventory/usage-forecast',  icon: TrendingDown,  managerOnly: true },
         ],
       },
@@ -118,7 +119,7 @@ const NAV_GROUPS: NavGroup[] = [
         labelKey: 'sidebar.nav.delivery', href: '/delivery', icon: Truck, permKey: 'delivery',
         children: [
           { labelKey: 'sidebar.nav.stages',           href: '/delivery',          icon: Truck },
-          { labelKey: 'sidebar.nav.deliveryReports',  href: '/delivery/reports',  icon: ClipboardList },
+          { labelKey: 'sidebar.nav.deliveryReports',  href: '/delivery/reports',  icon: ClipboardList, managerOnly: true },
         ],
       },
       { labelKey: 'sidebar.nav.packing', href: '/delivery', icon: Package, permKey: 'packer' },
@@ -271,12 +272,15 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
     return pathname === href || pathname.startsWith(href + '/');
   };
 
-  const isAdmin = profile?.role === 'admin';
-  const perms   = profile?.permissions ?? {};
+  const isAdmin   = profile?.role === 'admin';
+  const isManager = profile?.role === 'manager';
+  const isStaff   = !isAdmin && !isManager; // any staff_* or plain staff
+  const perms     = profile?.permissions ?? {};
 
   const canSeeItem = (item: NavItem): boolean => {
     if (isAdmin) return true;
     if (item.adminOnly) return false;
+    if (item.managerOnly && isStaff) return false;
     if (item.permKey) return !!perms[item.permKey];
     return true;
   };
@@ -363,7 +367,7 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
 
                     {hasChildren && isExpanded && (
                       <div className="mt-0.5 space-y-0.5">
-                        {item.children!.filter(c => !c.managerOnly || !profile?.role?.startsWith('staff')).map((child) => {
+                        {item.children!.filter(c => !c.managerOnly || !isStaff).map((child) => {
                           const ChildIcon = child.icon;
                           const childActive = pathname === child.href;
                           return (
@@ -397,14 +401,8 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
         {profile && (
           <div className="mb-3">
             <div className="text-white text-sm font-medium truncate">{profile.full_name}</div>
-            <div className="text-white/50 text-xs">
-              {profile.role === 'admin' ? 'Admin'
-                : profile.role === 'manager' ? 'Manager'
-                : profile.role === 'staff_food_production' ? 'Staff · Food Production'
-                : profile.role === 'staff_service' ? 'Staff · Service'
-                : profile.role === 'staff_delivery_driver' ? 'Staff · Delivery Driver'
-                : profile.role === 'staff_cook' ? 'Staff · Cook'
-                : 'Staff'}
+            <div className="text-white/50 text-xs capitalize">
+              {isAdmin ? 'Admin' : isManager ? 'Manager' : 'Staff'}
             </div>
           </div>
         )}
