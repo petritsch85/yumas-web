@@ -28,54 +28,21 @@ function formatDuration(seconds: number): string {
   return `${m} min ${s}s`;
 }
 
-/* ─── Canonical sort order (mirrors inventory form) ──────────────────────── */
-const SECTION_ORDER = ['Kühlhaus', 'Tiefkühler', 'Trockenware', 'Regale', 'Lager'];
-const CANONICAL_ITEMS: string[] = [
-  // Kühlhaus
-  'Guacamole','Schärfemix','Maissalsa','Tomatensalsa','Sour Cream','Marinade Chicken',
-  'Pico de Gallo','Crema Nogada','Käse Gouda','Gouda Scheiben Gringa','Ciabatta','Brownie',
-  'Carlota de Limon','Schoko- Avocado Mousse','Mole','Marinade Al Pastor','Barbacoa',
-  'Chili con Carne','Cochinita','Kartoffel Würfel','Vinaigrette','Honig Sesam / Senf',
-  'Pozole','Zwiebeln karamellisiert','Karotten karamellisiert','Bohnencreme',
-  'Alambre - Zwiebel','Weizen Tortillas 12cm','Tortillas 30cm','Frische Habaneros',
-  'Salsa Habanero','Salsa Verde','Chipotle SourCream','Salsa de Jamaica','Salsa Torta',
-  'Humo Salsa','Fuego Salsa','Oliven entkernt','Chiles Poblanos','Salsa Pitaya',
-  'Mais Tortillas 12cm','Blau Mais Tortillas 15cm','Queso Cotija','Queso Oaxaca',
-  'Queso Chihuahua','Rinderfilet Steak','Filetspitzen','Hähnchenkeule (ganz)','Mole Rojo',
-  'Chorizo','Carne Vegetal','Costilla de Res','Salsa für Costilla de Res',
-  'Rote Zwiebeln eingelegt','Pulpo (Chipulpotle)','Salsa Pulpo','Birria','Salsa Birria',
-  'Füllung Nogada','H-Milch 3,5%',
-  // Tiefkühler
-  'Alambre - Paprika Streifen','Gambas','Weizentortillas 20cm',
-  // Trockenware
-  'Reis','Schwarze Bohnen','Salz','Zucker','Brauner Zucker','Pfeffer','Pfeffer geschrotet',
-  'Rapsöl','Tajin','Limettensaft (750ml Metro)',
-  // Regale
-  'Große Bowl togo Schale','Große Bowl togo Deckel','Kleine Bowl togo Schale',
-  'Kleine Bowl togo Deckel','Dressingsbecher Schale','Dressingsbecher Deckel','Alufolie',
-  'Backpapier','Trayliner Papier','Weiße Serviette','Zig-Zag Papier','Müllbeutel Blau 120L',
-  'Handschuhe M','Handschuhe L','Mehrwegbowl',
-  // Lager
-  'Große Togo Tüte','Kleine Togo Tüte','Schwarze Serviette','Nachos','Spüli','Essigessenz',
-  'Topfschwamm','Edelstahlschwamm','Reinigungshandschuhe','Blaue Rolle','Toilettenpapier',
-  'Glasreiniger','WC Reiniger','Desinfektionsreiniger','Gastro Universal Reiniger',
-  'Kalkreiniger','Laminat - Parkett-Reiniger','B100N','B200S','F8500','F420E',
-  'Spülmaschine Salz - Etolit',
-];
-const ITEM_RANK: Record<string, number> = Object.fromEntries(CANONICAL_ITEMS.map((n, i) => [n, i]));
+/* ─── Fallback section order (used while DB loads) ───────────────────────── */
+const SECTION_ORDER_FALLBACK = ['Kühlhaus', 'Tiefkühler', 'Trockenware', 'Regale', 'Lager'];
 
-function canonicalSections(sectionNames: string[]): string[] {
+function canonicalSections(sectionNames: string[], sectionOrder: string[]): string[] {
   return [...sectionNames].sort((a, b) => {
-    const ia = SECTION_ORDER.indexOf(a);
-    const ib = SECTION_ORDER.indexOf(b);
+    const ia = sectionOrder.indexOf(a);
+    const ib = sectionOrder.indexOf(b);
     return (ia < 0 ? 999 : ia) - (ib < 0 ? 999 : ib);
   });
 }
 
-function canonicalItems<T extends { item_name: string }>(items: T[]): T[] {
+function canonicalItems<T extends { item_name: string }>(items: T[], itemRank: Record<string, number>): T[] {
   return [...items].sort((a, b) => {
-    const ia = ITEM_RANK[a.item_name] ?? 9999;
-    const ib = ITEM_RANK[b.item_name] ?? 9999;
+    const ia = itemRank[a.item_name] ?? 9999;
+    const ib = itemRank[b.item_name] ?? 9999;
     return ia !== ib ? ia - ib : a.item_name.localeCompare(b.item_name);
   });
 }
@@ -202,7 +169,7 @@ const STORE_CONFIRM_COL: Partial<Record<Store, keyof DeliveryRun>> = {
   Westend:  'list_confirmed_westend_at',
 };
 
-const SECTIONS = ['Kühlhaus', 'Tiefkühler', 'Trockenware', 'Regale', 'Lager'];
+const SECTIONS_FALLBACK = ['Kühlhaus', 'Tiefkühler', 'Trockenware', 'Regale', 'Lager'];
 
 const DELIVERY_DAYS = [1, 2, 3, 5]; // Mon=1 Tue=2 Wed=3 Fri=5
 type DayKey = 'mon_target' | 'tue_target' | 'wed_target' | 'fri_target';
@@ -369,6 +336,7 @@ function StoreDeliveryList({
   forecast, standard, viewMode, editingTargets, editingPackedQty,
   onTargetChange, onTargetBlur, onPackedQtyChange, packingStarted, isPreview,
   storeInventory, storeTimestamp, stdScaleMode, onScaleChange, scalingTargets, storeConfirmed,
+  sectionOrder, itemRank,
 }: {
   store: Store;
   lines: DeliveryLine[];
@@ -391,6 +359,8 @@ function StoreDeliveryList({
   onScaleChange: (mode: 'low' | 'std' | 'high') => void;
   scalingTargets?: boolean;
   storeConfirmed?: boolean;
+  sectionOrder: string[];
+  itemRank: Record<string, number>;
 }) {
   if (!hasSubmission) {
     return (
@@ -419,7 +389,7 @@ function StoreDeliveryList({
   };
 
   const itemsToDeliver = lines.filter(l => liveDeliveryQty(l) > 0);
-  const sections = canonicalSections([...new Set(lines.map(l => l.section))]);
+  const sections = canonicalSections([...new Set(lines.map(l => l.section))], sectionOrder);
 
   const fullCount    = itemsToDeliver.filter(l => l.packed_qty !== null && l.packed_qty >= l.delivery_qty).length;
   const partialCount = itemsToDeliver.filter(l => l.packed_qty !== null && l.packed_qty > 0 && l.packed_qty < l.delivery_qty).length;
@@ -506,7 +476,7 @@ function StoreDeliveryList({
             </thead>
             <tbody>
               {sections.map(section => {
-                const sectionLines = canonicalItems(lines.filter(l => l.section === section));
+                const sectionLines = canonicalItems(lines.filter(l => l.section === section), itemRank);
                 return (
                   <React.Fragment key={section}>
                     <tr className="bg-gray-50">
@@ -733,11 +703,13 @@ function DriverView({ run, targetDate, onStart, onFinish, startingDelivery, fini
 }
 
 /* ─── Store Manager Receipt View ─────────────────────────────────────────── */
-function StoreManagerView({ run, lines, targetDate, myStore }: {
+function StoreManagerView({ run, lines, targetDate, myStore, sectionOrder, itemRank }: {
   run: DeliveryRun | null;
   lines: DeliveryLine[];
   targetDate: string;
   myStore: Store | null; // null = manager viewing all (shows tabs)
+  sectionOrder: string[];
+  itemRank: Record<string, number>;
 }) {
   const qc = useQueryClient();
   const [activeTab, setActiveTab] = useState<Store>(myStore ?? 'Eschborn');
@@ -786,7 +758,7 @@ function StoreManagerView({ run, lines, targetDate, myStore }: {
   });
 
   const isConfirmed = !!receipt?.received_at;
-  const sections = canonicalSections([...new Set(storeLines.map(l => l.section))]);
+  const sections = canonicalSections([...new Set(storeLines.map(l => l.section))], sectionOrder);
 
   return (
     <div className="space-y-4">
@@ -856,7 +828,7 @@ function StoreManagerView({ run, lines, targetDate, myStore }: {
                         <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">{section}</span>
                       </td>
                     </tr>
-                    {canonicalItems(storeLines.filter(l => l.section === section)).map(line => {
+                    {canonicalItems(storeLines.filter(l => l.section === section), itemRank).map(line => {
                       const qty = line.packed_qty ?? line.delivery_qty;
                       const isComplete = !!itemComplete[line.id];
                       return (
@@ -957,6 +929,35 @@ export default function DeliveryPage() {
   const qc = useQueryClient();
   const fileRef = useRef<HTMLInputElement>(null);
   const { t } = useT();
+
+  /* ── DB: canonical sections + item order (Inventory Lists source of truth) ── */
+  const { data: dbSections = [] } = useQuery<{ id: string; name: string; sort_order: number }[]>({
+    queryKey: ['inventory-sections'],
+    queryFn: async () => {
+      const { data } = await supabase.from('inventory_sections').select('id, name, sort_order').order('sort_order');
+      return data ?? [];
+    },
+    staleTime: 60_000,
+  });
+
+  const { data: dbItems = [] } = useQuery<{ id: string; name: string; sort_order: number }[]>({
+    queryKey: ['inventory-items-all'],
+    queryFn: async () => {
+      const { data } = await supabase.from('inventory_items').select('id, name, sort_order').order('sort_order');
+      return data ?? [];
+    },
+    staleTime: 60_000,
+  });
+
+  const sectionOrder = useMemo(
+    () => dbSections.length > 0 ? dbSections.map(s => s.name) : SECTION_ORDER_FALLBACK,
+    [dbSections],
+  );
+
+  const itemRank = useMemo<Record<string, number>>(
+    () => Object.fromEntries(dbItems.map(item => [item.name, item.sort_order ?? 9999])),
+    [dbItems],
+  );
 
   const [activeStore, setActiveStore] = useState<Store>('Eschborn');
   const [generating, setGenerating] = useState(false);
@@ -1719,12 +1720,13 @@ export default function DeliveryPage() {
     <>
       {/* ── Standard Targets Modal ── */}
       {showStandards && (() => {
-        const stdGrouped = SECTIONS.reduce<Record<string, TargetRow[]>>((acc, sec) => {
+        const activeSections = sectionOrder.length > 0 ? sectionOrder : SECTIONS_FALLBACK;
+        const stdGrouped = activeSections.reduce<Record<string, TargetRow[]>>((acc, sec) => {
           acc[sec] = stdTargets.filter(t => t.section === sec);
           return acc;
         }, {});
-        const stdOther = [...new Set(stdTargets.map(t => t.section).filter(s => !new Set(SECTIONS).has(s)))];
-        const stdAllSections = [...SECTIONS, ...stdOther];
+        const stdOther = [...new Set(stdTargets.map(t => t.section).filter(s => !new Set(activeSections).has(s)))];
+        const stdAllSections = [...activeSections, ...stdOther];
 
         return (
           <>
@@ -2089,6 +2091,8 @@ export default function DeliveryPage() {
             lines={lines}
             targetDate={targetDate}
             myStore={myStore}
+            sectionOrder={sectionOrder}
+            itemRank={itemRank}
           />
         )}
 
@@ -2252,6 +2256,8 @@ export default function DeliveryPage() {
                     onScaleChange={mode => handleScaleChange(store, mode)}
                     scalingTargets={scaleTargets.isPending}
                     storeConfirmed={!!storeConfirmedAt(store)}
+                    sectionOrder={sectionOrder}
+                    itemRank={itemRank}
                   />
                 </div>
               ))}
