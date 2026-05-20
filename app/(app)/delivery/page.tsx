@@ -6,11 +6,10 @@ import { supabase } from '@/lib/supabase-browser';
 import {
   RefreshCw, CheckCircle2, AlertCircle, Package, TrendingUp,
   Eye, Settings2, Truck, Play, Timer, Flag, XCircle,
-  Upload, SlidersHorizontal, Save, X, CalendarDays,
+  SlidersHorizontal, Save, X, CalendarDays,
   Navigation, Store, ClipboardCheck, Clock, Lock, LockOpen,
   ClipboardList,
 } from 'lucide-react';
-import * as XLSX from 'xlsx';
 import type { Profile } from '@/types';
 import { useT } from '@/lib/i18n';
 
@@ -101,16 +100,6 @@ type DeliveryLine = {
 type TargetRow = {
   id: string;
   location_name: string;
-  section: string;
-  item_name: string;
-  unit: string;
-  mon_target: number;
-  tue_target: number;
-  wed_target: number;
-  fri_target: number;
-};
-
-type ParsedItem = {
   section: string;
   item_name: string;
   unit: string;
@@ -928,7 +917,6 @@ function StoreManagerView({ run, lines, targetDate, myStore, sectionOrder, itemR
 /* ─── Main Page ──────────────────────────────────────────────────────────── */
 export default function DeliveryPage() {
   const qc = useQueryClient();
-  const fileRef = useRef<HTMLInputElement>(null);
   const { t } = useT();
 
   /* ── DB: canonical sections + item order (Inventory Lists source of truth) ── */
@@ -1023,11 +1011,6 @@ export default function DeliveryPage() {
   const [showStandards, setShowStandards] = useState(false);
   const [stdStore, setStdStore] = useState<Store>('Eschborn');
   const [stdEdits, setStdEdits] = useState<Record<string, { mon: number; tue: number; wed: number; fri: number }>>({});
-
-  /* Upload Excel */
-  const [uploading, setUploading] = useState(false);
-  const [uploadMsg, setUploadMsg] = useState('');
-  const [uploadStore, setUploadStore] = useState<Store>('Eschborn');
 
   const setMode = (mode: ViewMode) => {
     setViewMode(mode);
@@ -1313,112 +1296,6 @@ export default function DeliveryPage() {
     scaleTargets.mutate({ store, mode });
   };
 
-  /* ─ Upload Excel ─ */
-  const upsertTargets = useMutation({
-    mutationFn: async (rows: ParsedItem[]) => {
-      const payload = rows.map(r => ({
-        location_name: uploadStore,
-        section: r.section,
-        item_name: r.item_name,
-        unit: r.unit,
-        mon_target: r.mon_target,
-        tue_target: r.tue_target,
-        wed_target: r.wed_target,
-        fri_target: r.fri_target,
-      }));
-      const { error } = await supabase
-        .from('delivery_targets').upsert(payload, { onConflict: 'location_name,item_name' });
-      if (error) throw error;
-    },
-    onSuccess: (_, rows) => {
-      qc.invalidateQueries({ queryKey: ['delivery-run', targetDate] });
-      setUploadMsg(`Imported ${rows.length} items for ${uploadStore}.`);
-      setTimeout(() => setUploadMsg(''), 4000);
-    },
-    onError: (e: Error) => setUploadMsg(`Error: ${e.message}`),
-  });
-
-  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setUploading(true);
-    setUploadMsg('');
-    try {
-      const buffer = await file.arrayBuffer();
-      const wb = XLSX.read(buffer, { type: 'array' });
-      const ws = wb.Sheets[wb.SheetNames[0]];
-      const raw: unknown[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
-
-      // ── Auto-detect day-column positions ─────────────────────────────────
-      // Scan first 20 rows for a header row containing Mo / Di / Mi / Fr
-      let moCol = 3, diCol = 4, miCol = 5, frCol = 6; // legacy default (cols D-G)
-      let dataStartRow = 2;
-      for (let i = 0; i < Math.min(20, raw.length); i++) {
-        const cells = (raw[i] as unknown[]).map(c => String(c ?? '').trim());
-        const moIdx = cells.findIndex(c => c === 'Mo');
-        if (moIdx >= 0) {
-          const diIdx = cells.findIndex((c, j) => j > moIdx && c === 'Di');
-          const miIdx = cells.findIndex((c, j) => j > moIdx && c === 'Mi');
-          const frIdx = cells.findIndex((c, j) => j > moIdx && c === 'Fr');
-          if (diIdx > 0 && miIdx > 0 && frIdx > 0) {
-            moCol = moIdx; diCol = diIdx; miCol = miIdx; frCol = frIdx;
-            dataStartRow = i + 1;
-            break;
-          }
-        }
-      }
-
-      // ── Section name normalisation ────────────────────────────────────────
-      const SECTION_MAP: Record<string, string> = {
-        'kühl-/gefrierschrank': 'Kühlhaus',
-        'fleischkuehlschrank':  'Kühlhaus',
-      };
-      const SKIP_SECTIONS = new Set(['other']);
-      const STOP_SECTIONS = new Set(['zk view']); // repeated data below this row
-
-      const parsed: ParsedItem[] = [];
-      let currentSection = 'Kühlhaus';
-      let skipSection = false;
-      const toNum = (v: unknown) => Math.max(0, parseFloat(String(v ?? '')) || 0);
-
-      for (let i = dataStartRow; i < raw.length; i++) {
-        const row = raw[i] as unknown[];
-        const colA = String(row[0] ?? '').trim();
-        const colC = String(row[2] ?? '').trim();
-        if (!colA) continue;
-
-        if (colC === '') {
-          // No unit → section header or metadata
-          const key = colA.toLowerCase();
-          if (STOP_SECTIONS.has(key)) break;
-          skipSection = SKIP_SECTIONS.has(key);
-          currentSection = SECTION_MAP[key] ?? colA;
-          continue;
-        }
-
-        if (skipSection) continue;
-
-        parsed.push({
-          section: currentSection,
-          item_name: colA,
-          unit: colC,
-          mon_target: toNum(row[moCol]),
-          tue_target: toNum(row[diCol]),
-          wed_target: toNum(row[miCol]),
-          fri_target: toNum(row[frCol]),
-        });
-      }
-
-      if (parsed.length === 0) setUploadMsg('No data rows found in the file.');
-      else upsertTargets.mutate(parsed);
-    } catch (err: unknown) {
-      setUploadMsg(`Parse error: ${err instanceof Error ? err.message : String(err)}`);
-    } finally {
-      setUploading(false);
-      if (fileRef.current) fileRef.current.value = '';
-    }
-  };
-
   /* ─ Update target qty ─ */
   const updateTarget = useMutation({
     mutationFn: async ({ line, newTarget }: { line: DeliveryLine; newTarget: number }) => {
@@ -1650,17 +1527,49 @@ export default function DeliveryPage() {
     setGenerateError('');
     try {
       const dayKey = DAY_KEY_MAP[dayOfWeek] as DayKey;
+      // ZK is the production kitchen — excluded from delivery runs
+      const deliveryStores = STORES.filter(s => s !== 'ZK');
 
-      const storeData: { store: Store; submission: InventorySubmission | null; targets: DeliveryTarget[] }[] = [];
-      for (const store of STORES) {
+      type InvItemRow = { name: string; section: string; unit: string; sort_order: number; store_sort_orders: Record<string, number> | null };
+      const storeData: {
+        store: Store;
+        submission: InventorySubmission | null;
+        invItems: InvItemRow[];
+        targetMap: Map<string, DeliveryTarget>;
+      }[] = [];
+
+      for (const store of deliveryStores) {
         const { data: submissions } = await supabase
           .from('inventory_submissions').select('*').eq('location_name', store)
           .order('submitted_at', { ascending: false }).limit(1);
-        const { data: targets } = await supabase.from('delivery_targets').select('*').eq('location_name', store);
+
+        const { data: invItemsRaw } = await supabase
+          .from('inventory_items')
+          .select('name, section, unit, sort_order, store_sort_orders')
+          .contains('stores', [store])
+          .order('sort_order', { ascending: true });
+
+        const { data: targets } = await supabase
+          .from('delivery_targets').select('*').eq('location_name', store);
+
+        // Build target lookup by item name (case-insensitive)
+        const targetMap = new Map<string, DeliveryTarget>();
+        for (const t of (targets ?? []) as DeliveryTarget[]) {
+          targetMap.set(t.item_name.trim().toLowerCase(), t);
+        }
+
+        // Sort items by per-store rank, falling back to global sort_order
+        const invItems = ((invItemsRaw ?? []) as InvItemRow[]).sort((a, b) => {
+          const ra = a.store_sort_orders?.[store] ?? a.sort_order ?? 9999;
+          const rb = b.store_sort_orders?.[store] ?? b.sort_order ?? 9999;
+          return ra - rb;
+        });
+
         storeData.push({
           store,
           submission: (submissions?.[0] as InventorySubmission | undefined) ?? null,
-          targets: (targets ?? []) as DeliveryTarget[],
+          invItems,
+          targetMap,
         });
       }
 
@@ -1673,21 +1582,22 @@ export default function DeliveryPage() {
       await supabase.from('delivery_run_lines').delete().eq('run_id', runId);
 
       const allLines: Omit<DeliveryLine, 'id' | 'created_at'>[] = [];
-      for (const { store, submission, targets } of storeData) {
-        for (const target of targets) {
-          const effectiveTarget = Math.max(0, target[dayKey] ?? 0);
+      for (const { store, submission, invItems, targetMap } of storeData) {
+        for (const item of invItems) {
+          const target = targetMap.get(item.name.trim().toLowerCase());
+          const effectiveTarget = Math.max(0, (target?.[dayKey] as number | undefined) ?? 0);
 
           let reportedQty = 0;
           if (submission?.data && Array.isArray(submission.data)) {
             const found = (submission.data as InventoryItem[]).find(
-              item => item.name.trim().toLowerCase() === target.item_name.trim().toLowerCase()
+              i => i.name.trim().toLowerCase() === item.name.trim().toLowerCase()
             );
             if (found) reportedQty = Number(found.quantity) || 0;
           }
           const deliveryQty = Math.max(0, effectiveTarget - reportedQty);
           allLines.push({
-            run_id: runId, location_name: store, section: target.section,
-            item_name: target.item_name, unit: target.unit,
+            run_id: runId, location_name: store, section: item.section,
+            item_name: item.name, unit: item.unit,
             standard_target_qty: effectiveTarget, target_qty: effectiveTarget,
             reported_qty: reportedQty, delivery_qty: deliveryQty,
             is_packed: false, packed_qty: null,
@@ -1849,9 +1759,6 @@ export default function DeliveryPage() {
         );
       })()}
 
-      {/* Hidden file input */}
-      <input ref={fileRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={handleFile} />
-
       <div>
         {/* ── Page header ── */}
         <div className="flex items-start justify-between mb-4">
@@ -1919,7 +1826,7 @@ export default function DeliveryPage() {
           </div>
         </div>
 
-        {/* ── Manager toolbar: week + day picker + Standard Targets + Upload Excel ── */}
+        {/* ── Manager toolbar: week + day picker + Standard Targets ── */}
         {viewMode === 'manager' && (
           <div className="mb-5 p-3 bg-gray-50 border border-gray-100 rounded-xl space-y-3">
 
@@ -1940,7 +1847,7 @@ export default function DeliveryPage() {
               </div>
             </div>
 
-            {/* Row 2: Delivery day buttons + lock controls + Standard Targets + Upload Excel (right-aligned) */}
+            {/* Row 2: Delivery day buttons + lock controls + Standard Targets (right-aligned) */}
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-xs text-gray-500 font-medium whitespace-nowrap">Delivery Day:</span>
               {DELIVERY_DAY_BUTTONS.map(btn => {
@@ -1996,7 +1903,7 @@ export default function DeliveryPage() {
                 )
               )}
 
-              {/* Standard Targets + Upload Excel — right-aligned */}
+              {/* Standard Targets — right-aligned */}
               <div className="ml-auto flex items-center gap-2 flex-wrap justify-end">
                 <button
                   onClick={() => { setStdStore(activeStore); setShowStandards(true); }}
@@ -2004,29 +1911,6 @@ export default function DeliveryPage() {
                 >
                   <SlidersHorizontal size={14} /> Standard Targets
                 </button>
-
-                {uploadMsg && (
-                  <span className={`text-xs font-medium px-2.5 py-1 rounded-lg ${uploadMsg.startsWith('Error') || uploadMsg.startsWith('Parse') ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-700'}`}>
-                    {uploadMsg}
-                  </span>
-                )}
-
-                <div className="flex items-center gap-1 border border-gray-200 rounded-lg bg-white shadow-sm overflow-hidden">
-                  <select
-                    value={uploadStore}
-                    onChange={e => setUploadStore(e.target.value as Store)}
-                    className="text-sm text-gray-600 px-2 py-1.5 bg-transparent border-r border-gray-200 focus:outline-none cursor-pointer"
-                  >
-                    {STORES.map(s => <option key={s} value={s}>{s}</option>)}
-                  </select>
-                  <button
-                    onClick={() => fileRef.current?.click()}
-                    disabled={uploading || upsertTargets.isPending}
-                    className="flex items-center gap-1.5 text-sm px-3 py-1.5 text-gray-600 hover:bg-gray-50 transition-colors disabled:opacity-50"
-                  >
-                    <Upload size={14} /> {uploading || upsertTargets.isPending ? 'Importing…' : 'Upload Excel'}
-                  </button>
-                </div>
               </div>
             </div>
           </div>
