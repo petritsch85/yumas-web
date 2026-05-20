@@ -703,13 +703,13 @@ function DriverView({ run, targetDate, onStart, onFinish, startingDelivery, fini
 }
 
 /* ─── Store Manager Receipt View ─────────────────────────────────────────── */
-function StoreManagerView({ run, lines, targetDate, myStore, sectionOrder, itemRank }: {
+function StoreManagerView({ run, lines, targetDate, myStore, sectionOrder, itemRankByStore }: {
   run: DeliveryRun | null;
   lines: DeliveryLine[];
   targetDate: string;
   myStore: Store | null; // null = manager viewing all (shows tabs)
   sectionOrder: string[];
-  itemRank: Record<string, number>;
+  itemRankByStore: Partial<Record<Store, Record<string, number>>>;
 }) {
   const qc = useQueryClient();
   const [activeTab, setActiveTab] = useState<Store>(myStore ?? 'Eschborn');
@@ -758,6 +758,7 @@ function StoreManagerView({ run, lines, targetDate, myStore, sectionOrder, itemR
   });
 
   const isConfirmed = !!receipt?.received_at;
+  const storeItemRank = itemRankByStore[currentStore] ?? {};
   const sections = canonicalSections([...new Set(storeLines.map(l => l.section))], sectionOrder);
 
   return (
@@ -828,7 +829,7 @@ function StoreManagerView({ run, lines, targetDate, myStore, sectionOrder, itemR
                         <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">{section}</span>
                       </td>
                     </tr>
-                    {canonicalItems(storeLines.filter(l => l.section === section), itemRank).map(line => {
+                    {canonicalItems(storeLines.filter(l => l.section === section), storeItemRank).map(line => {
                       const qty = line.packed_qty ?? line.delivery_qty;
                       const isComplete = !!itemComplete[line.id];
                       return (
@@ -940,10 +941,10 @@ export default function DeliveryPage() {
     staleTime: 60_000,
   });
 
-  const { data: dbItems = [] } = useQuery<{ id: string; name: string; sort_order: number }[]>({
+  const { data: dbItems = [] } = useQuery<{ id: string; name: string; sort_order: number; store_sort_orders: Record<string, number> | null }[]>({
     queryKey: ['inventory-items-all'],
     queryFn: async () => {
-      const { data } = await supabase.from('inventory_items').select('id, name, sort_order').order('sort_order');
+      const { data } = await supabase.from('inventory_items').select('id, name, sort_order, store_sort_orders').order('sort_order');
       return data ?? [];
     },
     staleTime: 60_000,
@@ -954,6 +955,23 @@ export default function DeliveryPage() {
     [dbSections],
   );
 
+  /**
+   * Per-store item ranks — mirrors exactly how Inventory Lists sorts items:
+   * uses store_sort_orders[store] as primary key, falls back to global sort_order.
+   */
+  const itemRankByStore = useMemo<Partial<Record<Store, Record<string, number>>>>(() => {
+    const result: Partial<Record<Store, Record<string, number>>> = {};
+    for (const store of STORES) {
+      const rank: Record<string, number> = {};
+      for (const item of dbItems) {
+        rank[item.name] = (item.store_sort_orders as Record<string, number> | null)?.[store] ?? item.sort_order ?? 9999;
+      }
+      result[store] = rank;
+    }
+    return result;
+  }, [dbItems]);
+
+  /** Global fallback rank (used when store is unknown) */
   const itemRank = useMemo<Record<string, number>>(
     () => Object.fromEntries(dbItems.map(item => [item.name, item.sort_order ?? 9999])),
     [dbItems],
@@ -2092,7 +2110,7 @@ export default function DeliveryPage() {
             targetDate={targetDate}
             myStore={myStore}
             sectionOrder={sectionOrder}
-            itemRank={itemRank}
+            itemRankByStore={itemRankByStore}
           />
         )}
 
@@ -2257,7 +2275,7 @@ export default function DeliveryPage() {
                     scalingTargets={scaleTargets.isPending}
                     storeConfirmed={!!storeConfirmedAt(store)}
                     sectionOrder={sectionOrder}
-                    itemRank={itemRank}
+                    itemRank={itemRankByStore[store] ?? itemRank}
                   />
                 </div>
               ))}
