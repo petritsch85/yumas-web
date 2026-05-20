@@ -119,6 +119,7 @@ const NAV_GROUPS: NavGroup[] = [
           { labelKey: 'sidebar.nav.deliveryReports',  href: '/delivery/reports',  icon: ClipboardList },
         ],
       },
+      { labelKey: 'sidebar.nav.packing', href: '/delivery', icon: Package, permKey: 'packer' },
       { labelKey: 'sidebar.nav.recipes', href: '/products/semi-finished', icon: FlaskConical, permKey: 'production' },
       { labelKey: 'sidebar.nav.buying',      href: '/purchase-orders',         icon: ShoppingCart, permKey: 'buying' },
       { labelKey: 'sidebar.nav.controlling', href: '/coming-soon/controlling', icon: TrendingUp,   adminOnly: true },
