@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 
 /* ─── Constants ──────────────────────────────────────────────────────────────── */
-const STORES = ['Eschborn', 'Taunus', 'Westend'] as const;
+const STORES = ['Eschborn', 'Taunus', 'Westend', 'ZK'] as const;
 type Store = (typeof STORES)[number];
 
 const SECTION_ORDER = ['Kühlhaus', 'Tiefkühler', 'Trockenware', 'Regale', 'Lager'];

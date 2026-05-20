@@ -193,7 +193,7 @@ type WeeklyForecast = {
 };
 
 /* ─── Constants ──────────────────────────────────────────────────────────── */
-const STORES = ['Eschborn', 'Taunus', 'Westend'] as const;
+const STORES = ['Eschborn', 'Taunus', 'Westend', 'ZK'] as const;
 type Store = typeof STORES[number];
 
 const STORE_CONFIRM_COL: Record<Store, keyof DeliveryRun> = {
