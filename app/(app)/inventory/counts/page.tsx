@@ -2,9 +2,11 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { ChevronDown, ChevronRight, Trash2, Pencil, X, Check } from 'lucide-react';
 import { useT } from '@/lib/i18n';
+
+type DataItem = { section: string; name: string; unit: string; quantity: number };
 
 type SubmissionRow = {
   id: string;
@@ -12,11 +14,14 @@ type SubmissionRow = {
   submitted_at: string;
   submitted_by: string | null;
   comment: string | null;
-  data: { section: string; name: string; unit: string; quantity: number }[];
-  profile: { full_name: string } | null;
+  data: DataItem[];
+  edited_at: string | null;
+  edited_by: string | null;
+  original_data: DataItem[] | null;
+  submitterName?: string;
 };
 
-function groupBySection(data: SubmissionRow['data']) {
+function groupBySection(data: DataItem[]) {
   const map: Record<string, { name: string; unit: string; quantity: number }[]> = {};
   for (const item of data) {
     if (!map[item.section]) map[item.section] = [];
@@ -33,43 +38,60 @@ function formatDuration(seconds: number | null | undefined): string | null {
   return `${m}m ${String(s).padStart(2, '0')}s`;
 }
 
-function formatDate(iso: string) {
-  return new Date(iso).toLocaleString('de-DE', {
-    day: '2-digit', month: '2-digit', year: 'numeric',
-    hour: '2-digit', minute: '2-digit',
-  });
+/** True if the submission is still within the edit window (until 09:00 the next calendar day) */
+function isEditable(submittedAt: string): boolean {
+  const deadline = new Date(submittedAt);
+  deadline.setDate(deadline.getDate() + 1);
+  deadline.setHours(9, 0, 0, 0);
+  return new Date() < deadline;
 }
 
 /** YYYY-MM-DD in local time — used as grouping key */
 function localDateKey(iso: string): string {
-  return new Date(iso).toLocaleDateString('en-CA'); // en-CA gives YYYY-MM-DD
+  return new Date(iso).toLocaleDateString('en-CA');
 }
 
 /** Human-readable day label: Today / Yesterday / Wednesday 28 Apr 2026 */
 function dayLabel(iso: string, t: (key: string) => string): string {
   const d = new Date(iso);
-  const todayKey   = new Date().toLocaleDateString('en-CA');
-  const yestDate   = new Date(); yestDate.setDate(yestDate.getDate() - 1);
-  const yestKey    = yestDate.toLocaleDateString('en-CA');
-  const key        = d.toLocaleDateString('en-CA');
+  const todayKey = new Date().toLocaleDateString('en-CA');
+  const yestDate = new Date(); yestDate.setDate(yestDate.getDate() - 1);
+  const yestKey  = yestDate.toLocaleDateString('en-CA');
+  const key      = d.toLocaleDateString('en-CA');
   if (key === todayKey) return t('inventory.counts.today');
   if (key === yestKey)  return t('inventory.counts.yesterday');
   return d.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' });
 }
 
 function toLocalDateStr(d: Date) {
-  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
 export default function CurrentInventoryPage() {
   const { t } = useT();
   const [locationFilter, setLocationFilter] = useState('all');
-  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+  const [expandedIds, setExpandedIds]       = useState<Set<string>>(new Set());
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
-  const [deleteError, setDeleteError] = useState<string | null>(null);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editDraft, setEditDraft] = useState<Record<string, number>>({});
-  const [editError, setEditError] = useState<string | null>(null);
+  const [deleteError, setDeleteError]       = useState<string | null>(null);
+  const [editingId, setEditingId]           = useState<string | null>(null);
+  const [editDraft, setEditDraft]           = useState<Record<string, number>>({});
+  const [editError, setEditError]           = useState<string | null>(null);
+
+  // Current user identity & role — drives permission checks
+  const [currentUserId, setCurrentUserId]   = useState<string | null>(null);
+  const [isManager, setIsManager]           = useState<boolean | null>(null); // null = still loading
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (!user) { setIsManager(false); return; }
+      setCurrentUserId(user.id);
+      supabase.from('profiles').select('role').eq('id', user.id).single()
+        .then(({ data }) => {
+          const role = data?.role ?? '';
+          setIsManager(role === 'admin' || role === 'manager');
+        });
+    });
+  }, []);
 
   const queryClient = useQueryClient();
 
@@ -89,15 +111,36 @@ export default function CurrentInventoryPage() {
   });
 
   const editMutation = useMutation({
-    mutationFn: async ({ id, data }: { id: string; data: { section: string; name: string; unit: string; quantity: number }[] }) => {
+    mutationFn: async ({
+      id,
+      data,
+      originalData,
+      alreadyEdited,
+      userId,
+    }: {
+      id: string;
+      data: DataItem[];
+      originalData: DataItem[];
+      alreadyEdited: boolean;
+      userId: string | null;
+    }) => {
+      const updatePayload: Record<string, unknown> = {
+        data,
+        edited_at: new Date().toISOString(),
+        edited_by: userId,
+      };
+      // Only store original_data once — preserves the true original across multiple edits
+      if (!alreadyEdited) {
+        updatePayload.original_data = originalData;
+      }
       const { data: updated, error } = await supabase
         .from('inventory_submissions')
-        .update({ data })
+        .update(updatePayload)
         .eq('id', id)
         .select('id');
       if (error) throw error;
       if (!updated || updated.length === 0) {
-        throw new Error('Permission denied — your database RLS policy does not allow updates on inventory_submissions. Run the SQL fix in Supabase.');
+        throw new Error('Permission denied — RLS policy blocked the update. Run the staff-update SQL fix in Supabase.');
       }
     },
     onSuccess: () => {
@@ -107,11 +150,11 @@ export default function CurrentInventoryPage() {
       setEditError(null);
     },
     onError: (err: unknown) => {
-      setEditError(err instanceof Error ? err.message : 'Save failed — you may not have permission to edit submissions.');
+      setEditError(err instanceof Error ? err.message : 'Save failed — you may not have permission to edit this submission.');
     },
   });
 
-  // Date range — default: last 90 days (catches backdated Excel uploads)
+  // Date range — default: last 90 days
   const defaultFrom = toLocalDateStr(new Date(Date.now() - 90 * 86_400_000));
   const defaultTo   = toLocalDateStr(new Date());
   const [fromDate, setFromDate] = useState(() => toLocalDateStr(new Date(Date.now() - 90 * 86_400_000)));
@@ -126,16 +169,19 @@ export default function CurrentInventoryPage() {
   });
 
   const { data: submissions, isLoading } = useQuery({
-    queryKey: ['inventory-submissions', locationFilter, fromDate, toDate],
+    queryKey: ['inventory-submissions', locationFilter, fromDate, toDate, isManager, currentUserId],
+    enabled: isManager !== null, // wait until role is resolved
     queryFn: async () => {
       let q = supabase
         .from('inventory_submissions')
-        .select('id, location_name, submitted_at, submitted_by, duration_seconds, data, comment')
+        .select('id, location_name, submitted_at, submitted_by, duration_seconds, data, comment, edited_at, edited_by, original_data')
         .gte('submitted_at', `${fromDate}T00:00:00`)
         .lte('submitted_at', `${toDate}T23:59:59`)
         .order('submitted_at', { ascending: false })
         .limit(2000);
       if (locationFilter !== 'all') q = q.eq('location_name', locationFilter);
+      // Staff only see their own submissions
+      if (!isManager && currentUserId) q = q.eq('submitted_by', currentUserId);
       const { data, error } = await q;
       if (error) throw error;
 
@@ -145,16 +191,14 @@ export default function CurrentInventoryPage() {
       let profileMap: Record<string, string> = {};
       if (userIds.length) {
         const { data: profiles } = await supabase
-          .from('profiles')
-          .select('id, full_name')
-          .in('id', userIds);
+          .from('profiles').select('id, full_name').in('id', userIds);
         for (const p of profiles ?? []) profileMap[p.id] = p.full_name;
       }
 
       return rows.map((r) => ({
         ...r,
         submitterName: r.submitted_by ? (profileMap[r.submitted_by] ?? 'Unknown') : 'Unknown',
-      }));
+      })) as (SubmissionRow & { submitterName: string; duration_seconds?: number | null })[];
     },
   });
 
@@ -166,25 +210,37 @@ export default function CurrentInventoryPage() {
     });
   };
 
-  const startEdit = (sub: { id: string; data: { section: string; name: string; unit: string; quantity: number }[] }) => {
+  const startEdit = (sub: SubmissionRow) => {
     const draft: Record<string, number> = {};
     for (const item of sub.data ?? []) draft[item.name] = item.quantity;
     setEditDraft(draft);
     setEditingId(sub.id);
     setEditError(null);
-    // Make sure the card is expanded when editing
     setExpandedIds((prev) => { const next = new Set(prev); next.add(sub.id); return next; });
   };
 
-  const saveEdit = (sub: { id: string; data: { section: string; name: string; unit: string; quantity: number }[] }) => {
+  const saveEdit = (sub: SubmissionRow) => {
     const updatedData = (sub.data ?? []).map((item) => ({
       ...item,
       quantity: editDraft[item.name] ?? item.quantity,
     }));
-    editMutation.mutate({ id: sub.id, data: updatedData });
+    editMutation.mutate({
+      id: sub.id,
+      data: updatedData,
+      originalData: sub.data,
+      alreadyEdited: !!sub.edited_at,
+      userId: currentUserId,
+    });
   };
 
-  // Unique location names for filter
+  /** Current user may edit this submission if the window is open and they own it (or are manager) */
+  const canEdit = (sub: SubmissionRow): boolean => {
+    if (!isEditable(sub.submitted_at)) return false;
+    if (isManager) return true;
+    return sub.submitted_by === currentUserId;
+  };
+
+  // Unique location names for filter dropdown
   const locationNames = [...new Set((locations as { id: string; name: string }[] ?? []).map((l) => l.name))];
 
   return (
@@ -195,19 +251,21 @@ export default function CurrentInventoryPage() {
 
       {/* Filters */}
       <div className="mb-5 flex flex-wrap items-center gap-4">
-        <div className="flex items-center gap-2">
-          <label className="text-sm font-medium text-gray-700 whitespace-nowrap">{t('inventory.counts.locationFilter')}</label>
-          <select
-            value={locationFilter}
-            onChange={(e) => setLocationFilter(e.target.value)}
-            className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]"
-          >
-            <option value="all">{t('inventory.counts.allLocations')}</option>
-            {locationNames.map((name) => (
-              <option key={name} value={name}>{name}</option>
-            ))}
-          </select>
-        </div>
+        {isManager && (
+          <div className="flex items-center gap-2">
+            <label className="text-sm font-medium text-gray-700 whitespace-nowrap">{t('inventory.counts.locationFilter')}</label>
+            <select
+              value={locationFilter}
+              onChange={(e) => setLocationFilter(e.target.value)}
+              className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]"
+            >
+              <option value="all">{t('inventory.counts.allLocations')}</option>
+              {locationNames.map((name) => (
+                <option key={name} value={name}>{name}</option>
+              ))}
+            </select>
+          </div>
+        )}
 
         <div className="flex items-center gap-2">
           <label className="text-sm font-medium text-gray-700 whitespace-nowrap">{t('inventory.counts.from')}</label>
@@ -229,7 +287,7 @@ export default function CurrentInventoryPage() {
         </button>
       </div>
 
-      {isLoading ? (
+      {isLoading || isManager === null ? (
         <div className="space-y-3">
           {[...Array(4)].map((_, i) => (
             <div key={i} className="h-16 bg-gray-100 rounded-lg animate-pulse" />
@@ -268,13 +326,14 @@ export default function CurrentInventoryPage() {
                   {/* Cards for this day */}
                   <div className="space-y-2">
                     {subs.map((sub) => {
-                      const isExpanded = expandedIds.has(sub.id);
-                      const sections = groupBySection(sub.data ?? []);
-                      const totalFilled = (sub.data ?? []).filter((i: { quantity: number }) => i.quantity > 0).length;
-                      const totalItems = (sub.data ?? []).length;
-
-                        const isEditing = editingId === sub.id;
+                      const isExpanded        = expandedIds.has(sub.id);
+                      const sections          = groupBySection(sub.data ?? []);
+                      const totalFilled       = (sub.data ?? []).filter((i) => i.quantity > 0).length;
+                      const totalItems        = (sub.data ?? []).length;
+                      const isEditing         = editingId === sub.id;
                       const isConfirmingDelete = confirmDeleteId === sub.id;
+                      const editable          = canEdit(sub);
+                      const wasEdited         = !!sub.edited_at;
 
                       return (
                         <div key={sub.id} className="bg-white rounded-lg shadow-sm border border-gray-100 overflow-hidden">
@@ -285,13 +344,23 @@ export default function CurrentInventoryPage() {
                               className="flex-1 min-w-0 flex items-center gap-4 text-left"
                             >
                               <div className="flex-1 min-w-0">
-                                <div className="flex items-center gap-2">
+                                <div className="flex items-center gap-2 flex-wrap">
                                   <span className="font-semibold text-gray-900 text-sm">{sub.location_name}</span>
                                   <span className="text-xs text-gray-400">·</span>
                                   <span className="text-xs text-gray-500">{sub.submitterName}</span>
+                                  {wasEdited && (
+                                    <span className="text-xs font-semibold text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded">
+                                      Edited
+                                    </span>
+                                  )}
                                 </div>
                                 <div className="text-xs text-gray-400 mt-0.5">
                                   {new Date(sub.submitted_at).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}
+                                  {wasEdited && sub.edited_at && (
+                                    <span className="ml-2 text-amber-500">
+                                      · edited {new Date(sub.edited_at).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}
+                                    </span>
+                                  )}
                                 </div>
                               </div>
                               <div className="flex items-center gap-3 flex-shrink-0">
@@ -326,45 +395,48 @@ export default function CurrentInventoryPage() {
                                     <X size={12} /> {t('common.cancel')}
                                   </button>
                                 </>
-                              ) : (
+                              ) : editable ? (
                                 <button
                                   onClick={() => startEdit(sub)}
                                   className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                                  title="Edit report"
+                                  title="Edit submission"
                                 >
                                   <Pencil size={14} />
                                 </button>
-                              )}
+                              ) : null}
 
-                              {isConfirmingDelete ? (
-                                <>
-                                  {deleteError && confirmDeleteId === sub.id && (
-                                    <span className="text-xs text-red-500 mr-1 max-w-[180px] truncate" title={deleteError}>
-                                      {deleteError}
-                                    </span>
-                                  )}
+                              {/* Delete — managers only */}
+                              {isManager && (
+                                isConfirmingDelete ? (
+                                  <>
+                                    {deleteError && confirmDeleteId === sub.id && (
+                                      <span className="text-xs text-red-500 mr-1 max-w-[180px] truncate" title={deleteError}>
+                                        {deleteError}
+                                      </span>
+                                    )}
+                                    <button
+                                      onClick={() => { setDeleteError(null); deleteMutation.mutate(sub.id); }}
+                                      disabled={deleteMutation.isPending}
+                                      className="px-2.5 py-1 text-xs font-semibold text-white bg-red-500 rounded-lg hover:bg-red-600 disabled:opacity-50 transition-colors"
+                                    >
+                                      {deleteMutation.isPending ? t('inventory.counts.deleting') : t('inventory.counts.yesDelete')}
+                                    </button>
+                                    <button
+                                      onClick={() => { setConfirmDeleteId(null); setDeleteError(null); }}
+                                      className="px-2.5 py-1 text-xs font-semibold text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
+                                    >
+                                      {t('common.cancel')}
+                                    </button>
+                                  </>
+                                ) : (
                                   <button
-                                    onClick={() => { setDeleteError(null); deleteMutation.mutate(sub.id); }}
-                                    disabled={deleteMutation.isPending}
-                                    className="px-2.5 py-1 text-xs font-semibold text-white bg-red-500 rounded-lg hover:bg-red-600 disabled:opacity-50 transition-colors"
+                                    onClick={() => setConfirmDeleteId(sub.id)}
+                                    className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                                    title="Delete report"
                                   >
-                                    {deleteMutation.isPending ? t('inventory.counts.deleting') : t('inventory.counts.yesDelete')}
+                                    <Trash2 size={14} />
                                   </button>
-                                  <button
-                                    onClick={() => { setConfirmDeleteId(null); setDeleteError(null); }}
-                                    className="px-2.5 py-1 text-xs font-semibold text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
-                                  >
-                                    {t('common.cancel')}
-                                  </button>
-                                </>
-                              ) : (
-                                <button
-                                  onClick={() => setConfirmDeleteId(sub.id)}
-                                  className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-                                  title="Delete report"
-                                >
-                                  <Trash2 size={14} />
-                                </button>
+                                )
                               )}
                             </div>
                           </div>

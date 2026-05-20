@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase-browser';
 import { saveDraft, loadDraft, clearDraft } from '@/lib/draft-store';
 import { enqueue, dequeueAll, removeFromQueue, pendingCount } from '@/lib/offline-queue';
-import { ChevronLeft, Send, WifiOff, Wifi, RefreshCw, CheckCircle2, Timer, Play, Pause, Upload, X, FileSpreadsheet, AlertCircle, RotateCcw } from 'lucide-react';
+import { ChevronLeft, Send, WifiOff, Wifi, RefreshCw, CheckCircle2, Timer, Play, Pause, Upload, X, FileSpreadsheet, AlertCircle, RotateCcw, Pencil } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { useT } from '@/lib/i18n';
 
@@ -157,6 +157,14 @@ const SECTIONS: Section[] = [
 ];
 
 const TOTAL_ITEMS = SECTIONS.reduce((sum, s) => sum + s.data.length, 0);
+
+/** True if the submission is still within the edit window (until 09:00 the next calendar day) */
+function isEditable(submittedAt: string): boolean {
+  const deadline = new Date(submittedAt);
+  deadline.setDate(deadline.getDate() + 1);
+  deadline.setHours(9, 0, 0, 0);
+  return new Date() < deadline;
+}
 
 /* ─── Sync queue to Supabase ──────────────────────────────────────────────── */
 async function syncPendingQueue(): Promise<number> {
@@ -448,6 +456,7 @@ export default function LocationInventoryFormPage({
   const [showUpload, setShowUpload] = useState(false);
   const [submitted, setSubmitted]   = useState(false);
   const [savedOffline, setSavedOffline] = useState(false);
+  const [submittedAt, setSubmittedAt]   = useState<string | null>(null);
   const [isStaff, setIsStaff]       = useState(false);
   const [isOnline, setIsOnline]     = useState(true);
   const [queueCount, setQueueCount] = useState(0);
@@ -591,13 +600,14 @@ export default function LocationInventoryFormPage({
         setComment('');
       } else {
         // ── Online path: submit directly ──
+        const now = new Date().toISOString();
         const { error: insertError } = await supabase
           .from('inventory_submissions')
           .insert({
             location_id:      params.locationId,
             location_name:    locationName,
             submitted_by:     user.id,
-            submitted_at:     new Date().toISOString(),
+            submitted_at:     now,
             data,
             comment:          comment.trim() || null,
             duration_seconds: durationSeconds > 0 ? durationSeconds : null,
@@ -609,6 +619,7 @@ export default function LocationInventoryFormPage({
           return;
         }
 
+        setSubmittedAt(now);
         clearDraft(params.locationId);
         // Also drain any queued items opportunistically
         const n = await pendingCount();
@@ -641,6 +652,7 @@ export default function LocationInventoryFormPage({
     setComment('');
     setSubmitted(false);
     setSavedOffline(false);
+    setSubmittedAt(null);
     setTimerStarted(false);
     setTimerRunning(false);
     setElapsedSeconds(0);
@@ -703,13 +715,22 @@ export default function LocationInventoryFormPage({
         </div>
         <h2 className="text-xl font-bold text-gray-900">Inventory Submitted</h2>
         <p className="text-sm text-gray-500">Your inventory for {locationName} has been saved.</p>
-        <div className="flex gap-3 mt-2">
+        <div className="flex flex-wrap gap-3 mt-2 justify-center">
           <button
             onClick={startNew}
             className="px-4 py-2 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50"
           >
             New Submission
           </button>
+          {submittedAt && isEditable(submittedAt) && (
+            <button
+              onClick={() => router.push('/inventory/counts')}
+              className="flex items-center gap-2 px-4 py-2 border border-amber-300 bg-amber-50 text-amber-700 rounded-lg text-sm font-medium hover:bg-amber-100 transition-colors"
+            >
+              <Pencil size={14} />
+              Edit this submission
+            </button>
+          )}
           {!isStaff && (
             <button
               onClick={() => router.push('/inventory/counts')}

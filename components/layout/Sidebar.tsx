@@ -108,7 +108,7 @@ const NAV_GROUPS: NavGroup[] = [
         children: [
           { labelKey: 'sidebar.nav.addNewInventory',  href: '/inventory/add',            icon: FilePlus },
           { labelKey: 'sidebar.nav.currentInventory', href: '/inventory/overview',        icon: BarChart3,    managerOnly: true },
-          { labelKey: 'sidebar.nav.inventoryReports', href: '/inventory/counts',          icon: ClipboardList, managerOnly: true },
+          { labelKey: 'sidebar.nav.inventoryReports', href: '/inventory/counts',          icon: ClipboardList },
           { labelKey: 'sidebar.nav.usageForecast',    href: '/inventory/usage-forecast',  icon: TrendingDown,  managerOnly: true },
         ],
       },
