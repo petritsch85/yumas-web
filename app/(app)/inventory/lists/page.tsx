@@ -48,6 +48,13 @@ type LocalTarget = Record<DayKey, number>;
 
 type AddForm = { section: string; name: string; unit: string; stores: string[] };
 
+type InventorySection = {
+  id:         string;
+  name:       string;
+  stores:     string[];
+  sort_order: number;
+};
+
 const LOCK_PAGE_KEY     = 'inventory-lists';
 const LOCK_RENEW_MS     = 2.5 * 60 * 1000; // renew every 2.5 min
 const LOCK_POLL_MS      = 15  * 1000;       // re-check lock every 15 s (view mode)
@@ -59,14 +66,16 @@ function AddItemModal({
   onClose,
   onSubmit,
   isPending,
+  sections,
 }: {
   onClose:   () => void;
   onSubmit:  (form: AddForm) => void;
   isPending: boolean;
+  sections:  string[];
 }) {
   const ALL_STORES = [...STORES] as string[];
   const [form, setForm] = useState<AddForm>({
-    section: SECTION_ORDER[0], name: '', unit: '', stores: ALL_STORES,
+    section: sections[0] ?? SECTION_ORDER[0], name: '', unit: '', stores: ALL_STORES,
   });
 
   function handleSubmit(e: React.FormEvent) {
@@ -111,7 +120,7 @@ function AddItemModal({
               onChange={e => setForm(f => ({ ...f, section: e.target.value }))}
               className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm text-gray-800 focus:outline-none focus:border-[#1B5E20] focus:ring-1 focus:ring-[#1B5E20] bg-white"
             >
-              {SECTION_ORDER.map(s => (
+              {sections.map(s => (
                 <option key={s} value={s}>{s}</option>
               ))}
             </select>
@@ -197,15 +206,122 @@ function AddItemModal({
   );
 }
 
+/* ─── Add Section Modal ──────────────────────────────────────────────────────── */
+function AddSectionModal({
+  onClose,
+  onSubmit,
+  isPending,
+}: {
+  onClose:   () => void;
+  onSubmit:  (name: string, stores: string[]) => void;
+  isPending: boolean;
+}) {
+  const ALL_STORES = [...STORES] as string[];
+  const [name,   setName]   = useState('');
+  const [stores, setStores] = useState<string[]>(ALL_STORES);
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!name.trim()) return;
+    onSubmit(name.trim(), stores);
+  }
+
+  const storeValue = stores.length === STORES.length ? 'all' : stores.length === 1 ? stores[0] : 'all';
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+      onClick={e => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 overflow-hidden">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+          <h2 className="text-base font-bold text-gray-900">Add New Section</h2>
+          <button
+            onClick={onClose}
+            className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="px-6 py-5 space-y-4">
+
+          {/* Section name */}
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">
+              Section Name
+            </label>
+            <input
+              autoFocus
+              type="text"
+              placeholder="e.g. Spezialitäten"
+              value={name}
+              onChange={e => setName(e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm text-gray-800 placeholder-gray-400 focus:outline-none focus:border-[#1B5E20] focus:ring-1 focus:ring-[#1B5E20]"
+            />
+          </div>
+
+          {/* Store scope */}
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">
+              Add to
+            </label>
+            <div className="flex gap-2">
+              {(['all', ...STORES] as const).map(opt => {
+                const label  = opt === 'all' ? 'All Stores' : opt;
+                const active = storeValue === opt;
+                return (
+                  <button
+                    key={opt}
+                    type="button"
+                    onClick={() => setStores(opt === 'all' ? ALL_STORES : [opt])}
+                    className={`flex-1 py-2 rounded-lg text-xs font-semibold border transition-colors ${
+                      active
+                        ? 'bg-[#1B5E20] text-white border-[#1B5E20]'
+                        : 'bg-white text-gray-600 border-gray-300 hover:border-[#1B5E20] hover:text-[#1B5E20]'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Actions */}
+          <div className="flex items-center gap-3 pt-1">
+            <button
+              type="submit"
+              disabled={!name.trim() || isPending}
+              className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg bg-[#1B5E20] text-white text-sm font-semibold disabled:opacity-50 hover:bg-[#2E7D32] transition-colors"
+            >
+              <Plus size={15} />
+              {isPending ? 'Adding…' : 'Add Section'}
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 py-2.5 rounded-lg bg-white text-gray-600 border border-gray-300 text-sm font-semibold hover:bg-gray-50 transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 /* ─── Page ───────────────────────────────────────────────────────────────────── */
 export default function InventoryListsPage() {
   useT();
   const qc = useQueryClient();
 
-  const [activeStore,  setActiveStore]  = useState<Store>('Eschborn');
-  const [editMode,     setEditMode]     = useState(false);
-  const [confirmReset, setConfirmReset] = useState(false);
-  const [showAddModal, setShowAddModal] = useState(false);
+  const [activeStore,         setActiveStore]         = useState<Store>('Eschborn');
+  const [editMode,            setEditMode]            = useState(false);
+  const [confirmReset,        setConfirmReset]        = useState(false);
+  const [showAddModal,        setShowAddModal]        = useState(false);
+  const [showAddSectionModal, setShowAddSectionModal] = useState(false);
 
   // Local editable targets: item_name → {mon_target, tue_target, wed_target, fri_target}
   const [localTargets, setLocalTargets] = useState<Map<string, LocalTarget>>(new Map());
@@ -244,6 +360,23 @@ export default function InventoryListsPage() {
         .eq('location_name', activeStore);
       if (error) throw error;
       return (data ?? []) as TargetRow[];
+    },
+  });
+
+  const { data: dbSections = [] } = useQuery({
+    queryKey: ['inventory-sections', activeStore],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('inventory_sections')
+        .select('id, name, stores, sort_order')
+        .contains('stores', [activeStore])
+        .order('sort_order', { ascending: true });
+      if (error) {
+        // Table may not exist yet — fall back gracefully
+        console.warn('inventory_sections query failed, using hardcoded defaults', error.message);
+        return [] as InventorySection[];
+      }
+      return (data ?? []) as InventorySection[];
     },
   });
 
@@ -343,16 +476,20 @@ export default function InventoryListsPage() {
   }, [editMode]);
 
   /* ── Derived data ────────────────────────────────────────────────────────── */
+
+  // Ordered list of section names: DB-backed if table exists, else hardcoded fallback
+  const allSectionNames = useMemo(() => {
+    const dbNames = dbSections.map(s => s.name);
+    const base    = dbNames.length > 0 ? dbNames : SECTION_ORDER;
+    // Also surface any sections present in items but not in the list (legacy data)
+    const extra   = [...new Set(items.map(i => i.section))].filter(s => !base.includes(s));
+    return [...base, ...extra];
+  }, [dbSections, items]);
+
   const sections = useMemo(() => {
-    const grouped = new Map<string, InventoryItem[]>(SECTION_ORDER.map(s => [s, []]));
-    items.forEach(item => {
-      if (!grouped.has(item.section)) grouped.set(item.section, []);
-      grouped.get(item.section)!.push(item);
-    });
-    return SECTION_ORDER
+    return allSectionNames
       .map(title => {
-        const sectionItems = [...(grouped.get(title) ?? [])];
-        // Sort by this store's specific order, falling back to global sort_order
+        const sectionItems = items.filter(i => i.section === title).slice();
         sectionItems.sort((a, b) => {
           const aOrd = a.store_sort_orders?.[activeStore] ?? a.sort_order;
           const bOrd = b.store_sort_orders?.[activeStore] ?? b.sort_order;
@@ -360,8 +497,9 @@ export default function InventoryListsPage() {
         });
         return { title, items: sectionItems };
       })
-      .filter(s => s.items.length > 0);
-  }, [items, activeStore]);
+      // In edit mode show empty sections (newly created); in view mode hide them
+      .filter(s => editMode || s.items.length > 0);
+  }, [allSectionNames, items, activeStore, editMode]);
 
   const targetMap = useMemo(
     () => new Map(targets.map(t => [t.item_name, t])),
@@ -436,6 +574,25 @@ export default function InventoryListsPage() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['inventory-items'] });
       setShowAddModal(false);
+    },
+  });
+
+  const addSectionMutation = useMutation({
+    mutationFn: async ({ name, stores }: { name: string; stores: string[] }) => {
+      const { data: maxData } = await supabase
+        .from('inventory_sections')
+        .select('sort_order')
+        .order('sort_order', { ascending: false })
+        .limit(1);
+      const maxOrder = maxData?.[0]?.sort_order ?? 0;
+      const { error } = await supabase
+        .from('inventory_sections')
+        .insert({ name, stores, sort_order: maxOrder + 10 });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['inventory-sections'] });
+      setShowAddSectionModal(false);
     },
   });
 
@@ -536,6 +693,15 @@ export default function InventoryListsPage() {
           onClose={() => setShowAddModal(false)}
           onSubmit={form => addMutation.mutate(form)}
           isPending={addMutation.isPending}
+          sections={allSectionNames}
+        />
+      )}
+
+      {showAddSectionModal && (
+        <AddSectionModal
+          onClose={() => setShowAddSectionModal(false)}
+          onSubmit={(name, stores) => addSectionMutation.mutate({ name, stores })}
+          isPending={addSectionMutation.isPending}
         />
       )}
 
@@ -566,13 +732,22 @@ export default function InventoryListsPage() {
           <span className="w-px h-6 bg-gray-200" />
 
           {editMode && (
-            <button
-              onClick={() => setShowAddModal(true)}
-              className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-semibold bg-[#1B5E20] text-white border border-[#1B5E20] hover:bg-[#2E7D32] transition-colors shadow-sm"
-            >
-              <Plus size={15} />
-              Add Item
-            </button>
+            <>
+              <button
+                onClick={() => setShowAddModal(true)}
+                className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-semibold bg-[#1B5E20] text-white border border-[#1B5E20] hover:bg-[#2E7D32] transition-colors shadow-sm"
+              >
+                <Plus size={15} />
+                Add Item
+              </button>
+              <button
+                onClick={() => setShowAddSectionModal(true)}
+                className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-semibold bg-white text-[#1B5E20] border border-[#1B5E20] hover:bg-[#F1F8E9] transition-colors"
+              >
+                <Plus size={15} />
+                Add Section
+              </button>
+            </>
           )}
 
           {!editMode && (
@@ -709,6 +884,14 @@ export default function InventoryListsPage() {
                         {section.title}
                       </td>
                     </tr>
+
+                    {editMode && section.items.length === 0 && (
+                      <tr>
+                        <td colSpan={colSpan} className="px-4 py-5 text-center text-xs text-gray-300 italic">
+                          No items yet — use &ldquo;Add Item&rdquo; and select this section.
+                        </td>
+                      </tr>
+                    )}
 
                     {section.items.map((item, idx) => {
                       const target  = targetMap.get(item.name);
