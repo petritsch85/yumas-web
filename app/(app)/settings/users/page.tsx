@@ -79,9 +79,9 @@ const MODULE_GROUPS: ModuleGroup[] = [
 ];
 
 const STAFF_DEFAULTS: AppPermissions = {
-  inventory: true, production: false, buying: false, waste_log: true,
-  delivery: false, packer: true, driver: false, store_receiver: false,
-  analysis: false, events: false, staff_videos: true,
+  inventory: false, production: false, buying: false, waste_log: false,
+  delivery: false, packer: false, driver: false, store_receiver: false,
+  analysis: false, events: false, staff_videos: false,
   bills: false, pl_reports: false, suppliers: false, products: false,
 };
 
