@@ -13,6 +13,7 @@ import {
   FlaskConical,
   Utensils,
   ClipboardList,
+  LayoutList,
   Factory,
   ShoppingCart,
   TrendingUp,
@@ -106,6 +107,7 @@ const NAV_GROUPS: NavGroup[] = [
       {
         labelKey: 'sidebar.nav.inventory', href: '/inventory', icon: ClipboardList, permKey: 'inventory',
         children: [
+          { labelKey: 'sidebar.nav.inventoryLists',   href: '/inventory/lists',          icon: LayoutList },
           { labelKey: 'sidebar.nav.addNewInventory',  href: '/inventory/add',            icon: FilePlus },
           { labelKey: 'sidebar.nav.currentInventory', href: '/inventory/overview',        icon: BarChart3,    managerOnly: true },
           { labelKey: 'sidebar.nav.inventoryReports', href: '/inventory/counts',          icon: ClipboardList },
