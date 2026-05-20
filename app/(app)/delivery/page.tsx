@@ -196,7 +196,7 @@ type WeeklyForecast = {
 const STORES = ['Eschborn', 'Taunus', 'Westend', 'ZK'] as const;
 type Store = typeof STORES[number];
 
-const STORE_CONFIRM_COL: Record<Store, keyof DeliveryRun> = {
+const STORE_CONFIRM_COL: Partial<Record<Store, keyof DeliveryRun>> = {
   Eschborn: 'list_confirmed_eschborn_at',
   Taunus:   'list_confirmed_taunus_at',
   Westend:  'list_confirmed_westend_at',
@@ -1268,7 +1268,7 @@ export default function DeliveryPage() {
   /* ─ Std scale mode (per store) ─ */
   type ScaleMode = 'low' | 'std' | 'high';
   const [stdScaleMode, setStdScaleMode] = useState<Record<Store, ScaleMode>>({
-    Eschborn: 'std', Taunus: 'std', Westend: 'std',
+    Eschborn: 'std', Taunus: 'std', Westend: 'std', ZK: 'std',
   });
 
   const scaleTargets = useMutation({
@@ -1545,6 +1545,7 @@ export default function DeliveryPage() {
     setConfirmingStore(store);
     try {
       const col = STORE_CONFIRM_COL[store];
+      if (!col) return; // ZK has no confirm column
       const now = new Date().toISOString();
       await supabase.from('delivery_runs').update({ [col]: now }).eq('id', run.id);
       qc.invalidateQueries({ queryKey: ['delivery-run', targetDate] });
@@ -1559,6 +1560,7 @@ export default function DeliveryPage() {
     setDeconfirmingStore(store);
     try {
       const col = STORE_CONFIRM_COL[store];
+      if (!col) return; // ZK has no confirm column
       await supabase.from('delivery_runs').update({ [col]: null }).eq('id', run.id);
       qc.invalidateQueries({ queryKey: ['delivery-run', targetDate] });
     } finally {
@@ -1598,9 +1600,12 @@ export default function DeliveryPage() {
   };
 
   /* ─ Per-store confirmation derived state ─ */
-  const storeConfirmedAt = (store: Store): string | null =>
-    run ? (run[STORE_CONFIRM_COL[store]] as string | null) : null;
-  const allStoresConfirmed = STORES.every(s => !!storeConfirmedAt(s));
+  const storeConfirmedAt = (store: Store): string | null => {
+    const col = STORE_CONFIRM_COL[store];
+    return (run && col) ? (run[col] as string | null) : null;
+  };
+  // ZK has no confirm column — only require the 3 restaurant stores to be confirmed
+  const allStoresConfirmed = STORES.filter(s => s in STORE_CONFIRM_COL).every(s => !!storeConfirmedAt(s));
   const dayLocked = !!run?.day_locked_at;
   const deliveryStarted = !!run?.delivery_started_at;
 
