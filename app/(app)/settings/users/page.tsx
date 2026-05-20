@@ -257,7 +257,7 @@ function PermissionsEditor({
                     >
                       <input
                         type="checkbox"
-                        className="sr-only"
+                        className="hidden"
                         checked={checked}
                         onChange={() => toggle(key)}
                       />
