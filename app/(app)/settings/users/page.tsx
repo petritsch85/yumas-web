@@ -670,6 +670,7 @@ export default function TeamPage() {
                 <tr>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">{t('team.table.name')}</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">{t('team.table.email')}</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">Category</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">{t('team.table.role')}</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">{t('team.table.location')}</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">{t('team.table.status')}</th>
@@ -685,14 +686,12 @@ export default function TeamPage() {
                         {emailMap?.[user.id] ?? <span className="text-gray-300">—</span>}
                       </td>
                       <td className="px-4 py-3">
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium capitalize ${roleColor[categoryFromRole(user.role)] ?? 'bg-gray-100 text-gray-600'}`}>
-                            {categoryFromRole(user.role)}
-                          </span>
-                          {user.job_role && (
-                            <span className="text-xs text-gray-500">{jobRoleLabel(user.job_role)}</span>
-                          )}
-                        </div>
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium capitalize ${roleColor[categoryFromRole(user.role)] ?? 'bg-gray-100 text-gray-600'}`}>
+                          {categoryFromRole(user.role)}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-gray-600 text-xs">
+                        {user.job_role ? jobRoleLabel(user.job_role) : <span className="text-gray-300">—</span>}
                       </td>
                       <td className="px-4 py-3 text-gray-600">
                         {(user as any).location?.name ?? <span className="text-gray-400 text-xs font-medium">All</span>}
