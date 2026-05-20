@@ -320,8 +320,9 @@ export default function InventoryListsPage() {
   const [activeStore,         setActiveStore]         = useState<Store>('Eschborn');
   const [editMode,            setEditMode]            = useState(false);
   const [confirmReset,        setConfirmReset]        = useState(false);
-  const [showAddModal,        setShowAddModal]        = useState(false);
-  const [showAddSectionModal, setShowAddSectionModal] = useState(false);
+  const [showAddModal,          setShowAddModal]          = useState(false);
+  const [showAddSectionModal,   setShowAddSectionModal]   = useState(false);
+  const [confirmDeleteSection,  setConfirmDeleteSection]  = useState<string | null>(null);
 
   // Local editable targets: item_name → {mon_target, tue_target, wed_target, fri_target}
   const [localTargets, setLocalTargets] = useState<Map<string, LocalTarget>>(new Map());
@@ -593,6 +594,25 @@ export default function InventoryListsPage() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['inventory-sections'] });
       setShowAddSectionModal(false);
+    },
+  });
+
+  const deleteSectionMutation = useMutation({
+    mutationFn: async (sectionName: string) => {
+      const sec = dbSections.find(s => s.name === sectionName);
+      if (!sec) return; // legacy section not in DB table — nothing to do
+      const remaining = sec.stores.filter(s => s !== activeStore);
+      if (remaining.length === 0) {
+        const { error } = await supabase.from('inventory_sections').delete().eq('id', sec.id);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from('inventory_sections').update({ stores: remaining }).eq('id', sec.id);
+        if (error) throw error;
+      }
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['inventory-sections'] });
+      setConfirmDeleteSection(null);
     },
   });
 
@@ -880,8 +900,54 @@ export default function InventoryListsPage() {
                   <React.Fragment key={section.title}>
 
                     <tr className="bg-[#F1F8E9] border-y border-green-100">
-                      <td colSpan={colSpan} className="px-4 py-2 text-xs font-bold text-[#2E7D32] uppercase tracking-wider">
-                        {section.title}
+                      <td colSpan={colSpan} className="px-4 py-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold text-[#2E7D32] uppercase tracking-wider">
+                            {section.title}
+                          </span>
+                          {editMode && (
+                            confirmDeleteSection === section.title ? (
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs text-red-600 font-medium">
+                                  Remove from {activeStore}?
+                                </span>
+                                <button
+                                  onClick={() => deleteSectionMutation.mutate(section.title)}
+                                  disabled={deleteSectionMutation.isPending}
+                                  className="px-2.5 py-0.5 rounded text-xs font-semibold bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 transition-colors"
+                                >
+                                  {deleteSectionMutation.isPending ? 'Removing…' : 'Confirm'}
+                                </button>
+                                <button
+                                  onClick={() => setConfirmDeleteSection(null)}
+                                  className="px-2 py-0.5 rounded text-xs text-gray-500 hover:text-gray-700 transition-colors"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                onClick={() => section.items.length === 0
+                                  ? setConfirmDeleteSection(section.title)
+                                  : undefined
+                                }
+                                disabled={section.items.length > 0}
+                                title={
+                                  section.items.length > 0
+                                    ? 'Remove all items from this section first'
+                                    : `Remove ${section.title} from ${activeStore}`
+                                }
+                                className={`p-1 rounded transition-colors ${
+                                  section.items.length > 0
+                                    ? 'text-green-200 cursor-not-allowed'
+                                    : 'text-green-300 hover:text-red-500 hover:bg-red-50'
+                                }`}
+                              >
+                                <Trash2 size={13} />
+                              </button>
+                            )
+                          )}
+                        </div>
                       </td>
                     </tr>
 
