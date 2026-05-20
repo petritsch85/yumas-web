@@ -616,6 +616,17 @@ export default function InventoryListsPage() {
     },
   });
 
+  const moveSectionMutation = useMutation({
+    mutationFn: async ({ id, section }: { id: string; section: string }) => {
+      const { error } = await supabase
+        .from('inventory_items')
+        .update({ section })
+        .eq('id', id);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['inventory-items'] as const }),
+  });
+
   // Save targets via upsert (unique constraint on location_name,item_name confirmed in DB)
   // section is required NOT NULL in delivery_targets — must be included
   const saveTargetMutation = useMutation({
@@ -991,7 +1002,20 @@ export default function InventoryListsPage() {
                             </td>
                           )}
 
-                          <td className="px-4 py-2.5 font-medium text-gray-800">{item.name}</td>
+                          <td className="px-4 py-2.5">
+                            <div className="font-medium text-gray-800">{item.name}</div>
+                            {editMode && (
+                              <select
+                                value={item.section}
+                                onChange={e => moveSectionMutation.mutate({ id: item.id, section: e.target.value })}
+                                className="mt-1 text-xs text-gray-400 border border-gray-200 rounded px-1.5 py-0.5 bg-white focus:outline-none focus:border-[#1B5E20] cursor-pointer hover:border-gray-400 transition-colors"
+                              >
+                                {allSectionNames.map(s => (
+                                  <option key={s} value={s}>{s}</option>
+                                ))}
+                              </select>
+                            )}
+                          </td>
                           <td className="px-2 py-1.5 text-xs text-gray-400">
                             {editMode ? (
                               <input
