@@ -1157,6 +1157,7 @@ export default function DeliveryPage() {
     const perms = profile.permissions as any;
     const locName = profile.locationName;
     if (perms?.driver)                              { setViewMode('driver'); return; }
+    if (perms?.store_receiver)                      { setViewMode('store');  return; }
     if (locName && STORES.includes(locName as Store)) { setViewMode('store');  return; }
     // packer: true explicitly OR undefined (legacy — treat as packer by default)
     if (perms?.packer !== false)                    { setViewMode('packer'); return; }

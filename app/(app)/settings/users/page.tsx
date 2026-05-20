@@ -16,8 +16,9 @@ type AppPermissions = {
   buying:       boolean;
   waste_log:    boolean;
   delivery:     boolean;
-  packer:       boolean; // delivery sub-role: auto-routes to Packer view
-  driver:       boolean; // delivery sub-role: auto-routes to Driver view
+  packer:         boolean; // delivery sub-role: auto-routes to Packer view
+  driver:         boolean; // delivery sub-role: auto-routes to Driver view
+  store_receiver: boolean; // delivery sub-role: auto-routes to Store receipt view
   analysis:     boolean;
   events:       boolean;
   staff_videos: boolean;
@@ -79,21 +80,21 @@ const MODULE_GROUPS: ModuleGroup[] = [
 
 const STAFF_DEFAULTS: AppPermissions = {
   inventory: true, production: false, buying: false, waste_log: true,
-  delivery: false, packer: true, driver: false,
+  delivery: false, packer: true, driver: false, store_receiver: false,
   analysis: false, events: false, staff_videos: true,
   bills: false, pl_reports: false, suppliers: false, products: false,
 };
 
 const MANAGER_DEFAULTS: AppPermissions = {
   inventory: true, production: true, buying: true, waste_log: true,
-  delivery: true, packer: false, driver: false,
+  delivery: true, packer: false, driver: false, store_receiver: false,
   analysis: true, events: true, staff_videos: true,
   bills: false, pl_reports: true, suppliers: true, products: true,
 };
 
 const ADMIN_DEFAULTS: AppPermissions = {
   inventory: true, production: true, buying: true, waste_log: true,
-  delivery: true, packer: false, driver: false,
+  delivery: true, packer: false, driver: false, store_receiver: false,
   analysis: true, events: true, staff_videos: true,
   bills: true, pl_reports: true, suppliers: true, products: true,
 };
@@ -270,6 +271,7 @@ function PermissionsEditor({
                         {([
                           { flag: 'packer' as PermKey, label: '📦 Packer' },
                           { flag: 'driver' as PermKey, label: '🚚 Driver' },
+                          { flag: 'store_receiver' as PermKey, label: '🏪 Store' },
                         ] as { flag: PermKey; label: string }[]).map(({ flag, label: subLabel }) => {
                           const subChecked = !!perms[flag];
                           return (
