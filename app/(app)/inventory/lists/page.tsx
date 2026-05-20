@@ -31,6 +31,7 @@ type InventoryItem = {
   name:       string;
   unit:       string;
   sort_order: number;
+  stores:     string[];
 };
 
 type TargetRow = {
@@ -43,7 +44,7 @@ type TargetRow = {
 
 type LocalTarget = Record<DayKey, number>;
 
-type AddForm = { section: string; name: string; unit: string };
+type AddForm = { section: string; name: string; unit: string; stores: string[] };
 
 /* ─── Add Item Modal ─────────────────────────────────────────────────────────── */
 function AddItemModal({
@@ -55,12 +56,23 @@ function AddItemModal({
   onSubmit:  (form: AddForm) => void;
   isPending: boolean;
 }) {
-  const [form, setForm] = useState<AddForm>({ section: SECTION_ORDER[0], name: '', unit: '' });
+  const ALL_STORES = [...STORES] as string[];
+  const [form, setForm] = useState<AddForm>({
+    section: SECTION_ORDER[0], name: '', unit: '', stores: ALL_STORES,
+  });
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!form.name.trim() || !form.unit.trim()) return;
-    onSubmit({ section: form.section, name: form.name.trim(), unit: form.unit.trim() });
+    onSubmit({ section: form.section, name: form.name.trim(), unit: form.unit.trim(), stores: form.stores });
+  }
+
+  const storeValue = form.stores.length === STORES.length ? 'all'
+    : form.stores.length === 1 ? form.stores[0]
+    : 'all';
+
+  function handleStoreChange(val: string) {
+    setForm(f => ({ ...f, stores: val === 'all' ? ALL_STORES : [val] }));
   }
 
   return (
@@ -80,6 +92,8 @@ function AddItemModal({
         </div>
 
         <form onSubmit={handleSubmit} className="px-6 py-5 space-y-4">
+
+          {/* Section */}
           <div>
             <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">
               Section
@@ -95,6 +109,7 @@ function AddItemModal({
             </select>
           </div>
 
+          {/* Item name */}
           <div>
             <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">
               Item Name
@@ -109,6 +124,7 @@ function AddItemModal({
             />
           </div>
 
+          {/* Unit */}
           <div>
             <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">
               Unit
@@ -122,6 +138,34 @@ function AddItemModal({
             />
           </div>
 
+          {/* Store scope */}
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">
+              Add to
+            </label>
+            <div className="flex gap-2">
+              {(['all', ...STORES] as const).map(opt => {
+                const label = opt === 'all' ? 'All Stores' : opt;
+                const active = storeValue === opt;
+                return (
+                  <button
+                    key={opt}
+                    type="button"
+                    onClick={() => handleStoreChange(opt)}
+                    className={`flex-1 py-2 rounded-lg text-xs font-semibold border transition-colors ${
+                      active
+                        ? 'bg-[#1B5E20] text-white border-[#1B5E20]'
+                        : 'bg-white text-gray-600 border-gray-300 hover:border-[#1B5E20] hover:text-[#1B5E20]'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Actions */}
           <div className="flex items-center gap-3 pt-1">
             <button
               type="submit"
@@ -160,11 +204,12 @@ export default function InventoryListsPage() {
 
   /* ── Queries ─────────────────────────────────────────────────────────────── */
   const { data: items = [], isLoading: itemsLoading } = useQuery({
-    queryKey: ['inventory-items'],
+    queryKey: ['inventory-items', activeStore],
     queryFn: async () => {
       const { data, error } = await supabase
         .from('inventory_items')
-        .select('id, section, name, unit, sort_order')
+        .select('id, section, name, unit, sort_order, stores')
+        .contains('stores', [activeStore])
         .order('sort_order', { ascending: true });
       if (error) throw error;
       return (data ?? []) as InventoryItem[];
@@ -242,7 +287,7 @@ export default function InventoryListsPage() {
         .eq('id', id);
       if (error) throw error;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['inventory-items'] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['inventory-items'] as const }),
   });
 
   const moveMutation = useMutation({
@@ -258,18 +303,22 @@ export default function InventoryListsPage() {
         supabase.from('inventory_items').update({ sort_order: item.sort_order }).eq('id', other.id),
       ]);
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['inventory-items'] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['inventory-items'] as const }),
   });
 
   const addMutation = useMutation({
-    mutationFn: async ({ section, name, unit }: AddForm) => {
-      const sectionItems = items.filter(i => i.section === section);
-      const maxOrder     = sectionItems.length > 0
-        ? Math.max(...sectionItems.map(i => i.sort_order))
-        : 0;
+    mutationFn: async ({ section, name, unit, stores }: AddForm) => {
+      // Use ALL items (not just the active store's filtered list) to compute max sort_order
+      const { data: allSectionItems } = await supabase
+        .from('inventory_items')
+        .select('sort_order')
+        .eq('section', section)
+        .order('sort_order', { ascending: false })
+        .limit(1);
+      const maxOrder = allSectionItems?.[0]?.sort_order ?? 0;
       const { error } = await supabase
         .from('inventory_items')
-        .insert({ section, name, unit, sort_order: maxOrder + 10 });
+        .insert({ section, name, unit, sort_order: maxOrder + 10, stores });
       if (error) throw error;
     },
     onSuccess: () => {
