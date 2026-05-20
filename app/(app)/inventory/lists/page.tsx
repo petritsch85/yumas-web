@@ -210,6 +210,11 @@ export default function InventoryListsPage() {
   // Local editable targets: item_name → {mon_target, tue_target, wed_target, fri_target}
   const [localTargets, setLocalTargets] = useState<Map<string, LocalTarget>>(new Map());
 
+  // Local editable units: item id → unit string
+  const [localUnits, setLocalUnits] = useState<Map<string, string>>(new Map());
+  const localUnitsRef = useRef(localUnits);
+  useEffect(() => { localUnitsRef.current = localUnits; }, [localUnits]);
+
   // ── Edit lock ──────────────────────────────────────────────────────────────
   const [currentUser,  setCurrentUser]  = useState<{ id: string; name: string } | null>(null);
   const [activeLock,   setActiveLock]   = useState<LockInfo>(null); // lock held by someone ELSE
@@ -314,22 +319,28 @@ export default function InventoryListsPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser]);
 
-  /* ── Seed local targets when entering edit mode ──────────────────────────── */
+  /* ── Seed local state when entering edit mode ───────────────────────────── */
   useEffect(() => {
     if (editMode) {
-      const map = new Map<string, LocalTarget>();
+      // Targets
+      const tMap = new Map<string, LocalTarget>();
       targets.forEach(t => {
-        map.set(t.item_name, {
+        tMap.set(t.item_name, {
           mon_target: t.mon_target ?? 0,
           tue_target: t.tue_target ?? 0,
           wed_target: t.wed_target ?? 0,
           fri_target: t.fri_target ?? 0,
         });
       });
-      setLocalTargets(map);
+      setLocalTargets(tMap);
+
+      // Units (keyed by item id)
+      const uMap = new Map<string, string>();
+      items.forEach(i => uMap.set(i.id, i.unit));
+      setLocalUnits(uMap);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editMode]); // only re-init when toggling edit mode, not on every targets refetch
+  }, [editMode]);
 
   /* ── Derived data ────────────────────────────────────────────────────────── */
   const sections = useMemo(() => {
@@ -452,6 +463,18 @@ export default function InventoryListsPage() {
       if (error) throw error;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['inventory-lists-targets', activeStore] }),
+  });
+
+  // Save unit change to inventory_items
+  const editUnitMutation = useMutation({
+    mutationFn: async ({ id, unit }: { id: string; unit: string }) => {
+      const { error } = await supabase
+        .from('inventory_items')
+        .update({ unit })
+        .eq('id', id);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['inventory-items'] as const }),
   });
 
   /* ── Target edit helpers ─────────────────────────────────────────────────── */
@@ -720,7 +743,24 @@ export default function InventoryListsPage() {
                           )}
 
                           <td className="px-4 py-2.5 font-medium text-gray-800">{item.name}</td>
-                          <td className="px-4 py-2.5 text-xs text-gray-400">{item.unit}</td>
+                          <td className="px-2 py-1.5 text-xs text-gray-400">
+                            {editMode ? (
+                              <input
+                                type="text"
+                                value={localUnits.get(item.id) ?? item.unit}
+                                onChange={e => setLocalUnits(prev => new Map(prev).set(item.id, e.target.value))}
+                                onBlur={() => {
+                                  const unit = localUnitsRef.current.get(item.id);
+                                  if (unit !== undefined && unit !== item.unit) {
+                                    editUnitMutation.mutate({ id: item.id, unit });
+                                  }
+                                }}
+                                className="w-full border border-gray-200 rounded-md px-2 py-1 text-xs text-gray-600 bg-white focus:outline-none focus:border-[#1B5E20] focus:ring-1 focus:ring-[#1B5E20]"
+                              />
+                            ) : (
+                              item.unit
+                            )}
+                          </td>
 
                           {/* Day target cells */}
                           {DAY_COLS.map(d => (
