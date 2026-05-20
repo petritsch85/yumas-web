@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
 import { saveDraft, loadDraft, clearDraft } from '@/lib/draft-store';
 import { enqueue, dequeueAll, removeFromQueue, pendingCount } from '@/lib/offline-queue';
@@ -18,145 +19,17 @@ function formatTimer(seconds: number): string {
 type Item    = { name: string; unit: string };
 type Section = { title: string; data: Item[] };
 
-const SECTIONS: Section[] = [
-  {
-    title: 'Kühlhaus',
-    data: [
-      { name: 'Guacamole', unit: '1/6 GN groß' },
-      { name: 'Schärfemix', unit: 'Beutel (0.5kg)' },
-      { name: 'Maissalsa', unit: '1/6 GN groß' },
-      { name: 'Tomatensalsa', unit: '1/6 GN groß' },
-      { name: 'Sour Cream', unit: '1/6 GN groß' },
-      { name: 'Marinade Chicken', unit: 'Beutel (1.0kg)' },
-      { name: 'Pico de Gallo', unit: '1/2 GN' },
-      { name: 'Crema Nogada', unit: 'Beutel (1.0kg)' },
-      { name: 'Käse Gouda', unit: 'Beutel (5.0kg)' },
-      { name: 'Gouda Scheiben Gringa', unit: 'Packung' },
-      { name: 'Ciabatta', unit: 'Stück' },
-      { name: 'Brownie', unit: 'Blech' },
-      { name: 'Carlota de Limon', unit: 'Stück' },
-      { name: 'Schoko- Avocado Mousse', unit: 'Blech' },
-      { name: 'Mole', unit: '1/6 GN groß' },
-      { name: 'Marinade Al Pastor', unit: 'Beutel (1.5kg)' },
-      { name: 'Barbacoa', unit: '1/6 GN groß' },
-      { name: 'Chili con Carne', unit: '1/6 GN groß' },
-      { name: 'Cochinita', unit: '1/6 GN groß' },
-      { name: 'Kartoffel Würfel', unit: 'Beutel (3.0kg)' },
-      { name: 'Vinaigrette', unit: 'Behälter (1.0l)' },
-      { name: 'Honig Sesam / Senf', unit: 'Behälter (1.0l)' },
-      { name: 'Pozole', unit: 'Beutel (1.0kg)' },
-      { name: 'Zwiebeln karamellisiert', unit: 'Beutel (1.0kg)' },
-      { name: 'Karotten karamellisiert', unit: 'Beutel (10 Stück)' },
-      { name: 'Bohnencreme', unit: 'Beutel (2.5kg)' },
-      { name: 'Alambre - Zwiebel', unit: 'Beutel (2.0kg)' },
-      { name: 'Weizen Tortillas 12cm', unit: 'Kisten' },
-      { name: 'Tortillas 30cm', unit: 'Kisten' },
-      { name: 'Frische Habaneros', unit: 'Stück' },
-      { name: 'Salsa Habanero', unit: 'Beutel (1.5kg)' },
-      { name: 'Salsa Verde', unit: 'Beutel (2.0kg)' },
-      { name: 'Chipotle SourCream', unit: 'Beutel (2.0kg)' },
-      { name: 'Salsa de Jamaica', unit: 'Beutel (0.5kg)' },
-      { name: 'Salsa Torta', unit: 'Beutel (1.0kg)' },
-      { name: 'Humo Salsa', unit: 'Flasche' },
-      { name: 'Fuego Salsa', unit: 'Flasche' },
-      { name: 'Oliven entkernt', unit: 'Glas' },
-      { name: 'Chiles Poblanos', unit: 'Stück' },
-      { name: 'Salsa Pitaya', unit: 'Beutel (0.5kg)' },
-      { name: 'Mais Tortillas 12cm', unit: 'Beutel (50 Stk)' },
-      { name: 'Blau Mais Tortillas 15cm', unit: 'Beutel (40 Stk)' },
-      { name: 'Queso Cotija', unit: 'Pack (1.0kg)' },
-      { name: 'Queso Oaxaca', unit: 'Pack (1.0kg)' },
-      { name: 'Queso Chihuahua', unit: 'Pack (1.0kg)' },
-      { name: 'Rinderfilet Steak', unit: 'Beutel (250g)' },
-      { name: 'Filetspitzen', unit: 'Beutel (100g)' },
-      { name: 'Hähnchenkeule (ganz)', unit: 'Beutel (2 Stück)' },
-      { name: 'Mole Rojo', unit: 'Beutel (2.0kg)' },
-      { name: 'Chorizo', unit: 'Beutel (1.0kg)' },
-      { name: 'Carne Vegetal', unit: 'Beutel (1.0kg)' },
-      { name: 'Costilla de Res', unit: 'Beutel (4 Portionen)' },
-      { name: 'Salsa für Costilla de Res', unit: 'Beutel (2L)' },
-      { name: 'Rote Zwiebeln eingelegt', unit: '1/6 GN groß' },
-      { name: 'Pulpo (Chipulpotle)', unit: 'Beutel (100 g)' },
-      { name: 'Salsa Pulpo', unit: 'Beutel (0.5kg)' },
-      { name: 'Birria', unit: 'Beutel (2.0kg)' },
-      { name: 'Salsa Birria', unit: 'Beutel (1.0kg)' },
-      { name: 'Füllung Nogada', unit: 'Beutel (1.0kg)' },
-      { name: 'H-Milch 3,5%', unit: 'Packung' },
-    ],
-  },
-  {
-    title: 'Tiefkühler',
-    data: [
-      { name: 'Alambre - Paprika Streifen', unit: 'Beutel (2.5kg)' },
-      { name: 'Gambas', unit: 'Beutel (1.0kg)' },
-      { name: 'Weizentortillas 20cm', unit: 'Karton' },
-    ],
-  },
-  {
-    title: 'Trockenware',
-    data: [
-      { name: 'Reis', unit: 'Beutel (1kg)' },
-      { name: 'Schwarze Bohnen', unit: 'Sack (5kg)' },
-      { name: 'Salz', unit: 'Eimer (10kg)' },
-      { name: 'Zucker', unit: 'Packung (1.0kg)' },
-      { name: 'Brauner Zucker', unit: 'Packung' },
-      { name: 'Pfeffer', unit: 'Packung' },
-      { name: 'Pfeffer geschrotet', unit: 'Packung' },
-      { name: 'Rapsöl', unit: 'Kanister (10L)' },
-      { name: 'Tajin', unit: 'Packung' },
-      { name: 'Limettensaft (750ml Metro)', unit: 'Flasche' },
-    ],
-  },
-  {
-    title: 'Regale',
-    data: [
-      { name: 'Große Bowl togo Schale', unit: 'Packungen (40 Stk)' },
-      { name: 'Große Bowl togo Deckel', unit: 'Packungen (40 Stk)' },
-      { name: 'Kleine Bowl togo Schale', unit: 'Packungen (40 Stk)' },
-      { name: 'Kleine Bowl togo Deckel', unit: 'Packungen (40 Stk)' },
-      { name: 'Dressingsbecher Schale', unit: '50er Pack' },
-      { name: 'Dressingsbecher Deckel', unit: '50er Pack' },
-      { name: 'Alufolie', unit: 'Rolle' },
-      { name: 'Backpapier', unit: 'Rolle' },
-      { name: 'Trayliner Papier', unit: 'Karton' },
-      { name: 'Weiße Serviette', unit: 'Karton' },
-      { name: 'Zig-Zag Papier', unit: 'Karton' },
-      { name: 'Müllbeutel Blau 120L', unit: '120L Rolle' },
-      { name: 'Handschuhe M', unit: 'Packung' },
-      { name: 'Handschuhe L', unit: 'Packung' },
-      { name: 'Mehrwegbowl', unit: 'Stück' },
-    ],
-  },
-  {
-    title: 'Lager',
-    data: [
-      { name: 'Große Togo Tüte', unit: 'Kartons (250 Stk)' },
-      { name: 'Kleine Togo Tüte', unit: 'Kartons (250 Stk)' },
-      { name: 'Schwarze Serviette', unit: 'Karton' },
-      { name: 'Nachos', unit: 'Karton (12 Beutel)' },
-      { name: 'Spüli', unit: 'Flasche' },
-      { name: 'Essigessenz', unit: 'Flasche' },
-      { name: 'Topfschwamm', unit: 'Packung (10Stk)' },
-      { name: 'Edelstahlschwamm', unit: 'Packung (10Stk)' },
-      { name: 'Reinigungshandschuhe', unit: 'Packung (2Stk)' },
-      { name: 'Blaue Rolle', unit: 'Rolle' },
-      { name: 'Toilettenpapier', unit: 'Packung' },
-      { name: 'Glasreiniger', unit: 'Kanister' },
-      { name: 'WC Reiniger', unit: 'Kanister' },
-      { name: 'Desinfektionsreiniger', unit: 'Kanister' },
-      { name: 'Gastro Universal Reiniger', unit: 'Kanister' },
-      { name: 'Kalkreiniger', unit: 'Kanister' },
-      { name: 'Laminat - Parkett-Reiniger', unit: 'Kanister' },
-      { name: 'B100N', unit: 'Kanister' },
-      { name: 'B200S', unit: 'Kanister' },
-      { name: 'F8500', unit: 'Kanister' },
-      { name: 'F420E', unit: 'Kanister' },
-      { name: 'Spülmaschine Salz - Etolit', unit: 'Beutel' },
-    ],
-  },
-];
+type DbItem = {
+  id: string; section: string; name: string; unit: string;
+  sort_order: number; stores: string[];
+  store_sort_orders: Record<string, number>;
+};
 
-const TOTAL_ITEMS = SECTIONS.reduce((sum, s) => sum + s.data.length, 0);
+type DbSection = {
+  id: string; name: string; stores: string[]; sort_order: number;
+};
+
+const SECTION_ORDER_FALLBACK = ['Kühlhaus', 'Tiefkühler', 'Trockenware', 'Regale', 'Lager'];
 
 /** True if the submission is still within the edit window (until 09:00 the next calendar day) */
 function isEditable(submittedAt: string): boolean {
@@ -190,25 +63,27 @@ async function syncPendingQueue(): Promise<number> {
   return synced;
 }
 
-/* ─── All known items (flat) for matching ────────────────────────────────── */
-const ALL_ITEMS = SECTIONS.flatMap(s => s.data.map(i => ({ ...i, section: s.title })));
-
 function normalise(s: string) {
   return s.toLowerCase().replace(/[\s\-_().]/g, '').trim();
 }
 
 /* ─── Upload Inventory Modal ─────────────────────────────────────────────── */
 function UploadInventoryModal({
-  locationId, locationName, onClose, onUploaded,
+  locationId, locationName, onClose, onUploaded, sections,
 }: {
-  locationId: string;
+  locationId:   string;
   locationName: string;
-  onClose: () => void;
-  onUploaded: () => void;
+  onClose:      () => void;
+  onUploaded:   () => void;
+  sections:     Section[];
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
 
-  // Default date: today at 22:00
+  const allItems = useMemo(
+    () => sections.flatMap(s => s.data.map(i => ({ ...i, section: s.title }))),
+    [sections],
+  );
+
   const defaultDate = () => {
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
@@ -241,10 +116,7 @@ function UploadInventoryModal({
 
         for (const row of rows) {
           if (!Array.isArray(row) || row.length < 2) continue;
-          // Find first string cell (item name) and first numeric cell (quantity)
           const nameCandidates = row.filter(c => typeof c === 'string' && (c as string).trim().length > 1);
-          // Only accept true numeric cells (typeof number) — avoids false matches on
-          // unit strings like "1/6 GN groß" where parseFloat would return 1.
           const numCandidates  = row.filter(c => typeof c === 'number');
           if (!nameCandidates.length || !numCandidates.length) continue;
 
@@ -252,13 +124,11 @@ function UploadInventoryModal({
           const qty     = parseFloat(String(numCandidates[0]));
           if (isNaN(qty) || rawName.length < 2) continue;
 
-          // Try exact then fuzzy match against known items
           const normRaw = normalise(rawName);
-          const found   = ALL_ITEMS.find(it => normalise(it.name) === normRaw)
-                       ?? ALL_ITEMS.find(it => normalise(it.name).includes(normRaw) || normRaw.includes(normalise(it.name)));
+          const found   = allItems.find(it => normalise(it.name) === normRaw)
+                       ?? allItems.find(it => normalise(it.name).includes(normRaw) || normRaw.includes(normalise(it.name)));
 
           if (found) {
-            // Avoid duplicates – keep last value
             const existing = matchedItems.findIndex(m => m.name === found.name);
             if (existing >= 0) matchedItems[existing].quantity = qty;
             else matchedItems.push({ section: found.section, name: found.name, unit: found.unit, quantity: qty });
@@ -284,14 +154,13 @@ function UploadInventoryModal({
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) { setError('Not logged in.'); setSubmitting(false); return; }
 
-      // Build submitted_at from the chosen date + time
       const submittedAt = new Date(`${inventoryDate}T${inventoryTime}:00`).toISOString();
 
-      // Merge matched items back into full SECTIONS structure (unmatched items get qty 0)
       const qtyMap: Record<string, number> = {};
       for (const m of matched) qtyMap[m.name] = m.quantity;
 
-      const data = SECTIONS.flatMap(section =>
+      // Build full data using the live DB sections — unmatched items get qty 0
+      const data = sections.flatMap(section =>
         section.data.map(item => ({
           section:  section.title,
           name:     item.name,
@@ -323,7 +192,6 @@ function UploadInventoryModal({
     <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col">
 
-        {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
           <div>
             <h2 className="text-base font-bold text-gray-900">Upload Inventory from Excel</h2>
@@ -336,7 +204,6 @@ function UploadInventoryModal({
 
         <div className="overflow-y-auto flex-1 p-5 space-y-5">
 
-          {/* Date + Time */}
           <div>
             <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Inventory Date &amp; Time</p>
             <div className="flex gap-3">
@@ -356,7 +223,6 @@ function UploadInventoryModal({
             </p>
           </div>
 
-          {/* File picker */}
           <div>
             <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Excel File</p>
             <input ref={fileRef} type="file" accept=".xls,.xlsx" onChange={handleFile} className="hidden" />
@@ -367,7 +233,6 @@ function UploadInventoryModal({
             </button>
           </div>
 
-          {/* Error */}
           {error && (
             <div className="flex items-start gap-2 bg-red-50 border border-red-100 rounded-lg px-3 py-2.5 text-xs text-red-600">
               <AlertCircle size={14} className="flex-shrink-0 mt-0.5" />
@@ -375,7 +240,6 @@ function UploadInventoryModal({
             </div>
           )}
 
-          {/* Matched items preview */}
           {matched.length > 0 && (
             <div>
               <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
@@ -404,7 +268,6 @@ function UploadInventoryModal({
             </div>
           )}
 
-          {/* Unmatched items */}
           {unmatched.length > 0 && (
             <div>
               <p className="text-xs font-semibold text-amber-600 uppercase tracking-wide mb-2">
@@ -421,7 +284,6 @@ function UploadInventoryModal({
           )}
         </div>
 
-        {/* Footer */}
         <div className="px-5 py-4 border-t border-gray-100 flex items-center justify-between gap-3">
           <button onClick={onClose} className="px-4 py-2 text-sm text-gray-500 hover:text-gray-700 font-medium transition-colors">
             Cancel
@@ -440,6 +302,7 @@ function UploadInventoryModal({
   );
 }
 
+/* ─── Main Page ──────────────────────────────────────────────────────────── */
 export default function LocationInventoryFormPage({
   params,
 }: {
@@ -450,6 +313,64 @@ export default function LocationInventoryFormPage({
   const { t } = useT();
   const locationName = searchParams.get('name') ?? 'Location';
 
+  /* ── DB queries — items and sections for this store ── */
+  const { data: dbItems = [], isLoading: itemsLoading } = useQuery({
+    queryKey: ['inventory-items', locationName],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('inventory_items')
+        .select('id, section, name, unit, sort_order, stores, store_sort_orders')
+        .contains('stores', [locationName])
+        .order('sort_order', { ascending: true });
+      if (error) throw error;
+      return (data ?? []) as DbItem[];
+    },
+    enabled: !!locationName,
+  });
+
+  const { data: dbSections = [] } = useQuery({
+    queryKey: ['inventory-sections', locationName],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('inventory_sections')
+        .select('id, name, stores, sort_order')
+        .contains('stores', [locationName])
+        .order('sort_order', { ascending: true });
+      if (error) {
+        console.warn('inventory_sections not found, falling back to defaults');
+        return [] as DbSection[];
+      }
+      return (data ?? []) as DbSection[];
+    },
+    enabled: !!locationName,
+  });
+
+  /* ── Derive ordered sections from DB (mirrors Inventory Lists logic) ── */
+  const sections = useMemo<Section[]>(() => {
+    const dbNames = dbSections.map(s => s.name);
+    const base    = dbNames.length > 0 ? dbNames : SECTION_ORDER_FALLBACK;
+    const extra   = [...new Set(dbItems.map(i => i.section))].filter(s => !base.includes(s));
+    const titles  = [...base, ...extra];
+
+    return titles
+      .map(title => {
+        const sectionItems = dbItems
+          .filter(i => i.section === title)
+          .slice()
+          .sort((a, b) => {
+            const aOrd = a.store_sort_orders?.[locationName] ?? a.sort_order;
+            const bOrd = b.store_sort_orders?.[locationName] ?? b.sort_order;
+            return aOrd - bOrd;
+          })
+          .map(i => ({ name: i.name, unit: i.unit }));
+        return { title, data: sectionItems };
+      })
+      .filter(s => s.data.length > 0);
+  }, [dbItems, dbSections, locationName]);
+
+  const totalItems = sections.reduce((sum, s) => sum + s.data.length, 0);
+
+  /* ── Local form state ── */
   const [counts, setCounts]         = useState<Record<string, string>>({});
   const [comment, setComment]       = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -464,17 +385,14 @@ export default function LocationInventoryFormPage({
   const [justSynced, setJustSynced] = useState(false);
   const draftTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // ── Timer ──
+  /* ── Timer ── */
   const [timerStarted, setTimerStarted]   = useState(false);
   const [timerRunning, setTimerRunning]   = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const timerInterval = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const startTimer = () => {
-    setTimerStarted(true);
-    setTimerRunning(true);
-  };
-  const pauseTimer = () => setTimerRunning(false);
+  const startTimer  = () => { setTimerStarted(true); setTimerRunning(true); };
+  const pauseTimer  = () => setTimerRunning(false);
   const resumeTimer = () => setTimerRunning(true);
 
   useEffect(() => {
@@ -486,7 +404,7 @@ export default function LocationInventoryFormPage({
     return () => { if (timerInterval.current) clearInterval(timerInterval.current); };
   }, [timerRunning]);
 
-  /* ── Fetch role on mount to gate manager-only post-submit actions ── */
+  /* ── Fetch role ── */
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
       if (!user) return;
@@ -498,27 +416,21 @@ export default function LocationInventoryFormPage({
   /* ── Load draft on mount ── */
   useEffect(() => {
     const draft = loadDraft(params.locationId);
-    if (draft) {
-      setCounts(draft.counts);
-      setComment(draft.comment);
-    }
+    if (draft) { setCounts(draft.counts); setComment(draft.comment); }
   }, [params.locationId]);
 
-  /* ── Refresh queue count from IndexedDB ── */
+  /* ── Queue count ── */
   const refreshQueueCount = useCallback(async () => {
     const n = await pendingCount();
     setQueueCount(n);
   }, []);
-
   useEffect(() => { refreshQueueCount(); }, [refreshQueueCount]);
 
-  /* ── Online / offline detection ── */
+  /* ── Online / offline ── */
   useEffect(() => {
     setIsOnline(navigator.onLine);
-
     const handleOnline = async () => {
       setIsOnline(true);
-      // Auto-sync any queued submissions
       const n = await pendingCount();
       if (n > 0) {
         setSyncing(true);
@@ -529,9 +441,7 @@ export default function LocationInventoryFormPage({
         setTimeout(() => setJustSynced(false), 3000);
       }
     };
-
     const handleOffline = () => setIsOnline(false);
-
     window.addEventListener('online',  handleOnline);
     window.addEventListener('offline', handleOffline);
     return () => {
@@ -540,31 +450,25 @@ export default function LocationInventoryFormPage({
     };
   }, [refreshQueueCount]);
 
-  /* ── Auto-save draft (debounced 800 ms) ── */
+  /* ── Auto-save draft ── */
   useEffect(() => {
     if (draftTimer.current) clearTimeout(draftTimer.current);
-    draftTimer.current = setTimeout(() => {
-      saveDraft(params.locationId, counts, comment);
-    }, 800);
+    draftTimer.current = setTimeout(() => saveDraft(params.locationId, counts, comment), 800);
     return () => { if (draftTimer.current) clearTimeout(draftTimer.current); };
   }, [counts, comment, params.locationId]);
 
-  const filledCount = Object.values(counts).filter((v) => v !== '' && v !== '0').length;
-
-  const handleChange = (name: string, value: string) => {
-    setCounts((prev) => ({ ...prev, [name]: value }));
-  };
+  const filledCount = Object.values(counts).filter(v => v !== '' && v !== '0').length;
+  const handleChange = (name: string, value: string) => setCounts(prev => ({ ...prev, [name]: value }));
 
   /* ── Submit ── */
   const handleSubmit = async () => {
-    if (!window.confirm(`Submit inventory for ${locationName}? (${filledCount} / ${TOTAL_ITEMS} items filled)`)) return;
+    if (!window.confirm(`Submit inventory for ${locationName}? (${filledCount} / ${totalItems} items filled)`)) return;
 
-    // Stop the timer and capture final elapsed time
     if (timerInterval.current) clearInterval(timerInterval.current);
     setTimerRunning(false);
     const durationSeconds = elapsedSeconds;
-
     setSubmitting(true);
+
     try {
       const { data: { user }, error: userError } = await supabase.auth.getUser();
       if (userError || !user) {
@@ -573,8 +477,9 @@ export default function LocationInventoryFormPage({
         return;
       }
 
-      const data = SECTIONS.flatMap((section) =>
-        section.data.map((item) => ({
+      // Build submission data from live DB sections
+      const data = sections.flatMap(section =>
+        section.data.map(item => ({
           section:  section.title,
           name:     item.name,
           unit:     item.unit,
@@ -583,7 +488,6 @@ export default function LocationInventoryFormPage({
       );
 
       if (!navigator.onLine) {
-        // ── Offline path: save to IndexedDB queue ──
         await enqueue({
           locationId:      params.locationId,
           locationName,
@@ -599,7 +503,6 @@ export default function LocationInventoryFormPage({
         setCounts({});
         setComment('');
       } else {
-        // ── Online path: submit directly ──
         const now = new Date().toISOString();
         const { error: insertError } = await supabase
           .from('inventory_submissions')
@@ -613,15 +516,10 @@ export default function LocationInventoryFormPage({
             duration_seconds: durationSeconds > 0 ? durationSeconds : null,
           });
 
-        if (insertError) {
-          alert(`Error: ${insertError.message}`);
-          setSubmitting(false);
-          return;
-        }
+        if (insertError) { alert(`Error: ${insertError.message}`); setSubmitting(false); return; }
 
         setSubmittedAt(now);
         clearDraft(params.locationId);
-        // Also drain any queued items opportunistically
         const n = await pendingCount();
         if (n > 0) {
           setSyncing(true);
@@ -680,22 +578,15 @@ export default function LocationInventoryFormPage({
         )}
         {justSynced && queueCount === 0 && (
           <div className="flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-full bg-green-50 text-green-700">
-            <CheckCircle2 size={14} />
-            All synced successfully
+            <CheckCircle2 size={14} />All synced successfully
           </div>
         )}
         <div className="flex gap-3 mt-2">
-          <button
-            onClick={startNew}
-            className="px-4 py-2 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50"
-          >
+          <button onClick={startNew} className="px-4 py-2 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50">
             New Submission
           </button>
           {!isStaff && (
-            <button
-              onClick={() => router.push('/inventory/counts')}
-              className="px-4 py-2 bg-[#1B5E20] text-white rounded-lg text-sm font-medium hover:bg-[#2E7D32]"
-            >
+            <button onClick={() => router.push('/inventory/counts')} className="px-4 py-2 bg-[#1B5E20] text-white rounded-lg text-sm font-medium hover:bg-[#2E7D32]">
               View Reports
             </button>
           )}
@@ -716,26 +607,17 @@ export default function LocationInventoryFormPage({
         <h2 className="text-xl font-bold text-gray-900">Inventory Submitted</h2>
         <p className="text-sm text-gray-500">Your inventory for {locationName} has been saved.</p>
         <div className="flex flex-wrap gap-3 mt-2 justify-center">
-          <button
-            onClick={startNew}
-            className="px-4 py-2 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50"
-          >
+          <button onClick={startNew} className="px-4 py-2 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50">
             New Submission
           </button>
           {submittedAt && isEditable(submittedAt) && (
-            <button
-              onClick={() => router.push('/inventory/counts')}
-              className="flex items-center gap-2 px-4 py-2 border border-amber-300 bg-amber-50 text-amber-700 rounded-lg text-sm font-medium hover:bg-amber-100 transition-colors"
-            >
-              <Pencil size={14} />
-              Edit this submission
+            <button onClick={() => router.push('/inventory/counts')}
+              className="flex items-center gap-2 px-4 py-2 border border-amber-300 bg-amber-50 text-amber-700 rounded-lg text-sm font-medium hover:bg-amber-100 transition-colors">
+              <Pencil size={14} />Edit this submission
             </button>
           )}
           {!isStaff && (
-            <button
-              onClick={() => router.push('/inventory/counts')}
-              className="px-4 py-2 bg-[#1B5E20] text-white rounded-lg text-sm font-medium hover:bg-[#2E7D32]"
-            >
+            <button onClick={() => router.push('/inventory/counts')} className="px-4 py-2 bg-[#1B5E20] text-white rounded-lg text-sm font-medium hover:bg-[#2E7D32]">
               View Current Inventory
             </button>
           )}
@@ -748,89 +630,70 @@ export default function LocationInventoryFormPage({
   return (
     <div className="flex flex-col h-full">
 
-      {/* Upload modal */}
       {showUpload && (
         <UploadInventoryModal
           locationId={params.locationId}
           locationName={locationName}
           onClose={() => setShowUpload(false)}
-          onUploaded={() => {
-            setShowUpload(false);
-          }}
+          onUploaded={() => setShowUpload(false)}
+          sections={sections}
         />
       )}
 
       {/* Header */}
       <div className="mb-5">
-        {/* Back link */}
-        <button
-          onClick={() => router.back()}
-          className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-800 transition-colors mb-3"
-        >
-          <ChevronLeft size={16} />
-          Back
+        <button onClick={() => router.back()}
+          className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-800 transition-colors mb-3">
+          <ChevronLeft size={16} />Back
         </button>
 
-        {/* Title row + timer row */}
         <div className="flex items-start justify-between gap-4">
-          <h1 className="text-2xl font-bold text-gray-900">{locationName} — Inventory</h1>
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900">{locationName} — Inventory</h1>
+            {itemsLoading && (
+              <p className="text-xs text-gray-400 mt-1 animate-pulse">Loading items…</p>
+            )}
+            {!itemsLoading && (
+              <p className="text-xs text-gray-400 mt-1">{totalItems} items · {sections.length} sections</p>
+            )}
+          </div>
 
           <div className="flex items-center gap-2 flex-shrink-0">
-            {/* Reset button — only visible once timer has started */}
             {timerStarted && (
-              <button
-                onClick={handleReset}
-                className="flex items-center gap-1.5 border border-red-200 text-red-500 px-3 py-2 rounded-lg text-sm font-semibold hover:bg-red-50 transition-colors"
-              >
-                <RotateCcw size={14} />
-                Reset
+              <button onClick={handleReset}
+                className="flex items-center gap-1.5 border border-red-200 text-red-500 px-3 py-2 rounded-lg text-sm font-semibold hover:bg-red-50 transition-colors">
+                <RotateCcw size={14} />Reset
               </button>
             )}
 
-            {/* Upload button — always visible */}
-            <button
-              onClick={() => setShowUpload(true)}
-              className="flex items-center gap-1.5 border border-[#1B5E20] text-[#1B5E20] px-3 py-2 rounded-lg text-sm font-semibold hover:bg-[#1B5E20]/5 transition-colors"
-            >
-              <Upload size={14} />
-              Upload
+            <button onClick={() => setShowUpload(true)}
+              className="flex items-center gap-1.5 border border-[#1B5E20] text-[#1B5E20] px-3 py-2 rounded-lg text-sm font-semibold hover:bg-[#1B5E20]/5 transition-colors">
+              <Upload size={14} />Upload
             </button>
 
-          {/* Timer */}
-          {!timerStarted ? (
-            <button
-              onClick={startTimer}
-              className="flex items-center gap-2 bg-[#1B5E20] text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-[#2E7D32] transition-colors"
-            >
-              <Play size={14} />
-              Start Inventory
-            </button>
-          ) : (
-            <div className="flex-shrink-0 flex items-center gap-2 bg-gray-100 rounded-lg px-3 py-2">
-              <Timer size={15} className={timerRunning ? 'text-[#1B5E20]' : 'text-gray-400'} />
-              <span className="text-base font-mono font-bold text-gray-800 tabular-nums min-w-[52px]">
-                {formatTimer(elapsedSeconds)}
-              </span>
-              {timerRunning ? (
-                <button
-                  onClick={pauseTimer}
-                  className="flex items-center gap-1 text-xs text-amber-600 hover:text-amber-800 font-medium ml-1"
-                >
-                  <Pause size={13} />
-                  Pause
-                </button>
-              ) : (
-                <button
-                  onClick={resumeTimer}
-                  className="flex items-center gap-1 text-xs text-[#1B5E20] hover:text-[#2E7D32] font-medium ml-1"
-                >
-                  <Play size={13} />
-                  Resume
-                </button>
-              )}
-            </div>
-          )}
-          </div>  {/* end flex gap-2 */}
+            {!timerStarted ? (
+              <button onClick={startTimer} disabled={itemsLoading}
+                className="flex items-center gap-2 bg-[#1B5E20] text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-[#2E7D32] transition-colors disabled:opacity-50">
+                <Play size={14} />Start Inventory
+              </button>
+            ) : (
+              <div className="flex-shrink-0 flex items-center gap-2 bg-gray-100 rounded-lg px-3 py-2">
+                <Timer size={15} className={timerRunning ? 'text-[#1B5E20]' : 'text-gray-400'} />
+                <span className="text-base font-mono font-bold text-gray-800 tabular-nums min-w-[52px]">
+                  {formatTimer(elapsedSeconds)}
+                </span>
+                {timerRunning ? (
+                  <button onClick={pauseTimer} className="flex items-center gap-1 text-xs text-amber-600 hover:text-amber-800 font-medium ml-1">
+                    <Pause size={13} />Pause
+                  </button>
+                ) : (
+                  <button onClick={resumeTimer} className="flex items-center gap-1 text-xs text-[#1B5E20] hover:text-[#2E7D32] font-medium ml-1">
+                    <Play size={13} />Resume
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -841,21 +704,18 @@ export default function LocationInventoryFormPage({
           <span><strong>You're offline.</strong> Keep counting — your data will be saved locally and synced when you reconnect.</span>
         </div>
       )}
-
       {isOnline && syncing && (
         <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 rounded-xl px-4 py-2.5 mb-3 text-sm text-blue-700">
           <RefreshCw size={15} className="animate-spin text-blue-500 flex-shrink-0" />
           Syncing offline submissions…
         </div>
       )}
-
       {isOnline && justSynced && (
         <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-xl px-4 py-2.5 mb-3 text-sm text-green-700">
           <CheckCircle2 size={15} className="text-green-500 flex-shrink-0" />
           Offline submissions synced successfully.
         </div>
       )}
-
       {isOnline && !syncing && !justSynced && queueCount > 0 && (
         <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5 mb-3 text-sm text-amber-700">
           <RefreshCw size={15} className="text-amber-500 flex-shrink-0" />
@@ -863,74 +723,95 @@ export default function LocationInventoryFormPage({
         </div>
       )}
 
-
-      {/* Sections */}
-      <div className="flex-1 space-y-4">
-        {SECTIONS.map((section) => (
-          <div key={section.title} className="bg-white rounded-lg shadow-sm border border-gray-100 overflow-hidden">
-            <div className="flex items-center justify-between px-4 py-2.5" style={{ backgroundColor: '#1B5E20' }}>
-              <span className="text-white text-xs font-bold tracking-widest uppercase">{section.title}</span>
-              <span className="text-green-300 text-xs font-medium">{section.data.length} items</span>
-            </div>
-            <div>
-              {section.data.map((item, idx) => (
-                <div
-                  key={item.name}
-                  className={`flex items-center gap-4 px-4 py-3 ${idx < section.data.length - 1 ? 'border-b border-gray-100' : ''}`}
-                >
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium text-gray-900 truncate">{item.name}</div>
-                    <div className="text-xs text-gray-400 mt-0.5">{item.unit}</div>
+      {/* Loading skeleton */}
+      {itemsLoading && (
+        <div className="space-y-4">
+          {[...Array(3)].map((_, i) => (
+            <div key={i} className="bg-white rounded-lg border border-gray-100 overflow-hidden">
+              <div className="h-9 bg-gray-200 animate-pulse" />
+              {[...Array(4)].map((_, j) => (
+                <div key={j} className="flex items-center gap-4 px-4 py-3 border-b border-gray-50">
+                  <div className="flex-1 space-y-1.5">
+                    <div className="h-3.5 bg-gray-100 rounded w-40 animate-pulse" />
+                    <div className="h-2.5 bg-gray-100 rounded w-24 animate-pulse" />
                   </div>
-                  <select
-                    value={counts[item.name] ?? '0'}
-                    onChange={(e) => handleChange(item.name, e.target.value)}
-                    disabled={!timerStarted}
-                    className={`w-20 text-right border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20] transition-colors ${
-                      timerStarted
-                        ? counts[item.name] && counts[item.name] !== '0'
-                          ? 'border-[#1B5E20] bg-green-50 text-[#1B5E20] font-semibold'
-                          : 'border-gray-200 bg-gray-50'
-                        : 'border-gray-100 bg-gray-100 text-gray-300 cursor-not-allowed'
-                    }`}
-                  >
-                    {Array.from({ length: 51 }, (_, i) => (
-                      <option key={i} value={String(i)}>{i}</option>
-                    ))}
-                  </select>
+                  <div className="h-8 w-20 bg-gray-100 rounded-lg animate-pulse" />
                 </div>
               ))}
             </div>
-          </div>
-        ))}
+          ))}
+        </div>
+      )}
 
-        {/* Comment box */}
-        <div className="bg-white rounded-lg shadow-sm border border-gray-100 overflow-hidden mb-28">
-          <div className="flex items-center justify-between px-4 py-2.5" style={{ backgroundColor: '#1B5E20' }}>
-            <span className="text-white text-xs font-bold tracking-widest uppercase">Comments</span>
-          </div>
-          <div className="px-4 py-3">
-            <textarea
-              rows={3}
-              value={comment}
-              onChange={(e) => setComment(e.target.value)}
-              placeholder="Add any extra comments or notes for this inventory report…"
-              disabled={!timerStarted}
-              className={`w-full border rounded-lg px-3 py-2 text-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#1B5E20] resize-none transition-colors ${
-                timerStarted
-                  ? 'border-gray-200 bg-gray-50 text-gray-800'
-                  : 'border-gray-100 bg-gray-100 text-gray-300 cursor-not-allowed'
-              }`}
-            />
+      {/* Sections */}
+      {!itemsLoading && (
+        <div className="flex-1 space-y-4">
+          {sections.map(section => (
+            <div key={section.title} className="bg-white rounded-lg shadow-sm border border-gray-100 overflow-hidden">
+              <div className="flex items-center justify-between px-4 py-2.5" style={{ backgroundColor: '#1B5E20' }}>
+                <span className="text-white text-xs font-bold tracking-widest uppercase">{section.title}</span>
+                <span className="text-green-300 text-xs font-medium">{section.data.length} items</span>
+              </div>
+              <div>
+                {section.data.map((item, idx) => (
+                  <div
+                    key={item.name}
+                    className={`flex items-center gap-4 px-4 py-3 ${idx < section.data.length - 1 ? 'border-b border-gray-100' : ''}`}
+                  >
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-medium text-gray-900 truncate">{item.name}</div>
+                      <div className="text-xs text-gray-400 mt-0.5">{item.unit}</div>
+                    </div>
+                    <select
+                      value={counts[item.name] ?? '0'}
+                      onChange={e => handleChange(item.name, e.target.value)}
+                      disabled={!timerStarted}
+                      className={`w-20 text-right border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20] transition-colors ${
+                        timerStarted
+                          ? counts[item.name] && counts[item.name] !== '0'
+                            ? 'border-[#1B5E20] bg-green-50 text-[#1B5E20] font-semibold'
+                            : 'border-gray-200 bg-gray-50'
+                          : 'border-gray-100 bg-gray-100 text-gray-300 cursor-not-allowed'
+                      }`}
+                    >
+                      {Array.from({ length: 51 }, (_, i) => (
+                        <option key={i} value={String(i)}>{i}</option>
+                      ))}
+                    </select>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+
+          {/* Comment box */}
+          <div className="bg-white rounded-lg shadow-sm border border-gray-100 overflow-hidden mb-28">
+            <div className="flex items-center justify-between px-4 py-2.5" style={{ backgroundColor: '#1B5E20' }}>
+              <span className="text-white text-xs font-bold tracking-widest uppercase">Comments</span>
+            </div>
+            <div className="px-4 py-3">
+              <textarea
+                rows={3}
+                value={comment}
+                onChange={e => setComment(e.target.value)}
+                placeholder="Add any extra comments or notes for this inventory report…"
+                disabled={!timerStarted}
+                className={`w-full border rounded-lg px-3 py-2 text-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#1B5E20] resize-none transition-colors ${
+                  timerStarted
+                    ? 'border-gray-200 bg-gray-50 text-gray-800'
+                    : 'border-gray-100 bg-gray-100 text-gray-300 cursor-not-allowed'
+                }`}
+              />
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       {/* Fixed bottom bar */}
       <div className="fixed bottom-0 left-0 md:left-60 right-0 bg-white border-t border-gray-200 px-4 md:px-6 py-3 flex items-center justify-between shadow-lg z-10">
         <div className="flex items-center gap-3">
           <span className="text-sm text-gray-500 font-medium">
-            {filledCount} / {TOTAL_ITEMS} items filled
+            {filledCount} / {totalItems} items filled
           </span>
           {isOnline
             ? <span className="flex items-center gap-1 text-xs text-green-600"><Wifi size={12} /> Online</span>
@@ -939,7 +820,7 @@ export default function LocationInventoryFormPage({
         </div>
         <button
           onClick={handleSubmit}
-          disabled={submitting || !timerStarted}
+          disabled={submitting || !timerStarted || itemsLoading}
           className="flex items-center gap-2 bg-[#1B5E20] text-white px-6 py-2.5 rounded-lg text-sm font-bold hover:bg-[#2E7D32] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <Send size={15} />
