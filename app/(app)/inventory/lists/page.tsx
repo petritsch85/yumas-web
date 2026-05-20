@@ -428,37 +428,28 @@ export default function InventoryListsPage() {
     },
   });
 
-  // Save targets: UPDATE if row already exists, INSERT if new
+  // Save targets via upsert (unique constraint on location_name,item_name confirmed in DB)
+  // section is required NOT NULL in delivery_targets — must be included
   const saveTargetMutation = useMutation({
-    mutationFn: async ({ itemName, unit, t }: { itemName: string; unit: string; t: LocalTarget }) => {
-      const existingId = targetMap.get(itemName)?.id;
-      if (existingId) {
-        // Row exists — update it by id (no unique constraint needed)
-        const { error } = await supabase
-          .from('delivery_targets')
-          .update({
-            mon_target: t.mon_target,
-            tue_target: t.tue_target,
-            wed_target: t.wed_target,
-            fri_target: t.fri_target,
-          })
-          .eq('id', existingId);
-        if (error) throw error;
-      } else {
-        // No row yet — insert one
-        const { error } = await supabase
-          .from('delivery_targets')
-          .insert({
+    mutationFn: async ({
+      itemName, section, unit, t,
+    }: { itemName: string; section: string; unit: string; t: LocalTarget }) => {
+      const { error } = await supabase
+        .from('delivery_targets')
+        .upsert(
+          {
             location_name: activeStore,
             item_name:     itemName,
+            section,
             unit,
             mon_target:    t.mon_target,
             tue_target:    t.tue_target,
             wed_target:    t.wed_target,
             fri_target:    t.fri_target,
-          });
-        if (error) throw error;
-      }
+          },
+          { onConflict: 'location_name,item_name' },
+        );
+      if (error) throw error;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['inventory-lists-targets', activeStore] }),
   });
@@ -487,7 +478,12 @@ export default function InventoryListsPage() {
     // Always read from ref to avoid stale closure capturing old localTargets
     const t = localTargetsRef.current.get(item.name);
     if (t !== undefined) {
-      saveTargetMutation.mutate({ itemName: item.name, unit: item.unit, t });
+      saveTargetMutation.mutate({
+        itemName: item.name,
+        section:  item.section,
+        unit:     item.unit,
+        t,
+      });
     }
   }, [saveTargetMutation]);
 
