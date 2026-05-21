@@ -1,8 +1,6 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { useRouter } from 'next/navigation';
-import { useEffect } from 'react';
 import { supabase } from '@/lib/supabase-browser';
 import {
   Package, Truck, ShoppingCart, AlertTriangle,
@@ -40,7 +38,6 @@ function KpiCard({
 
 export default function DashboardPage() {
   const { t } = useT();
-  const router = useRouter();
 
   const { data: profile } = useQuery<Profile | null>({
     queryKey: ['dashboard-profile'],
@@ -52,22 +49,10 @@ export default function DashboardPage() {
     },
   });
 
-  const isAdmin   = profile?.role === 'admin';
-  const isManager = profile?.role === 'manager';
+  const isAdmin     = profile?.role === 'admin';
+  const isManager   = profile?.role === 'manager';
   const isStaffRole = profile !== undefined && profile !== null && !isAdmin && !isManager;
-  const perms     = profile?.permissions ?? {};
-
-  // Staff users don't belong on the admin dashboard — send them to their first permitted page
-  useEffect(() => {
-    if (!isStaffRole) return;
-    if (perms.inventory)     { router.replace('/inventory/add'); return; }
-    if (perms.delivery || perms.store_receiver || perms.packer || perms.driver) {
-      router.replace('/delivery');
-      return;
-    }
-    if (perms.waste_log)     { router.replace('/waste');         return; }
-    if (perms.staff_videos)  { router.replace('/staff-videos');  return; }
-  }, [isStaffRole, perms, router]);
+  const perms       = profile?.permissions ?? {};
 
   const can = (permKey?: keyof AppPermissions, adminOnly?: boolean): boolean => {
     if (profile === undefined) return false;

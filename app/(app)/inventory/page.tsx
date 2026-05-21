@@ -1,44 +1,20 @@
 'use client';
 
-import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { useQuery } from '@tanstack/react-query';
-import { supabase } from '@/lib/supabase-browser';
 import { FilePlus, BarChart3, ClipboardList } from 'lucide-react';
 import { useT } from '@/lib/i18n';
-import type { Profile } from '@/types';
 
 export default function InventoryHubPage() {
   const router = useRouter();
   const { t } = useT();
 
-  const { data: profile } = useQuery<Profile | null>({
-    queryKey: ['inv-hub-profile'],
-    queryFn: async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return null;
-      const { data } = await supabase.from('profiles').select('*').eq('id', user.id).single();
-      return data as Profile | null;
-    },
-  });
-
-  const isAdmin   = profile?.role === 'admin';
-  const isManager = profile?.role === 'manager';
-  const isStaff   = profile !== undefined && profile !== null && !isAdmin && !isManager;
-
-  // Staff only need Add — skip the hub and go straight there
-  useEffect(() => {
-    if (isStaff) router.replace('/inventory/add');
-  }, [isStaff, router]);
-
-  const ALL_ITEMS = [
+  const items = [
     {
       icon: FilePlus,
       labelKey: 'inventory.addNew.label',
       sublabelKey: 'inventory.addNew.sublabel',
       href: '/inventory/add',
       color: '#2E7D32',
-      managerOnly: false,
     },
     {
       icon: BarChart3,
@@ -46,7 +22,6 @@ export default function InventoryHubPage() {
       sublabelKey: 'inventory.current.sublabel',
       href: '/inventory/overview',
       color: '#1565C0',
-      managerOnly: true,
     },
     {
       icon: ClipboardList,
@@ -54,11 +29,8 @@ export default function InventoryHubPage() {
       sublabelKey: 'inventory.reports.sublabel',
       href: '/inventory/counts',
       color: '#6A1B9A',
-      managerOnly: true,
     },
   ];
-
-  const items = ALL_ITEMS.filter(item => !item.managerOnly || !isStaff);
 
   return (
     <div>
