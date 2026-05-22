@@ -326,8 +326,13 @@ export default function DeliveryReportsPage() {
 
   const activeRun = useMemo<Run | null>(() => {
     if (!runs.length) return null;
-    if (selectedRunId) return runs.find(r => r.id === selectedRunId) ?? runs[0];
-    return runs[0];
+    // 'upcoming' sentinel = user clicked the upcoming slot but no run exists yet
+    if (selectedRunId === 'upcoming') return null;
+    if (selectedRunId) return runs.find(r => r.id === selectedRunId) ?? null;
+    // Default: most recent past run (cutoff already passed), sorted desc so [0] is latest
+    const now = new Date();
+    const pastRuns = runs.filter(r => deliveryCutoff(r.delivery_date) <= now || !!r.delivery_finished_at);
+    return pastRuns[0] ?? null;
   }, [runs, selectedRunId]);
 
   /* ── Lines ── */
@@ -504,32 +509,34 @@ export default function DeliveryReportsPage() {
       </div>
 
       {/* ── Run selector — split Upcoming / Past ── */}
-      {runs.length > 0 && (() => {
+      {(() => {
         const now = new Date();
-        // A run is "upcoming" only if its 14:00 delivery cutoff is still in the future and it hasn't finished
-        const upcoming = runs.filter(r => deliveryCutoff(r.delivery_date) > now && !r.delivery_finished_at);
-        const past     = runs.filter(r => deliveryCutoff(r.delivery_date) <= now || !!r.delivery_finished_at);
+        // Next delivery date from the calendar (independent of what runs exist in DB)
+        const nextDate = getNextDeliveryDate();
+        const nextRun  = runs.find(r => r.delivery_date === nextDate) ?? null;
 
-        // Show only the single nearest upcoming run (runs are sorted desc → last item = soonest)
-        const upcomingToShow = upcoming.length > 0 ? [upcoming[upcoming.length - 1]] : [];
+        // Past = all runs whose 14:00 cutoff has already passed, or are explicitly finished
+        const past = runs.filter(r => deliveryCutoff(r.delivery_date) <= now || !!r.delivery_finished_at);
 
-        const Btn = ({ run: r, showDelete }: { run: Run; showDelete?: boolean }) => {
+        // Upcoming button — always anchored to the real next delivery date
+        const upcomingIsActive = nextRun ? activeRun?.id === nextRun.id : selectedRunId === 'upcoming';
+
+        const PastBtn = ({ run: r }: { run: Run }) => {
           const isActive = activeRun?.id === r.id;
-          const isPast = deliveryCutoff(r.delivery_date) <= now || !!r.delivery_finished_at;
           return (
             <div className="flex items-center gap-0.5">
               <button
                 onClick={() => { setSelectedRunId(r.id); setLocalChecked({}); setLocalNotes({}); }}
                 className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors flex items-center gap-1.5 ${
                   isActive
-                    ? isPast ? 'bg-gray-700 text-white border-gray-700' : 'bg-[#1B5E20] text-white border-[#1B5E20]'
-                    : isPast ? 'bg-white text-gray-500 border-gray-200 hover:border-gray-400' : 'bg-white text-[#1B5E20] border-[#1B5E20]/30 hover:border-[#1B5E20]'
+                    ? 'bg-gray-700 text-white border-gray-700'
+                    : 'bg-white text-gray-500 border-gray-200 hover:border-gray-400'
                 }`}
               >
                 {fmtDate(r.delivery_date)}
-                {isPast && r.delivery_finished_at && <span className="opacity-60">✓</span>}
+                {r.delivery_finished_at && <span className="opacity-60">✓</span>}
               </button>
-              {showDelete && isAdmin && (
+              {isAdmin && (
                 <button
                   onClick={() => {
                     if (window.confirm(`Delete the ${fmtDate(r.delivery_date)} delivery run? This cannot be undone.`)) {
@@ -549,16 +556,30 @@ export default function DeliveryReportsPage() {
 
         return (
           <div className="mb-6 space-y-3">
-            {upcomingToShow.length > 0 && (
-              <div>
-                <p className="text-xs font-semibold text-[#1B5E20] uppercase tracking-wider mb-2">Upcoming</p>
-                <div className="flex flex-wrap gap-2">{upcomingToShow.map(r => <Btn key={r.id} run={r} />)}</div>
+            {/* Always show the single next delivery date */}
+            <div>
+              <p className="text-xs font-semibold text-[#1B5E20] uppercase tracking-wider mb-2">Upcoming</p>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={() => {
+                    setSelectedRunId(nextRun ? nextRun.id : 'upcoming');
+                    setLocalChecked({});
+                    setLocalNotes({});
+                  }}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors flex items-center gap-1.5 ${
+                    upcomingIsActive
+                      ? 'bg-[#1B5E20] text-white border-[#1B5E20]'
+                      : 'bg-white text-[#1B5E20] border-[#1B5E20]/30 hover:border-[#1B5E20]'
+                  }`}
+                >
+                  {fmtDate(nextDate)}
+                </button>
               </div>
-            )}
+            </div>
             {past.length > 0 && (
               <div>
                 <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Past — snapshot</p>
-                <div className="flex flex-wrap gap-2">{past.map(r => <Btn key={r.id} run={r} showDelete />)}</div>
+                <div className="flex flex-wrap gap-2">{past.map(r => <PastBtn key={r.id} run={r} />)}</div>
               </div>
             )}
           </div>
