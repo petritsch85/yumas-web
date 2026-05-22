@@ -401,32 +401,43 @@ export default function LocationInventoryFormPage({
   const handleLoadPrevious = async () => {
     setLoadingPrevious(true);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-      const { data } = await supabase
+      // Fetch the most recent submission for this location (by anyone).
+      // We intentionally do NOT filter by submitted_by — the reports page can
+      // already see all submissions for a location, so RLS allows it, and a
+      // manager loading the last count regardless of who submitted it is useful.
+      const { data: row, error } = await supabase
         .from('inventory_submissions')
-        .select('id, submitted_at, data, comment')
+        .select('id, submitted_at, submitted_by, data, comment')
         .eq('location_id', params.locationId)
-        .eq('submitted_by', user.id)
         .order('submitted_at', { ascending: false })
         .limit(1)
         .maybeSingle();
 
-      if (!data) {
+      if (error) {
+        alert(`Error loading submission: ${error.message}`);
+        return;
+      }
+
+      if (!row) {
         alert('No previous submission found for this location.');
         return;
       }
 
+      const submissionData = row.data as { name: string; quantity: number }[];
       const restored = Object.fromEntries(
-        (data.data as { name: string; quantity: number }[]).map((d: { name: string; quantity: number }) => [d.name, String(d.quantity)])
+        submissionData.map((d) => [d.name, String(d.quantity)])
       );
       setCounts(restored);
-      setComment(data.comment ?? '');
+      setComment(row.comment ?? '');
 
-      if (isEditable(data.submitted_at)) {
-        setSubmissionId(data.id);
-        setSubmittedAt(data.submitted_at);
-        setIsEditingSubmission(true);
+      // Only enter edit mode if it was submitted by the current user and is still editable
+      if (isEditable(row.submitted_at)) {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user && row.submitted_by === user.id) {
+          setSubmissionId(row.id);
+          setSubmittedAt(row.submitted_at);
+          setIsEditingSubmission(true);
+        }
       }
 
       // Auto-start the timer so the user can begin editing immediately
