@@ -4,7 +4,7 @@ import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
 import {
-  Package, Truck, CheckCircle2, Clock, AlertTriangle, ChevronDown, ChevronUp,
+  Package, Truck, CheckCircle2, Clock, AlertTriangle, ChevronDown, ChevronUp, Trash2,
 } from 'lucide-react';
 import { useT } from '@/lib/i18n';
 
@@ -472,6 +472,20 @@ export default function DeliveryReportsPage() {
     }
   };
 
+  /* ── Delete a run (admin only) ── */
+  const deleteRun = useMutation({
+    mutationFn: async (runId: string) => {
+      await supabase.from('delivery_run_lines').delete().eq('run_id', runId);
+      await supabase.from('store_delivery_receipts').delete().eq('run_id', runId);
+      const { error } = await supabase.from('delivery_runs').delete().eq('id', runId);
+      if (error) throw error;
+    },
+    onSuccess: (_, runId) => {
+      if (selectedRunId === runId) setSelectedRunId(null);
+      qc.invalidateQueries({ queryKey: ['delivery-runs-list'] });
+    },
+  });
+
   const makeResetProps = (stepKey: string, onReset: () => void) => ({
     onReset: isAdmin ? onReset : undefined,
     resetting: resettingStep === stepKey,
@@ -491,41 +505,60 @@ export default function DeliveryReportsPage() {
 
       {/* ── Run selector — split Upcoming / Past ── */}
       {runs.length > 0 && (() => {
-        const todayStr = new Date().toISOString().slice(0, 10);
-        const upcoming = runs.filter(r => r.delivery_date >= todayStr && !r.delivery_finished_at);
-        const past     = runs.filter(r => r.delivery_date < todayStr  ||  !!r.delivery_finished_at);
+        const now = new Date();
+        // A run is "upcoming" only if its 14:00 delivery cutoff is still in the future and it hasn't finished
+        const upcoming = runs.filter(r => deliveryCutoff(r.delivery_date) > now && !r.delivery_finished_at);
+        const past     = runs.filter(r => deliveryCutoff(r.delivery_date) <= now || !!r.delivery_finished_at);
 
-        const Btn = ({ run: r }: { run: Run }) => {
+        // Show only the single nearest upcoming run (runs are sorted desc → last item = soonest)
+        const upcomingToShow = upcoming.length > 0 ? [upcoming[upcoming.length - 1]] : [];
+
+        const Btn = ({ run: r, showDelete }: { run: Run; showDelete?: boolean }) => {
           const isActive = activeRun?.id === r.id;
-          const isPast = !!r.delivery_finished_at;
+          const isPast = deliveryCutoff(r.delivery_date) <= now || !!r.delivery_finished_at;
           return (
-            <button
-              key={r.id}
-              onClick={() => { setSelectedRunId(r.id); setLocalChecked({}); setLocalNotes({}); }}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors flex items-center gap-1.5 ${
-                isActive
-                  ? isPast ? 'bg-gray-700 text-white border-gray-700' : 'bg-[#1B5E20] text-white border-[#1B5E20]'
-                  : isPast ? 'bg-white text-gray-500 border-gray-200 hover:border-gray-400' : 'bg-white text-[#1B5E20] border-[#1B5E20]/30 hover:border-[#1B5E20]'
-              }`}
-            >
-              {fmtDate(r.delivery_date)}
-              {isPast && <span className="opacity-60">✓</span>}
-            </button>
+            <div className="flex items-center gap-0.5">
+              <button
+                onClick={() => { setSelectedRunId(r.id); setLocalChecked({}); setLocalNotes({}); }}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors flex items-center gap-1.5 ${
+                  isActive
+                    ? isPast ? 'bg-gray-700 text-white border-gray-700' : 'bg-[#1B5E20] text-white border-[#1B5E20]'
+                    : isPast ? 'bg-white text-gray-500 border-gray-200 hover:border-gray-400' : 'bg-white text-[#1B5E20] border-[#1B5E20]/30 hover:border-[#1B5E20]'
+                }`}
+              >
+                {fmtDate(r.delivery_date)}
+                {isPast && r.delivery_finished_at && <span className="opacity-60">✓</span>}
+              </button>
+              {showDelete && isAdmin && (
+                <button
+                  onClick={() => {
+                    if (window.confirm(`Delete the ${fmtDate(r.delivery_date)} delivery run? This cannot be undone.`)) {
+                      deleteRun.mutate(r.id);
+                    }
+                  }}
+                  disabled={deleteRun.isPending}
+                  className="p-1 rounded text-gray-300 hover:text-red-400 hover:bg-red-50 transition-colors disabled:opacity-40"
+                  title="Delete run"
+                >
+                  <Trash2 size={12} />
+                </button>
+              )}
+            </div>
           );
         };
 
         return (
           <div className="mb-6 space-y-3">
-            {upcoming.length > 0 && (
+            {upcomingToShow.length > 0 && (
               <div>
                 <p className="text-xs font-semibold text-[#1B5E20] uppercase tracking-wider mb-2">Upcoming</p>
-                <div className="flex flex-wrap gap-2">{upcoming.map(r => <Btn key={r.id} run={r} />)}</div>
+                <div className="flex flex-wrap gap-2">{upcomingToShow.map(r => <Btn key={r.id} run={r} />)}</div>
               </div>
             )}
             {past.length > 0 && (
               <div>
                 <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Past — snapshot</p>
-                <div className="flex flex-wrap gap-2">{past.map(r => <Btn key={r.id} run={r} />)}</div>
+                <div className="flex flex-wrap gap-2">{past.map(r => <Btn key={r.id} run={r} showDelete />)}</div>
               </div>
             )}
           </div>
