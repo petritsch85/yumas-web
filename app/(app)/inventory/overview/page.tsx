@@ -135,7 +135,7 @@ type SectionGroup = { title: string; items: ItemRow[] };
 
 function GroupView() {
   /* ── DB: canonical sections + items ── */
-  const { data: dbSections = [] } = useQuery<DbSection[]>({
+  const { data: dbSections = [], isLoading: sectionsLoading } = useQuery<DbSection[]>({
     queryKey: ['inventory-sections'],
     queryFn: async () => {
       const { data } = await supabase
@@ -147,7 +147,7 @@ function GroupView() {
     staleTime: 60_000,
   });
 
-  const { data: dbItems = [] } = useQuery<DbItem[]>({
+  const { data: dbItems = [], isLoading: itemsLoading } = useQuery<DbItem[]>({
     queryKey: ['inventory-items-all'],
     queryFn: async () => {
       const { data } = await supabase
@@ -265,6 +265,8 @@ function GroupView() {
   }, [data, dbItems, sectionOrder]);
 
   const latestByLocation = data?.latestByLocation ?? {};
+  const anySubmissions = Object.keys(latestByLocation).length > 0;
+  const allLoading = isLoading || itemsLoading || sectionsLoading;
 
   return (
     <>
@@ -291,15 +293,20 @@ function GroupView() {
         })}
       </div>
 
-      {isLoading ? (
+      {allLoading ? (
         <div className="space-y-2">
           {[...Array(6)].map((_, i) => (
             <div key={i} className="h-10 bg-gray-100 rounded animate-pulse" />
           ))}
         </div>
-      ) : sections.length === 0 ? (
+      ) : sections.length === 0 && !anySubmissions ? (
         <div className="bg-white rounded-lg border border-gray-100 p-10 text-center text-gray-400 text-sm">
           No inventory submissions found.
+        </div>
+      ) : sections.length === 0 && anySubmissions ? (
+        <div className="bg-white rounded-lg border border-gray-100 p-10 text-center text-sm">
+          <p className="text-gray-500 font-medium mb-1">Submissions found but items could not be loaded.</p>
+          <p className="text-gray-400 text-xs">Try clicking Refresh. If this persists, the inventory items list may be empty in the database.</p>
         </div>
       ) : (
         <div className="bg-white rounded-lg shadow-sm border border-gray-100 overflow-hidden">
