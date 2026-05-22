@@ -70,7 +70,8 @@ type DeliveryRun = {
   list_confirmed_westend_at:  string | null;
   day_locked_at:  string | null;
   day_locked_by:  string | null;
-  store_notes:    Record<string, string> | null;
+  store_notes:                Record<string, string> | null;
+  store_inventory_comments:   Record<string, string> | null;
 };
 
 type StoreReceipt = {
@@ -1709,7 +1710,22 @@ export default function DeliveryPage() {
       }
 
       const allSubmitted = storeData.every(s => s.submission !== null);
-      await supabase.from('delivery_runs').update({ status: allSubmitted ? 'ready' : 'draft' }).eq('id', runId);
+
+      // Snapshot inventory comments from the submissions used to build this run.
+      // Stored separately from manager overrides (store_notes) so that:
+      //  - the comment is permanently linked to THIS delivery's inventory
+      //  - a new submission without a comment won't wipe the stored one
+      //  - managers can still override per-run via store_notes
+      const inventoryComments: Record<string, string> = {};
+      for (const { store, submission } of storeData) {
+        const comment = (submission as any)?.comment;
+        if (comment?.trim()) inventoryComments[store] = comment.trim();
+      }
+
+      await supabase.from('delivery_runs').update({
+        status: allSubmitted ? 'ready' : 'draft',
+        store_inventory_comments: inventoryComments,
+      }).eq('id', runId);
 
       qc.invalidateQueries({ queryKey: ['delivery-run', targetDate] });
       qc.invalidateQueries({ queryKey: ['weekly-forecasts-today', targetDate] });
@@ -2272,7 +2288,10 @@ export default function DeliveryPage() {
                     {/* ── Store note (inventory comment / manager override) ── */}
                     {(() => {
                       const managerNote: string = run?.store_notes?.[store] ?? '';
-                      const inventoryComment: string = liveInventoryComments[store] ?? '';
+                      // Prefer the comment that was snapshotted when the list was generated;
+                      // fall back to the live latest-submission comment (covers preview / no-run state)
+                      const inventoryComment: string =
+                        run?.store_inventory_comments?.[store] ?? liveInventoryComments[store] ?? '';
                       const displayNote = managerNote || inventoryComment;
                       const isEditing = editingNoteStore === store;
                       const canEdit = viewMode === 'manager' && !!run && !isPreview;
