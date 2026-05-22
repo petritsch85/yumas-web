@@ -192,7 +192,15 @@ function PermissionsEditor({
     );
   }
 
-  const toggle = (key: PermKey) => onChange({ ...perms, [key]: !perms[key] });
+  const toggle = (key: PermKey) => {
+    const newVal = !perms[key];
+    if (key === 'delivery' && !newVal) {
+      // Turning delivery OFF — also clear all delivery sub-roles
+      onChange({ ...perms, delivery: false, packer: false, driver: false, store_receiver: false });
+    } else {
+      onChange({ ...perms, [key]: newVal });
+    }
+  };
 
   const groupAllOn  = (group: ModuleGroup) => {
     const patch = Object.fromEntries(group.items.map(i => [i.key, true])) as Partial<AppPermissions>;

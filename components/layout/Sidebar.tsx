@@ -75,7 +75,7 @@ const NAV_GROUPS: NavGroup[] = [
   {
     labelKey: 'sidebar.groups.overview',
     items: [
-      { labelKey: 'sidebar.nav.dashboard', href: '/', icon: LayoutDashboard, managerOnly: true },
+      { labelKey: 'sidebar.nav.dashboard', href: '/', icon: LayoutDashboard },
     ],
   },
   {
