@@ -3,7 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
-import { Building2, Factory } from 'lucide-react';
+import { Building2, Factory, Pencil } from 'lucide-react';
 import { useT } from '@/lib/i18n';
 
 const LOCATION_COLORS: Record<string, string> = {
@@ -11,6 +11,19 @@ const LOCATION_COLORS: Record<string, string> = {
   Taunus:   '#E65100',
   Westend:  '#6A1B9A',
   ZK:       '#2E7D32',
+};
+
+/** True if the submission is still within the edit window (until 09:00 the next calendar day) */
+function isEditable(submittedAt: string): boolean {
+  const deadline = new Date(submittedAt);
+  deadline.setDate(deadline.getDate() + 1);
+  deadline.setHours(9, 0, 0, 0);
+  return new Date() < deadline;
+}
+
+type EditableSubmission = {
+  location_id: string;
+  submitted_at: string;
 };
 
 export default function AddInventoryPage() {
@@ -30,6 +43,40 @@ export default function AddInventoryPage() {
     },
   });
 
+  // Fetch the current user's most recent submission per location and keep
+  // only those still within the edit window (before 09:00 next day).
+  const { data: editableByLocation = {} } = useQuery<Record<string, EditableSubmission>>({
+    queryKey: ['my-editable-submissions'],
+    staleTime: 0,
+    queryFn: async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return {};
+
+      // Pull the latest submission per location for this user within the last 36 h
+      // (generous window — isEditable does the precise check)
+      const since = new Date();
+      since.setHours(since.getHours() - 36);
+
+      const { data } = await supabase
+        .from('inventory_submissions')
+        .select('location_id, submitted_at')
+        .eq('submitted_by', user.id)
+        .gte('submitted_at', since.toISOString())
+        .order('submitted_at', { ascending: false });
+
+      if (!data) return {};
+
+      // Keep only the most-recent editable submission per location
+      const map: Record<string, EditableSubmission> = {};
+      for (const row of data) {
+        if (!map[row.location_id] && isEditable(row.submitted_at)) {
+          map[row.location_id] = row as EditableSubmission;
+        }
+      }
+      return map;
+    },
+  });
+
   return (
     <div>
       <h1 className="text-2xl font-bold text-gray-900 mb-1">{t('inventory.add.title')}</h1>
@@ -44,33 +91,56 @@ export default function AddInventoryPage() {
           </div>
         ) : (
           (locations as { id: string; name: string; type: string }[] ?? []).map((loc, i, arr) => {
-            const color = LOCATION_COLORS[loc.name] ?? '#1B5E20';
-            const isLast = i === arr.length - 1;
-            const Icon = loc.type === 'production' ? Factory : Building2;
+            const color   = LOCATION_COLORS[loc.name] ?? '#1B5E20';
+            const isLast  = i === arr.length - 1;
+            const Icon    = loc.type === 'production' ? Factory : Building2;
+            const recent  = editableByLocation[loc.id];
+            const timeStr = recent
+              ? new Date(recent.submitted_at).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })
+              : null;
+
             return (
-              <button
-                key={loc.id}
-                onClick={() => router.push(`/inventory/add/${loc.id}?name=${encodeURIComponent(loc.name)}`)}
-                className={`w-full flex items-center gap-4 px-5 py-4 hover:bg-gray-50 transition-colors text-left ${
-                  !isLast ? 'border-b border-gray-100' : ''
-                }`}
-              >
-                <div
-                  className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
-                  style={{ backgroundColor: color + '18' }}
+              <div key={loc.id} className={!isLast ? 'border-b border-gray-100' : ''}>
+                {/* Main location row */}
+                <button
+                  onClick={() => router.push(`/inventory/add/${loc.id}?name=${encodeURIComponent(loc.name)}`)}
+                  className="w-full flex items-center gap-4 px-5 py-4 hover:bg-gray-50 transition-colors text-left"
                 >
-                  <Icon size={20} style={{ color }} />
-                </div>
-                <div className="flex-1">
-                  <div className="font-medium text-gray-900">{loc.name}</div>
-                  <div className="text-xs text-gray-500 mt-0.5">
-                    {loc.type === 'production' ? t('sidebar.groups.supplyChain') : 'Restaurant'}
+                  <div
+                    className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+                    style={{ backgroundColor: color + '18' }}
+                  >
+                    <Icon size={20} style={{ color }} />
                   </div>
-                </div>
-                <svg className="text-gray-400" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M9 18l6-6-6-6" />
-                </svg>
-              </button>
+                  <div className="flex-1">
+                    <div className="font-medium text-gray-900">{loc.name}</div>
+                    <div className="text-xs text-gray-500 mt-0.5">
+                      {loc.type === 'production' ? t('sidebar.groups.supplyChain') : 'Restaurant'}
+                    </div>
+                  </div>
+                  <svg className="text-gray-400" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M9 18l6-6-6-6" />
+                  </svg>
+                </button>
+
+                {/* Editable-submission banner — only when a recent submission exists */}
+                {recent && timeStr && (
+                  <div className="mx-4 mb-3 flex items-center justify-between gap-3 px-3 py-2 bg-amber-50 border border-amber-200 rounded-xl">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <Pencil size={13} className="text-amber-500 flex-shrink-0" />
+                      <span className="text-xs text-amber-700 truncate">
+                        Submitted at <strong>{timeStr}</strong> · editable until 09:00 tomorrow
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => router.push(`/inventory/add/${loc.id}?name=${encodeURIComponent(loc.name)}`)}
+                      className="flex-shrink-0 px-3 py-1 bg-amber-100 hover:bg-amber-200 text-amber-800 rounded-lg text-xs font-semibold transition-colors"
+                    >
+                      Edit
+                    </button>
+                  </div>
+                )}
+              </div>
             );
           })
         )}
