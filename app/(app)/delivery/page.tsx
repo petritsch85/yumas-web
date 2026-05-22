@@ -1221,16 +1221,19 @@ export default function DeliveryPage() {
   const canManage = profile?.role === 'admin' || profile?.role === 'manager';
 
   // For non-managers: auto-set view based on their role/location/permissions
+  const permsKey = JSON.stringify(profile?.permissions ?? null);
   useEffect(() => {
     if (!profile || canManage) return;
     const perms = profile.permissions as any;
     const locName = profile.locationName;
+    // Packer takes priority — check BEFORE location-based store routing
     if (perms?.driver)                              { setViewMode('driver'); return; }
+    if (perms?.packer)                              { setViewMode('packer'); return; }
     if (perms?.store_receiver)                      { setViewMode('store');  return; }
     if (locName && STORES.includes(locName as Store)) { setViewMode('store');  return; }
-    // packer: true explicitly OR undefined (legacy — treat as packer by default)
-    if (perms?.packer !== false)                    { setViewMode('packer'); return; }
-  }, [profile?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+    // Fallback: default to packer
+    setViewMode('packer');
+  }, [profile?.id, permsKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Which store does this user belong to? (for Store Manager auto-filter)
   const myStore: Store | null = (() => {
@@ -1833,9 +1836,11 @@ export default function DeliveryPage() {
             <div className="flex items-center gap-2 mb-1">
               {viewMode === 'manager'
                 ? <ClipboardList size={20} className="text-[#1B5E20]" />
-                : <Truck size={20} className="text-[#1B5E20]" />}
+                : viewMode === 'packer'
+                  ? <Package size={20} className="text-[#1B5E20]" />
+                  : <Truck size={20} className="text-[#1B5E20]" />}
               <h1 className="text-2xl font-bold text-gray-900">
-                {viewMode === 'manager' ? 'List confirmation' : 'Delivery'}
+                {viewMode === 'manager' ? 'List confirmation' : viewMode === 'packer' ? 'Packing' : viewMode === 'driver' ? 'Delivery' : 'Delivery'}
               </h1>
             </div>
             <p className="text-sm text-gray-500">Mon · Tue · Wed · Fri — departs ZK at 14:00</p>

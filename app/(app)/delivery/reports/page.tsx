@@ -28,6 +28,9 @@ type Run = {
   delivery_snapshot: DeliverySnapshot | null;
   lists_checked_at: string | null;
   lists_checked_by: string | null;
+  list_confirmed_eschborn_at: string | null;
+  list_confirmed_taunus_at: string | null;
+  list_confirmed_westend_at: string | null;
 };
 
 type DeliveryLine = {
@@ -632,7 +635,19 @@ export default function DeliveryReportsPage() {
 
           {/* ── Row 2: Delivery Lists Checked ── */}
           {(() => {
-            const checked = !!activeRun.lists_checked_at;
+            const allListsConfirmed =
+              !!activeRun.list_confirmed_eschborn_at &&
+              !!activeRun.list_confirmed_taunus_at &&
+              !!activeRun.list_confirmed_westend_at;
+            const checked = !!activeRun.lists_checked_at || allListsConfirmed;
+            const checkedAt = activeRun.lists_checked_at
+              ?? (allListsConfirmed
+                  ? [
+                      activeRun.list_confirmed_eschborn_at,
+                      activeRun.list_confirmed_taunus_at,
+                      activeRun.list_confirmed_westend_at,
+                    ].filter(Boolean).sort().at(-1) ?? null
+                  : null);
             const byName = activeRun.lists_checked_by ? (profileMap[activeRun.lists_checked_by] ?? '—') : undefined;
             const accent = checked ? 'green' : 'gray';
             const statusNode = checked
@@ -645,7 +660,7 @@ export default function DeliveryReportsPage() {
                 accent={accent}
                 title="Lists Checked"
                 meta={byName}
-                timeLeft={checked ? fmt(activeRun.lists_checked_at) : undefined}
+                timeLeft={checked ? fmt(checkedAt) : undefined}
                 status={statusNode}
                 {...(checked ? makeResetProps('lists-checked', () => resetStep('lists-checked', { lists_checked_at: null, lists_checked_by: null })) : {})}
               >
