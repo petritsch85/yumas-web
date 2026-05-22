@@ -450,6 +450,9 @@ function StoreDeliveryList({
             <tbody>
               {sections.map((section, sIdx) => {
                 const sectionLines = canonicalItems(lines.filter(l => l.section === section), itemRank);
+                // In packer view, skip entire section if nothing to pack
+                const packerVisibleLines = !isManager ? sectionLines.filter(l => liveDeliveryQty(l) > 0) : sectionLines;
+                if (!isManager && packerVisibleLines.length === 0) return null;
                 return (
                   <React.Fragment key={section}>
                     {/* Section separator gap (packer only, not first section) */}
@@ -468,6 +471,8 @@ function StoreDeliveryList({
                     {sectionLines.map((line, lineIdx) => {
                       const deliverQty = liveDeliveryQty(line);
                       const muted = deliverQty === 0;
+                      // Packer only sees items they actually need to pack
+                      if (!isManager && muted) return null;
                       const targetVal = editingTargets[line.id] ?? String(line.target_qty);
                       const packedVal = editingPackedQty[line.id] ?? (line.packed_qty !== null ? String(line.packed_qty) : '');
                       const isEven = lineIdx % 2 === 0;
