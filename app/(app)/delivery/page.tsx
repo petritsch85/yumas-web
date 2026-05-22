@@ -6,7 +6,7 @@ import { supabase } from '@/lib/supabase-browser';
 import {
   RefreshCw, CheckCircle2, AlertCircle, Package, TrendingUp,
   Eye, Settings2, Truck, Play, Timer, Flag, XCircle,
-  SlidersHorizontal, Save, X, CalendarDays,
+  Save, X, CalendarDays,
   Navigation, Store, ClipboardCheck, Clock, Lock, LockOpen,
   ClipboardList, MessageSquare,
 } from 'lucide-react';
@@ -99,18 +99,6 @@ type DeliveryLine = {
   packed_qty: number | null;
 };
 
-type TargetRow = {
-  id: string;
-  location_name: string;
-  section: string;
-  item_name: string;
-  unit: string;
-  mon_target: number;
-  tue_target: number;
-  wed_target: number;
-  fri_target: number;
-};
-
 type InventoryItem = {
   section: string;
   name: string;
@@ -125,17 +113,6 @@ type InventorySubmission = {
   data: InventoryItem[];
 };
 
-type DeliveryTarget = {
-  id: string;
-  location_name: string;
-  section: string;
-  item_name: string;
-  unit: string;
-  mon_target: number;
-  tue_target: number;
-  wed_target: number;
-  fri_target: number;
-};
 
 type StoreDayStandard = {
   location_name: string;
@@ -163,7 +140,7 @@ const STORE_CONFIRM_COL: Partial<Record<Store, keyof DeliveryRun>> = {
 const SECTIONS_FALLBACK = ['Kühlhaus', 'Tiefkühler', 'Trockenware', 'Regale', 'Lager'];
 
 const DELIVERY_DAYS = [1, 2, 3, 5]; // Mon=1 Tue=2 Wed=3 Fri=5
-type DayKey = 'mon_target' | 'tue_target' | 'wed_target' | 'fri_target';
+type DayKey = 'mon' | 'tue' | 'wed' | 'fri';
 
 const DELIVERY_DAY_BUTTONS = [
   { dow: 1, label: 'Mon', offset: 0 },
@@ -173,7 +150,7 @@ const DELIVERY_DAY_BUTTONS = [
 ] as const;
 
 const DAY_KEY_MAP: Record<number, DayKey> = {
-  1: 'mon_target', 2: 'tue_target', 3: 'wed_target', 5: 'fri_target',
+  1: 'mon', 2: 'tue', 3: 'wed', 5: 'fri',
 };
 
 const DOW_TO_STD_KEY: Record<number, string> = {
@@ -1081,11 +1058,6 @@ export default function DeliveryPage() {
   const [editingTargets, setEditingTargets] = useState<Record<string, string>>({});
   const [editingPackedQty, setEditingPackedQty] = useState<Record<string, string>>({});
 
-  /* Standard Targets modal */
-  const [showStandards, setShowStandards] = useState(false);
-  const [stdStore, setStdStore] = useState<Store>('Eschborn');
-  const [stdEdits, setStdEdits] = useState<Record<string, { mon: number; tue: number; wed: number; fri: number }>>({});
-
   const setMode = (mode: ViewMode) => {
     setViewMode(mode);
     localStorage.setItem('delivery-view-mode', mode);
@@ -1152,30 +1124,39 @@ export default function DeliveryPage() {
         return { run: run as DeliveryRun, lines: (lines ?? []) as DeliveryLine[], isPreview: false, liveInventory, liveInventoryTimestamps, liveInventoryComments };
       }
 
-      // No run yet — build a preview from delivery_targets (reported = 0)
+      // No run yet — build a preview from store_targets (reported = 0)
       const dow = new Date(targetDate + 'T12:00:00').getDay();
       const dKey = DAY_KEY_MAP[dow] as DayKey | undefined;
       if (!dKey) return { run: null, lines: [] as DeliveryLine[], isPreview: true, liveInventory, liveInventoryTimestamps };
 
-      const allTargetsResults = await Promise.all(
-        STORES.map(store =>
-          supabase.from('delivery_targets').select('*').eq('location_name', store)
-            .order('section').order('item_name')
+      type PreviewItemRow = { id: string; name: string; section: string; unit: string; sort_order: number; store_sort_orders: Record<string, number> | null; store_targets: Record<string, Record<string, number>> | null };
+      const deliveryStores = STORES.filter(s => s !== 'ZK');
+      const previewItemResults = await Promise.all(
+        deliveryStores.map(store =>
+          supabase.from('inventory_items')
+            .select('id, name, section, unit, sort_order, store_sort_orders, store_targets')
+            .contains('stores', [store])
         )
       );
 
       const previewLines: DeliveryLine[] = [];
-      STORES.forEach((store, i) => {
-        const targets = (allTargetsResults[i].data ?? []) as DeliveryTarget[];
-        for (const t of targets) {
-          const baseTarget = (t[dKey] as number) ?? 0;
+      deliveryStores.forEach((store, i) => {
+        const items = ((previewItemResults[i].data ?? []) as PreviewItemRow[])
+          .filter(item => (item.store_targets?.[store]?.[dKey] ?? 0) > 0)
+          .sort((a, b) => {
+            const ra = a.store_sort_orders?.[store] ?? a.sort_order ?? 9999;
+            const rb = b.store_sort_orders?.[store] ?? b.sort_order ?? 9999;
+            return ra - rb;
+          });
+        for (const item of items) {
+          const baseTarget = item.store_targets![store][dKey] as number;
           previewLines.push({
-            id: t.id,
+            id: item.id,
             run_id: '',
             location_name: store,
-            section: t.section,
-            item_name: t.item_name,
-            unit: t.unit,
+            section: item.section,
+            item_name: item.name,
+            unit: item.unit,
             standard_target_qty: baseTarget,
             target_qty: baseTarget,
             reported_qty: 0,
@@ -1249,102 +1230,6 @@ export default function DeliveryPage() {
     const loc = profile?.locationName;
     return loc && STORES.includes(loc as Store) ? (loc as Store) : null;
   })();
-
-  /* ─ Standard Targets query (modal only) ─ */
-  const { data: stdTargetsData } = useQuery({
-    queryKey: ['std-targets', stdStore],
-    enabled: showStandards,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('delivery_targets').select('*').eq('location_name', stdStore)
-        .order('section').order('item_name');
-      if (error) throw error;
-      return data as TargetRow[];
-    },
-  });
-  const stdTargets = stdTargetsData ?? [];
-
-  /* Initialise std edits when data loads */
-  useEffect(() => {
-    if (!stdTargetsData || stdTargetsData.length === 0) return;
-    const initial: Record<string, { mon: number; tue: number; wed: number; fri: number }> = {};
-    for (const t of stdTargetsData) {
-      initial[t.id] = {
-        mon: t.mon_target, tue: t.tue_target, wed: t.wed_target, fri: t.fri_target,
-      };
-    }
-    setStdEdits(initial);
-  }, [stdTargetsData]);
-
-  /* ─ Save Standard Targets ─ */
-  const saveStandards = useMutation({
-    mutationFn: async () => {
-      const payload = stdTargets.map(t => ({
-        id: t.id,
-        location_name: t.location_name,
-        section: t.section,
-        item_name: t.item_name,
-        unit: t.unit,
-        mon_target: stdEdits[t.id]?.mon ?? t.mon_target,
-        tue_target: stdEdits[t.id]?.tue ?? t.tue_target,
-        wed_target: stdEdits[t.id]?.wed ?? t.wed_target,
-        fri_target: stdEdits[t.id]?.fri ?? t.fri_target,
-      }));
-      const { error } = await supabase
-        .from('delivery_targets').upsert(payload, { onConflict: 'location_name,item_name' });
-      if (error) throw error;
-
-      // Sync standard_target_qty on any already-generated run lines
-      if (run) {
-        const dow = new Date(targetDate + 'T12:00:00').getDay();
-        const dKey = DAY_KEY_MAP[dow] as DayKey | undefined;
-        if (dKey) {
-          await Promise.all(payload.map(p => {
-            const newStd = Math.max(0, p[dKey as keyof typeof p] as number ?? 0);
-            return supabase
-              .from('delivery_run_lines')
-              .update({ standard_target_qty: newStd })
-              .eq('run_id', run.id)
-              .eq('location_name', p.location_name)
-              .eq('item_name', p.item_name);
-          }));
-        }
-      }
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['std-targets'] });
-      qc.invalidateQueries({ queryKey: ['delivery-run', targetDate] });
-      setShowStandards(false);
-    },
-  });
-
-  /* ─ Delete all Standard Targets for current store ─ */
-  const deleteStandards = useMutation({
-    mutationFn: async () => {
-      const { error } = await supabase
-        .from('delivery_targets').delete().eq('location_name', stdStore);
-      if (error) throw error;
-
-      // Zero out standard_target_qty on any already-generated run lines
-      if (run) {
-        await supabase
-          .from('delivery_run_lines')
-          .update({ standard_target_qty: 0 })
-          .eq('run_id', run.id)
-          .eq('location_name', stdStore);
-      }
-    },
-    onSuccess: () => {
-      setStdEdits({});
-      qc.invalidateQueries({ queryKey: ['std-targets', stdStore] });
-      qc.invalidateQueries({ queryKey: ['delivery-run', targetDate] });
-    },
-  });
-
-  const setStdEdit = (id: string, day: 'mon' | 'tue' | 'wed' | 'fri', val: string) => {
-    const num = parseFloat(val);
-    setStdEdits(prev => ({ ...prev, [id]: { ...prev[id], [day]: isNaN(num) ? 0 : num } }));
-  };
 
   /* ─ Std scale mode (per store) ─ */
   type ScaleMode = 'low' | 'std' | 'high';
@@ -1629,12 +1514,11 @@ export default function DeliveryPage() {
       // ZK is the production kitchen — excluded from delivery runs
       const deliveryStores = STORES.filter(s => s !== 'ZK');
 
-      type InvItemRow = { name: string; section: string; unit: string; sort_order: number; store_sort_orders: Record<string, number> | null };
+      type InvItemRow = { name: string; section: string; unit: string; sort_order: number; store_sort_orders: Record<string, number> | null; store_targets: Record<string, Record<string, number>> | null };
       const storeData: {
         store: Store;
         submission: InventorySubmission | null;
         invItems: InvItemRow[];
-        targetMap: Map<string, DeliveryTarget>;
       }[] = [];
 
       for (const store of deliveryStores) {
@@ -1644,18 +1528,9 @@ export default function DeliveryPage() {
 
         const { data: invItemsRaw } = await supabase
           .from('inventory_items')
-          .select('name, section, unit, sort_order, store_sort_orders')
+          .select('name, section, unit, sort_order, store_sort_orders, store_targets')
           .contains('stores', [store])
           .order('sort_order', { ascending: true });
-
-        const { data: targets } = await supabase
-          .from('delivery_targets').select('*').eq('location_name', store);
-
-        // Build target lookup by item name (case-insensitive)
-        const targetMap = new Map<string, DeliveryTarget>();
-        for (const t of (targets ?? []) as DeliveryTarget[]) {
-          targetMap.set(t.item_name.trim().toLowerCase(), t);
-        }
 
         // Sort items by per-store rank, falling back to global sort_order
         const invItems = ((invItemsRaw ?? []) as InvItemRow[]).sort((a, b) => {
@@ -1668,7 +1543,6 @@ export default function DeliveryPage() {
           store,
           submission: (submissions?.[0] as InventorySubmission | undefined) ?? null,
           invItems,
-          targetMap,
         });
       }
 
@@ -1681,10 +1555,10 @@ export default function DeliveryPage() {
       await supabase.from('delivery_run_lines').delete().eq('run_id', runId);
 
       const allLines: Omit<DeliveryLine, 'id' | 'created_at'>[] = [];
-      for (const { store, submission, invItems, targetMap } of storeData) {
+      for (const { store, submission, invItems } of storeData) {
         for (const item of invItems) {
-          const target = targetMap.get(item.name.trim().toLowerCase());
-          const effectiveTarget = Math.max(0, (target?.[dayKey] as number | undefined) ?? 0);
+          const storeTarget = item.store_targets?.[store];
+          const effectiveTarget = Math.max(0, storeTarget?.[dayKey] ?? 0);
 
           let reportedQty = 0;
           if (submission?.data && Array.isArray(submission.data)) {
@@ -1760,119 +1634,6 @@ export default function DeliveryPage() {
   /* ─────────────────────────────────────────────────────────────────────── */
   return (
     <>
-      {/* ── Standard Targets Modal ── */}
-      {showStandards && (() => {
-        const activeSections = sectionOrder.length > 0 ? sectionOrder : SECTIONS_FALLBACK;
-        const stdGrouped = activeSections.reduce<Record<string, TargetRow[]>>((acc, sec) => {
-          acc[sec] = stdTargets.filter(t => t.section === sec);
-          return acc;
-        }, {});
-        const stdOther = [...new Set(stdTargets.map(t => t.section).filter(s => !new Set(activeSections).has(s)))];
-        const stdAllSections = [...activeSections, ...stdOther];
-
-        return (
-          <>
-            <div className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm" onClick={() => setShowStandards(false)} />
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-6 pointer-events-none">
-              <div className="bg-white rounded-2xl shadow-2xl flex flex-col w-full max-w-3xl max-h-[88vh] pointer-events-auto">
-                {/* Header */}
-                <div className="flex items-start justify-between px-6 py-4 border-b border-gray-100 flex-shrink-0">
-                  <div>
-                    <div className="flex items-center gap-2 mb-2">
-                      <SlidersHorizontal size={16} className="text-[#1B5E20]" />
-                      <h2 className="text-base font-semibold text-gray-900">Standard Targets</h2>
-                    </div>
-                    <div className="flex gap-1 bg-gray-100 rounded-lg p-0.5 w-fit">
-                      {STORES.map(store => (
-                        <button key={store} onClick={() => setStdStore(store)}
-                          className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${stdStore === store ? 'bg-white text-[#1B5E20] shadow-sm font-semibold' : 'text-gray-500 hover:text-gray-700'}`}
-                        >{store}</button>
-                      ))}
-                    </div>
-                  </div>
-                  <button onClick={() => setShowStandards(false)} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors mt-0.5">
-                    <X size={18} />
-                  </button>
-                </div>
-                {/* Table */}
-                <div className="flex-1 overflow-y-auto">
-                  {stdTargets.length === 0 ? (
-                    <div className="p-8 text-center text-sm text-gray-400">No targets uploaded yet for {stdStore}.</div>
-                  ) : (
-                    <table className="w-full text-sm border-collapse">
-                      <thead className="sticky top-0 z-10 bg-white border-b-2 border-gray-200">
-                        <tr>
-                          <th className="px-5 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Item</th>
-                          <th className="px-2 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide w-24">Unit</th>
-                          {(['MON','TUE','WED','FRI'] as const).map(d => (
-                            <th key={d} className="px-2 py-2.5 text-center text-xs font-semibold text-gray-500 uppercase tracking-wide w-16">{d}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {stdAllSections.map(section => {
-                          const sectionRows = stdGrouped[section] ?? stdTargets.filter(t => t.section === section);
-                          if (sectionRows.length === 0) return null;
-                          return (
-                            <React.Fragment key={section}>
-                              <tr className="bg-green-50">
-                                <td colSpan={6} className="px-5 py-1.5">
-                                  <span className="text-[11px] font-bold text-[#1B5E20] uppercase tracking-wider">{section}</span>
-                                </td>
-                              </tr>
-                              {sectionRows.map(row => (
-                                <tr key={row.id} className="border-t border-gray-50 hover:bg-gray-50/50">
-                                  <td className="px-5 py-2 text-sm text-gray-800">{row.item_name}</td>
-                                  <td className="px-2 py-2 text-xs text-gray-400">{row.unit}</td>
-                                  {(['mon','tue','wed','fri'] as const).map(day => (
-                                    <td key={day} className="px-2 py-1.5 text-center">
-                                      <input
-                                        type="number" min={0} step={1}
-                                        value={stdEdits[row.id]?.[day] ?? (row as any)[`${day}_target`]}
-                                        onChange={e => setStdEdit(row.id, day, e.target.value)}
-                                        className="w-14 text-center text-sm border border-gray-200 rounded-md py-1 px-1 focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20]/50"
-                                      />
-                                    </td>
-                                  ))}
-                                </tr>
-                              ))}
-                            </React.Fragment>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  )}
-                </div>
-                {/* Footer */}
-                <div className="px-6 py-4 border-t border-gray-100 flex-shrink-0 flex items-center justify-between bg-gray-50/50 rounded-b-2xl">
-                  <p className="text-xs text-gray-400">Changes update the base targets for all future runs.</p>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => {
-                        if (!window.confirm(`Delete ALL standard targets for ${stdStore}? This cannot be undone.`)) return;
-                        deleteStandards.mutate();
-                      }}
-                      disabled={saveStandards.isPending || deleteStandards.isPending || stdTargets.length === 0}
-                      className="flex items-center gap-2 border border-red-200 text-red-500 px-4 py-2 rounded-lg text-sm font-medium hover:bg-red-50 transition-colors disabled:opacity-40"
-                    >
-                      {deleteStandards.isPending ? 'Deleting…' : 'Reset'}
-                    </button>
-                    <button
-                      onClick={() => saveStandards.mutate()}
-                      disabled={saveStandards.isPending || stdTargets.length === 0}
-                      className="flex items-center gap-2 bg-[#1B5E20] text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-[#2E7D32] transition-colors disabled:opacity-50"
-                    >
-                      <Save size={15} />
-                      {saveStandards.isPending ? 'Saving…' : 'Save Changes'}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </>
-        );
-      })()}
-
       <div>
         {/* ── Page header ── */}
         <div className="flex items-start justify-between mb-4">
@@ -2042,15 +1803,6 @@ export default function DeliveryPage() {
                 )
               )}
 
-              {/* Standard Targets — right-aligned */}
-              <div className="ml-auto flex items-center gap-2 flex-wrap justify-end">
-                <button
-                  onClick={() => { setStdStore(activeStore); setShowStandards(true); }}
-                  className="flex items-center gap-1.5 text-sm border border-gray-200 rounded-lg px-3 py-1.5 text-gray-600 bg-white shadow-sm hover:bg-gray-50 transition-colors"
-                >
-                  <SlidersHorizontal size={14} /> Standard Targets
-                </button>
-              </div>
             </div>
           </div>
         )}

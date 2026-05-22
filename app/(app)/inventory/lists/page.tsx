@@ -16,13 +16,13 @@ type Store = (typeof STORES)[number];
 const SECTION_ORDER = ['Kühlhaus', 'Tiefkühler', 'Trockenware', 'Regale', 'Lager'];
 
 const DAY_COLS = [
-  { key: 'mon_target' as const, label: 'MON' },
-  { key: 'tue_target' as const, label: 'TUE' },
-  { key: 'wed_target' as const, label: 'WED' },
-  { key: 'fri_target' as const, label: 'FRI' },
+  { key: 'mon' as const, label: 'MON' },
+  { key: 'tue' as const, label: 'TUE' },
+  { key: 'wed' as const, label: 'WED' },
+  { key: 'fri' as const, label: 'FRI' },
 ];
 
-type DayKey = 'mon_target' | 'tue_target' | 'wed_target' | 'fri_target';
+type DayKey = 'mon' | 'tue' | 'wed' | 'fri';
 
 /* ─── Types ──────────────────────────────────────────────────────────────────── */
 type InventoryItem = {
@@ -33,15 +33,7 @@ type InventoryItem = {
   sort_order:         number;
   stores:             string[];
   store_sort_orders:  Record<string, number>;
-};
-
-type TargetRow = {
-  id?:         string;
-  item_name:   string;
-  mon_target:  number;
-  tue_target:  number;
-  wed_target:  number;
-  fri_target:  number;
+  store_targets:      Record<string, Record<string, number>> | null;
 };
 
 type LocalTarget = Record<DayKey, number>;
@@ -344,23 +336,11 @@ export default function InventoryListsPage() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('inventory_items')
-        .select('id, section, name, unit, sort_order, stores, store_sort_orders')
+        .select('id, section, name, unit, sort_order, stores, store_sort_orders, store_targets')
         .contains('stores', [activeStore])
         .order('sort_order', { ascending: true });
       if (error) throw error;
       return (data ?? []) as InventoryItem[];
-    },
-  });
-
-  const { data: targets = [], isLoading: targetsLoading } = useQuery({
-    queryKey: ['inventory-lists-targets', activeStore],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('delivery_targets')
-        .select('id, item_name, mon_target, tue_target, wed_target, fri_target')
-        .eq('location_name', activeStore);
-      if (error) throw error;
-      return (data ?? []) as TargetRow[];
     },
   });
 
@@ -381,7 +361,7 @@ export default function InventoryListsPage() {
     },
   });
 
-  const isLoading = itemsLoading || targetsLoading;
+  const isLoading = itemsLoading;
 
   /* ── Fetch current user profile ─────────────────────────────────────────── */
   useEffect(() => {
@@ -456,14 +436,15 @@ export default function InventoryListsPage() {
   /* ── Seed local state when entering edit mode ───────────────────────────── */
   useEffect(() => {
     if (editMode) {
-      // Targets
+      // Targets — read from inventory_items.store_targets
       const tMap = new Map<string, LocalTarget>();
-      targets.forEach(t => {
-        tMap.set(t.item_name, {
-          mon_target: t.mon_target ?? 0,
-          tue_target: t.tue_target ?? 0,
-          wed_target: t.wed_target ?? 0,
-          fri_target: t.fri_target ?? 0,
+      items.forEach(item => {
+        const st = item.store_targets?.[activeStore] ?? {};
+        tMap.set(item.id, {
+          mon: st.mon ?? 0,
+          tue: st.tue ?? 0,
+          wed: st.wed ?? 0,
+          fri: st.fri ?? 0,
         });
       });
       setLocalTargets(tMap);
@@ -502,22 +483,14 @@ export default function InventoryListsPage() {
       .filter(s => editMode || s.items.length > 0);
   }, [allSectionNames, items, activeStore, editMode]);
 
-  const targetMap = useMemo(
-    () => new Map(targets.map(t => [t.item_name, t])),
-    [targets],
-  );
-
   /* ── Mutations ───────────────────────────────────────────────────────────── */
   const resetMutation = useMutation({
     mutationFn: async () => {
-      const { error } = await supabase
-        .from('delivery_targets')
-        .delete()
-        .eq('location_name', activeStore);
+      const { error } = await supabase.rpc('clear_store_targets', { p_store: activeStore });
       if (error) throw error;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['inventory-lists-targets', activeStore] });
+      qc.invalidateQueries({ queryKey: ['inventory-items', activeStore] });
       setConfirmReset(false);
     },
   });
@@ -627,30 +600,19 @@ export default function InventoryListsPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['inventory-items'] as const }),
   });
 
-  // Save targets via upsert (unique constraint on location_name,item_name confirmed in DB)
-  // section is required NOT NULL in delivery_targets — must be included
   const saveTargetMutation = useMutation({
-    mutationFn: async ({
-      itemName, section, unit, t,
-    }: { itemName: string; section: string; unit: string; t: LocalTarget }) => {
-      const { error } = await supabase
-        .from('delivery_targets')
-        .upsert(
-          {
-            location_name: activeStore,
-            item_name:     itemName,
-            section,
-            unit,
-            mon_target:    t.mon_target,
-            tue_target:    t.tue_target,
-            wed_target:    t.wed_target,
-            fri_target:    t.fri_target,
-          },
-          { onConflict: 'location_name,item_name' },
-        );
+    mutationFn: async ({ item, t }: { item: InventoryItem; t: LocalTarget }) => {
+      const { error } = await supabase.rpc('set_item_store_target', {
+        p_item_id: item.id,
+        p_store:   activeStore,
+        p_mon:     t.mon,
+        p_tue:     t.tue,
+        p_wed:     t.wed,
+        p_fri:     t.fri,
+      });
       if (error) throw error;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['inventory-lists-targets', activeStore] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['inventory-items', activeStore] }),
   });
 
   // Save unit change to inventory_items
@@ -671,30 +633,24 @@ export default function InventoryListsPage() {
   const localTargetsRef = useRef(localTargets);
   useEffect(() => { localTargetsRef.current = localTargets; }, [localTargets]);
 
-  function getLocalVal(itemName: string, key: DayKey): number {
-    return localTargets.get(itemName)?.[key] ?? targetMap.get(itemName)?.[key] ?? 0;
+  function getLocalVal(itemId: string, key: DayKey): number {
+    return localTargets.get(itemId)?.[key] ?? 0;
   }
 
-  const handleTargetChange = useCallback((itemName: string, key: DayKey, raw: string) => {
+  const handleTargetChange = useCallback((itemId: string, key: DayKey, raw: string) => {
     const num = raw === '' ? 0 : Math.max(0, parseInt(raw, 10) || 0);
     setLocalTargets(prev => {
       const copy     = new Map(prev);
-      const existing = copy.get(itemName) ?? { mon_target: 0, tue_target: 0, wed_target: 0, fri_target: 0 };
-      copy.set(itemName, { ...existing, [key]: num });
+      const existing = copy.get(itemId) ?? { mon: 0, tue: 0, wed: 0, fri: 0 };
+      copy.set(itemId, { ...existing, [key]: num });
       return copy;
     });
   }, []);
 
   const handleTargetBlur = useCallback((item: InventoryItem) => {
-    // Always read from ref to avoid stale closure capturing old localTargets
-    const t = localTargetsRef.current.get(item.name);
+    const t = localTargetsRef.current.get(item.id);
     if (t !== undefined) {
-      saveTargetMutation.mutate({
-        itemName: item.name,
-        section:  item.section,
-        unit:     item.unit,
-        t,
-      });
+      saveTargetMutation.mutate({ item, t });
     }
   }, [saveTargetMutation]);
 
@@ -971,7 +927,7 @@ export default function InventoryListsPage() {
                     )}
 
                     {section.items.map((item, idx) => {
-                      const target  = targetMap.get(item.name);
+                      const storeTarget = item.store_targets?.[activeStore];
                       const isEven  = idx % 2 === 0;
                       const isFirst = idx === 0;
                       const isLast  = idx === section.items.length - 1;
@@ -1042,16 +998,16 @@ export default function InventoryListsPage() {
                                 <input
                                   type="number"
                                   min="0"
-                                  value={getLocalVal(item.name, d.key) || ''}
+                                  value={getLocalVal(item.id, d.key) || ''}
                                   placeholder="—"
-                                  onChange={e => handleTargetChange(item.name, d.key, e.target.value)}
+                                  onChange={e => handleTargetChange(item.id, d.key, e.target.value)}
                                   onBlur={() => handleTargetBlur(item)}
                                   className="w-14 text-center border border-gray-200 rounded-md px-1 py-1 text-sm font-semibold text-[#2E7D32] bg-white focus:outline-none focus:border-[#1B5E20] focus:ring-1 focus:ring-[#1B5E20] tabular-nums [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                                 />
                               ) : (
-                                (target?.[d.key] == null || target[d.key] === 0)
+                                (storeTarget?.[d.key] == null || storeTarget?.[d.key] === 0)
                                   ? <span className="text-gray-300">—</span>
-                                  : <span className="font-semibold text-[#2E7D32]">{target[d.key]}</span>
+                                  : <span className="font-semibold text-[#2E7D32]">{storeTarget[d.key]}</span>
                               )}
                             </td>
                           ))}
