@@ -600,6 +600,19 @@ export default function LocationInventoryFormPage({
         </div>
       )}
 
+      {/* Paused banner */}
+      {timerStarted && !timerRunning && (
+        <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5 mb-3 text-sm text-amber-700">
+          <Pause size={15} className="text-amber-500 flex-shrink-0" />
+          <span><strong>Timer paused.</strong> Resume the timer to continue entering counts.</span>
+          <button
+            onClick={resumeTimer}
+            className="ml-auto flex items-center gap-1.5 text-xs font-semibold bg-amber-100 hover:bg-amber-200 px-2.5 py-1 rounded-lg transition-colors flex-shrink-0">
+            <Play size={11} />Resume
+          </button>
+        </div>
+      )}
+
       {/* Loading skeleton */}
       {itemsLoading && (
         <div className="space-y-4">
@@ -642,13 +655,15 @@ export default function LocationInventoryFormPage({
                     <select
                       value={counts[item.name] ?? '0'}
                       onChange={e => handleChange(item.name, e.target.value)}
-                      disabled={!timerStarted}
+                      disabled={!timerStarted || !timerRunning}
                       className={`w-20 text-right border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20] transition-colors ${
-                        timerStarted
-                          ? counts[item.name] && counts[item.name] !== '0'
-                            ? 'border-[#1B5E20] bg-green-50 text-[#1B5E20] font-semibold'
-                            : 'border-gray-200 bg-gray-50'
-                          : 'border-gray-100 bg-gray-100 text-gray-300 cursor-not-allowed'
+                        !timerStarted
+                          ? 'border-gray-100 bg-gray-100 text-gray-300 cursor-not-allowed'
+                          : !timerRunning
+                          ? 'border-amber-200 bg-amber-50 text-amber-400 cursor-not-allowed'
+                          : counts[item.name] && counts[item.name] !== '0'
+                          ? 'border-[#1B5E20] bg-green-50 text-[#1B5E20] font-semibold'
+                          : 'border-gray-200 bg-gray-50'
                       }`}
                     >
                       {Array.from({ length: 51 }, (_, i) => (
@@ -672,11 +687,13 @@ export default function LocationInventoryFormPage({
                 value={comment}
                 onChange={e => setComment(e.target.value)}
                 placeholder="Add any extra comments or notes for this inventory report…"
-                disabled={!timerStarted}
+                disabled={!timerStarted || !timerRunning}
                 className={`w-full border rounded-lg px-3 py-2 text-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#1B5E20] resize-none transition-colors ${
-                  timerStarted
-                    ? 'border-gray-200 bg-gray-50 text-gray-800'
-                    : 'border-gray-100 bg-gray-100 text-gray-300 cursor-not-allowed'
+                  !timerStarted
+                    ? 'border-gray-100 bg-gray-100 text-gray-300 cursor-not-allowed'
+                    : !timerRunning
+                    ? 'border-amber-200 bg-amber-50 text-amber-400 cursor-not-allowed'
+                    : 'border-gray-200 bg-gray-50 text-gray-800'
                 }`}
               />
             </div>
@@ -697,7 +714,7 @@ export default function LocationInventoryFormPage({
         </div>
         <button
           onClick={handleSubmit}
-          disabled={submitting || !timerStarted || itemsLoading}
+          disabled={submitting || !timerStarted || !timerRunning || itemsLoading}
           className="flex items-center gap-2 bg-[#1B5E20] text-white px-6 py-2.5 rounded-lg text-sm font-bold hover:bg-[#2E7D32] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <Send size={15} />
