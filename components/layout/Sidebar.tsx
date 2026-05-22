@@ -280,6 +280,8 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
 
   const canSeeItem = (item: NavItem): boolean => {
     if (item.staffOnly && !isStaff) return false; // hide from admin/manager regardless
+    // Hide the full Delivery nav item for staff-packers — they already have the Packing item
+    if (item.permKey === 'delivery' && isStaff && !!(perms as any).packer) return false;
     if (isAdmin) return true;
     if (item.adminOnly) return false;
     if (item.managerOnly && isStaff) return false;
