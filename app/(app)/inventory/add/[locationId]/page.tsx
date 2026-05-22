@@ -174,6 +174,13 @@ export default function LocationInventoryFormPage({
     return () => { if (timerInterval.current) clearInterval(timerInterval.current); };
   }, [timerRunning]);
 
+  /* ── Disable horizontal scroll for the lifetime of this page ── */
+  useEffect(() => {
+    const prev = document.body.style.overflowX;
+    document.body.style.overflowX = 'hidden';
+    return () => { document.body.style.overflowX = prev; };
+  }, []);
+
   /* ── Fetch role ── */
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
@@ -611,8 +618,8 @@ export default function LocationInventoryFormPage({
         </button>
 
         <div className="flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">{locationName} — Inventory</h1>
+          <div className="min-w-0">
+            <h1 className="text-2xl font-bold text-gray-900 truncate">{locationName} — Inventory</h1>
             {itemsLoading && (
               <p className="text-xs text-gray-400 mt-1 animate-pulse">Loading items…</p>
             )}
