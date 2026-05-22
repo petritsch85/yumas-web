@@ -153,6 +153,7 @@ export default function LocationInventoryFormPage({
   const [syncing, setSyncing]       = useState(false);
   const [justSynced, setJustSynced] = useState(false);
   const [loadingPrevious, setLoadingPrevious] = useState(false);
+  const [draftRestored, setDraftRestored] = useState<string | null>(null); // savedAt timestamp when a draft was restored
   const draftTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   /* ── Timer ── */
@@ -232,8 +233,19 @@ export default function LocationInventoryFormPage({
   /* ── Load draft on mount ── */
   useEffect(() => {
     const draft = loadDraft(locationId);
-    if (draft) { setCounts(draft.counts); setComment(draft.comment); }
-  }, [locationId]);
+    if (!draft) return;
+    // Only restore if there's something meaningful saved
+    const hasData = Object.values(draft.counts).some(v => v !== '' && v !== '0');
+    if (!hasData && !draft.comment) return;
+    setCounts(draft.counts);
+    setComment(draft.comment);
+    if (draft.timerStarted) {
+      setElapsedSeconds(draft.elapsedSeconds ?? 0);
+      setTimerStarted(true);
+      setTimerRunning(true); // auto-resume so they can keep entering immediately
+    }
+    setDraftRestored(draft.savedAt);
+  }, [locationId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ── Queue count ── */
   const refreshQueueCount = useCallback(async () => {
@@ -266,12 +278,15 @@ export default function LocationInventoryFormPage({
     };
   }, [refreshQueueCount]);
 
-  /* ── Auto-save draft ── */
+  /* ── Auto-save draft (every ~800 ms after last change) ── */
   useEffect(() => {
     if (draftTimer.current) clearTimeout(draftTimer.current);
-    draftTimer.current = setTimeout(() => saveDraft(locationId, counts, comment), 800);
+    draftTimer.current = setTimeout(
+      () => saveDraft(locationId, counts, comment, elapsedSeconds, timerStarted),
+      800,
+    );
     return () => { if (draftTimer.current) clearTimeout(draftTimer.current); };
-  }, [counts, comment, locationId]);
+  }, [counts, comment, locationId, elapsedSeconds, timerStarted]);
 
   const filledCount = Object.values(counts).filter(v => v !== '' && v !== '0').length;
   const handleChange = (name: string, value: string) => setCounts(prev => ({ ...prev, [name]: value }));
@@ -411,6 +426,7 @@ export default function LocationInventoryFormPage({
     setTimerStarted(false);
     setTimerRunning(false);
     setElapsedSeconds(0);
+    setDraftRestored(null);
     if (timerInterval.current) clearInterval(timerInterval.current);
     // Clear the recent-submission marker so the picker doesn't show a stale banner
     localStorage.removeItem(`yumas_recent_inv_${locationId}`);
@@ -693,6 +709,26 @@ export default function LocationInventoryFormPage({
         <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5 mb-3 text-sm text-amber-700">
           <RefreshCw size={15} className="text-amber-500 flex-shrink-0" />
           {queueCount} offline submission{queueCount > 1 ? 's' : ''} pending sync.
+        </div>
+      )}
+
+      {/* Draft-restored banner */}
+      {draftRestored && (
+        <div className="flex items-center justify-between gap-3 bg-blue-50 border border-blue-200 rounded-xl px-4 py-2.5 mb-3 text-sm text-blue-700">
+          <div className="flex items-center gap-2 min-w-0">
+            <RotateCcw size={15} className="text-blue-500 flex-shrink-0" />
+            <span className="truncate">
+              <strong>Draft restored</strong> · saved at{' '}
+              {new Date(draftRestored).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}
+              {' '}— your previous entries have been reloaded.
+            </span>
+          </div>
+          <button
+            onClick={() => setDraftRestored(null)}
+            className="flex-shrink-0 text-blue-400 hover:text-blue-600 transition-colors"
+            aria-label="Dismiss">
+            <X size={15} />
+          </button>
         </div>
       )}
 

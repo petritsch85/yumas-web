@@ -1,16 +1,24 @@
 const PREFIX = 'yumas-draft-';
 
 export type Draft = {
-  counts:  Record<string, string>;
-  comment: string;
-  savedAt: string;
+  counts:         Record<string, string>;
+  comment:        string;
+  savedAt:        string;
+  elapsedSeconds: number;
+  timerStarted:   boolean;
 };
 
-export function saveDraft(locationId: string, counts: Record<string, string>, comment: string) {
+export function saveDraft(
+  locationId: string,
+  counts: Record<string, string>,
+  comment: string,
+  elapsedSeconds = 0,
+  timerStarted = false,
+) {
   try {
     localStorage.setItem(
       PREFIX + locationId,
-      JSON.stringify({ counts, comment, savedAt: new Date().toISOString() })
+      JSON.stringify({ counts, comment, savedAt: new Date().toISOString(), elapsedSeconds, timerStarted })
     );
   } catch { /* storage full or unavailable */ }
 }
