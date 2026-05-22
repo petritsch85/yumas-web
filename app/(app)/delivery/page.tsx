@@ -938,6 +938,54 @@ export default function DeliveryPage() {
     staleTime: 60_000,
   });
 
+  /* ── ZK-specific sections + items (packing list mirrors ZK Inventory Lists) ── */
+  const { data: zkSections = [] } = useQuery<{ name: string; sort_order: number }[]>({
+    queryKey: ['inventory-sections', 'ZK'],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('inventory_sections')
+        .select('name, sort_order')
+        .contains('stores', ['ZK'])
+        .order('sort_order');
+      return data ?? [];
+    },
+    staleTime: 60_000,
+  });
+
+  const { data: zkItemsRaw = [] } = useQuery<{ name: string; section: string; sort_order: number; store_sort_orders: Record<string, number> | null }[]>({
+    queryKey: ['inventory-items', 'ZK'],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('inventory_items')
+        .select('name, section, sort_order, store_sort_orders')
+        .contains('stores', ['ZK'])
+        .order('sort_order');
+      return data ?? [];
+    },
+    staleTime: 60_000,
+  });
+
+  /** ZK section order — used for packing list */
+  const zkSectionOrder = useMemo(
+    () => zkSections.length > 0 ? zkSections.map(s => s.name) : SECTION_ORDER_FALLBACK,
+    [zkSections],
+  );
+
+  /** item_name → ZK physical section */
+  const zkItemSection = useMemo<Record<string, string>>(
+    () => Object.fromEntries(zkItemsRaw.map(i => [i.name, i.section])),
+    [zkItemsRaw],
+  );
+
+  /** item_name → ZK sort rank */
+  const zkItemRank = useMemo<Record<string, number>>(
+    () => Object.fromEntries(zkItemsRaw.map(i => [
+      i.name,
+      (i.store_sort_orders as Record<string, number> | null)?.['ZK'] ?? i.sort_order ?? 9999,
+    ])),
+    [zkItemsRaw],
+  );
+
   const sectionOrder = useMemo(
     () => dbSections.length > 0 ? dbSections.map(s => s.name) : SECTION_ORDER_FALLBACK,
     [dbSections],
@@ -2134,35 +2182,46 @@ export default function DeliveryPage() {
               })()}
 
               {/* Store lists */}
-              {STORES.map(store => (
-                <div key={store} className={activeStore === store ? 'block' : 'hidden'}>
-                  <StoreDeliveryList
-                    store={store}
-                    lines={storeLines(store)}
-                    hasSubmission={storeHasSubmission(store)}
-                    isActive={activeStore === store}
-                    onPackedQtyBlur={handlePackedQtyBlur}
-                    forecast={getStoreForecast(store)}
-                    standard={getStoreStandard(store)}
-                    viewMode={viewMode as 'packer' | 'manager'}
-                    editingTargets={editingTargets}
-                    editingPackedQty={editingPackedQty}
-                    onTargetChange={handleTargetChange}
-                    onTargetBlur={handleTargetBlur}
-                    onPackedQtyChange={handlePackedQtyChange}
-                    packingStarted={packingStarted}
-                    isPreview={isPreview}
-                    storeInventory={liveInventory[store] ?? {}}
-                    storeTimestamp={liveInventoryTimestamps[store]}
-                    stdScaleMode={stdScaleMode[store]}
-                    onScaleChange={mode => handleScaleChange(store, mode)}
-                    scalingTargets={scaleTargets.isPending}
-                    storeConfirmed={!!storeConfirmedAt(store)}
-                    sectionOrder={sectionOrder}
-                    itemRank={itemRankByStore[store] ?? itemRank}
-                  />
-                </div>
-              ))}
+              {STORES.map(store => {
+                // In packer view, remap each line's section to ZK's physical section
+                // so the packing list mirrors ZK's Inventory Lists layout exactly.
+                const isPacker = viewMode === 'packer';
+                const displayLines = isPacker
+                  ? storeLines(store).map(l => ({
+                      ...l,
+                      section: zkItemSection[l.item_name] ?? l.section,
+                    }))
+                  : storeLines(store);
+                return (
+                  <div key={store} className={activeStore === store ? 'block' : 'hidden'}>
+                    <StoreDeliveryList
+                      store={store}
+                      lines={displayLines}
+                      hasSubmission={storeHasSubmission(store)}
+                      isActive={activeStore === store}
+                      onPackedQtyBlur={handlePackedQtyBlur}
+                      forecast={getStoreForecast(store)}
+                      standard={getStoreStandard(store)}
+                      viewMode={viewMode as 'packer' | 'manager'}
+                      editingTargets={editingTargets}
+                      editingPackedQty={editingPackedQty}
+                      onTargetChange={handleTargetChange}
+                      onTargetBlur={handleTargetBlur}
+                      onPackedQtyChange={handlePackedQtyChange}
+                      packingStarted={packingStarted}
+                      isPreview={isPreview}
+                      storeInventory={liveInventory[store] ?? {}}
+                      storeTimestamp={liveInventoryTimestamps[store]}
+                      stdScaleMode={stdScaleMode[store]}
+                      onScaleChange={mode => handleScaleChange(store, mode)}
+                      scalingTargets={scaleTargets.isPending}
+                      storeConfirmed={!!storeConfirmedAt(store)}
+                      sectionOrder={isPacker ? zkSectionOrder : sectionOrder}
+                      itemRank={isPacker ? zkItemRank : (itemRankByStore[store] ?? itemRank)}
+                    />
+                  </div>
+                );
+              })}
             </>
           )
         )}
