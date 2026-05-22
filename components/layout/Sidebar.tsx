@@ -62,6 +62,7 @@ type NavItem = {
   permKey?: keyof AppPermissions;
   adminOnly?: boolean;
   managerOnly?: boolean; // hidden from staff roles
+  staffOnly?: boolean;   // hidden from admin and manager (staff-facing items only)
 };
 
 type NavGroup = {
@@ -122,7 +123,7 @@ const NAV_GROUPS: NavGroup[] = [
           { labelKey: 'sidebar.nav.deliveryReports',  href: '/delivery/reports',  icon: ClipboardList, managerOnly: true },
         ],
       },
-      { labelKey: 'sidebar.nav.packing', href: '/delivery', icon: Package, permKey: 'packer' },
+      { labelKey: 'sidebar.nav.packing', href: '/delivery', icon: Package, permKey: 'packer', staffOnly: true },
       { labelKey: 'sidebar.nav.recipes', href: '/products/semi-finished', icon: FlaskConical, permKey: 'production' },
       { labelKey: 'sidebar.nav.buying',      href: '/purchase-orders',         icon: ShoppingCart, permKey: 'buying' },
       { labelKey: 'sidebar.nav.controlling', href: '/coming-soon/controlling', icon: TrendingUp,   adminOnly: true },
@@ -278,6 +279,7 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
   const perms     = profile?.permissions ?? {};
 
   const canSeeItem = (item: NavItem): boolean => {
+    if (item.staffOnly && !isStaff) return false; // hide from admin/manager regardless
     if (isAdmin) return true;
     if (item.adminOnly) return false;
     if (item.managerOnly && isStaff) return false;
