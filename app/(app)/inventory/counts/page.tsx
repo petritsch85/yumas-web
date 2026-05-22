@@ -3,7 +3,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
 import { useState, useEffect } from 'react';
-import { ChevronDown, ChevronRight, Trash2, Pencil, X, Check } from 'lucide-react';
+import { ChevronDown, ChevronRight, Trash2, Pencil, X, Check, RotateCcw, AlertTriangle } from 'lucide-react';
 import { useT } from '@/lib/i18n';
 
 type DataItem = { section: string; name: string; unit: string; quantity: number };
@@ -18,6 +18,8 @@ type SubmissionRow = {
   edited_at: string | null;
   edited_by: string | null;
   original_data: DataItem[] | null;
+  deleted_at: string | null;
+  deleted_by: string | null;
   submitterName?: string;
 };
 
@@ -71,8 +73,10 @@ export default function CurrentInventoryPage() {
   const { t } = useT();
   const [locationFilter, setLocationFilter] = useState('all');
   const [expandedIds, setExpandedIds]       = useState<Set<string>>(new Set());
-  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
-  const [deleteError, setDeleteError]       = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId]   = useState<string | null>(null);
+  const [confirmPermDeleteId, setConfirmPermDeleteId] = useState<string | null>(null);
+  const [deleteError, setDeleteError]           = useState<string | null>(null);
+  const [showTrash, setShowTrash]               = useState(false);
   const [editingId, setEditingId]           = useState<string | null>(null);
   const [editDraft, setEditDraft]           = useState<Record<string, number>>({});
   const [editError, setEditError]           = useState<string | null>(null);
@@ -95,18 +99,57 @@ export default function CurrentInventoryPage() {
 
   const queryClient = useQueryClient();
 
+  // Soft-delete: move to trash
   const deleteMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const { data: { user } } = await supabase.auth.getUser();
+      const { error } = await supabase
+        .from('inventory_submissions')
+        .update({ deleted_at: new Date().toISOString(), deleted_by: user?.id ?? null })
+        .eq('id', id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['inventory-submissions'] });
+      queryClient.invalidateQueries({ queryKey: ['inventory-trash'] });
+      setConfirmDeleteId(null);
+      setDeleteError(null);
+    },
+    onError: (err: any) => {
+      setDeleteError(err?.message ?? 'Move to trash failed — you may not have permission.');
+    },
+  });
+
+  // Restore from trash
+  const restoreMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase
+        .from('inventory_submissions')
+        .update({ deleted_at: null, deleted_by: null })
+        .eq('id', id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['inventory-submissions'] });
+      queryClient.invalidateQueries({ queryKey: ['inventory-trash'] });
+    },
+    onError: (err: any) => {
+      setDeleteError(err?.message ?? 'Restore failed.');
+    },
+  });
+
+  // Permanent delete (irreversible — from trash only)
+  const permDeleteMutation = useMutation({
     mutationFn: async (id: string) => {
       const { error } = await supabase.from('inventory_submissions').delete().eq('id', id);
       if (error) throw error;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['inventory-submissions'] });
-      setConfirmDeleteId(null);
-      setDeleteError(null);
+      queryClient.invalidateQueries({ queryKey: ['inventory-trash'] });
+      setConfirmPermDeleteId(null);
     },
     onError: (err: any) => {
-      setDeleteError(err?.message ?? 'Delete failed — you may not have permission.');
+      setDeleteError(err?.message ?? 'Permanent delete failed.');
     },
   });
 
@@ -170,22 +213,21 @@ export default function CurrentInventoryPage() {
 
   const { data: submissions, isLoading } = useQuery({
     queryKey: ['inventory-submissions', locationFilter, fromDate, toDate, isManager, currentUserId],
-    enabled: isManager !== null, // wait until role is resolved
+    enabled: isManager !== null,
     queryFn: async () => {
       let q = supabase
         .from('inventory_submissions')
-        .select('id, location_name, submitted_at, submitted_by, duration_seconds, data, comment, edited_at, edited_by, original_data')
+        .select('id, location_name, submitted_at, submitted_by, duration_seconds, data, comment, edited_at, edited_by, original_data, deleted_at, deleted_by')
+        .is('deleted_at', null)  // exclude soft-deleted
         .gte('submitted_at', `${fromDate}T00:00:00`)
         .lte('submitted_at', `${toDate}T23:59:59`)
         .order('submitted_at', { ascending: false })
         .limit(2000);
       if (locationFilter !== 'all') q = q.eq('location_name', locationFilter);
-      // Staff only see their own submissions
       if (!isManager && currentUserId) q = q.eq('submitted_by', currentUserId);
       const { data, error } = await q;
       if (error) throw error;
 
-      // Resolve submitter names
       const rows = data ?? [];
       const userIds = [...new Set(rows.map((r) => r.submitted_by).filter(Boolean))] as string[];
       let profileMap: Record<string, string> = {};
@@ -194,13 +236,46 @@ export default function CurrentInventoryPage() {
           .from('profiles').select('id, full_name').in('id', userIds);
         for (const p of profiles ?? []) profileMap[p.id] = p.full_name;
       }
-
       return rows.map((r) => ({
         ...r,
         submitterName: r.submitted_by ? (profileMap[r.submitted_by] ?? 'Unknown') : 'Unknown',
       })) as (SubmissionRow & { submitterName: string; duration_seconds?: number | null })[];
     },
   });
+
+  // Trash query — managers only, all soft-deleted records
+  const { data: trashItems, isLoading: trashLoading } = useQuery({
+    queryKey: ['inventory-trash', isManager, currentUserId],
+    enabled: isManager === true, // always fetch so the count badge is accurate
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('inventory_submissions')
+        .select('id, location_name, submitted_at, submitted_by, duration_seconds, data, comment, edited_at, edited_by, original_data, deleted_at, deleted_by')
+        .not('deleted_at', 'is', null)
+        .order('deleted_at', { ascending: false })
+        .limit(500);
+      if (error) throw error;
+
+      const rows = data ?? [];
+      const userIds = [...new Set([
+        ...rows.map((r) => r.submitted_by),
+        ...rows.map((r) => r.deleted_by),
+      ].filter(Boolean))] as string[];
+      let profileMap: Record<string, string> = {};
+      if (userIds.length) {
+        const { data: profiles } = await supabase
+          .from('profiles').select('id, full_name').in('id', userIds);
+        for (const p of profiles ?? []) profileMap[p.id] = p.full_name;
+      }
+      return rows.map((r) => ({
+        ...r,
+        submitterName: r.submitted_by ? (profileMap[r.submitted_by] ?? 'Unknown') : 'Unknown',
+        deleterName:   r.deleted_by   ? (profileMap[r.deleted_by]   ?? 'Unknown') : 'Unknown',
+      })) as (SubmissionRow & { submitterName: string; deleterName: string; duration_seconds?: number | null })[];
+    },
+  });
+
+  const trashCount = trashItems?.length ?? 0;
 
   const toggleExpand = (id: string) => {
     setExpandedIds((prev) => {
@@ -247,7 +322,118 @@ export default function CurrentInventoryPage() {
     <div>
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold text-gray-900">{t('inventory.counts.title')}</h1>
+        {isManager && (
+          <button
+            onClick={() => { setShowTrash(v => !v); setDeleteError(null); setConfirmPermDeleteId(null); }}
+            className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors border ${
+              showTrash
+                ? 'bg-red-50 border-red-200 text-red-700'
+                : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+            }`}
+          >
+            <Trash2 size={14} />
+            Trash
+            {!showTrash && trashCount > 0 && (
+              <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-red-100 text-red-600 text-xs font-bold">
+                {trashCount}
+              </span>
+            )}
+          </button>
+        )}
       </div>
+
+      {/* ── Trash view ── */}
+      {showTrash && isManager && (
+        <div className="mb-8">
+          <div className="flex items-center gap-3 mb-4 px-4 py-3 bg-red-50 border border-red-200 rounded-xl">
+            <AlertTriangle size={16} className="text-red-500 flex-shrink-0" />
+            <div className="flex-1 text-sm text-red-700">
+              <strong>Trash bin</strong> — reports moved here are hidden from the main list.
+              Restore them to make them visible again, or delete permanently (irreversible).
+            </div>
+          </div>
+
+          {trashLoading ? (
+            <div className="space-y-2">{[...Array(3)].map((_, i) => <div key={i} className="h-14 bg-gray-100 rounded-lg animate-pulse" />)}</div>
+          ) : !trashItems || trashItems.length === 0 ? (
+            <div className="bg-white rounded-lg border border-gray-100 p-8 text-center text-gray-400 text-sm">
+              Trash is empty — no deleted reports.
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {trashItems.map((sub) => {
+                const totalFilled = (sub.data ?? []).filter(i => i.quantity > 0).length;
+                const totalItems  = (sub.data ?? []).length;
+                const isConfirmingPerm = confirmPermDeleteId === sub.id;
+                return (
+                  <div key={sub.id} className="bg-white rounded-lg border border-red-100 shadow-sm overflow-hidden opacity-75">
+                    <div className="flex items-center gap-3 px-4 py-3.5">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-semibold text-gray-700 text-sm">{sub.location_name}</span>
+                          <span className="text-xs text-gray-400">·</span>
+                          <span className="text-xs text-gray-500">{sub.submitterName}</span>
+                          <span className="text-xs bg-red-100 text-red-600 px-1.5 py-0.5 rounded font-semibold">Deleted</span>
+                        </div>
+                        <div className="text-xs text-gray-400 mt-0.5">
+                          Submitted {new Date(sub.submitted_at).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                          {sub.deleted_at && (
+                            <span className="ml-2 text-red-400">
+                              · moved to trash {new Date(sub.deleted_at).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                              {(sub as any).deleterName ? ` by ${(sub as any).deleterName}` : ''}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <span className="text-xs text-gray-400 flex-shrink-0">{totalFilled}/{totalItems} filled</span>
+
+                      {/* Restore */}
+                      <button
+                        onClick={() => restoreMutation.mutate(sub.id)}
+                        disabled={restoreMutation.isPending}
+                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-green-700 bg-green-50 border border-green-200 rounded-lg hover:bg-green-100 transition-colors disabled:opacity-50 flex-shrink-0"
+                      >
+                        <RotateCcw size={12} /> Restore
+                      </button>
+
+                      {/* Permanent delete */}
+                      {isConfirmingPerm ? (
+                        <div className="flex items-center gap-1 flex-shrink-0">
+                          <span className="text-xs text-red-600 font-medium">Sure?</span>
+                          <button
+                            onClick={() => permDeleteMutation.mutate(sub.id)}
+                            disabled={permDeleteMutation.isPending}
+                            className="px-2.5 py-1 text-xs font-semibold text-white bg-red-600 rounded-lg hover:bg-red-700 disabled:opacity-50 transition-colors"
+                          >
+                            {permDeleteMutation.isPending ? 'Deleting…' : 'Yes, delete'}
+                          </button>
+                          <button
+                            onClick={() => setConfirmPermDeleteId(null)}
+                            className="px-2 py-1 text-xs text-gray-500 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => setConfirmPermDeleteId(sub.id)}
+                          className="p-1.5 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors flex-shrink-0"
+                          title="Delete permanently"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          <div className="mt-4 border-t border-gray-100 pt-4">
+            <p className="text-xs text-gray-400 font-semibold uppercase tracking-widest">Main list</p>
+          </div>
+        </div>
+      )}
 
       {/* Filters */}
       <div className="mb-5 flex flex-wrap items-center gap-4">
@@ -419,7 +605,7 @@ export default function CurrentInventoryPage() {
                                       disabled={deleteMutation.isPending}
                                       className="px-2.5 py-1 text-xs font-semibold text-white bg-red-500 rounded-lg hover:bg-red-600 disabled:opacity-50 transition-colors"
                                     >
-                                      {deleteMutation.isPending ? t('inventory.counts.deleting') : t('inventory.counts.yesDelete')}
+                                      {deleteMutation.isPending ? 'Moving…' : 'Move to Trash'}
                                     </button>
                                     <button
                                       onClick={() => { setConfirmDeleteId(null); setDeleteError(null); }}
@@ -432,7 +618,7 @@ export default function CurrentInventoryPage() {
                                   <button
                                     onClick={() => setConfirmDeleteId(sub.id)}
                                     className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-                                    title="Delete report"
+                                    title="Move to trash"
                                   >
                                     <Trash2 size={14} />
                                   </button>
