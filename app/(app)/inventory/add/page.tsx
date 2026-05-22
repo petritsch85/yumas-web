@@ -2,6 +2,7 @@
 
 import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
+import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase-browser';
 import { Building2, Factory, Pencil } from 'lucide-react';
 import { useT } from '@/lib/i18n';
@@ -21,10 +22,7 @@ function isEditable(submittedAt: string): boolean {
   return new Date() < deadline;
 }
 
-type EditableSubmission = {
-  location_id: string;
-  submitted_at: string;
-};
+type Loc = { id: string; name: string; type: string };
 
 export default function AddInventoryPage() {
   const router = useRouter();
@@ -39,21 +37,38 @@ export default function AddInventoryPage() {
         .eq('is_active', true)
         .neq('name', 'ZK')
         .order('name');
-      return data ?? [];
+      return (data ?? []) as Loc[];
     },
   });
 
-  // Fetch the current user's most recent submission per location and keep
-  // only those still within the edit window (before 09:00 next day).
-  const { data: editableByLocation = {} } = useQuery<Record<string, EditableSubmission>>({
+  // Primary source: localStorage written immediately after submission (device-local, instant, no RLS)
+  const [localRecent, setLocalRecent] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    if (!locations?.length) return;
+    const map: Record<string, string> = {};
+    for (const loc of locations) {
+      const submittedAt = localStorage.getItem(`yumas_recent_inv_${loc.id}`);
+      if (submittedAt) {
+        if (isEditable(submittedAt)) {
+          map[loc.id] = submittedAt;
+        } else {
+          // Past deadline — clean up stale entry
+          localStorage.removeItem(`yumas_recent_inv_${loc.id}`);
+        }
+      }
+    }
+    setLocalRecent(map);
+  }, [locations]);
+
+  // Fallback source: DB query (catches cross-device and post-localStorage-clear cases)
+  const { data: dbRecent = {} } = useQuery<Record<string, string>>({
     queryKey: ['my-editable-submissions'],
     staleTime: 0,
     queryFn: async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return {};
 
-      // Pull the latest submission per location for this user within the last 36 h
-      // (generous window — isEditable does the precise check)
       const since = new Date();
       since.setHours(since.getHours() - 36);
 
@@ -64,18 +79,20 @@ export default function AddInventoryPage() {
         .gte('submitted_at', since.toISOString())
         .order('submitted_at', { ascending: false });
 
-      if (!data) return {};
+      if (!data?.length) return {};
 
-      // Keep only the most-recent editable submission per location
-      const map: Record<string, EditableSubmission> = {};
+      const map: Record<string, string> = {};
       for (const row of data) {
         if (!map[row.location_id] && isEditable(row.submitted_at)) {
-          map[row.location_id] = row as EditableSubmission;
+          map[row.location_id] = row.submitted_at;
         }
       }
       return map;
     },
   });
+
+  // Merge: localStorage wins (it's always fresher on the same device)
+  const recentByLocation: Record<string, string> = { ...dbRecent, ...localRecent };
 
   return (
     <div>
@@ -90,13 +107,13 @@ export default function AddInventoryPage() {
             ))}
           </div>
         ) : (
-          (locations as { id: string; name: string; type: string }[] ?? []).map((loc, i, arr) => {
-            const color   = LOCATION_COLORS[loc.name] ?? '#1B5E20';
-            const isLast  = i === arr.length - 1;
-            const Icon    = loc.type === 'production' ? Factory : Building2;
-            const recent  = editableByLocation[loc.id];
-            const timeStr = recent
-              ? new Date(recent.submitted_at).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })
+          (locations ?? []).map((loc, i, arr) => {
+            const color    = LOCATION_COLORS[loc.name] ?? '#1B5E20';
+            const isLast   = i === arr.length - 1;
+            const Icon     = loc.type === 'production' ? Factory : Building2;
+            const submittedAt = recentByLocation[loc.id];
+            const timeStr  = submittedAt
+              ? new Date(submittedAt).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })
               : null;
 
             return (
@@ -123,8 +140,8 @@ export default function AddInventoryPage() {
                   </svg>
                 </button>
 
-                {/* Editable-submission banner — only when a recent submission exists */}
-                {recent && timeStr && (
+                {/* Editable-submission banner */}
+                {submittedAt && timeStr && (
                   <div className="mx-4 mb-3 flex items-center justify-between gap-3 px-3 py-2 bg-amber-50 border border-amber-200 rounded-xl">
                     <div className="flex items-center gap-2 min-w-0">
                       <Pencil size={13} className="text-amber-500 flex-shrink-0" />

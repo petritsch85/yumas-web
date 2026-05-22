@@ -317,6 +317,7 @@ export default function LocationInventoryFormPage({
           setLastSubmittedComment(comment);
           setSubmittedAt(now);
           clearDraft(params.locationId);
+          localStorage.setItem(`yumas_recent_inv_${params.locationId}`, now);
           setSubmitted(true);
           setCounts({});
           setComment('');
@@ -343,6 +344,7 @@ export default function LocationInventoryFormPage({
           setLastSubmittedComment(comment);
           setSubmittedAt(now);
           clearDraft(params.locationId);
+          localStorage.setItem(`yumas_recent_inv_${params.locationId}`, now);
           const n = await pendingCount();
           if (n > 0) {
             setSyncing(true);
@@ -383,6 +385,8 @@ export default function LocationInventoryFormPage({
     setTimerRunning(false);
     setElapsedSeconds(0);
     if (timerInterval.current) clearInterval(timerInterval.current);
+    // Clear the recent-submission marker so the picker doesn't show a stale banner
+    localStorage.removeItem(`yumas_recent_inv_${params.locationId}`);
   };
 
   const editSubmitted = () => {
