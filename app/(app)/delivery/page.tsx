@@ -8,7 +8,7 @@ import {
   Eye, Settings2, Truck, Play, Timer, Flag, XCircle,
   SlidersHorizontal, Save, X, CalendarDays,
   Navigation, Store, ClipboardCheck, Clock, Lock, LockOpen,
-  ClipboardList,
+  ClipboardList, MessageSquare,
 } from 'lucide-react';
 import type { Profile } from '@/types';
 import { useT } from '@/lib/i18n';
@@ -70,6 +70,7 @@ type DeliveryRun = {
   list_confirmed_westend_at:  string | null;
   day_locked_at:  string | null;
   day_locked_by:  string | null;
+  store_notes:    Record<string, string> | null;
 };
 
 type StoreReceipt = {
@@ -1113,7 +1114,7 @@ export default function DeliveryPage() {
       const invResults = await Promise.all(
         STORES.map(store =>
           supabase.from('inventory_submissions')
-            .select('data, submitted_at')
+            .select('data, submitted_at, comment')
             .eq('location_name', store)
             .order('submitted_at', { ascending: false })
             .limit(1)
@@ -1123,6 +1124,7 @@ export default function DeliveryPage() {
       // Build map: store → { item_name_lower → quantity }
       const liveInventory: Partial<Record<Store, Record<string, number>>> = {};
       const liveInventoryTimestamps: Partial<Record<Store, string>> = {};
+      const liveInventoryComments: Partial<Record<Store, string>> = {};
       STORES.forEach((store, i) => {
         const sub = invResults[i].data;
         if (sub?.data) {
@@ -1132,6 +1134,7 @@ export default function DeliveryPage() {
           }
           liveInventory[store] = map;
           if ((sub as any).submitted_at) liveInventoryTimestamps[store] = (sub as any).submitted_at;
+          if ((sub as any).comment)      liveInventoryComments[store]  = (sub as any).comment;
         }
       });
 
@@ -1145,7 +1148,7 @@ export default function DeliveryPage() {
           .from('delivery_run_lines').select('*').eq('run_id', run.id)
           .order('location_name').order('section').order('item_name');
         if (linesErr) throw linesErr;
-        return { run: run as DeliveryRun, lines: (lines ?? []) as DeliveryLine[], isPreview: false, liveInventory, liveInventoryTimestamps };
+        return { run: run as DeliveryRun, lines: (lines ?? []) as DeliveryLine[], isPreview: false, liveInventory, liveInventoryTimestamps, liveInventoryComments };
       }
 
       // No run yet — build a preview from delivery_targets (reported = 0)
@@ -1182,7 +1185,7 @@ export default function DeliveryPage() {
         }
       });
 
-      return { run: null, lines: previewLines, isPreview: true, liveInventory, liveInventoryTimestamps };
+      return { run: null, lines: previewLines, isPreview: true, liveInventory, liveInventoryTimestamps, liveInventoryComments };
     },
   });
 
@@ -1495,6 +1498,7 @@ export default function DeliveryPage() {
   const isPreview = runData?.isPreview ?? false;
   const liveInventory = runData?.liveInventory ?? {};
   const liveInventoryTimestamps = runData?.liveInventoryTimestamps ?? {};
+  const liveInventoryComments = runData?.liveInventoryComments ?? {};
 
   const confirmList = async () => {
     if (!run) return;
@@ -1526,6 +1530,25 @@ export default function DeliveryPage() {
   };
 
   const [deconfirmingStore, setDeconfirmingStore] = useState<Store | null>(null);
+
+  /* ─ Per-store packer note (manager-editable override of inventory comment) ─ */
+  const [editingNoteStore, setEditingNoteStore] = useState<Store | null>(null);
+  const [noteText, setNoteText] = useState('');
+
+  const saveNote = useMutation({
+    mutationFn: async ({ store, text }: { store: Store; text: string }) => {
+      if (!run) return;
+      const current = run.store_notes ?? {};
+      const updated = text ? { ...current, [store]: text } : Object.fromEntries(Object.entries(current).filter(([k]) => k !== store));
+      const { error } = await supabase.from('delivery_runs').update({ store_notes: updated }).eq('id', run.id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['delivery-run', targetDate] });
+      setEditingNoteStore(null);
+    },
+  });
+
   const deconfirmStore = async (store: Store) => {
     if (!run) return;
     setDeconfirmingStore(store);
@@ -2246,6 +2269,98 @@ export default function DeliveryPage() {
                   : storeLines(store);
                 return (
                   <div key={store} className={activeStore === store ? 'block' : 'hidden'}>
+                    {/* ── Store note (inventory comment / manager override) ── */}
+                    {(() => {
+                      const managerNote: string = run?.store_notes?.[store] ?? '';
+                      const inventoryComment: string = liveInventoryComments[store] ?? '';
+                      const displayNote = managerNote || inventoryComment;
+                      const isEditing = editingNoteStore === store;
+                      const canEdit = viewMode === 'manager' && !!run && !isPreview;
+
+                      if (isEditing) {
+                        return (
+                          <div className="mb-4 bg-amber-50 border border-amber-200 rounded-xl p-4 space-y-3">
+                            <p className="text-xs font-semibold text-amber-700 uppercase tracking-wide">
+                              Note for Packer — {store}
+                            </p>
+                            {inventoryComment && (
+                              <p className="text-xs text-amber-600 italic">
+                                Inventory note: &ldquo;{inventoryComment}&rdquo;
+                              </p>
+                            )}
+                            <textarea
+                              value={noteText}
+                              onChange={e => setNoteText(e.target.value)}
+                              rows={3}
+                              autoFocus
+                              placeholder="Type a note for the packer…"
+                              className="w-full text-sm border border-amber-200 rounded-lg px-3 py-2 resize-none focus:outline-none focus:ring-2 focus:ring-amber-300 bg-white placeholder-gray-300"
+                            />
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => saveNote.mutate({ store, text: noteText.trim() })}
+                                disabled={saveNote.isPending}
+                                className="flex items-center gap-1.5 bg-[#1B5E20] hover:bg-[#2E7D32] text-white px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors disabled:opacity-50"
+                              >
+                                <Save size={12} />{saveNote.isPending ? 'Saving…' : 'Save note'}
+                              </button>
+                              <button
+                                onClick={() => setEditingNoteStore(null)}
+                                className="text-xs text-gray-500 hover:text-gray-700 px-3 py-1.5 border border-gray-200 rounded-lg"
+                              >
+                                Cancel
+                              </button>
+                              {managerNote && (
+                                <button
+                                  onClick={() => saveNote.mutate({ store, text: '' })}
+                                  disabled={saveNote.isPending}
+                                  className="ml-auto text-xs text-red-400 hover:text-red-600"
+                                >
+                                  Remove override
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      }
+
+                      if (displayNote) {
+                        return (
+                          <div className="mb-4 flex items-start gap-3 px-4 py-3 bg-amber-50 border border-amber-200 rounded-xl">
+                            <MessageSquare size={15} className="text-amber-500 flex-shrink-0 mt-0.5" />
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs font-semibold text-amber-600 uppercase tracking-wide mb-1">
+                                {managerNote ? "Manager's note for packer" : 'Note from inventory report'}
+                              </p>
+                              <p className="text-sm text-amber-800 leading-relaxed whitespace-pre-wrap">{displayNote}</p>
+                            </div>
+                            {canEdit && (
+                              <button
+                                onClick={() => { setEditingNoteStore(store); setNoteText(managerNote || inventoryComment); }}
+                                className="flex-shrink-0 text-xs text-amber-600 hover:text-amber-800 font-semibold underline whitespace-nowrap"
+                              >
+                                Edit
+                              </button>
+                            )}
+                          </div>
+                        );
+                      }
+
+                      // No note yet — let the manager add one
+                      if (canEdit) {
+                        return (
+                          <button
+                            onClick={() => { setEditingNoteStore(store); setNoteText(''); }}
+                            className="mb-4 w-full flex items-center gap-2 px-4 py-2.5 border border-dashed border-gray-200 rounded-xl text-xs text-gray-400 hover:border-amber-300 hover:text-amber-600 transition-colors"
+                          >
+                            <MessageSquare size={13} /> Add note for packer
+                          </button>
+                        );
+                      }
+
+                      return null;
+                    })()}
+
                     <StoreDeliveryList
                       store={store}
                       lines={displayLines}
