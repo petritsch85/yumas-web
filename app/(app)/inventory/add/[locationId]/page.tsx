@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams, useParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
 import { saveDraft, loadDraft, clearDraft } from '@/lib/draft-store';
@@ -64,7 +64,7 @@ async function syncPendingQueue(): Promise<number> {
 
 /* ─── Main Page ──────────────────────────────────────────────────────────── */
 export default function LocationInventoryFormPage({
-  params,
+  params: _params,
 }: {
   params: { locationId: string };
 }) {
@@ -72,6 +72,10 @@ export default function LocationInventoryFormPage({
   const searchParams = useSearchParams();
   const { t } = useT();
   const locationName = searchParams.get('name') ?? 'Location';
+
+  // useParams() reliably reads the URL segment on the client regardless of
+  // whether Next.js has made the params prop async (Next.js 15 behaviour).
+  const { locationId } = useParams() as { locationId: string };
 
   /* ── DB queries — items and sections for this store ── */
   const { data: dbItems = [], isLoading: itemsLoading } = useQuery({
@@ -183,14 +187,14 @@ export default function LocationInventoryFormPage({
     data: { name: string; quantity: number }[];
     comment: string | null;
   } | null>({
-    queryKey: ['latest-my-submission', params.locationId],
+    queryKey: ['latest-my-submission', locationId],
     queryFn: async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return null;
       const { data } = await supabase
         .from('inventory_submissions')
         .select('id, submitted_at, data, comment')
-        .eq('location_id', params.locationId)
+        .eq('location_id', locationId)
         .eq('submitted_by', user.id)
         .order('submitted_at', { ascending: false })
         .limit(1)
@@ -216,9 +220,9 @@ export default function LocationInventoryFormPage({
 
   /* ── Load draft on mount ── */
   useEffect(() => {
-    const draft = loadDraft(params.locationId);
+    const draft = loadDraft(locationId);
     if (draft) { setCounts(draft.counts); setComment(draft.comment); }
-  }, [params.locationId]);
+  }, [locationId]);
 
   /* ── Queue count ── */
   const refreshQueueCount = useCallback(async () => {
@@ -254,9 +258,9 @@ export default function LocationInventoryFormPage({
   /* ── Auto-save draft ── */
   useEffect(() => {
     if (draftTimer.current) clearTimeout(draftTimer.current);
-    draftTimer.current = setTimeout(() => saveDraft(params.locationId, counts, comment), 800);
+    draftTimer.current = setTimeout(() => saveDraft(locationId, counts, comment), 800);
     return () => { if (draftTimer.current) clearTimeout(draftTimer.current); };
-  }, [counts, comment, params.locationId]);
+  }, [counts, comment, locationId]);
 
   const filledCount = Object.values(counts).filter(v => v !== '' && v !== '0').length;
   const handleChange = (name: string, value: string) => setCounts(prev => ({ ...prev, [name]: value }));
@@ -290,7 +294,7 @@ export default function LocationInventoryFormPage({
 
       if (!navigator.onLine) {
         await enqueue({
-          locationId:      params.locationId,
+          locationId:      locationId,
           locationName,
           userId:          user.id,
           data,
@@ -298,7 +302,7 @@ export default function LocationInventoryFormPage({
           durationSeconds: durationSeconds > 0 ? durationSeconds : null,
           queuedAt:        new Date().toISOString(),
         });
-        clearDraft(params.locationId);
+        clearDraft(locationId);
         await refreshQueueCount();
         setSavedOffline(true);
         setCounts({});
@@ -317,8 +321,8 @@ export default function LocationInventoryFormPage({
           setLastSubmittedCounts(counts);
           setLastSubmittedComment(comment);
           setSubmittedAt(now);
-          clearDraft(params.locationId);
-          localStorage.setItem(`yumas_recent_inv_${params.locationId}`, now);
+          clearDraft(locationId);
+          localStorage.setItem(`yumas_recent_inv_${locationId}`, now);
           setSubmitted(true);
           setCounts({});
           setComment('');
@@ -327,7 +331,7 @@ export default function LocationInventoryFormPage({
           const { data: inserted, error: insertError } = await supabase
             .from('inventory_submissions')
             .insert({
-              location_id:      params.locationId,
+              location_id:      locationId,
               location_name:    locationName,
               submitted_by:     user.id,
               submitted_at:     now,
@@ -344,8 +348,8 @@ export default function LocationInventoryFormPage({
           setLastSubmittedCounts(counts);
           setLastSubmittedComment(comment);
           setSubmittedAt(now);
-          clearDraft(params.locationId);
-          localStorage.setItem(`yumas_recent_inv_${params.locationId}`, now);
+          clearDraft(locationId);
+          localStorage.setItem(`yumas_recent_inv_${locationId}`, now);
           const n = await pendingCount();
           if (n > 0) {
             setSyncing(true);
@@ -369,7 +373,7 @@ export default function LocationInventoryFormPage({
     if (!window.confirm('Do you really want to reset? All entered quantities will be set back to 0.')) return;
     setCounts({});
     setComment('');
-    clearDraft(params.locationId);
+    clearDraft(locationId);
   };
 
   const startNew = () => {
@@ -387,7 +391,7 @@ export default function LocationInventoryFormPage({
     setElapsedSeconds(0);
     if (timerInterval.current) clearInterval(timerInterval.current);
     // Clear the recent-submission marker so the picker doesn't show a stale banner
-    localStorage.removeItem(`yumas_recent_inv_${params.locationId}`);
+    localStorage.removeItem(`yumas_recent_inv_${locationId}`);
   };
 
   const editSubmitted = () => {
@@ -408,7 +412,7 @@ export default function LocationInventoryFormPage({
       const { data: row, error } = await supabase
         .from('inventory_submissions')
         .select('id, submitted_at, submitted_by, data, comment')
-        .eq('location_id', params.locationId)
+        .eq('location_id', locationId)
         .order('submitted_at', { ascending: false })
         .limit(1)
         .maybeSingle();
