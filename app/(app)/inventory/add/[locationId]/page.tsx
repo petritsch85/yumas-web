@@ -146,6 +146,7 @@ export default function LocationInventoryFormPage({
   const [queueCount, setQueueCount] = useState(0);
   const [syncing, setSyncing]       = useState(false);
   const [justSynced, setJustSynced] = useState(false);
+  const [loadingPrevious, setLoadingPrevious] = useState(false);
   const draftTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   /* ── Timer ── */
@@ -396,6 +397,48 @@ export default function LocationInventoryFormPage({
     setSubmitted(false);
   };
 
+  /* ── Load most recent submission for this location and pre-fill the form ── */
+  const handleLoadPrevious = async () => {
+    setLoadingPrevious(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const { data } = await supabase
+        .from('inventory_submissions')
+        .select('id, submitted_at, data, comment')
+        .eq('location_id', params.locationId)
+        .eq('submitted_by', user.id)
+        .order('submitted_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (!data) {
+        alert('No previous submission found for this location.');
+        return;
+      }
+
+      const restored = Object.fromEntries(
+        (data.data as { name: string; quantity: number }[]).map((d: { name: string; quantity: number }) => [d.name, String(d.quantity)])
+      );
+      setCounts(restored);
+      setComment(data.comment ?? '');
+
+      if (isEditable(data.submitted_at)) {
+        setSubmissionId(data.id);
+        setSubmittedAt(data.submitted_at);
+        setIsEditingSubmission(true);
+      }
+
+      // Auto-start the timer so the user can begin editing immediately
+      setTimerStarted(true);
+      setTimerRunning(true);
+    } catch (e: unknown) {
+      alert((e as Error)?.message ?? 'Could not load previous submission.');
+    } finally {
+      setLoadingPrevious(false);
+    }
+  };
+
   /* ─── Offline-saved screen ─── */
   if (savedOffline) {
     return (
@@ -553,10 +596,18 @@ export default function LocationInventoryFormPage({
             )}
 
             {!timerStarted ? (
-              <button onClick={startTimer} disabled={itemsLoading}
-                className="flex items-center gap-2 bg-[#1B5E20] text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-[#2E7D32] transition-colors disabled:opacity-50">
-                <Play size={14} />Start Inventory
-              </button>
+              <div className="flex flex-col items-end gap-2">
+                <button onClick={startTimer} disabled={itemsLoading}
+                  className="flex items-center gap-2 bg-[#1B5E20] text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-[#2E7D32] transition-colors disabled:opacity-50">
+                  <Play size={14} />Start Inventory
+                </button>
+                <button
+                  onClick={handleLoadPrevious}
+                  disabled={itemsLoading || loadingPrevious}
+                  className="flex items-center gap-2 bg-orange-500 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-orange-600 transition-colors disabled:opacity-50">
+                  <Pencil size={14} />{loadingPrevious ? 'Loading…' : 'Edit Inventory'}
+                </button>
+              </div>
             ) : (
               <div className="flex-shrink-0 flex items-center gap-2 bg-gray-100 rounded-lg px-3 py-2">
                 <Timer size={15} className={timerRunning ? 'text-[#1B5E20]' : 'text-gray-400'} />
