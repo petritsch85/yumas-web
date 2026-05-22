@@ -588,9 +588,15 @@ export default function DeliveryReportsPage() {
 
       {/* ── Empty state ── */}
       {!activeRun && (
-        <div className="bg-white rounded-xl border border-gray-100 p-10 text-center text-gray-400 text-sm">
+        <div className="bg-white rounded-xl border border-gray-100 p-10 text-center text-gray-400 text-sm space-y-1">
           <Package size={32} className="mx-auto text-gray-200 mb-3" />
-          No delivery runs found yet.
+          {selectedRunId === 'upcoming'
+            ? <>
+                <p className="font-medium text-gray-500">No delivery list generated yet</p>
+                <p className="text-xs text-gray-400">Once inventories are in, go to <strong>List Confirmation</strong> and click <strong>Generate List</strong>.</p>
+              </>
+            : <p>No delivery runs found yet.</p>
+          }
         </div>
       )}
 
