@@ -143,6 +143,8 @@ export default function LocationInventoryFormPage({
   const [submittedAt, setSubmittedAt]   = useState<string | null>(null);
   const [submissionId, setSubmissionId] = useState<string | null>(null);
   const [isEditingSubmission, setIsEditingSubmission] = useState(false);
+  const [originalSubData, setOriginalSubData]         = useState<{ section: string; name: string; unit: string; quantity: number }[] | null>(null);
+  const [subAlreadyEdited, setSubAlreadyEdited]       = useState(false);
   const [lastSubmittedCounts, setLastSubmittedCounts] = useState<Record<string, string>>({});
   const [lastSubmittedComment, setLastSubmittedComment] = useState('');
   const [isStaff, setIsStaff]       = useState(false);
@@ -183,8 +185,8 @@ export default function LocationInventoryFormPage({
 
   /* ── Check for existing editable submission from this user ── */
   const { data: existingSubmission } = useQuery<{
-    id: string; submitted_at: string;
-    data: { name: string; quantity: number }[];
+    id: string; submitted_at: string; edited_at: string | null;
+    data: { section: string; name: string; unit: string; quantity: number }[];
     comment: string | null;
   } | null>({
     queryKey: ['latest-my-submission', locationId],
@@ -193,14 +195,14 @@ export default function LocationInventoryFormPage({
       if (!user) return null;
       const { data } = await supabase
         .from('inventory_submissions')
-        .select('id, submitted_at, data, comment')
+        .select('id, submitted_at, edited_at, data, comment')
         .eq('location_id', locationId)
         .eq('submitted_by', user.id)
         .order('submitted_at', { ascending: false })
         .limit(1)
         .maybeSingle();
       if (!data || !isEditable(data.submitted_at)) return null;
-      return data as { id: string; submitted_at: string; data: { name: string; quantity: number }[]; comment: string | null };
+      return data as { id: string; submitted_at: string; edited_at: string | null; data: { section: string; name: string; unit: string; quantity: number }[]; comment: string | null };
     },
     staleTime: 0,
   });
@@ -208,12 +210,14 @@ export default function LocationInventoryFormPage({
   const loadExistingSubmission = () => {
     if (!existingSubmission) return;
     const restored = Object.fromEntries(
-      (existingSubmission.data as { name: string; quantity: number }[]).map(d => [d.name, String(d.quantity)])
+      existingSubmission.data.map(d => [d.name, String(d.quantity)])
     );
     setCounts(restored);
     setComment(existingSubmission.comment ?? '');
     setSubmissionId(existingSubmission.id);
     setSubmittedAt(existingSubmission.submitted_at);
+    setOriginalSubData(existingSubmission.data);
+    setSubAlreadyEdited(!!existingSubmission.edited_at);
     setIsEditingSubmission(true);
     setSubmitted(false);
   };
@@ -312,9 +316,20 @@ export default function LocationInventoryFormPage({
 
         if (isEditingSubmission && submissionId) {
           // UPDATE existing submission within edit window
+          const updatePayload: Record<string, unknown> = {
+            data,
+            comment:      comment.trim() || null,
+            submitted_at: now,
+            edited_at:    now,
+            edited_by:    user.id,
+          };
+          // Preserve the true original across multiple edits (only store once)
+          if (!subAlreadyEdited && originalSubData) {
+            updatePayload.original_data = originalSubData;
+          }
           const { error: updateError } = await supabase
             .from('inventory_submissions')
-            .update({ data, comment: comment.trim() || null, submitted_at: now })
+            .update(updatePayload)
             .eq('id', submissionId)
             .eq('submitted_by', user.id);
           if (updateError) { alert(`Error updating: ${updateError.message}`); setSubmitting(false); return; }
@@ -411,7 +426,7 @@ export default function LocationInventoryFormPage({
       // manager loading the last count regardless of who submitted it is useful.
       const { data: row, error } = await supabase
         .from('inventory_submissions')
-        .select('id, submitted_at, submitted_by, data, comment')
+        .select('id, submitted_at, submitted_by, data, comment, edited_at')
         .eq('location_id', locationId)
         .order('submitted_at', { ascending: false })
         .limit(1)
@@ -433,6 +448,10 @@ export default function LocationInventoryFormPage({
       );
       setCounts(restored);
       setComment(row.comment ?? '');
+
+      // Capture original data for diff tracking (used when saving the edit)
+      setOriginalSubData(row.data as { section: string; name: string; unit: string; quantity: number }[]);
+      setSubAlreadyEdited(!!(row as any).edited_at);
 
       // Only enter edit mode if it was submitted by the current user and is still editable
       if (isEditable(row.submitted_at)) {
@@ -788,7 +807,7 @@ export default function LocationInventoryFormPage({
           className="flex items-center gap-2 bg-[#1B5E20] text-white px-6 py-2.5 rounded-lg text-sm font-bold hover:bg-[#2E7D32] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <Send size={15} />
-          {submitting ? 'Saving…' : isEditingSubmission ? 'Update Submission' : isOnline ? 'Submit' : 'Save Offline'}
+          {submitting ? 'Saving…' : isEditingSubmission ? 'Update' : isOnline ? 'Submit' : 'Save Offline'}
         </button>
       </div>
     </div>
