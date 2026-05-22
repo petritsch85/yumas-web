@@ -67,8 +67,16 @@ function toLocalDateStr(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
+/**
+ * Submissions before 04:00 are treated as end-of-the-previous-day.
+ * e.g. 00:12 on May 22nd → assigned to May 21st (end-of-evening inventory).
+ */
+const EOD_CUTOFF_HOUR = 4;
+
 function localDateStrFromIso(iso: string): string {
-  return toLocalDateStr(new Date(iso));
+  const d = new Date(iso);
+  if (d.getHours() < EOD_CUTOFF_HOUR) d.setDate(d.getDate() - 1);
+  return toLocalDateStr(d);
 }
 
 /** Returns Mon–Sun of the week at the given offset (0 = current week) */
@@ -754,7 +762,7 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
         .select('submitted_at, data')
         .eq('location_name', location)
         .gte('submitted_at', `${queryRangeStart}T00:00:00`)
-        .lte('submitted_at', `${weekEnd}T23:59:59`)
+        .lte('submitted_at', `${(() => { const d = new Date(weekEnd + 'T12:00:00'); d.setDate(d.getDate() + 1); return toLocalDateStr(d); })()}T03:59:59`)
         .order('submitted_at', { ascending: true });
 
       const { data: runs } = await supabase
