@@ -7,7 +7,7 @@ import {
   RefreshCw, CheckCircle2, AlertCircle, Package, TrendingUp,
   Eye, Settings2, Truck, Play, Timer, Flag, XCircle,
   Save, X, CalendarDays,
-  Navigation, Store, ClipboardCheck, Clock, Lock, LockOpen,
+  Navigation, Store, ClipboardCheck, Clock,
   ClipboardList, MessageSquare,
 } from 'lucide-react';
 import type { Profile } from '@/types';
@@ -1073,8 +1073,6 @@ export default function DeliveryPage() {
   const [finishingDelivery, setFinishingDelivery] = useState(false);
   const [confirmingList, setConfirmingList] = useState(false);
   const [confirmingStore, setConfirmingStore] = useState<Store | null>(null);
-  const [lockingDay, setLockingDay] = useState(false);
-
   useEffect(() => {
     return () => { if (packingInterval.current) clearInterval(packingInterval.current); };
   }, []);
@@ -1448,37 +1446,6 @@ export default function DeliveryPage() {
     }
   };
 
-  const lockDay = async () => {
-    if (!run) return;
-    setLockingDay(true);
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      await supabase.from('delivery_runs').update({
-        day_locked_at: new Date().toISOString(),
-        day_locked_by: user?.id ?? null,
-        lists_checked_at: new Date().toISOString(),
-        lists_checked_by: user?.id ?? null,
-      }).eq('id', run.id);
-      qc.invalidateQueries({ queryKey: ['delivery-run', targetDate] });
-    } finally {
-      setLockingDay(false);
-    }
-  };
-
-  const unlockDay = async () => {
-    if (!run) return;
-    setLockingDay(true);
-    try {
-      await supabase.from('delivery_runs').update({
-        day_locked_at: null,
-        day_locked_by: null,
-      }).eq('id', run.id);
-      qc.invalidateQueries({ queryKey: ['delivery-run', targetDate] });
-    } finally {
-      setLockingDay(false);
-    }
-  };
-
   /* ─ Per-store confirmation derived state ─ */
   const storeConfirmedAt = (store: Store): string | null => {
     const col = STORE_CONFIRM_COL[store];
@@ -1486,7 +1453,6 @@ export default function DeliveryPage() {
   };
   // ZK has no confirm column — only require the 3 restaurant stores to be confirmed
   const allStoresConfirmed = STORES.filter(s => s in STORE_CONFIRM_COL).every(s => !!storeConfirmedAt(s));
-  const dayLocked = !!run?.day_locked_at;
   const deliveryStarted = !!run?.delivery_started_at;
 
   /* ─ Receipt status (for driver live view) ─ */
@@ -1695,8 +1661,7 @@ export default function DeliveryPage() {
             {viewMode === 'manager' && (
               <button
                 onClick={handleGenerate}
-                disabled={generating || dayLocked}
-                title={dayLocked ? 'Day is locked — unlock to regenerate' : undefined}
+                disabled={generating}
                 className="flex items-center gap-2 bg-[#1B5E20] text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-[#2E7D32] transition-colors disabled:opacity-60 shadow-sm"
               >
                 {generating ? <><RefreshCw size={15} className="animate-spin" /> Generating…</> : <><RefreshCw size={15} /> {run ? 'Regenerate' : 'Generate List'}</>}
@@ -1752,7 +1717,6 @@ export default function DeliveryPage() {
               <span className="text-xs text-gray-500 font-medium whitespace-nowrap">Delivery Day:</span>
               {DELIVERY_DAY_BUTTONS.map(btn => {
                 const isActive = selectedDow === btn.dow;
-                const isLocked = isActive && dayLocked;
                 const d = new Date(selectedWeek + 'T12:00:00');
                 d.setDate(d.getDate() + btn.offset);
                 const dayNum = d.getDate();
@@ -1763,45 +1727,17 @@ export default function DeliveryPage() {
                     onClick={() => setSelectedDow(btn.dow)}
                     className={`relative flex flex-col items-center px-5 py-2 rounded-lg text-sm font-semibold border transition-colors ${
                       isActive
-                        ? isLocked
-                          ? 'bg-gray-700 border-gray-700 text-white shadow-sm'
-                          : 'bg-[#1B5E20] border-[#1B5E20] text-white shadow-sm'
+                        ? 'bg-[#1B5E20] border-[#1B5E20] text-white shadow-sm'
                         : 'border-gray-200 text-gray-600 bg-white hover:border-[#1B5E20] hover:text-[#1B5E20]'
                     }`}
                   >
                     <span className="flex items-center gap-1 text-[11px] font-bold uppercase tracking-wide leading-tight">
-                      {isLocked && <Lock size={9} />}
                       {btn.label}
                     </span>
                     <span className={`text-[10px] leading-tight mt-0.5 ${isActive ? 'text-gray-200' : 'text-gray-400'}`}>{dayNum} {monAbbr}</span>
                   </button>
                 );
               })}
-
-              {/* Lock / Unlock controls */}
-              {run && !isPreview && (
-                dayLocked ? (
-                  !deliveryStarted && (
-                    <button
-                      onClick={unlockDay}
-                      disabled={lockingDay}
-                      className="flex items-center gap-1.5 text-sm border border-gray-300 rounded-lg px-3 py-2 text-gray-600 bg-white shadow-sm hover:bg-gray-50 transition-colors disabled:opacity-50 ml-2"
-                    >
-                      <LockOpen size={13} /> {lockingDay ? 'Unlocking…' : 'Unlock'}
-                    </button>
-                  )
-                ) : (
-                  allStoresConfirmed && (
-                    <button
-                      onClick={lockDay}
-                      disabled={lockingDay}
-                      className="flex items-center gap-1.5 text-sm border border-gray-700 rounded-lg px-3 py-2 text-gray-700 bg-white shadow-sm hover:bg-gray-700 hover:text-white transition-colors disabled:opacity-50 ml-2"
-                    >
-                      <Lock size={13} /> {lockingDay ? 'Locking…' : 'Lock Day'}
-                    </button>
-                  )
-                )
-              )}
 
             </div>
           </div>
@@ -1957,7 +1893,6 @@ export default function DeliveryPage() {
                     <CheckCircle2 size={18} className="text-green-600 flex-shrink-0" />
                     <div className="flex-1">
                       <span className="text-sm font-bold text-green-800">All stores confirmed ✓</span>
-                      <span className="text-xs text-green-600 ml-2">Ready to lock the day</span>
                     </div>
                   </div>
                 ) : (
@@ -1985,24 +1920,22 @@ export default function DeliveryPage() {
                         </span>
                         <span className="text-xs text-green-500 ml-2">· Table locked</span>
                       </div>
-                      {!dayLocked && (
-                        <div className="flex items-center gap-3">
-                          <button
-                            onClick={() => confirmStore(activeStore)}
-                            disabled={confirmingStore === activeStore || deconfirmingStore === activeStore}
-                            className="text-xs text-green-600 hover:text-green-800 underline whitespace-nowrap"
-                          >
-                            Re-confirm
-                          </button>
-                          <button
-                            onClick={() => deconfirmStore(activeStore)}
-                            disabled={confirmingStore === activeStore || deconfirmingStore === activeStore}
-                            className="text-xs text-red-500 hover:text-red-700 underline whitespace-nowrap"
-                          >
-                            {deconfirmingStore === activeStore ? 'De-confirming…' : 'De-confirm'}
-                          </button>
-                        </div>
-                      )}
+                      <div className="flex items-center gap-3">
+                        <button
+                          onClick={() => confirmStore(activeStore)}
+                          disabled={confirmingStore === activeStore || deconfirmingStore === activeStore}
+                          className="text-xs text-green-600 hover:text-green-800 underline whitespace-nowrap"
+                        >
+                          Re-confirm
+                        </button>
+                        <button
+                          onClick={() => deconfirmStore(activeStore)}
+                          disabled={confirmingStore === activeStore || deconfirmingStore === activeStore}
+                          className="text-xs text-red-500 hover:text-red-700 underline whitespace-nowrap"
+                        >
+                          {deconfirmingStore === activeStore ? 'De-confirming…' : 'De-confirm'}
+                        </button>
+                      </div>
                     </div>
                   );
                 }
