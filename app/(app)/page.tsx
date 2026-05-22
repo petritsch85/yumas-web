@@ -162,7 +162,14 @@ export default function DashboardPage() {
     { label: t('dashboard.kpi.lowStockItems'),   value: lowStockCount ?? 0, icon: AlertTriangle, color: '#C62828', loading: loadingLowStock,  show: can('analysis')  },
   ].filter((k) => k.show);
 
-  const visibleLinks = QUICK_LINKS.filter((l) => can(l.permKey, l.adminOnly) && !(l.managerOnly && isStaffRole));
+  const isPacker = isStaffRole && !!(perms as any).packer;
+  const visibleLinks = QUICK_LINKS.filter((l) => {
+    if (!can(l.permKey, l.adminOnly)) return false;
+    if (l.managerOnly && isStaffRole) return false;
+    // Staff packers: suppress Delivery link (covered by Packing link)
+    if (l.permKey === 'delivery' && isPacker) return false;
+    return true;
+  });
   const showPOPanel       = can('buying');
   const showLowStockPanel = can('analysis');
   const showPanelRow      = showPOPanel || showLowStockPanel;
