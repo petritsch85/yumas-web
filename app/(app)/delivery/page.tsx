@@ -456,32 +456,47 @@ function StoreDeliveryList({
                   <th className={`px-3 md:px-4 py-3 text-center text-xs font-semibold uppercase tracking-wide ${stdScaleMode === 'high' ? 'text-[#1B5E20]' : 'text-gray-400'}`}>STD +25%</th>
                   <th className="px-3 md:px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wide">Target Today</th>
                 </>}
-                <th className="px-3 md:px-4 py-3 text-center text-xs font-semibold text-[#1B5E20] uppercase tracking-wide">To Pack</th>
+                <th className={`px-3 md:px-4 py-3 text-center text-xs font-semibold uppercase tracking-wide ${isManager ? 'text-[#1B5E20]' : 'text-[#1B5E20]'}`}>To Pack</th>
                 {!isManager && <>
                   <th className="px-3 md:px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wide">Packed</th>
-                  <th className="px-3 md:px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wide">Full/Partial</th>
+                  <th className="px-3 md:px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wide">Full / Partial</th>
                 </>}
               </tr>
             </thead>
             <tbody>
-              {sections.map(section => {
+              {sections.map((section, sIdx) => {
                 const sectionLines = canonicalItems(lines.filter(l => l.section === section), itemRank);
                 return (
                   <React.Fragment key={section}>
-                    <tr className="bg-gray-50">
-                      <td colSpan={colCount} className="px-3 md:px-4 py-2">
-                        <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">{section}</span>
+                    {/* Section separator gap (packer only, not first section) */}
+                    {!isManager && sIdx > 0 && (
+                      <tr><td colSpan={colCount} className="pt-2 bg-gray-50" /></tr>
+                    )}
+                    {/* Section header */}
+                    <tr className={isManager ? 'bg-gray-50' : 'bg-[#1B5E20]'}>
+                      <td colSpan={colCount} className={isManager ? 'px-3 md:px-4 py-2' : 'px-4 py-2.5'}>
+                        <span className={isManager
+                          ? 'text-xs font-semibold text-gray-500 uppercase tracking-wider'
+                          : 'text-xs font-bold text-white uppercase tracking-widest'
+                        }>{section}</span>
                       </td>
                     </tr>
-                    {sectionLines.map(line => {
+                    {sectionLines.map((line, lineIdx) => {
                       const deliverQty = liveDeliveryQty(line);
                       const muted = deliverQty === 0;
                       const targetVal = editingTargets[line.id] ?? String(line.target_qty);
                       const packedVal = editingPackedQty[line.id] ?? (line.packed_qty !== null ? String(line.packed_qty) : '');
+                      const isEven = lineIdx % 2 === 0;
 
                       return (
-                        <tr key={line.id} className={`border-t border-gray-50 transition-colors ${muted ? 'opacity-40' : 'hover:bg-gray-50/50'}`}>
-                          <td className={`px-3 md:px-4 py-2.5 font-medium ${muted ? 'text-gray-400' : 'text-gray-800'}`}>
+                        <tr key={line.id} className={`border-t border-gray-100 transition-colors ${
+                          muted
+                            ? 'opacity-30'
+                            : isManager
+                              ? 'hover:bg-gray-50/50'
+                              : isEven ? 'bg-white hover:bg-green-50/30' : 'bg-gray-50/50 hover:bg-green-50/30'
+                        }`}>
+                          <td className={`px-3 md:px-4 ${isManager ? 'py-2.5' : 'py-3'} font-medium ${muted ? 'text-gray-400' : 'text-gray-800'}`}>
                             {line.item_name}
                             {!isManager && <div className="text-xs text-gray-400 font-normal mt-0.5 sm:hidden">{line.unit}</div>}
                           </td>
@@ -528,11 +543,15 @@ function StoreDeliveryList({
                           </>}
                           <td className="px-2 md:px-4 py-2.5 text-center">
                             {deliverQty > 0 ? (
-                              <span className="inline-flex items-center justify-center min-w-[2rem] px-2 py-0.5 rounded-md bg-[#1B5E20]/10 text-[#1B5E20] font-bold text-sm">{deliverQty}</span>
-                            ) : <span className="text-gray-300 text-xs">—</span>}
+                              <span className={`inline-flex items-center justify-center tabular-nums font-bold rounded-lg ${
+                                isManager
+                                  ? 'min-w-[2rem] px-2 py-0.5 bg-[#1B5E20]/10 text-[#1B5E20] text-sm'
+                                  : 'min-w-[2.5rem] px-3 py-1 bg-[#1B5E20] text-white text-base shadow-sm'
+                              }`}>{deliverQty}</span>
+                            ) : <span className="text-gray-200 text-xs">—</span>}
                           </td>
                           {!isManager && (
-                            <td className="px-2 md:px-4 py-2.5 text-center">
+                            <td className="px-2 md:px-4 py-3 text-center">
                               {deliverQty > 0 ? (
                                 <input
                                   type="number" min="0" step="1"
@@ -541,14 +560,14 @@ function StoreDeliveryList({
                                   disabled={!canPack}
                                   onChange={e => onPackedQtyChange(line.id, e.target.value)}
                                   onBlur={e => onPackedQtyBlur(line.id, e.target.value, deliverQty)}
-                                  className={`w-16 text-center border rounded-md px-1.5 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20] tabular-nums ${!canPack ? 'border-gray-100 bg-gray-50 text-gray-300 cursor-not-allowed' : 'border-gray-200 bg-white'}`}
+                                  className={`w-16 text-center border rounded-lg px-1.5 py-1.5 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[#1B5E20] tabular-nums ${!canPack ? 'border-gray-100 bg-gray-50 text-gray-300 cursor-not-allowed' : 'border-gray-300 bg-white'}`}
                                   title={!canPack ? 'Start packing first' : ''}
                                 />
                               ) : <span className="text-gray-200 text-xs">—</span>}
                             </td>
                           )}
                           {!isManager && (
-                            <td className="px-2 md:px-4 py-2.5 text-center">
+                            <td className="px-2 md:px-4 py-3 text-center">
                               {deliverQty > 0 ? (
                                 <PackingStatus
                                   packedQty={editingPackedQty[line.id] !== undefined
