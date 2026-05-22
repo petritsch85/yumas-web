@@ -266,6 +266,7 @@ function PermissionsEditor({
                       <input
                         type="checkbox"
                         className="hidden"
+                        tabIndex={-1}
                         checked={checked}
                         onChange={() => toggle(key)}
                       />
@@ -300,6 +301,7 @@ function PermissionsEditor({
                               <input
                                 type="checkbox"
                                 className="sr-only"
+                                tabIndex={-1}
                                 checked={subChecked}
                                 onChange={() => onChange({ ...perms, [flag]: !subChecked })}
                               />
