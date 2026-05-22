@@ -70,6 +70,7 @@ type DeliveryRun = {
   list_confirmed_westend_at:  string | null;
   day_locked_at:  string | null;
   day_locked_by:  string | null;
+  store_packing_finished_at:  Record<string, string> | null;
   store_notes:                Record<string, string> | null;
   store_inventory_comments:   Record<string, string> | null;
 };
@@ -1076,6 +1077,7 @@ export default function DeliveryPage() {
   const packingInterval = useRef<ReturnType<typeof setInterval> | null>(null);
   const [startingDelivery, setStartingDelivery] = useState(false);
   const [finishingDelivery, setFinishingDelivery] = useState(false);
+  const [finishingPackingStore, setFinishingPackingStore] = useState<Store | null>(null);
   const [confirmingList, setConfirmingList] = useState(false);
   const [confirmingStore, setConfirmingStore] = useState<Store | null>(null);
   useEffect(() => {
@@ -1330,6 +1332,20 @@ export default function DeliveryPage() {
     }
   };
 
+  const markStorePacked = async (store: Store) => {
+    if (!run) return;
+    setFinishingPackingStore(store);
+    try {
+      const current = run.store_packing_finished_at ?? {};
+      await supabase.from('delivery_runs').update({
+        store_packing_finished_at: { ...current, [store]: new Date().toISOString() },
+      }).eq('id', run.id);
+      qc.invalidateQueries({ queryKey: ['delivery-run', targetDate] });
+    } finally {
+      setFinishingPackingStore(null);
+    }
+  };
+
   const startDelivery = async () => {
     if (!run) return;
     setStartingDelivery(true);
@@ -1459,6 +1475,9 @@ export default function DeliveryPage() {
   // ZK has no confirm column — only require the 3 restaurant stores to be confirmed
   const allStoresConfirmed = STORES.filter(s => s in STORE_CONFIRM_COL).every(s => !!storeConfirmedAt(s));
   const deliveryStarted = !!run?.delivery_started_at;
+  const storePackingDone: Record<string, string> = run?.store_packing_finished_at ?? {};
+  const deliveryStores = STORES.filter(s => s !== 'ZK') as Store[];
+  const allStoresPacked = deliveryStores.every(s => !!storePackingDone[s]);
 
   /* ─ Receipt status (for driver live view) ─ */
   const { data: receiptStatus = {} } = useQuery<Partial<Record<Store, boolean>>>({
@@ -1654,9 +1673,11 @@ export default function DeliveryPage() {
                       <Timer size={14} className="text-[#1B5E20]" />
                       <span className="font-mono font-bold text-gray-800 tabular-nums text-sm">{formatTimer(elapsedSeconds)}</span>
                     </div>
-                    <button onClick={finishPacking} className="flex items-center gap-2 bg-[#1B5E20] text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-[#2E7D32] transition-colors shadow-sm">
-                      <Flag size={15} /> Packing Finished
-                    </button>
+                    {allStoresPacked && (
+                      <button onClick={finishPacking} className="flex items-center gap-2 bg-[#1B5E20] text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-[#2E7D32] transition-colors shadow-sm">
+                        <Flag size={15} /> Finished Packing
+                      </button>
+                    )}
                   </>
                 )}
               </div>
@@ -1688,9 +1709,11 @@ export default function DeliveryPage() {
                   <Timer size={14} className="text-[#1B5E20]" />
                   <span className="font-mono font-bold text-gray-800 tabular-nums text-sm">{formatTimer(elapsedSeconds)}</span>
                 </div>
-                <button onClick={finishPacking} className="flex items-center gap-2 bg-[#1B5E20] text-white px-4 py-3 rounded-xl text-sm font-semibold hover:bg-[#2E7D32] transition-colors shadow-sm">
-                  <Flag size={15} /> Finish
-                </button>
+                {allStoresPacked && (
+                  <button onClick={finishPacking} className="flex items-center gap-2 bg-[#1B5E20] text-white px-4 py-3 rounded-xl text-sm font-semibold hover:bg-[#2E7D32] transition-colors shadow-sm">
+                    <Flag size={15} /> Finish
+                  </button>
+                )}
               </div>
             )}
           </div>
@@ -1877,10 +1900,10 @@ export default function DeliveryPage() {
                           ? <CheckCircle2 size={13} className={isActive ? 'text-[#1B5E20]' : 'text-green-500'} />
                           : <span className={`w-2 h-2 rounded-full ${isActive ? 'bg-amber-400' : 'bg-gray-300'}`} />
                       )}
-                      {/* Packer view: show item counts */}
+                      {/* Packer view: green tick when store marked done, else item counts */}
                       {isPacker && packingStarted && (
-                        complete
-                          ? <CheckCircle2 size={14} className="text-[#1B5E20]" />
+                        storePackingDone[store]
+                          ? <CheckCircle2 size={14} className="text-green-500" />
                           : total > 0 && <span className={`text-xs rounded-full px-1.5 py-0.5 font-bold leading-none ${isActive ? 'bg-[#1B5E20] text-white' : 'bg-gray-300 text-gray-600'}`}>{full}/{total}</span>
                       )}
                       {!isPacker && (viewMode !== 'manager' || isPreview || !run) && total > 0 && (
@@ -2095,6 +2118,24 @@ export default function DeliveryPage() {
                       sectionOrder={isPacker ? zkSectionOrder : sectionOrder}
                       itemRank={isPacker ? zkItemRank : (itemRankByStore[store] ?? itemRank)}
                     />
+
+                    {/* Per-store packing finish button (packer only, delivery stores only) */}
+                    {viewMode === 'packer' && packingStarted && store !== 'ZK' && (
+                      storePackingDone[store] ? (
+                        <div className="mt-4 flex items-center justify-center gap-2 py-3 rounded-xl border border-green-200 bg-green-50 text-green-700 text-sm font-semibold">
+                          <CheckCircle2 size={16} /> {store} packed ✓
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => markStorePacked(store)}
+                          disabled={finishingPackingStore === store}
+                          className="mt-4 w-full flex items-center justify-center gap-2 bg-[#1B5E20] text-white py-3 rounded-xl text-sm font-semibold hover:bg-[#2E7D32] transition-colors disabled:opacity-60 shadow-sm"
+                        >
+                          <CheckCircle2 size={15} />
+                          {finishingPackingStore === store ? 'Saving…' : `Finished ${store}`}
+                        </button>
+                      )
+                    )}
                   </div>
                 );
               })}
