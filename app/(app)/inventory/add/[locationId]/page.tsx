@@ -137,6 +137,10 @@ export default function LocationInventoryFormPage({
   const [submitted, setSubmitted]   = useState(false);
   const [savedOffline, setSavedOffline] = useState(false);
   const [submittedAt, setSubmittedAt]   = useState<string | null>(null);
+  const [submissionId, setSubmissionId] = useState<string | null>(null);
+  const [isEditingSubmission, setIsEditingSubmission] = useState(false);
+  const [lastSubmittedCounts, setLastSubmittedCounts] = useState<Record<string, string>>({});
+  const [lastSubmittedComment, setLastSubmittedComment] = useState('');
   const [isStaff, setIsStaff]       = useState(false);
   const [isOnline, setIsOnline]     = useState(true);
   const [queueCount, setQueueCount] = useState(0);
@@ -171,6 +175,43 @@ export default function LocationInventoryFormPage({
         .then(({ data }) => { if (data?.role?.startsWith('staff')) setIsStaff(true); });
     });
   }, []);
+
+  /* ── Check for existing editable submission from this user ── */
+  const { data: existingSubmission } = useQuery<{
+    id: string; submitted_at: string;
+    data: { name: string; quantity: number }[];
+    comment: string | null;
+  } | null>({
+    queryKey: ['latest-my-submission', params.locationId],
+    queryFn: async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return null;
+      const { data } = await supabase
+        .from('inventory_submissions')
+        .select('id, submitted_at, data, comment')
+        .eq('location_id', params.locationId)
+        .eq('submitted_by', user.id)
+        .order('submitted_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (!data || !isEditable(data.submitted_at)) return null;
+      return data as { id: string; submitted_at: string; data: { name: string; quantity: number }[]; comment: string | null };
+    },
+    staleTime: 0,
+  });
+
+  const loadExistingSubmission = () => {
+    if (!existingSubmission) return;
+    const restored = Object.fromEntries(
+      (existingSubmission.data as { name: string; quantity: number }[]).map(d => [d.name, String(d.quantity)])
+    );
+    setCounts(restored);
+    setComment(existingSubmission.comment ?? '');
+    setSubmissionId(existingSubmission.id);
+    setSubmittedAt(existingSubmission.submitted_at);
+    setIsEditingSubmission(true);
+    setSubmitted(false);
+  };
 
   /* ── Load draft on mount ── */
   useEffect(() => {
@@ -263,32 +304,56 @@ export default function LocationInventoryFormPage({
         setComment('');
       } else {
         const now = new Date().toISOString();
-        const { error: insertError } = await supabase
-          .from('inventory_submissions')
-          .insert({
-            location_id:      params.locationId,
-            location_name:    locationName,
-            submitted_by:     user.id,
-            submitted_at:     now,
-            data,
-            comment:          comment.trim() || null,
-            duration_seconds: durationSeconds > 0 ? durationSeconds : null,
-          });
 
-        if (insertError) { alert(`Error: ${insertError.message}`); setSubmitting(false); return; }
+        if (isEditingSubmission && submissionId) {
+          // UPDATE existing submission within edit window
+          const { error: updateError } = await supabase
+            .from('inventory_submissions')
+            .update({ data, comment: comment.trim() || null, submitted_at: now })
+            .eq('id', submissionId)
+            .eq('submitted_by', user.id);
+          if (updateError) { alert(`Error updating: ${updateError.message}`); setSubmitting(false); return; }
+          setLastSubmittedCounts(counts);
+          setLastSubmittedComment(comment);
+          setSubmittedAt(now);
+          clearDraft(params.locationId);
+          setSubmitted(true);
+          setCounts({});
+          setComment('');
+        } else {
+          // INSERT new submission
+          const { data: inserted, error: insertError } = await supabase
+            .from('inventory_submissions')
+            .insert({
+              location_id:      params.locationId,
+              location_name:    locationName,
+              submitted_by:     user.id,
+              submitted_at:     now,
+              data,
+              comment:          comment.trim() || null,
+              duration_seconds: durationSeconds > 0 ? durationSeconds : null,
+            })
+            .select('id')
+            .single();
 
-        setSubmittedAt(now);
-        clearDraft(params.locationId);
-        const n = await pendingCount();
-        if (n > 0) {
-          setSyncing(true);
-          await syncPendingQueue();
-          await refreshQueueCount();
-          setSyncing(false);
+          if (insertError) { alert(`Error: ${insertError.message}`); setSubmitting(false); return; }
+
+          setSubmissionId(inserted?.id ?? null);
+          setLastSubmittedCounts(counts);
+          setLastSubmittedComment(comment);
+          setSubmittedAt(now);
+          clearDraft(params.locationId);
+          const n = await pendingCount();
+          if (n > 0) {
+            setSyncing(true);
+            await syncPendingQueue();
+            await refreshQueueCount();
+            setSyncing(false);
+          }
+          setSubmitted(true);
+          setCounts({});
+          setComment('');
         }
-        setSubmitted(true);
-        setCounts({});
-        setComment('');
       }
     } catch (e: unknown) {
       alert((e as Error)?.message ?? 'An unexpected error occurred.');
@@ -310,10 +375,21 @@ export default function LocationInventoryFormPage({
     setSubmitted(false);
     setSavedOffline(false);
     setSubmittedAt(null);
+    setSubmissionId(null);
+    setIsEditingSubmission(false);
+    setLastSubmittedCounts({});
+    setLastSubmittedComment('');
     setTimerStarted(false);
     setTimerRunning(false);
     setElapsedSeconds(0);
     if (timerInterval.current) clearInterval(timerInterval.current);
+  };
+
+  const editSubmitted = () => {
+    setCounts(lastSubmittedCounts);
+    setComment(lastSubmittedComment);
+    setIsEditingSubmission(true);
+    setSubmitted(false);
   };
 
   /* ─── Offline-saved screen ─── */
@@ -356,28 +432,54 @@ export default function LocationInventoryFormPage({
 
   /* ─── Online-submitted screen ─── */
   if (submitted) {
+    const deadline = submittedAt ? (() => {
+      const d = new Date(submittedAt);
+      d.setDate(d.getDate() + 1);
+      d.setHours(9, 0, 0, 0);
+      return d;
+    })() : null;
+    const timeStr = submittedAt
+      ? new Date(submittedAt).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })
+      : '';
+    const deadlineStr = deadline
+      ? deadline.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })
+      : '';
+    const editable = submittedAt ? isEditable(submittedAt) : false;
+
     return (
-      <div className="flex flex-col items-center justify-center py-24 gap-4">
+      <div className="flex flex-col items-center justify-center py-16 gap-4 px-4">
         <div className="w-16 h-16 rounded-full bg-green-100 flex items-center justify-center">
           <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#1B5E20" strokeWidth="2.5">
             <path d="M20 6L9 17l-5-5" />
           </svg>
         </div>
-        <h2 className="text-xl font-bold text-gray-900">Inventory Submitted</h2>
-        <p className="text-sm text-gray-500">Your inventory for {locationName} has been saved.</p>
-        <div className="flex flex-wrap gap-3 mt-2 justify-center">
+        <h2 className="text-xl font-bold text-gray-900">
+          {isEditingSubmission ? 'Submission Updated' : 'Inventory Submitted'}
+        </h2>
+        <p className="text-sm text-gray-500 text-center">
+          {locationName} · {timeStr}
+        </p>
+
+        {editable && (
+          <div className="flex items-center gap-2 px-4 py-2.5 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-700 max-w-xs text-center">
+            <Pencil size={13} className="flex-shrink-0" />
+            <span>You can make changes until <strong>{deadlineStr} tomorrow</strong></span>
+          </div>
+        )}
+
+        <div className="flex flex-wrap gap-3 mt-1 justify-center">
+          {editable && (
+            <button onClick={editSubmitted}
+              className="flex items-center gap-2 px-4 py-2 border border-amber-300 bg-amber-50 text-amber-700 rounded-lg text-sm font-medium hover:bg-amber-100 transition-colors">
+              <Pencil size={14} /> Edit submission
+            </button>
+          )}
           <button onClick={startNew} className="px-4 py-2 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50">
             New Submission
           </button>
-          {submittedAt && isEditable(submittedAt) && (
-            <button onClick={() => router.push('/inventory/counts')}
-              className="flex items-center gap-2 px-4 py-2 border border-amber-300 bg-amber-50 text-amber-700 rounded-lg text-sm font-medium hover:bg-amber-100 transition-colors">
-              <Pencil size={14} />Edit this submission
-            </button>
-          )}
           {!isStaff && (
             <button onClick={() => router.push('/inventory/counts')} className="px-4 py-2 bg-[#1B5E20] text-white rounded-lg text-sm font-medium hover:bg-[#2E7D32]">
-              View Current Inventory
+              View Reports
             </button>
           )}
         </div>
@@ -389,6 +491,36 @@ export default function LocationInventoryFormPage({
   return (
     <div className="flex flex-col h-full">
 
+      {/* Editing-mode banner */}
+      {isEditingSubmission && submittedAt && (
+        <div className="mb-4 flex items-center gap-2 px-4 py-2.5 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-700">
+          <Pencil size={14} className="flex-shrink-0" />
+          <span>
+            Editing submission from{' '}
+            <strong>{new Date(submittedAt).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}</strong>
+            {' '}— changes will overwrite your previous counts.
+          </span>
+        </div>
+      )}
+
+      {/* Existing-submission banner (shown on fresh load if a recent submission exists) */}
+      {!isEditingSubmission && !submitted && existingSubmission && (
+        <div className="mb-4 flex items-center justify-between gap-3 px-4 py-2.5 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-700">
+          <div className="flex items-center gap-2">
+            <Pencil size={14} className="flex-shrink-0" />
+            <span>
+              You submitted at{' '}
+              <strong>{new Date(existingSubmission.submitted_at).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}</strong>.
+              {' '}Edit it until 09:00 tomorrow.
+            </span>
+          </div>
+          <button
+            onClick={loadExistingSubmission}
+            className="flex-shrink-0 px-3 py-1 bg-amber-100 hover:bg-amber-200 text-amber-800 rounded-lg text-xs font-semibold transition-colors">
+            Edit
+          </button>
+        </div>
+      )}
 
       {/* Header */}
       <div className="mb-5">
@@ -569,7 +701,7 @@ export default function LocationInventoryFormPage({
           className="flex items-center gap-2 bg-[#1B5E20] text-white px-6 py-2.5 rounded-lg text-sm font-bold hover:bg-[#2E7D32] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <Send size={15} />
-          {submitting ? 'Saving…' : isOnline ? 'Submit' : 'Save Offline'}
+          {submitting ? 'Saving…' : isEditingSubmission ? 'Update Submission' : isOnline ? 'Submit' : 'Save Offline'}
         </button>
       </div>
     </div>
