@@ -456,10 +456,15 @@ function StoreDeliveryList({
                   <th className={`px-3 md:px-4 py-3 text-center text-xs font-semibold uppercase tracking-wide ${stdScaleMode === 'high' ? 'text-[#1B5E20]' : 'text-gray-400'}`}>STD +25%</th>
                   <th className="px-3 md:px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wide">Target Today</th>
                 </>}
-                <th className={`px-3 md:px-4 py-3 text-center text-xs font-semibold uppercase tracking-wide ${isManager ? 'text-[#1B5E20]' : 'text-[#1B5E20]'}`}>To Pack</th>
+                {isManager
+                  ? <th className="px-3 md:px-4 py-3 text-center text-xs font-semibold text-[#1B5E20] uppercase tracking-wide">To Pack</th>
+                  : <th className="py-3 text-center text-xs font-semibold text-[#1B5E20] uppercase tracking-wide" style={{ width: '52px' }}>Pack</th>
+                }
                 {!isManager && <>
-                  <th className="px-3 md:px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wide">Packed</th>
-                  <th className="px-3 md:px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wide">Full / Partial</th>
+                  <th className="py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wide" style={{ width: '68px' }}>Packed</th>
+                  <th className="py-3 text-center text-xs font-semibold text-gray-400 uppercase tracking-wide" style={{ width: '46px' }}>
+                    <CheckCircle2 size={14} className="mx-auto" />
+                  </th>
                 </>}
               </tr>
             </thead>
@@ -541,17 +546,17 @@ function StoreDeliveryList({
                               )}
                             </td>
                           </>}
-                          <td className="px-2 md:px-4 py-2.5 text-center">
+                          <td className={isManager ? 'px-2 md:px-4 py-2.5 text-center' : 'px-1 py-2.5 text-center'}>
                             {deliverQty > 0 ? (
                               <span className={`inline-flex items-center justify-center tabular-nums font-bold rounded-lg ${
                                 isManager
                                   ? 'min-w-[2rem] px-2 py-0.5 bg-[#1B5E20]/10 text-[#1B5E20] text-sm'
-                                  : 'min-w-[2.5rem] px-3 py-1 bg-[#1B5E20] text-white text-base shadow-sm'
+                                  : 'min-w-[2.25rem] px-2 py-1 bg-[#1B5E20] text-white text-base shadow-sm'
                               }`}>{deliverQty}</span>
                             ) : <span className="text-gray-200 text-xs">—</span>}
                           </td>
                           {!isManager && (
-                            <td className="px-2 md:px-4 py-3 text-center">
+                            <td className="px-1 py-3 text-center">
                               {deliverQty > 0 ? (
                                 <input
                                   type="number" min="0" step="1"
@@ -560,14 +565,14 @@ function StoreDeliveryList({
                                   disabled={!canPack}
                                   onChange={e => onPackedQtyChange(line.id, e.target.value)}
                                   onBlur={e => onPackedQtyBlur(line.id, e.target.value, deliverQty)}
-                                  className={`w-16 text-center border rounded-lg px-1.5 py-1.5 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[#1B5E20] tabular-nums ${!canPack ? 'border-gray-100 bg-gray-50 text-gray-300 cursor-not-allowed' : 'border-gray-300 bg-white'}`}
+                                  className={`w-14 text-center border rounded-lg px-1 py-1.5 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[#1B5E20] tabular-nums ${!canPack ? 'border-gray-100 bg-gray-50 text-gray-300 cursor-not-allowed' : 'border-gray-300 bg-white'}`}
                                   title={!canPack ? 'Start packing first' : ''}
                                 />
                               ) : <span className="text-gray-200 text-xs">—</span>}
                             </td>
                           )}
                           {!isManager && (
-                            <td className="px-2 md:px-4 py-3 text-center">
+                            <td className="px-1 py-3 text-center">
                               {deliverQty > 0 ? (
                                 <PackingStatus
                                   packedQty={editingPackedQty[line.id] !== undefined
@@ -1865,23 +1870,25 @@ export default function DeliveryPage() {
               </div>
             )}
 
-            {/* Packer: Start Packing / timer / Finish */}
+            {/* Packer: Start Packing / timer / Finish — desktop only (mobile version shown below header) */}
             {viewMode === 'packer' && run && !packingFinished && (
-              !packingStarted ? (
-                <button onClick={startPacking} className="flex items-center gap-2 bg-[#1B5E20] text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-[#2E7D32] transition-colors shadow-sm">
-                  <Play size={15} /> Start Packing
-                </button>
-              ) : (
-                <div className="flex items-center gap-3">
-                  <div className="flex items-center gap-2 bg-gray-100 rounded-lg px-3 py-2">
-                    <Timer size={14} className="text-[#1B5E20]" />
-                    <span className="font-mono font-bold text-gray-800 tabular-nums text-sm">{formatTimer(elapsedSeconds)}</span>
-                  </div>
-                  <button onClick={finishPacking} className="flex items-center gap-2 bg-[#1B5E20] text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-[#2E7D32] transition-colors shadow-sm">
-                    <Flag size={15} /> Packing Finished
+              <div className="hidden sm:flex items-center gap-3">
+                {!packingStarted ? (
+                  <button onClick={startPacking} className="flex items-center gap-2 bg-[#1B5E20] text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-[#2E7D32] transition-colors shadow-sm">
+                    <Play size={15} /> Start Packing
                   </button>
-                </div>
-              )
+                ) : (
+                  <>
+                    <div className="flex items-center gap-2 bg-gray-100 rounded-lg px-3 py-2">
+                      <Timer size={14} className="text-[#1B5E20]" />
+                      <span className="font-mono font-bold text-gray-800 tabular-nums text-sm">{formatTimer(elapsedSeconds)}</span>
+                    </div>
+                    <button onClick={finishPacking} className="flex items-center gap-2 bg-[#1B5E20] text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-[#2E7D32] transition-colors shadow-sm">
+                      <Flag size={15} /> Packing Finished
+                    </button>
+                  </>
+                )}
+              </div>
             )}
 
             {/* Manager: Generate */}
@@ -1897,6 +1904,27 @@ export default function DeliveryPage() {
             )}
           </div>
         </div>
+
+        {/* Packer action button — full-width bar on mobile only */}
+        {viewMode === 'packer' && run && !packingFinished && (
+          <div className="sm:hidden mb-4">
+            {!packingStarted ? (
+              <button onClick={startPacking} className="w-full flex items-center justify-center gap-2 bg-[#1B5E20] text-white px-4 py-3 rounded-xl text-sm font-semibold hover:bg-[#2E7D32] transition-colors shadow-sm">
+                <Play size={15} /> Start Packing
+              </button>
+            ) : (
+              <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 bg-gray-100 rounded-xl px-3 py-2.5 flex-1 justify-center">
+                  <Timer size={14} className="text-[#1B5E20]" />
+                  <span className="font-mono font-bold text-gray-800 tabular-nums text-sm">{formatTimer(elapsedSeconds)}</span>
+                </div>
+                <button onClick={finishPacking} className="flex items-center gap-2 bg-[#1B5E20] text-white px-4 py-3 rounded-xl text-sm font-semibold hover:bg-[#2E7D32] transition-colors shadow-sm">
+                  <Flag size={15} /> Finish
+                </button>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* ── Manager toolbar: week + day picker + Standard Targets ── */}
         {viewMode === 'manager' && (
