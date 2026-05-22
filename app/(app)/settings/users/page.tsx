@@ -256,20 +256,19 @@ function PermissionsEditor({
                 const isNonManager = !role || (role !== 'admin' && role !== 'manager');
                 return (
                   <div key={key}>
-                    <label
+                    {/* Plain div — no hidden input, no label → no browser scroll-to-element */}
+                    <div
+                      role="checkbox"
+                      aria-checked={checked}
+                      tabIndex={0}
+                      onClick={() => toggle(key)}
+                      onKeyDown={(e) => (e.key === ' ' || e.key === 'Enter') && toggle(key)}
                       className={`flex items-start gap-2.5 p-3 rounded-xl border cursor-pointer transition-all select-none ${
                         checked
                           ? 'bg-indigo-50 border-indigo-300 text-indigo-900'
                           : 'bg-white border-gray-200 text-gray-600 hover:border-indigo-200 hover:bg-gray-50'
                       }`}
                     >
-                      <input
-                        type="checkbox"
-                        className="hidden"
-                        tabIndex={-1}
-                        checked={checked}
-                        onChange={() => toggle(key)}
-                      />
                       {checked
                         ? <CheckSquare size={15} className="text-indigo-600 flex-shrink-0 mt-0.5" />
                         : <Square size={15} className="text-gray-300 flex-shrink-0 mt-0.5" />
@@ -278,7 +277,7 @@ function PermissionsEditor({
                         <div className={`text-xs font-semibold ${checked ? 'text-indigo-800' : 'text-gray-700'}`}>{label}</div>
                         {displayDesc && <div className="text-xs text-gray-400 mt-0.5 leading-tight">{displayDesc}</div>}
                       </div>
-                    </label>
+                    </div>
 
                     {/* Delivery sub-roles: only for non-manager/admin when delivery is enabled */}
                     {key === 'delivery' && checked && isNonManager && (
@@ -290,27 +289,25 @@ function PermissionsEditor({
                         ] as { flag: PermKey; label: string }[]).map(({ flag, label: subLabel }) => {
                           const subChecked = !!perms[flag];
                           return (
-                            <label
+                            <div
                               key={flag}
+                              role="checkbox"
+                              aria-checked={subChecked}
+                              tabIndex={0}
+                              onClick={() => onChange({ ...perms, [flag]: !subChecked })}
+                              onKeyDown={(e) => (e.key === ' ' || e.key === 'Enter') && onChange({ ...perms, [flag]: !subChecked })}
                               className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs cursor-pointer transition-all select-none ${
                                 subChecked
                                   ? 'bg-indigo-100 border-indigo-300 text-indigo-800 font-semibold'
                                   : 'bg-white border-gray-200 text-gray-500 hover:border-indigo-200'
                               }`}
                             >
-                              <input
-                                type="checkbox"
-                                className="sr-only"
-                                tabIndex={-1}
-                                checked={subChecked}
-                                onChange={() => onChange({ ...perms, [flag]: !subChecked })}
-                              />
                               {subChecked
                                 ? <CheckSquare size={12} className="text-indigo-600 flex-shrink-0" />
                                 : <Square size={12} className="text-gray-300 flex-shrink-0" />
                               }
                               {subLabel}
-                            </label>
+                            </div>
                           );
                         })}
                       </div>
@@ -731,7 +728,7 @@ export default function TeamPage() {
                     {/* Inline edit row */}
                     {editingId === user.id && (
                       <tr className="border-t-4 border-indigo-400">
-                        <td colSpan={6} className="p-0 bg-indigo-50">
+                        <td colSpan={7} className="p-0 bg-indigo-50">
                           {/* Edit panel header */}
                           <div className="flex items-center justify-between px-5 py-3 bg-indigo-600">
                             <div className="flex items-center gap-2.5">
