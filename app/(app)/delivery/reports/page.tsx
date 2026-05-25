@@ -4,7 +4,7 @@ import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
 import {
-  Package, Truck, CheckCircle2, Clock, AlertTriangle, ChevronDown, ChevronUp, Trash2,
+  Package, Truck, CheckCircle2, Clock, AlertTriangle, ChevronDown, ChevronUp, Trash2, RotateCcw, XCircle,
 } from 'lucide-react';
 import { useT } from '@/lib/i18n';
 
@@ -31,6 +31,8 @@ type Run = {
   list_confirmed_eschborn_at: string | null;
   list_confirmed_taunus_at: string | null;
   list_confirmed_westend_at: string | null;
+  deleted_at: string | null;
+  deleted_by: string | null;
 };
 
 type DeliveryLine = {
@@ -294,6 +296,10 @@ export default function DeliveryReportsPage() {
   const [pendingReset, setPendingReset] = useState<string | null>(null); // step key awaiting confirm
   const [resettingStep, setResettingStep] = useState<string | null>(null);
 
+  /* ── Trash state ── */
+  const [showTrash, setShowTrash] = useState(false);
+  const [confirmPermDeleteId, setConfirmPermDeleteId] = useState<string | null>(null);
+
   /* ── Profile ── */
   const { data: profile } = useQuery({
     queryKey: ['dr-profile'],
@@ -318,8 +324,23 @@ export default function DeliveryReportsPage() {
       const { data } = await supabase
         .from('delivery_runs')
         .select('*')
+        .is('deleted_at', null)
         .order('delivery_date', { ascending: false })
         .limit(30);
+      return (data ?? []) as Run[];
+    },
+  });
+
+  /* ── Trash ── */
+  const { data: trashRuns = [] } = useQuery<Run[]>({
+    queryKey: ['delivery-runs-trash'],
+    enabled: isAdmin,
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('delivery_runs')
+        .select('*')
+        .not('deleted_at', 'is', null)
+        .order('deleted_at', { ascending: false });
       return (data ?? []) as Run[];
     },
   });
@@ -477,17 +498,47 @@ export default function DeliveryReportsPage() {
     }
   };
 
-  /* ── Delete a run (admin only) ── */
+  /* ── Soft-delete a run → moves to trash ── */
   const deleteRun = useMutation({
+    mutationFn: async (runId: string) => {
+      const { data: { user } } = await supabase.auth.getUser();
+      const { error } = await supabase.from('delivery_runs')
+        .update({ deleted_at: new Date().toISOString(), deleted_by: user?.id ?? null })
+        .eq('id', runId);
+      if (error) throw error;
+    },
+    onSuccess: (_, runId) => {
+      if (selectedRunId === runId) setSelectedRunId(null);
+      qc.invalidateQueries({ queryKey: ['delivery-runs-list'] });
+      qc.invalidateQueries({ queryKey: ['delivery-runs-trash'] });
+    },
+  });
+
+  /* ── Restore from trash ── */
+  const restoreRun = useMutation({
+    mutationFn: async (runId: string) => {
+      const { error } = await supabase.from('delivery_runs')
+        .update({ deleted_at: null, deleted_by: null })
+        .eq('id', runId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['delivery-runs-list'] });
+      qc.invalidateQueries({ queryKey: ['delivery-runs-trash'] });
+    },
+  });
+
+  /* ── Permanent delete (from trash only) ── */
+  const permDeleteRun = useMutation({
     mutationFn: async (runId: string) => {
       await supabase.from('delivery_run_lines').delete().eq('run_id', runId);
       await supabase.from('store_delivery_receipts').delete().eq('run_id', runId);
       const { error } = await supabase.from('delivery_runs').delete().eq('id', runId);
       if (error) throw error;
     },
-    onSuccess: (_, runId) => {
-      if (selectedRunId === runId) setSelectedRunId(null);
-      qc.invalidateQueries({ queryKey: ['delivery-runs-list'] });
+    onSuccess: () => {
+      setConfirmPermDeleteId(null);
+      qc.invalidateQueries({ queryKey: ['delivery-runs-trash'] });
     },
   });
 
@@ -538,14 +589,10 @@ export default function DeliveryReportsPage() {
               </button>
               {isAdmin && (
                 <button
-                  onClick={() => {
-                    if (window.confirm(`Delete the ${fmtDate(r.delivery_date)} delivery run? This cannot be undone.`)) {
-                      deleteRun.mutate(r.id);
-                    }
-                  }}
+                  onClick={() => deleteRun.mutate(r.id)}
                   disabled={deleteRun.isPending}
                   className="p-1 rounded text-gray-300 hover:text-red-400 hover:bg-red-50 transition-colors disabled:opacity-40"
-                  title="Delete run"
+                  title="Move to trash"
                 >
                   <Trash2 size={12} />
                 </button>
@@ -578,13 +625,93 @@ export default function DeliveryReportsPage() {
             </div>
             {past.length > 0 && (
               <div>
-                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Past — snapshot</p>
+                <div className="flex items-center gap-2 mb-2">
+                  <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Past — snapshot</p>
+                  {isAdmin && (
+                    <button
+                      onClick={() => setShowTrash(v => !v)}
+                      className={`relative flex items-center gap-1 px-2 py-0.5 rounded-md text-xs transition-colors ${showTrash ? 'bg-red-100 text-red-600' : 'text-gray-400 hover:text-red-400 hover:bg-red-50'}`}
+                      title="Trash bin"
+                    >
+                      <Trash2 size={12} />
+                      {trashRuns.length > 0 && (
+                        <span className="bg-red-500 text-white text-[10px] font-bold rounded-full w-4 h-4 flex items-center justify-center leading-none">
+                          {trashRuns.length}
+                        </span>
+                      )}
+                    </button>
+                  )}
+                </div>
                 <div className="flex flex-wrap gap-2">{past.map(r => <PastBtn key={r.id} run={r} />)}</div>
               </div>
             )}
           </div>
         );
       })()}
+
+      {/* ── Trash panel ── */}
+      {isAdmin && showTrash && (
+        <div className="mb-6 border border-red-100 rounded-xl bg-red-50/40 overflow-hidden">
+          <div className="flex items-center gap-2 px-4 py-3 border-b border-red-100 bg-red-50">
+            <Trash2 size={14} className="text-red-400" />
+            <p className="text-xs font-semibold text-red-600 uppercase tracking-wider flex-1">Trash</p>
+            <p className="text-xs text-red-400">{trashRuns.length} run{trashRuns.length !== 1 ? 's' : ''}</p>
+          </div>
+          {trashRuns.length === 0 ? (
+            <p className="px-4 py-6 text-center text-sm text-gray-400">Trash is empty</p>
+          ) : (
+            <div className="divide-y divide-red-100">
+              {trashRuns.map(r => (
+                <div key={r.id} className="flex items-center gap-3 px-4 py-3">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-gray-700">{fmtDate(r.delivery_date)}</p>
+                    <p className="text-xs text-gray-400 mt-0.5">
+                      Deleted {r.deleted_at ? fmtDateTime(r.deleted_at) : '—'}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    {/* Restore */}
+                    <button
+                      onClick={() => restoreRun.mutate(r.id)}
+                      disabled={restoreRun.isPending || permDeleteRun.isPending}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 transition-colors disabled:opacity-40"
+                    >
+                      <RotateCcw size={12} /> Restore
+                    </button>
+                    {/* Permanent delete — with inline confirm */}
+                    {confirmPermDeleteId === r.id ? (
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xs text-gray-400 whitespace-nowrap">Delete forever?</span>
+                        <button
+                          onClick={() => permDeleteRun.mutate(r.id)}
+                          disabled={permDeleteRun.isPending}
+                          className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-red-500 text-white hover:bg-red-600 transition-colors disabled:opacity-50"
+                        >
+                          {permDeleteRun.isPending ? '…' : 'Yes'}
+                        </button>
+                        <button
+                          onClick={() => setConfirmPermDeleteId(null)}
+                          className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors"
+                        >
+                          No
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => setConfirmPermDeleteId(r.id)}
+                        disabled={restoreRun.isPending || permDeleteRun.isPending}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border border-red-200 bg-white text-red-500 hover:bg-red-50 transition-colors disabled:opacity-40"
+                      >
+                        <XCircle size={12} /> Delete forever
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ── Empty state ── */}
       {!activeRun && (
