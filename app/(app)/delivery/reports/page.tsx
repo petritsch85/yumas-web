@@ -299,6 +299,7 @@ export default function DeliveryReportsPage() {
   /* ── Trash state ── */
   const [showTrash, setShowTrash] = useState(false);
   const [confirmPermDeleteId, setConfirmPermDeleteId] = useState<string | null>(null);
+  const [pendingTrashId, setPendingTrashId] = useState<string | null>(null);
 
   /* ── Profile ── */
   const { data: profile } = useQuery({
@@ -574,10 +575,11 @@ export default function DeliveryReportsPage() {
 
         const PastBtn = ({ run: r }: { run: Run }) => {
           const isActive = activeRun?.id === r.id;
+          const isPendingTrash = pendingTrashId === r.id;
           return (
             <div className="flex items-center gap-0.5">
               <button
-                onClick={() => { setSelectedRunId(r.id); setLocalChecked({}); setLocalNotes({}); }}
+                onClick={() => { setSelectedRunId(r.id); setLocalChecked({}); setLocalNotes({}); setPendingTrashId(null); }}
                 className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors flex items-center gap-1.5 ${
                   isActive
                     ? 'bg-gray-700 text-white border-gray-700'
@@ -588,14 +590,29 @@ export default function DeliveryReportsPage() {
                 {r.delivery_finished_at && <span className="opacity-60">✓</span>}
               </button>
               {isAdmin && (
-                <button
-                  onClick={() => deleteRun.mutate(r.id)}
-                  disabled={deleteRun.isPending}
-                  className="p-1 rounded text-gray-300 hover:text-red-400 hover:bg-red-50 transition-colors disabled:opacity-40"
-                  title="Move to trash"
-                >
-                  <Trash2 size={12} />
-                </button>
+                isPendingTrash ? (
+                  <div className="flex items-center gap-1 ml-1">
+                    <span className="text-xs text-gray-400 whitespace-nowrap">Move to trash?</span>
+                    <button
+                      onClick={() => { deleteRun.mutate(r.id); setPendingTrashId(null); }}
+                      disabled={deleteRun.isPending}
+                      className="px-2 py-1 rounded text-xs font-semibold bg-red-500 text-white hover:bg-red-600 transition-colors disabled:opacity-50"
+                    >Yes</button>
+                    <button
+                      onClick={() => setPendingTrashId(null)}
+                      className="px-2 py-1 rounded text-xs font-semibold bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors"
+                    >No</button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setPendingTrashId(r.id)}
+                    disabled={deleteRun.isPending}
+                    className="p-1 rounded text-gray-300 hover:text-red-400 hover:bg-red-50 transition-colors disabled:opacity-40"
+                    title="Move to trash"
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                )
               )}
             </div>
           );
@@ -623,7 +640,7 @@ export default function DeliveryReportsPage() {
                 </button>
               </div>
             </div>
-            {past.length > 0 && (
+            {(past.length > 0 || isAdmin) && (
               <div>
                 <div className="flex items-center gap-2 mb-2">
                   <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Past — snapshot</p>
@@ -642,7 +659,9 @@ export default function DeliveryReportsPage() {
                     </button>
                   )}
                 </div>
-                <div className="flex flex-wrap gap-2">{past.map(r => <PastBtn key={r.id} run={r} />)}</div>
+                {past.length > 0 && (
+                  <div className="flex flex-wrap gap-2">{past.map(r => <PastBtn key={r.id} run={r} />)}</div>
+                )}
               </div>
             )}
           </div>
