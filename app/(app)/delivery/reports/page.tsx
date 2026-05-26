@@ -288,7 +288,7 @@ function GrayBadge({ label }: { label: string }) {
 export default function DeliveryReportsPage() {
   const qc = useQueryClient();
   const { t } = useT();
-  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const [selectedRunId, setSelectedRunId] = useState<string | null>('upcoming');
   const [localChecked, setLocalChecked] = useState<Record<string, boolean>>({});
   const [localNotes, setLocalNotes] = useState<Record<string, string>>({});
   const [expandedStore, setExpandedStore] = useState<Store | null>(null);
@@ -958,25 +958,27 @@ export default function DeliveryReportsPage() {
           {/* ── Row 3: Packing Finished ── */}
           {(() => {
             const DELIVERY_STORES = ['Eschborn', 'Taunus', 'Westend'];
-            const allStoresPacked = DELIVERY_STORES.every(s => !!(activeRun.store_packing_finished_at ?? {})[s]);
+            const storeTs = activeRun.store_packing_finished_at ?? {};
+            const allStoresPacked = DELIVERY_STORES.every(s => !!storeTs[s]);
             const done = !!activeRun.packing_finished_at || allStoresPacked;
-            const duration = fmtDuration(activeRun.packing_duration_seconds);
+
+            // Use the latest store timestamp when allStoresPacked (avoids showing stale packing_finished_at)
+            const effectiveFinishedAt: string | null = allStoresPacked
+              ? DELIVERY_STORES.map(s => storeTs[s]).filter(Boolean).sort().at(-1) ?? null
+              : activeRun.packing_finished_at;
+
             const accent = done ? 'green' : 'gray';
 
-            let statusNode: React.ReactNode;
-            if (!done) {
-              statusNode = <GrayBadge label="In progress" />;
-            } else {
-              statusNode = <GreenBadge label="Complete" />;
-            }
+            const statusNode: React.ReactNode = done
+              ? <GreenBadge label="Complete" />
+              : <GrayBadge label="In progress" />;
 
             return (
               <StepRow
                 step={4}
                 accent={accent as 'green' | 'amber' | 'gray'}
                 title="Packing Finished"
-                timeLeft={done ? fmt(activeRun.packing_finished_at) : undefined}
-                timeMid={done && duration ? `· ${duration}` : undefined}
+                timeLeft={done ? fmt(effectiveFinishedAt) : undefined}
                 status={statusNode}
                 {...(done ? makeResetProps('packing-finished', () => resetStep('packing-finished', { packing_finished_at: null, packing_duration_seconds: null, items_packed_count: null })) : {})}
               >
