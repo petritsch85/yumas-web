@@ -342,7 +342,7 @@ function StoreDeliveryList({
 
   const isManager = viewMode === 'manager';
   const canPack = !isPreview && (isManager || packingStarted);
-  const colCount = isManager ? 8 : 5;
+  const colCount = isManager ? 8 : 4;
 
   // Live current inventory for this item (latest submission, always fresh)
   const getLiveInventory = (line: DeliveryLine): number =>
@@ -442,9 +442,6 @@ function StoreDeliveryList({
                 }
                 {!isManager && <>
                   <th className="py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wide" style={{ width: '68px' }}>Packed</th>
-                  <th className="py-3 text-center text-xs font-semibold text-gray-400 uppercase tracking-wide" style={{ width: '46px' }}>
-                    <CheckCircle2 size={14} className="mx-auto" />
-                  </th>
                 </>}
               </tr>
             </thead>
@@ -536,38 +533,40 @@ function StoreDeliveryList({
                               <span className={`inline-flex items-center justify-center tabular-nums font-bold rounded-lg ${
                                 isManager
                                   ? 'min-w-[2rem] px-2 py-0.5 bg-[#1B5E20]/10 text-[#1B5E20] text-sm'
-                                  : 'min-w-[2.25rem] px-2 py-1 bg-[#1B5E20] text-white text-base shadow-sm'
+                                  : 'min-w-[2.25rem] px-2 py-1 bg-blue-600 text-white text-base shadow-sm'
                               }`}>{deliverQty}</span>
                             ) : <span className="text-gray-200 text-xs">—</span>}
                           </td>
-                          {!isManager && (
-                            <td className="px-1 py-3 text-center">
-                              {deliverQty > 0 ? (
-                                <input
-                                  type="number" min="0" step="1"
-                                  value={packedVal}
-                                  placeholder="—"
-                                  disabled={!canPack}
-                                  onChange={e => onPackedQtyChange(line.id, e.target.value)}
-                                  onBlur={e => onPackedQtyBlur(line.id, e.target.value, deliverQty)}
-                                  className={`w-14 text-center border rounded-lg px-1 py-1.5 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[#1B5E20] tabular-nums ${!canPack ? 'border-gray-100 bg-gray-50 text-gray-300 cursor-not-allowed' : 'border-gray-300 bg-white'}`}
-                                  title={!canPack ? 'Start packing first' : ''}
-                                />
-                              ) : <span className="text-gray-200 text-xs">—</span>}
-                            </td>
-                          )}
-                          {!isManager && (
-                            <td className="px-1 py-3 text-center">
-                              {deliverQty > 0 ? (
-                                <PackingStatus
-                                  packedQty={editingPackedQty[line.id] !== undefined
-                                    ? (editingPackedQty[line.id] === '' ? null : parseFloat(editingPackedQty[line.id]))
-                                    : line.packed_qty}
-                                  deliveryQty={deliverQty}
-                                />
-                              ) : <span className="text-gray-200 text-xs">—</span>}
-                            </td>
-                          )}
+                          {!isManager && (() => {
+                            const currentPacked = editingPackedQty[line.id] !== undefined
+                              ? (editingPackedQty[line.id] === '' ? null : parseFloat(editingPackedQty[line.id]))
+                              : line.packed_qty;
+                            const packedColor = !canPack
+                              ? 'border-gray-100 bg-gray-50 text-gray-300 cursor-not-allowed'
+                              : currentPacked === null || currentPacked === undefined
+                                ? 'border-gray-300 bg-white text-gray-700'
+                                : currentPacked >= deliverQty
+                                  ? 'border-green-500 bg-green-500 text-white'
+                                  : currentPacked > 0
+                                    ? 'border-amber-400 bg-amber-400 text-white'
+                                    : 'border-red-500 bg-red-500 text-white';
+                            return (
+                              <td className="px-1 py-3 text-center">
+                                {deliverQty > 0 ? (
+                                  <input
+                                    type="number" min="0" step="1"
+                                    value={packedVal}
+                                    placeholder="—"
+                                    disabled={!canPack}
+                                    onChange={e => onPackedQtyChange(line.id, e.target.value)}
+                                    onBlur={e => onPackedQtyBlur(line.id, e.target.value, deliverQty)}
+                                    className={`w-14 text-center border rounded-lg px-1 py-1.5 text-base font-bold focus:outline-none focus:ring-2 focus:ring-blue-400 tabular-nums shadow-sm ${packedColor}`}
+                                    title={!canPack ? 'Start packing first' : ''}
+                                  />
+                                ) : <span className="text-gray-200 text-xs">—</span>}
+                              </td>
+                            );
+                          })()}
                         </tr>
                       );
                     })}
