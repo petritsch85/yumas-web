@@ -1344,11 +1344,11 @@ export default function DeliveryPage() {
     if (!profile || canManage) return;
     const perms = profile.permissions as any;
     const locName = profile.locationName;
-    // Packer takes priority — check BEFORE location-based store routing
-    if (perms?.driver)                              { setViewMode('driver'); return; }
-    if (perms?.packer)                              { setViewMode('packer'); return; }
-    if (perms?.store_receiver)                      { setViewMode('store');  return; }
+    // Store location assignment takes highest priority — store staff always see Store view
     if (locName && STORES.includes(locName as Store)) { setViewMode('store');  return; }
+    if (perms?.store_receiver)                        { setViewMode('store');  return; }
+    if (perms?.driver)                                { setViewMode('driver'); return; }
+    if (perms?.packer)                                { setViewMode('packer'); return; }
     // Fallback: default to packer
     setViewMode('packer');
   }, [profile?.id, permsKey]); // eslint-disable-line react-hooks/exhaustive-deps
