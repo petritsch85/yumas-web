@@ -305,7 +305,7 @@ function StoreDeliveryList({
   forecast, standard, viewMode, editingTargets, editingPackedQty,
   onTargetChange, onTargetBlur, onPackedQtyChange, packingStarted, isPreview,
   storeInventory, storeTimestamp, stdScaleMode, onScaleChange, scalingTargets, storeConfirmed,
-  sectionOrder, itemRank,
+  sectionOrder, itemRank, packingFinished,
 }: {
   store: Store;
   lines: DeliveryLine[];
@@ -330,6 +330,7 @@ function StoreDeliveryList({
   storeConfirmed?: boolean;
   sectionOrder: string[];
   itemRank: Record<string, number>;
+  packingFinished?: boolean;
 }) {
   if (!hasSubmission) {
     return (
@@ -341,7 +342,7 @@ function StoreDeliveryList({
   }
 
   const isManager = viewMode === 'manager';
-  const canPack = !isPreview && (isManager || packingStarted);
+  const canPack = !isPreview && (isManager || packingStarted) && !packingFinished;
   const colCount = isManager ? 8 : 5;
 
   // Packer toggle: true = "Yes, packed" (auto-fills packed = deliverQty), false = manual input
@@ -2182,6 +2183,7 @@ export default function DeliveryPage() {
                       storeConfirmed={!!storeConfirmedAt(store)}
                       sectionOrder={isPacker ? zkSectionOrder : sectionOrder}
                       itemRank={isPacker ? zkItemRank : (itemRankByStore[store] ?? itemRank)}
+                      packingFinished={isPacker && !!storePackingDone[store]}
                     />
 
                     {/* Per-store packing finish button (packer only, delivery stores only) */}
