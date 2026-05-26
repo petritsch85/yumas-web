@@ -1933,7 +1933,7 @@ export default function DeliveryPage() {
 
               {/* Store tabs — with per-store confirmation badges */}
               <div className="flex gap-1 mb-3 bg-gray-100 rounded-xl p-1 w-fit">
-                {STORES.map(store => {
+                {STORES.filter(s => viewMode !== 'packer' || s !== 'ZK').map(store => {
                   const { full, total, complete } = storePackStats(store);
                   const isActive = activeStore === store;
                   const isPacker = viewMode === 'packer';
@@ -2035,7 +2035,7 @@ export default function DeliveryPage() {
               })()}
 
               {/* Store lists */}
-              {STORES.map(store => {
+              {STORES.filter(s => viewMode !== 'packer' || s !== 'ZK').map(store => {
                 // In packer view, remap each line's section to ZK's physical section
                 // so the packing list mirrors ZK's Inventory Lists layout exactly.
                 const isPacker = viewMode === 'packer';
