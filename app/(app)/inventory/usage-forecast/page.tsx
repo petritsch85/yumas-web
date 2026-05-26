@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import React, { useState, useMemo, useEffect } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'; // useMutation + useQueryClient used in UploadModal
 import { supabase } from '@/lib/supabase-browser';
 import { Upload, Save, X } from 'lucide-react';
 
@@ -58,60 +58,122 @@ function sortedItems(items: InventoryItem[], store: Store): InventoryItem[] {
 }
 
 /* ─── Upload Standard Usage Modal ───────────────────────────────────────── */
-function UploadModal({
-  items,
-  store,
-  standards,
-  onClose,
-  onSave,
-  saving,
-}: {
-  items: InventoryItem[];
-  store: Store;
-  standards: UsageStandard[];
-  onClose: () => void;
-  onSave: (rows: { item_id: string; lunch_c: number; dinner_c: number }[]) => void;
-  saving: boolean;
-}) {
-  const [form, setForm] = useState<Record<string, { lunch: string; dinner: string }>>(() => {
-    const init: Record<string, { lunch: string; dinner: string }> = {};
-    items.forEach(item => {
-      const std = standards.find(s => s.item_id === item.id);
-      init[item.id] = {
-        lunch: std?.lunch_c ? String(std.lunch_c) : '',
-        dinner: std?.dinner_c ? String(std.dinner_c) : '',
-      };
-    });
-    return init;
+// Self-contained: manages its own store tab, data fetching, and form state.
+// form is keyed by store → item_id so switching tabs never loses unsaved data.
+function UploadModal({ onClose }: { onClose: () => void }) {
+  const [modalStore, setModalStore] = useState<Store>('Westend');
+  // Accumulated edits across all store tabs: store → item_id → { lunch, dinner }
+  const [form, setForm] = useState<Partial<Record<Store, Record<string, { lunch: string; dinner: string }>>>>({});
+  const [seeded, setSeeded] = useState<Partial<Record<Store, boolean>>>({});
+  const qc = useQueryClient();
+
+  /* ── Items for current modal store ── */
+  const { data: items = [], isLoading: loadingItems } = useQuery({
+    queryKey: ['upload-items', modalStore],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('inventory_items')
+        .select('id, section, name, unit, sort_order, stores, store_sort_orders')
+        .contains('stores', [modalStore]);
+      if (error) throw error;
+      return (data ?? []) as InventoryItem[];
+    },
   });
 
-  const sections = sortedSections(items);
+  /* ── Existing standards for current modal store ── */
+  const { data: standards = [] } = useQuery({
+    queryKey: ['upload-standards', modalStore],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('usage_standards')
+        .select('item_id, store, lunch_c, dinner_c')
+        .eq('store', modalStore);
+      if (error) throw error;
+      return (data ?? []) as UsageStandard[];
+    },
+  });
 
-  function handleSave() {
-    const rows = items.map(item => ({
-      item_id: item.id,
-      lunch_c: parseFloat(form[item.id]?.lunch || '0') || 0,
-      dinner_c: parseFloat(form[item.id]?.dinner || '0') || 0,
+  /* ── Seed form from DB on first visit to each store tab ── */
+  useEffect(() => {
+    if (seeded[modalStore]) return;
+    const init: Record<string, { lunch: string; dinner: string }> = {};
+    standards.forEach(s => {
+      init[s.item_id] = {
+        lunch: s.lunch_c ? String(s.lunch_c) : '',
+        dinner: s.dinner_c ? String(s.dinner_c) : '',
+      };
+    });
+    setForm(f => ({ ...f, [modalStore]: init }));
+    setSeeded(s => ({ ...s, [modalStore]: true }));
+  }, [standards, modalStore, seeded]);
+
+  /* ── Save current store ── */
+  const { mutate: save, isPending: saving } = useMutation({
+    mutationFn: async () => {
+      const storeForm = form[modalStore] ?? {};
+      const payload = items.map(item => ({
+        item_id: item.id,
+        store: modalStore,
+        lunch_c: parseFloat(storeForm[item.id]?.lunch || '0') || 0,
+        dinner_c: parseFloat(storeForm[item.id]?.dinner || '0') || 0,
+      }));
+      const { error } = await supabase
+        .from('usage_standards')
+        .upsert(payload, { onConflict: 'item_id,store' });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['usage-standards'] });
+    },
+  });
+
+  function setField(itemId: string, field: 'lunch' | 'dinner', value: string) {
+    setForm(f => ({
+      ...f,
+      [modalStore]: {
+        ...(f[modalStore] ?? {}),
+        [itemId]: { ...(f[modalStore]?.[itemId] ?? { lunch: '', dinner: '' }), [field]: value },
+      },
     }));
-    onSave(rows);
   }
+
+  const storeForm = form[modalStore] ?? {};
+  const sections = sortedSections(items);
 
   return (
     <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-xl max-h-[90vh] flex flex-col">
+
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 flex-shrink-0">
           <div>
             <h2 className="text-base font-bold text-gray-900">Upload Standard Usage</h2>
-            <p className="text-xs text-gray-400 mt-0.5">{store} — enter usage per shift (C = standard shift)</p>
+            <p className="text-xs text-gray-400 mt-0.5">C = standard shift quantity per item</p>
           </div>
           <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors">
             <X size={18} className="text-gray-500" />
           </button>
         </div>
 
+        {/* Store tabs */}
+        <div className="flex gap-2 px-6 pt-3 pb-0 flex-shrink-0">
+          {STORES.map(s => (
+            <button
+              key={s}
+              onClick={() => setModalStore(s)}
+              className={`px-4 py-1.5 rounded-lg text-sm font-semibold border transition-colors ${
+                modalStore === s
+                  ? 'bg-[#1B5E20] text-white border-[#1B5E20]'
+                  : 'bg-white text-[#1B5E20] border-[#1B5E20] hover:bg-[#1B5E20]/5'
+              }`}
+            >
+              {s}
+            </button>
+          ))}
+        </div>
+
         {/* Column headers */}
-        <div className="grid grid-cols-[1fr_88px_88px] gap-x-3 px-6 py-2 bg-gray-50 border-b border-gray-100 flex-shrink-0">
+        <div className="grid grid-cols-[1fr_88px_88px] gap-x-3 px-6 py-2 mt-3 bg-gray-50 border-t border-b border-gray-100 flex-shrink-0">
           <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Item</span>
           <span className="text-xs font-semibold text-[#1B5E20] uppercase tracking-wide text-center">Lunch C</span>
           <span className="text-xs font-semibold text-blue-600 uppercase tracking-wide text-center">Dinner C</span>
@@ -119,52 +181,59 @@ function UploadModal({
 
         {/* Scrollable body */}
         <div className="overflow-y-auto flex-1 px-6 py-2">
-          {sections.map(section => {
-            const sectionItems = sortedItems(items.filter(i => i.section === section), store);
-            if (sectionItems.length === 0) return null;
-            return (
-              <React.Fragment key={section}>
-                <div className="pt-3 pb-1 text-xs font-bold text-gray-400 uppercase tracking-wider">
-                  {section}
-                </div>
-                {sectionItems.map(item => (
-                  <div key={item.id} className="grid grid-cols-[1fr_88px_88px] gap-x-3 py-1.5 items-center border-b border-gray-50">
-                    <div>
-                      <span className="text-sm text-gray-800">{item.name}</span>
-                      <span className="text-xs text-gray-400 ml-1.5">{item.unit}</span>
-                    </div>
-                    <input
-                      type="number" min="0" step="0.5"
-                      value={form[item.id]?.lunch ?? ''}
-                      placeholder="—"
-                      onChange={e => setForm(f => ({ ...f, [item.id]: { ...f[item.id], lunch: e.target.value } }))}
-                      className="w-full text-center border border-gray-200 rounded-lg px-1 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]"
-                    />
-                    <input
-                      type="number" min="0" step="0.5"
-                      value={form[item.id]?.dinner ?? ''}
-                      placeholder="—"
-                      onChange={e => setForm(f => ({ ...f, [item.id]: { ...f[item.id], dinner: e.target.value } }))}
-                      className="w-full text-center border border-gray-200 rounded-lg px-1 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
-                    />
+          {loadingItems ? (
+            <div className="py-10 text-center text-sm text-gray-400">Loading…</div>
+          ) : (
+            sections.map(section => {
+              const sectionItems = sortedItems(items.filter(i => i.section === section), modalStore);
+              if (sectionItems.length === 0) return null;
+              return (
+                <React.Fragment key={section}>
+                  <div className="pt-3 pb-1 text-xs font-bold text-gray-400 uppercase tracking-wider">
+                    {section}
                   </div>
-                ))}
-              </React.Fragment>
-            );
-          })}
+                  {sectionItems.map(item => (
+                    <div key={item.id} className="grid grid-cols-[1fr_88px_88px] gap-x-3 py-1.5 items-center border-b border-gray-50">
+                      <div>
+                        <span className="text-sm text-gray-800">{item.name}</span>
+                        <span className="text-xs text-gray-400 ml-1.5">{item.unit}</span>
+                      </div>
+                      <input
+                        type="number" min="0" step="0.5"
+                        value={storeForm[item.id]?.lunch ?? ''}
+                        placeholder="—"
+                        onChange={e => setField(item.id, 'lunch', e.target.value)}
+                        className="w-full text-center border border-gray-200 rounded-lg px-1 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]"
+                      />
+                      <input
+                        type="number" min="0" step="0.5"
+                        value={storeForm[item.id]?.dinner ?? ''}
+                        placeholder="—"
+                        onChange={e => setField(item.id, 'dinner', e.target.value)}
+                        className="w-full text-center border border-gray-200 rounded-lg px-1 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                      />
+                    </div>
+                  ))}
+                </React.Fragment>
+              );
+            })
+          )}
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-gray-100 flex-shrink-0">
-          <button onClick={onClose}
-            className="px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-lg transition-colors">
-            Cancel
-          </button>
-          <button onClick={handleSave} disabled={saving}
-            className="flex items-center gap-2 px-5 py-2 bg-[#1B5E20] text-white text-sm font-semibold rounded-xl hover:bg-[#2E7D32] transition-colors disabled:opacity-60 shadow-sm">
-            <Save size={15} />
-            {saving ? 'Saving…' : 'Save'}
-          </button>
+        <div className="flex items-center justify-between px-6 py-4 border-t border-gray-100 flex-shrink-0">
+          <span className="text-xs text-gray-400">Saving applies to <span className="font-semibold text-gray-600">{modalStore}</span> only</span>
+          <div className="flex items-center gap-3">
+            <button onClick={onClose}
+              className="px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-lg transition-colors">
+              Close
+            </button>
+            <button onClick={() => save()} disabled={saving}
+              className="flex items-center gap-2 px-5 py-2 bg-[#1B5E20] text-white text-sm font-semibold rounded-xl hover:bg-[#2E7D32] transition-colors disabled:opacity-60 shadow-sm">
+              <Save size={15} />
+              {saving ? 'Saving…' : `Save ${modalStore}`}
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -175,7 +244,6 @@ function UploadModal({
 export default function UsageForecastPage() {
   const [activeStore, setActiveStore] = useState<Store>('Westend');
   const [showUpload, setShowUpload] = useState(false);
-  const qc = useQueryClient();
 
   /* ── Data ── */
   const { data: items = [], isLoading: loadingItems } = useQuery({
@@ -199,25 +267,6 @@ export default function UsageForecastPage() {
         .eq('store', activeStore);
       if (error) throw error;
       return (data ?? []) as UsageStandard[];
-    },
-  });
-
-  const { mutate: saveStandards, isPending: saving } = useMutation({
-    mutationFn: async (rows: { item_id: string; lunch_c: number; dinner_c: number }[]) => {
-      const payload = rows.map(r => ({
-        item_id: r.item_id,
-        store: activeStore,
-        lunch_c: r.lunch_c,
-        dinner_c: r.dinner_c,
-      }));
-      const { error } = await supabase
-        .from('usage_standards')
-        .upsert(payload, { onConflict: 'item_id,store' });
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['usage-standards', activeStore] });
-      setShowUpload(false);
     },
   });
 
@@ -419,14 +468,7 @@ export default function UsageForecastPage() {
 
       {/* Upload modal */}
       {showUpload && (
-        <UploadModal
-          items={items}
-          store={activeStore}
-          standards={standards}
-          onClose={() => setShowUpload(false)}
-          onSave={saveStandards}
-          saving={saving}
-        />
+        <UploadModal onClose={() => setShowUpload(false)} />
       )}
     </div>
   );
