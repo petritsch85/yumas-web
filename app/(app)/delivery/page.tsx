@@ -1428,15 +1428,15 @@ export default function DeliveryPage() {
     if (!run) return;
     setFinishingPackingStore(store);
     try {
-      // Auto-confirm: set packed_qty = delivery_qty for any line in this store still null
+      // Auto-confirm: set packed_qty = 0 for any line in this store still null (not individually confirmed)
       const unconfirmedLines = lines.filter(
-        l => l.location_name === store && l.delivery_qty > 0 && l.packed_qty === null
+        l => l.location_name === store && l.packed_qty === null
       );
       if (unconfirmedLines.length > 0) {
         await Promise.all(
           unconfirmedLines.map(l =>
             supabase.from('delivery_run_lines')
-              .update({ packed_qty: l.delivery_qty, is_packed: true })
+              .update({ packed_qty: 0, is_packed: false })
               .eq('id', l.id)
           )
         );
@@ -1456,9 +1456,9 @@ export default function DeliveryPage() {
     if (!run) return;
     setUndoingPackingStore(store);
     try {
-      // Reset auto-confirmed lines back to null so packer can re-enter
+      // Reset auto-zeroed lines back to null so packer can re-enter
       const autoConfirmedLines = lines.filter(
-        l => l.location_name === store && l.packed_qty === l.delivery_qty && l.delivery_qty > 0
+        l => l.location_name === store && l.packed_qty === 0
       );
       if (autoConfirmedLines.length > 0) {
         await Promise.all(
