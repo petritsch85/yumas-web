@@ -657,7 +657,13 @@ function DriverView({ run, targetDate, onStart, onFinish, startingDelivery, fini
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
   }, [run?.delivery_started_at, run?.delivery_finished_at]);
 
-  const canStart      = !!run?.packing_finished_at && !run?.delivery_started_at;
+  // Packing done: use new per-store system if available, else fall back to legacy field
+  const DELIVERY_STORES_DV = ['Eschborn', 'Taunus', 'Westend'];
+  const dvStoreTs   = run?.store_packing_finished_at ?? null;
+  const dvStoreMap  = dvStoreTs ?? {};
+  const dvAllPacked = DELIVERY_STORES_DV.every(s => !!dvStoreMap[s]);
+  const packingDone = run ? (dvStoreTs !== null ? dvAllPacked : !!run.packing_finished_at) : false;
+  const canStart      = packingDone && !run?.delivery_started_at;
   const inProgress    = !!run?.delivery_started_at && !run?.delivery_finished_at;
   const done          = !!run?.delivery_finished_at;
   const allConfirmed  = STORES.every(s => receiptStatus[s]);
