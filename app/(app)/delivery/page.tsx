@@ -1412,6 +1412,21 @@ export default function DeliveryPage() {
     }
   };
 
+  const [deConfirmingAll, setDeConfirmingAll] = useState(false);
+  const deConfirmAllPacking = async () => {
+    if (!run) return;
+    setDeConfirmingAll(true);
+    try {
+      await supabase.from('delivery_runs').update({
+        store_packing_finished_at: {},
+      }).eq('id', run.id);
+      setPackingFinished(false);
+      qc.invalidateQueries({ queryKey: ['delivery-run', targetDate] });
+    } finally {
+      setDeConfirmingAll(false);
+    }
+  };
+
   const startDelivery = async () => {
     if (!run) return;
     setStartingDelivery(true);
@@ -1727,9 +1742,22 @@ export default function DeliveryPage() {
             )}
 
             {/* Packer: Start Packing / timer / Finish — desktop only (mobile version shown below header) */}
-            {viewMode === 'packer' && run && !packingFinished && (
+            {viewMode === 'packer' && run && (
               <div className="hidden sm:flex items-center gap-3">
-                {!packingStarted ? (
+                {allStoresPacked || packingFinished ? (
+                  <>
+                    <span className="flex items-center gap-2 bg-green-50 border border-green-200 text-green-700 px-4 py-2 rounded-lg text-sm font-semibold">
+                      <CheckCircle2 size={15} /> Packing Finished
+                    </span>
+                    <button
+                      onClick={deConfirmAllPacking}
+                      disabled={deConfirmingAll}
+                      className="text-sm font-semibold text-gray-400 underline underline-offset-2 hover:text-gray-600 transition-colors disabled:opacity-50"
+                    >
+                      {deConfirmingAll ? 'Undoing…' : 'De-Confirm'}
+                    </button>
+                  </>
+                ) : !packingStarted ? (
                   <button onClick={startPacking} className="flex items-center gap-2 bg-[#1B5E20] text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-[#2E7D32] transition-colors shadow-sm">
                     <Play size={15} /> Start Packing
                   </button>
@@ -1763,9 +1791,22 @@ export default function DeliveryPage() {
         </div>
 
         {/* Packer action button — full-width bar on mobile only */}
-        {viewMode === 'packer' && run && !packingFinished && (
+        {viewMode === 'packer' && run && (
           <div className="sm:hidden mb-4">
-            {!packingStarted ? (
+            {allStoresPacked || packingFinished ? (
+              <div className="flex items-center justify-between gap-3 px-4 py-3 bg-green-50 border border-green-200 rounded-xl">
+                <span className="flex items-center gap-2 text-green-700 text-sm font-semibold">
+                  <CheckCircle2 size={16} /> Packing Finished
+                </span>
+                <button
+                  onClick={deConfirmAllPacking}
+                  disabled={deConfirmingAll}
+                  className="text-sm font-semibold text-gray-400 underline underline-offset-2 hover:text-gray-600 transition-colors disabled:opacity-50"
+                >
+                  {deConfirmingAll ? 'Undoing…' : 'De-Confirm'}
+                </button>
+              </div>
+            ) : !packingStarted ? (
               <button onClick={startPacking} className="w-full flex items-center justify-center gap-2 bg-[#1B5E20] text-white px-4 py-3 rounded-xl text-sm font-semibold hover:bg-[#2E7D32] transition-colors shadow-sm">
                 <Play size={15} /> Start Packing
               </button>
@@ -1873,7 +1914,7 @@ export default function DeliveryPage() {
         )}
 
         {/* ── Packing finished banner ── */}
-        {packingFinished && (
+        {(packingFinished || allStoresPacked) && viewMode === 'packer' && (
           <div className="mb-5 flex items-center gap-4 p-4 bg-green-50 border border-green-200 rounded-xl">
             <div className="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center flex-shrink-0">
               <CheckCircle2 size={22} className="text-[#1B5E20]" />
