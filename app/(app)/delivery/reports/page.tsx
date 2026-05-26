@@ -483,6 +483,8 @@ export default function DeliveryReportsPage() {
       await supabase.from('delivery_runs').update(updates).eq('id', activeRun.id);
       qc.invalidateQueries({ queryKey: ['delivery-runs-list'] });
       qc.invalidateQueries({ queryKey: ['dr-lines', activeRun.id] });
+      // Also invalidate the delivery page query so Driver/Packer views update immediately
+      qc.invalidateQueries({ queryKey: ['delivery-run', activeRun.delivery_date] });
     } finally {
       setResettingStep(null);
       setPendingReset(null);
