@@ -983,16 +983,12 @@ function StoreManagerView({ run, lines, targetDate, myStore, sectionOrder, itemR
               />
               <button
                 onClick={() => confirmReceipt.mutate()}
-                disabled={confirmReceipt.isPending || !run.delivery_started_at}
+                disabled={confirmReceipt.isPending}
                 className="w-full flex items-center justify-center gap-2 bg-[#1B5E20] text-white py-3 rounded-xl font-semibold text-sm hover:bg-[#2E7D32] transition-colors disabled:opacity-50 shadow-sm"
-                title={!run.delivery_started_at ? 'Delivery has not been started yet' : ''}
               >
                 <ClipboardCheck size={17} />
                 {confirmReceipt.isPending ? 'Confirming…' : 'Confirm All Received'}
               </button>
-              {!run.delivery_started_at && (
-                <p className="text-xs text-center text-gray-400">Delivery hasn't been started by the driver yet</p>
-              )}
             </div>
           ) : (
             <div className="bg-green-50 border border-green-200 rounded-xl p-5 space-y-2">
