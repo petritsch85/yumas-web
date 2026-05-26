@@ -1057,18 +1057,15 @@ export default function DeliveryReportsPage() {
             const note = receipt?.notes ?? '';
             const localNote = localNotes[store] ?? '';
 
-            // Accent & status
+            // Accent & status — always green once store has confirmed
             let accent: 'green' | 'amber' | 'gray' = 'gray';
             let statusNode: React.ReactNode;
 
             if (!receipt) {
               statusNode = <GrayBadge label="Awaiting" />;
-            } else if (missing > 0) {
-              accent = 'amber';
-              statusNode = <AmberBadge label={`${missing} missing`} />;
             } else {
               accent = 'green';
-              statusNode = <GreenBadge label={`${confirmed}/${total} confirmed`} />;
+              statusNode = <GreenBadge label="Confirmed" />;
             }
 
             // Can interact: own store manager (non-admin) before delivery starts? No — only after delivery started
