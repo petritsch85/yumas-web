@@ -1,9 +1,10 @@
 'use client';
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'; // useMutation + useQueryClient used in UploadModal
 import { supabase } from '@/lib/supabase-browser';
-import { Upload, Save, X } from 'lucide-react';
+import { Upload, Download, Save, X, FileUp } from 'lucide-react';
+import * as XLSX from 'xlsx';
 
 /* ─── Constants ──────────────────────────────────────────────────────────── */
 const STORES = ['Westend', 'Eschborn', 'Taunus'] as const;
@@ -127,6 +128,9 @@ function UploadModal({ onClose }: { onClose: () => void }) {
     },
   });
 
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+
   function setField(itemId: string, field: 'lunch' | 'dinner', value: string) {
     setForm(f => ({
       ...f,
@@ -135,6 +139,79 @@ function UploadModal({ onClose }: { onClose: () => void }) {
         [itemId]: { ...(f[modalStore]?.[itemId] ?? { lunch: '', dinner: '' }), [field]: value },
       },
     }));
+  }
+
+  /* ── Download XLS ── */
+  function handleDownload() {
+    const storeForm = form[modalStore] ?? {};
+    const sections = sortedSections(items);
+    const rows: (string | number)[][] = [
+      ['Section', 'Item', 'Unit', 'Lunch C', 'Dinner C', '_item_id'],
+    ];
+    sections.forEach(section => {
+      const sectionItems = sortedItems(items.filter(i => i.section === section), modalStore);
+      sectionItems.forEach(item => {
+        rows.push([
+          section,
+          item.name,
+          item.unit,
+          parseFloat(storeForm[item.id]?.lunch || '0') || 0,
+          parseFloat(storeForm[item.id]?.dinner || '0') || 0,
+          item.id,
+        ]);
+      });
+    });
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    // Hide the _item_id column (col F) by setting width to 0
+    ws['!cols'] = [
+      { wch: 16 }, { wch: 28 }, { wch: 12 }, { wch: 10 }, { wch: 10 }, { hidden: true },
+    ];
+    XLSX.utils.book_append_sheet(wb, ws, modalStore);
+    XLSX.writeFile(wb, `usage_${modalStore}_${new Date().toISOString().slice(0, 10)}.xls`, { bookType: 'xls' });
+  }
+
+  /* ── Upload XLS ── */
+  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadError(null);
+    const reader = new FileReader();
+    reader.onload = ev => {
+      try {
+        const data = new Uint8Array(ev.target!.result as ArrayBuffer);
+        const wb = XLSX.read(data, { type: 'array' });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json<Record<string, string | number>>(ws, { defval: '' });
+        const newEntries: Record<string, { lunch: string; dinner: string }> = {};
+        let matched = 0;
+        rows.forEach(row => {
+          const itemId = String(row['_item_id'] ?? '').trim();
+          const lunchC = row['Lunch C'];
+          const dinnerC = row['Dinner C'];
+          if (!itemId) return;
+          // Verify item belongs to current store
+          const item = items.find(i => i.id === itemId);
+          if (!item) return;
+          matched++;
+          newEntries[itemId] = {
+            lunch: lunchC !== '' && lunchC !== undefined ? String(lunchC) : '',
+            dinner: dinnerC !== '' && dinnerC !== undefined ? String(dinnerC) : '',
+          };
+        });
+        if (matched === 0) {
+          setUploadError('No matching items found. Make sure you are uploading the file downloaded for this store.');
+          return;
+        }
+        setForm(f => ({ ...f, [modalStore]: { ...(f[modalStore] ?? {}), ...newEntries } }));
+        setSeeded(s => ({ ...s, [modalStore]: true }));
+      } catch {
+        setUploadError('Could not read file. Please upload the .xls file downloaded from this page.');
+      }
+    };
+    reader.readAsArrayBuffer(file);
+    // Reset input so same file can be re-uploaded
+    e.target.value = '';
   }
 
   const storeForm = form[modalStore] ?? {};
@@ -150,17 +227,52 @@ function UploadModal({ onClose }: { onClose: () => void }) {
             <h2 className="text-base font-bold text-gray-900">Upload Standard Usage</h2>
             <p className="text-xs text-gray-400 mt-0.5">C = standard shift quantity per item</p>
           </div>
-          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors">
-            <X size={18} className="text-gray-500" />
-          </button>
+          <div className="flex items-center gap-2">
+            {/* Download */}
+            <button
+              onClick={handleDownload}
+              disabled={loadingItems || items.length === 0}
+              title="Download XLS for this store"
+              className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-semibold text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-40"
+            >
+              <Download size={14} />
+              Download
+            </button>
+            {/* Upload from file */}
+            <button
+              onClick={() => { setUploadError(null); fileInputRef.current?.click(); }}
+              title="Upload XLS for this store"
+              className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-semibold text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+            >
+              <FileUp size={14} />
+              Upload
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".xls,.xlsx"
+              className="hidden"
+              onChange={handleFileChange}
+            />
+            <button onClick={onClose} className="ml-1 p-1.5 rounded-lg hover:bg-gray-100 transition-colors">
+              <X size={18} className="text-gray-500" />
+            </button>
+          </div>
         </div>
+
+        {/* Upload error banner */}
+        {uploadError && (
+          <div className="mx-6 mt-3 px-4 py-2.5 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700 flex-shrink-0">
+            {uploadError}
+          </div>
+        )}
 
         {/* Store tabs */}
         <div className="flex gap-2 px-6 pt-3 pb-0 flex-shrink-0">
           {STORES.map(s => (
             <button
               key={s}
-              onClick={() => setModalStore(s)}
+              onClick={() => { setModalStore(s); setUploadError(null); }}
               className={`px-4 py-1.5 rounded-lg text-sm font-semibold border transition-colors ${
                 modalStore === s
                   ? 'bg-[#1B5E20] text-white border-[#1B5E20]'
