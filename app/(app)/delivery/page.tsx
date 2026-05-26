@@ -987,7 +987,7 @@ function StoreManagerView({ run, lines, targetDate, myStore, sectionOrder, itemR
                 className="w-full flex items-center justify-center gap-2 bg-[#1B5E20] text-white py-3 rounded-xl font-semibold text-sm hover:bg-[#2E7D32] transition-colors disabled:opacity-50 shadow-sm"
               >
                 <ClipboardCheck size={17} />
-                {confirmReceipt.isPending ? 'Confirming…' : 'Confirm All Received'}
+                {confirmReceipt.isPending ? 'Sending…' : 'Send'}
               </button>
             </div>
           ) : (
