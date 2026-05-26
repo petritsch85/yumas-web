@@ -1338,23 +1338,21 @@ export default function DeliveryPage() {
   });
   const canManage = profile?.role === 'admin' || profile?.role === 'manager';
 
-  // For non-managers: auto-set view based on their role/location/permissions
+  // For non-managers: auto-set view based purely on permissions (independent of role/category/location)
   const permsKey = JSON.stringify(profile?.permissions ?? null);
   useEffect(() => {
     if (!profile || canManage) return;
     const perms = profile.permissions as any;
-    const locName = profile.locationName;
-    // Store location assignment takes highest priority — store staff always see Store view
-    if (locName && STORES.includes(locName as Store)) { setViewMode('store');  return; }
-    if (perms?.store_receiver)                        { setViewMode('store');  return; }
-    if (perms?.driver)                                { setViewMode('driver'); return; }
-    if (perms?.packer)                                { setViewMode('packer'); return; }
-    // Fallback: default to packer
+    if (perms?.store_receiver) { setViewMode('store');  return; }
+    if (perms?.driver)         { setViewMode('driver'); return; }
+    if (perms?.packer)         { setViewMode('packer'); return; }
     setViewMode('packer');
   }, [profile?.id, permsKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Which store does this user belong to? (for Store Manager auto-filter)
+  // Which store does this user belong to? (for Store Manager auto-filter to their own store tab)
+  // Only applies if they have a store location AND store_receiver permission
   const myStore: Store | null = (() => {
+    if (!(profile?.permissions as any)?.store_receiver) return null;
     const loc = profile?.locationName;
     return loc && STORES.includes(loc as Store) ? (loc as Store) : null;
   })();
