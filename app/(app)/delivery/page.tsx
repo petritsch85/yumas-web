@@ -1395,6 +1395,22 @@ export default function DeliveryPage() {
     }
   };
 
+  const [undoingPackingStore, setUndoingPackingStore] = useState<Store | null>(null);
+  const unmarkStorePacked = async (store: Store) => {
+    if (!run) return;
+    setUndoingPackingStore(store);
+    try {
+      const current = { ...(run.store_packing_finished_at ?? {}) };
+      delete current[store];
+      await supabase.from('delivery_runs').update({
+        store_packing_finished_at: current,
+      }).eq('id', run.id);
+      qc.invalidateQueries({ queryKey: ['delivery-run', targetDate] });
+    } finally {
+      setUndoingPackingStore(null);
+    }
+  };
+
   const startDelivery = async () => {
     if (!run) return;
     setStartingDelivery(true);
@@ -2171,8 +2187,17 @@ export default function DeliveryPage() {
                     {/* Per-store packing finish button (packer only, delivery stores only) */}
                     {viewMode === 'packer' && packingStarted && store !== 'ZK' && (
                       storePackingDone[store] ? (
-                        <div className="mt-4 flex items-center justify-center gap-2 py-3 rounded-xl border border-green-200 bg-green-50 text-green-700 text-sm font-semibold">
-                          <CheckCircle2 size={16} /> {store} packed ✓
+                        <div className="mt-4 flex items-center justify-between gap-2 px-4 py-3 rounded-xl border border-green-200 bg-green-50 text-green-700 text-sm font-semibold">
+                          <span className="flex items-center gap-2">
+                            <CheckCircle2 size={16} /> {store} packed ✓
+                          </span>
+                          <button
+                            onClick={() => unmarkStorePacked(store as Store)}
+                            disabled={undoingPackingStore === store}
+                            className="text-xs font-semibold text-green-600 underline underline-offset-2 hover:text-green-800 transition-colors disabled:opacity-50"
+                          >
+                            {undoingPackingStore === store ? 'Undoing…' : 'Undo'}
+                          </button>
                         </div>
                       ) : (
                         <button
