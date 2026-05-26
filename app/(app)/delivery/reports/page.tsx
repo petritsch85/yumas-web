@@ -489,6 +489,28 @@ export default function DeliveryReportsPage() {
     }
   };
 
+  /* ── Reset packing (Started or Finished) — also zeros out all packed_qty on lines ── */
+  const resetPackingStep = async (stepKey: string, runUpdates: Record<string, null | Record<string, string>>) => {
+    if (!activeRun) return;
+    setResettingStep(stepKey);
+    try {
+      // Zero out all packed_qty on every line in this run
+      await supabase.from('delivery_run_lines')
+        .update({ packed_qty: 0, is_packed: false })
+        .eq('run_id', activeRun.id);
+      // Clear store_packing_finished_at + the requested run fields
+      await supabase.from('delivery_runs')
+        .update({ store_packing_finished_at: {}, ...runUpdates })
+        .eq('id', activeRun.id);
+      qc.invalidateQueries({ queryKey: ['delivery-runs-list'] });
+      qc.invalidateQueries({ queryKey: ['dr-lines', activeRun.id] });
+      qc.invalidateQueries({ queryKey: ['delivery-run', activeRun.delivery_date] });
+    } finally {
+      setResettingStep(null);
+      setPendingReset(null);
+    }
+  };
+
   const resetReceipt = async (store: Store) => {
     if (!activeRun) return;
     setResettingStep(`receipt-${store}`);
@@ -951,7 +973,7 @@ export default function DeliveryReportsPage() {
                 meta={byName}
                 timeLeft={fmt(activeRun.packing_started_at)}
                 status={statusNode}
-                {...(started ? makeResetProps('packing-started', () => resetStep('packing-started', { packing_started_at: null, packed_by: null })) : {})}
+                {...(started ? makeResetProps('packing-started', () => resetPackingStep('packing-started', { packing_started_at: null, packed_by: null })) : {})}
               >
                 {null}
               </StepRow>
@@ -987,7 +1009,7 @@ export default function DeliveryReportsPage() {
                 title="Packing Finished"
                 timeLeft={done ? fmt(effectiveFinishedAt) : undefined}
                 status={statusNode}
-                {...(done ? makeResetProps('packing-finished', () => resetStep('packing-finished', { packing_finished_at: null, packing_duration_seconds: null, items_packed_count: null })) : {})}
+                {...(done ? makeResetProps('packing-finished', () => resetPackingStep('packing-finished', { packing_finished_at: null, packing_duration_seconds: null, items_packed_count: null })) : {})}
               >
                 {null}
               </StepRow>
