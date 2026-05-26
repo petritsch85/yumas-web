@@ -523,7 +523,11 @@ export default function DeliveryReportsPage() {
         .delete()
         .eq('run_id', activeRun.id)
         .eq('location_name', store);
+      // Invalidate reports-page query
       qc.invalidateQueries({ queryKey: ['dr-receipts', activeRun.id] });
+      // Also invalidate delivery-page receipt queries so StoreManagerView resets immediately
+      qc.invalidateQueries({ queryKey: ['store-receipt', activeRun.id] });
+      qc.invalidateQueries({ queryKey: ['store-receipts-status', activeRun.id] });
     } finally {
       setResettingStep(null);
       setPendingReset(null);

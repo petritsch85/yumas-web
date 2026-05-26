@@ -827,6 +827,16 @@ function StoreManagerView({ run, lines, targetDate, myStore, sectionOrder, itemR
 
   const isConfirmed = !!receipt?.received_at;
   const locked = isConfirmed && !editing; // inputs locked once confirmed, unlocked when editing
+
+  // When receipt is deleted externally (e.g. Reports page Reset), clear all local UI state
+  useEffect(() => {
+    if (!isConfirmed) {
+      setItemOk({});
+      setItemManualQty({});
+      setEditing(false);
+      setNotes('');
+    }
+  }, [isConfirmed]);
   const storeItemRank = itemRankByStore[currentStore] ?? {};
   const sections = canonicalSections([...new Set(storeLines.map(l => l.section))], sectionOrder);
 
