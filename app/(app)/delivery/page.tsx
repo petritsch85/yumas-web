@@ -1428,6 +1428,19 @@ export default function DeliveryPage() {
     if (!run) return;
     setFinishingPackingStore(store);
     try {
+      // Auto-confirm: set packed_qty = delivery_qty for any line in this store still null
+      const unconfirmedLines = lines.filter(
+        l => l.location_name === store && l.delivery_qty > 0 && l.packed_qty === null
+      );
+      if (unconfirmedLines.length > 0) {
+        await Promise.all(
+          unconfirmedLines.map(l =>
+            supabase.from('delivery_run_lines')
+              .update({ packed_qty: l.delivery_qty, is_packed: true })
+              .eq('id', l.id)
+          )
+        );
+      }
       const current = run.store_packing_finished_at ?? {};
       await supabase.from('delivery_runs').update({
         store_packing_finished_at: { ...current, [store]: new Date().toISOString() },
@@ -1443,6 +1456,19 @@ export default function DeliveryPage() {
     if (!run) return;
     setUndoingPackingStore(store);
     try {
+      // Reset auto-confirmed lines back to null so packer can re-enter
+      const autoConfirmedLines = lines.filter(
+        l => l.location_name === store && l.packed_qty === l.delivery_qty && l.delivery_qty > 0
+      );
+      if (autoConfirmedLines.length > 0) {
+        await Promise.all(
+          autoConfirmedLines.map(l =>
+            supabase.from('delivery_run_lines')
+              .update({ packed_qty: null, is_packed: false })
+              .eq('id', l.id)
+          )
+        );
+      }
       const current = { ...(run.store_packing_finished_at ?? {}) };
       delete current[store];
       await supabase.from('delivery_runs').update({
