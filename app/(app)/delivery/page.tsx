@@ -826,6 +826,7 @@ function StoreManagerView({ run, lines, targetDate, myStore, sectionOrder, itemR
   });
 
   const isConfirmed = !!receipt?.received_at;
+  const locked = isConfirmed && !editing; // inputs locked once confirmed, unlocked when editing
   const storeItemRank = itemRankByStore[currentStore] ?? {};
   const sections = canonicalSections([...new Set(storeLines.map(l => l.section))], sectionOrder);
 
@@ -933,24 +934,36 @@ function StoreManagerView({ run, lines, targetDate, myStore, sectionOrder, itemR
                               </span>
                             )}
                           </td>
-                          {/* OK? toggle */}
+                          {/* OK? toggle — locked after Send */}
                           <td className="py-3 text-center">
-                            <button
-                              onClick={() => setItemOk(prev => ({ ...prev, [line.id]: !prev[line.id] }))}
-                              className={`w-10 h-8 rounded-full text-sm font-bold transition-colors ${
-                                isOk
-                                  ? 'bg-green-100 text-green-700 hover:bg-green-200'
-                                  : 'bg-red-100 text-red-600 hover:bg-red-200'
-                              }`}
-                            >
-                              {isOk ? '✓' : '✗'}
-                            </button>
+                            {locked ? (
+                              <span className={`w-10 h-8 rounded-full text-sm font-bold inline-flex items-center justify-center ${
+                                isOk ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'
+                              }`}>
+                                {isOk ? '✓' : '✗'}
+                              </span>
+                            ) : (
+                              <button
+                                onClick={() => setItemOk(prev => ({ ...prev, [line.id]: !prev[line.id] }))}
+                                className={`w-10 h-8 rounded-full text-sm font-bold transition-colors ${
+                                  isOk
+                                    ? 'bg-green-100 text-green-700 hover:bg-green-200'
+                                    : 'bg-red-100 text-red-600 hover:bg-red-200'
+                                }`}
+                              >
+                                {isOk ? '✓' : '✗'}
+                              </button>
+                            )}
                           </td>
-                          {/* Received: read-only packed qty when OK ✓; manual input when red ✗ */}
+                          {/* Received — locked after Send */}
                           <td className="py-3 text-center">
                             {isOk ? (
                               <span className="inline-flex items-center justify-center w-9 h-7 rounded-md bg-green-50 text-green-700 font-bold text-sm border border-green-200">
                                 {packedQty}
+                              </span>
+                            ) : locked ? (
+                              <span className="text-gray-400 text-sm font-bold">
+                                {itemManualQty[line.id] || '—'}
                               </span>
                             ) : (
                               <input
