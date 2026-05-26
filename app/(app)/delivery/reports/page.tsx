@@ -33,6 +33,7 @@ type Run = {
   list_confirmed_westend_at: string | null;
   deleted_at: string | null;
   deleted_by: string | null;
+  inventory_overrides: Record<string, string> | null;
 };
 
 type DeliveryLine = {
@@ -499,6 +500,33 @@ export default function DeliveryReportsPage() {
     }
   };
 
+  /* ── Confirm / unconfirm inventory for a store (override freshness check) ── */
+  const confirmInventory = useMutation({
+    mutationFn: async (store: Store) => {
+      if (!activeRun) throw new Error('No active run');
+      const { data: { user } } = await supabase.auth.getUser();
+      const current = activeRun.inventory_overrides ?? {};
+      const { error } = await supabase.from('delivery_runs')
+        .update({ inventory_overrides: { ...current, [store]: new Date().toISOString(), _confirmed_by: user?.id ?? null } })
+        .eq('id', activeRun.id);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['delivery-runs-list'] }),
+  });
+
+  const unconfirmInventory = useMutation({
+    mutationFn: async (store: Store) => {
+      if (!activeRun) throw new Error('No active run');
+      const current = { ...(activeRun.inventory_overrides ?? {}) };
+      delete current[store];
+      const { error } = await supabase.from('delivery_runs')
+        .update({ inventory_overrides: current })
+        .eq('id', activeRun.id);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['delivery-runs-list'] }),
+  });
+
   /* ── Soft-delete a run → moves to trash ── */
   const deleteRun = useMutation({
     mutationFn: async (runId: string) => {
@@ -751,27 +779,30 @@ export default function DeliveryReportsPage() {
       {activeRun && (() => {
             const snapshot = activeRun.delivery_snapshot ?? null;
             const isPastRun = !!activeRun.delivery_finished_at;
-            // Always evaluate freshness against the actual delivery date of the active run
+            const overrides = activeRun.inventory_overrides ?? {};
             const evalDate = activeRun.delivery_date;
             const cutoff = deliveryCutoff(evalDate);
+            const canOverride = isAdmin && !isPastRun;
 
-            // Resolve inventory timestamp per store
             const getSubmittedAt = (store: Store): string | null => {
               if (isPastRun && snapshot) return snapshot.inventories[store]?.submitted_at ?? null;
               return invSubFor(store)?.submitted_at ?? null;
             };
 
-            const allGreen = STORES.every(s => inventoryFreshness(getSubmittedAt(s), evalDate) === 'green');
-            const anyRed   = STORES.some(s  => inventoryFreshness(getSubmittedAt(s), evalDate) === 'red');
-            const accent   = allGreen ? 'green' : anyRed ? 'amber' : 'amber';
+            // Effective freshness: override → always green
+            const effectiveFreshness = (store: Store) =>
+              overrides[store] ? 'green' : inventoryFreshness(getSubmittedAt(store), evalDate);
 
-            const statusNode = isPastRun
-              ? (allGreen ? <GreenBadge label="All on time" /> : anyRed ? <AmberBadge label="Some missing / late" /> : <AmberBadge label="Some late" />)
-              : (allGreen ? <GreenBadge label="All on time" /> : anyRed ? <AmberBadge label="Some missing / late" /> : <AmberBadge label="Some late" />);
+            const allGreen = STORES.every(s => effectiveFreshness(s) === 'green');
+            const anyRed   = STORES.some(s  => effectiveFreshness(s) === 'red');
+            const accent   = allGreen ? 'green' : 'amber';
+            const statusNode = allGreen
+              ? <GreenBadge label="All confirmed" />
+              : anyRed ? <AmberBadge label="Some missing / late" /> : <AmberBadge label="Some late" />;
 
             return (
               <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-                <div className="flex items-center gap-4 px-5 py-4">
+                <div className="flex items-center gap-4 px-5 py-4 flex-wrap">
                   {/* Step number */}
                   <div className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 ${accent === 'green' ? 'bg-[#1B5E20]' : 'bg-amber-500'}`}>
                     <span className="text-white text-xs font-bold">1</span>
@@ -790,7 +821,8 @@ export default function DeliveryReportsPage() {
                   <div className="flex items-center gap-4 flex-1 min-w-0 flex-wrap">
                     {STORES.map(store => {
                       const submittedAt = getSubmittedAt(store);
-                      const freshness = inventoryFreshness(submittedAt, evalDate);
+                      const isOverridden = !!overrides[store];
+                      const freshness = effectiveFreshness(store);
                       const tickColor = freshness === 'green'
                         ? 'text-green-600 bg-green-50 border-green-200'
                         : freshness === 'amber'
@@ -802,14 +834,37 @@ export default function DeliveryReportsPage() {
                         ? <AlertTriangle size={13} />
                         : <Clock size={13} />;
                       return (
-                        <div key={store} className={`inline-flex flex-col items-center gap-0.5 border rounded-lg px-2.5 py-1.5 ${tickColor}`}>
+                        <div key={store} className={`inline-flex flex-col items-start gap-0.5 border rounded-lg px-2.5 py-1.5 ${tickColor}`}>
                           <div className="flex items-center gap-1 text-xs font-semibold">
                             {icon} {store}
+                            {isOverridden && (
+                              <span className="ml-1 text-[10px] font-normal opacity-70 italic">manually confirmed</span>
+                            )}
                           </div>
                           {submittedAt
                             ? <span className="text-xs opacity-70 font-mono">{fmtDateTime(submittedAt)}</span>
                             : <span className="text-xs opacity-50">No submission</span>
                           }
+                          {/* Admin actions */}
+                          {canOverride && (
+                            isOverridden ? (
+                              <button
+                                onClick={() => unconfirmInventory.mutate(store)}
+                                disabled={unconfirmInventory.isPending}
+                                className="mt-1 text-[10px] text-green-500 hover:text-green-700 underline leading-none disabled:opacity-50"
+                              >
+                                undo
+                              </button>
+                            ) : freshness !== 'green' ? (
+                              <button
+                                onClick={() => confirmInventory.mutate(store)}
+                                disabled={confirmInventory.isPending}
+                                className="mt-1 text-[10px] text-amber-600 hover:text-amber-800 underline leading-none disabled:opacity-50"
+                              >
+                                confirm for this delivery
+                              </button>
+                            ) : null
+                          )}
                         </div>
                       );
                     })}
