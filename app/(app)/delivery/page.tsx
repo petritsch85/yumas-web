@@ -835,7 +835,7 @@ function StoreManagerView({ run, lines, targetDate, myStore, sectionOrder, itemR
       {/* Store tabs — only shown to managers viewing all stores */}
       {!myStore && (
         <div className="flex gap-1 bg-gray-100 rounded-xl p-1 w-fit">
-          {STORES.map(s => (
+          {STORES.filter(s => s !== 'ZK').map(s => (
             <button key={s} onClick={() => setActiveTab(s)}
               className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${activeTab === s ? 'bg-white text-[#1B5E20] shadow-sm font-semibold' : 'text-gray-500 hover:text-gray-700'}`}
             >{s}</button>
