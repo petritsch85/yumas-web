@@ -44,6 +44,7 @@ type DeliveryLine = {
   item_name: string;
   unit: string;
   delivery_qty: number;
+  packed_qty: number | null;
 };
 
 type Receipt = {
@@ -369,9 +370,8 @@ export default function DeliveryReportsPage() {
     queryFn: async () => {
       const { data } = await supabase
         .from('delivery_run_lines')
-        .select('id, location_name, section, item_name, unit, delivery_qty')
+        .select('id, location_name, section, item_name, unit, delivery_qty, packed_qty')
         .eq('run_id', activeRun!.id)
-        .gt('delivery_qty', 0)
         .order('section').order('item_name');
       return (data ?? []) as DeliveryLine[];
     },
@@ -456,7 +456,9 @@ export default function DeliveryReportsPage() {
   const missingPacked = (packedCount !== null && totalLines > 0) ? Math.max(0, totalLines - packedCount) : 0;
 
   const receiptFor = (store: Store) => receipts.find(r => r.location_name === store) ?? null;
-  const linesFor = (store: Store) => lines.filter(l => l.location_name === store);
+  const linesFor = (store: Store) => lines.filter(l =>
+    l.location_name === store && l.packed_qty !== null && l.packed_qty > 0
+  );
 
   const checkedForStore = (store: Store) =>
     linesFor(store).filter(l => localChecked[l.id]).length;
@@ -1121,7 +1123,7 @@ export default function DeliveryReportsPage() {
                                 <td className="px-4 py-2.5 text-xs text-gray-500 hidden sm:table-cell">{line.unit}</td>
                                 <td className="px-4 py-2.5 text-center">
                                   <span className="inline-flex items-center justify-center min-w-[2rem] px-2 py-0.5 rounded-md bg-[#1B5E20]/10 text-[#1B5E20] font-bold text-xs">
-                                    {line.delivery_qty}
+                                    {line.packed_qty ?? line.delivery_qty}
                                   </span>
                                 </td>
                                 {/* Interactive checkbox */}
