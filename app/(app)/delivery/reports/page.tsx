@@ -971,7 +971,7 @@ export default function DeliveryReportsPage() {
 
             // Timestamp: latest store pack time (live) or legacy packing_finished_at
             const effectiveFinishedAt: string | null = allStoresPacked
-              ? DELIVERY_STORES.map(s => storeTs[s]).filter(Boolean).sort().at(-1) ?? null
+              ? DELIVERY_STORES.map(s => storeMap[s]).filter(Boolean).sort().at(-1) ?? null
               : activeRun.packing_finished_at;
 
             const accent = done ? 'green' : 'gray';
