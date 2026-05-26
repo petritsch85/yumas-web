@@ -772,10 +772,16 @@ function StoreManagerView({ run, lines, targetDate, myStore, sectionOrder, itemR
   const [itemOk, setItemOk] = useState<Record<string, boolean | undefined>>({});
 
   const currentStore = myStore ?? activeTab;
-  // Only show rows that actually have something in the delivery
+  // Only show rows actually in the van:
+  // - packed_qty > 0 (packer confirmed a qty), OR
+  // - packed_qty is null AND delivery_qty > 0 (scheduled but not individually confirmed — assumed in van)
+  // Excludes: delivery_qty = 0, or packed_qty explicitly set to 0
   const storeLines = lines.filter(l =>
     l.location_name === currentStore &&
-    (l.delivery_qty > 0 || (l.packed_qty !== null && l.packed_qty > 0))
+    (
+      (l.packed_qty !== null && l.packed_qty > 0) ||
+      (l.packed_qty === null && l.delivery_qty > 0)
+    )
   );
 
   /* Fetch receipt for current store */
