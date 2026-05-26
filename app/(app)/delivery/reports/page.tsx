@@ -961,12 +961,13 @@ export default function DeliveryReportsPage() {
           {/* ── Row 3: Packing Finished ── */}
           {(() => {
             const DELIVERY_STORES = ['Eschborn', 'Taunus', 'Westend'];
-            const storeTs = activeRun.store_packing_finished_at ?? {};
-            const allStoresPacked = DELIVERY_STORES.every(s => !!storeTs[s]);
-            // If store-level packing data exists, it is the authoritative source —
-            // packing_finished_at may be stale from a previous cycle that was undone.
-            const hasStoreData = Object.keys(storeTs).length > 0;
-            const done = hasStoreData ? allStoresPacked : !!activeRun.packing_finished_at;
+            const storeTs = activeRun.store_packing_finished_at; // null = legacy run; {} = new system (even if cleared)
+            const storeMap = storeTs ?? {};
+            const allStoresPacked = DELIVERY_STORES.every(s => !!storeMap[s]);
+            // storeTs !== null means the new per-store system has been used at least once —
+            // always use allStoresPacked so that De-Confirm (which sets {} not null) shows as In progress.
+            // Only fall back to packing_finished_at for truly legacy runs where the column is null.
+            const done = storeTs !== null ? allStoresPacked : !!activeRun.packing_finished_at;
 
             // Timestamp: latest store pack time (live) or legacy packing_finished_at
             const effectiveFinishedAt: string | null = allStoresPacked
