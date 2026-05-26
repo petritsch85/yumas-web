@@ -1091,7 +1091,6 @@ export default function DeliveryReportsPage() {
                 expandable={canExpand || canInteract}
                 expanded={isExpanded}
                 onToggle={() => setExpandedStore(prev => prev === store ? null : store)}
-                {...(receipt ? makeResetProps(`receipt-${store}`, () => resetReceipt(store)) : {})}
               >
                 <div className="px-5 py-4 space-y-4">
 
@@ -1205,6 +1204,37 @@ export default function DeliveryReportsPage() {
                         <CheckCircle2 size={15} />
                         {submittingStore === store ? 'Saving…' : 'Delivery Received'}
                       </button>
+                    </div>
+                  )}
+
+                  {/* Admin reset — inside expanded content to avoid conflict with row toggle */}
+                  {isAdmin && receipt && (
+                    <div className="flex justify-end pt-1 border-t border-gray-100">
+                      {pendingReset === `receipt-${store}` ? (
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-gray-400">Reset confirmation?</span>
+                          <button
+                            onClick={() => resetReceipt(store)}
+                            disabled={resettingStep === `receipt-${store}`}
+                            className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-red-500 text-white hover:bg-red-600 transition-colors disabled:opacity-50"
+                          >
+                            {resettingStep === `receipt-${store}` ? '…' : 'Yes'}
+                          </button>
+                          <button
+                            onClick={() => setPendingReset(null)}
+                            className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors"
+                          >
+                            No
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => setPendingReset(`receipt-${store}`)}
+                          className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-orange-400 hover:bg-orange-500 transition-colors"
+                        >
+                          Reset
+                        </button>
+                      )}
                     </div>
                   )}
 
