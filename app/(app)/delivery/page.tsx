@@ -768,11 +768,15 @@ function StoreManagerView({ run, lines, targetDate, myStore, sectionOrder, itemR
   const qc = useQueryClient();
   const [activeTab, setActiveTab] = useState<Store>(myStore ?? 'Eschborn');
   const [notes, setNotes] = useState('');
-  const [itemComplete, setItemComplete] = useState<Record<string, boolean>>({});
-  const [itemActualQty, setItemActualQty] = useState<Record<string, string>>({});
+  // itemOk: undefined = untouched, true = green (received), false = red (not received / 0)
+  const [itemOk, setItemOk] = useState<Record<string, boolean | undefined>>({});
 
   const currentStore = myStore ?? activeTab;
-  const storeLines = lines.filter(l => l.location_name === currentStore && (l.delivery_qty > 0 || l.packed_qty !== null));
+  // Only show rows that actually have something in the delivery
+  const storeLines = lines.filter(l =>
+    l.location_name === currentStore &&
+    (l.delivery_qty > 0 || (l.packed_qty !== null && l.packed_qty > 0))
+  );
 
   /* Fetch receipt for current store */
   const { data: receipt, isLoading: receiptLoading } = useQuery<StoreReceipt | null>({
@@ -883,8 +887,8 @@ function StoreManagerView({ run, lines, targetDate, myStore, sectionOrder, itemR
                   <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Item</th>
                   <th className="hidden sm:table-cell px-3 py-3 text-center text-xs font-semibold text-gray-400 uppercase tracking-wide">Unit</th>
                   <th className="py-3 text-center text-xs font-semibold text-[#1B5E20] uppercase tracking-wide" style={{ width: '60px' }}>Packed</th>
-                  <th className="py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wide" style={{ width: '72px' }}>Received</th>
                   <th className="py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wide" style={{ width: '60px' }}>OK?</th>
+                  <th className="py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wide" style={{ width: '72px' }}>Received</th>
                 </tr>
               </thead>
               <tbody>
@@ -896,52 +900,56 @@ function StoreManagerView({ run, lines, targetDate, myStore, sectionOrder, itemR
                       </td>
                     </tr>
                     {canonicalItems(storeLines.filter(l => l.section === section), storeItemRank).map(line => {
-                      const isComplete = !!itemComplete[line.id];
                       const isConfirmedPacked = line.packed_qty !== null;
-                      const qty = isConfirmedPacked ? line.packed_qty! : line.delivery_qty;
+                      const packedQty = isConfirmedPacked ? line.packed_qty! : line.delivery_qty;
+                      const okState = itemOk[line.id]; // undefined=untouched, true=ok, false=not ok
+                      // Received: empty if untouched, packedQty if ok, 0 if not ok
+                      const receivedDisplay = okState === undefined ? null : okState ? packedQty : 0;
                       return (
                         <tr key={line.id} className="border-t border-gray-50 hover:bg-gray-50/50">
                           <td className="px-4 py-3 font-medium text-gray-800 text-sm leading-snug">{line.item_name}</td>
                           <td className="hidden sm:table-cell px-3 py-3 text-xs text-gray-400 text-center">{line.unit}</td>
+                          {/* Packed */}
                           <td className="py-3 text-center">
                             {isConfirmedPacked ? (
                               <span className="inline-flex items-center justify-center w-9 h-7 rounded-md bg-[#1B5E20]/10 text-[#1B5E20] font-bold text-sm">
-                                {qty}
+                                {packedQty}
                               </span>
                             ) : (
                               <span
                                 className="inline-flex items-center justify-center w-9 h-7 rounded-md bg-gray-100 text-gray-400 font-bold text-sm border border-dashed border-gray-300"
                                 title="Scheduled quantity — packer did not confirm individual items"
                               >
-                                {qty}
+                                {packedQty}
                               </span>
                             )}
                           </td>
-                          <td className="py-3 text-center">
-                            {!isComplete ? (
-                              <input
-                                type="number"
-                                min={0}
-                                value={itemActualQty[line.id] ?? ''}
-                                onChange={e => setItemActualQty(prev => ({ ...prev, [line.id]: e.target.value }))}
-                                placeholder={String(qty)}
-                                className="w-14 text-center text-sm border border-gray-200 rounded-md px-1 py-1.5 focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20]/40"
-                              />
-                            ) : (
-                              <span className="text-sm text-gray-400">—</span>
-                            )}
-                          </td>
+                          {/* OK? toggle */}
                           <td className="py-3 text-center">
                             <button
-                              onClick={() => setItemComplete(prev => ({ ...prev, [line.id]: !prev[line.id] }))}
+                              onClick={() => setItemOk(prev => ({ ...prev, [line.id]: !prev[line.id] }))}
                               className={`w-10 h-8 rounded-full text-sm font-bold transition-colors ${
-                                isComplete
+                                okState === true
                                   ? 'bg-green-100 text-green-700 hover:bg-green-200'
                                   : 'bg-red-100 text-red-600 hover:bg-red-200'
                               }`}
                             >
-                              {isComplete ? '✓' : '✗'}
+                              {okState === true ? '✓' : '✗'}
                             </button>
+                          </td>
+                          {/* Received — empty until OK? is toggled */}
+                          <td className="py-3 text-center">
+                            {receivedDisplay === null ? (
+                              <span className="text-gray-300 text-xs select-none">—</span>
+                            ) : receivedDisplay > 0 ? (
+                              <span className="inline-flex items-center justify-center w-9 h-7 rounded-md bg-green-50 text-green-700 font-bold text-sm border border-green-200">
+                                {receivedDisplay}
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center justify-center w-9 h-7 rounded-md bg-red-50 text-red-500 font-bold text-sm border border-red-200">
+                                0
+                              </span>
+                            )}
                           </td>
                         </tr>
                       );
