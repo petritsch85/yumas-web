@@ -342,7 +342,22 @@ function StoreDeliveryList({
 
   const isManager = viewMode === 'manager';
   const canPack = !isPreview && (isManager || packingStarted);
-  const colCount = isManager ? 8 : 4;
+  const colCount = isManager ? 8 : 5;
+
+  // Packer toggle: true = "Yes, packed" (auto-fills packed = deliverQty), false = manual input
+  const [packedYes, setPackedYes] = React.useState<Record<string, boolean>>({});
+
+  function togglePackedYes(lineId: string, deliverQty: number) {
+    const newVal = !packedYes[lineId];
+    setPackedYes(p => ({ ...p, [lineId]: newVal }));
+    if (newVal) {
+      // Auto-save packed = deliverQty
+      onPackedQtyBlur(lineId, String(deliverQty), deliverQty);
+    } else {
+      // Reset to empty so packer can enter manually
+      onPackedQtyBlur(lineId, '', deliverQty);
+    }
+  }
 
   // Live current inventory for this item (latest submission, always fresh)
   const getLiveInventory = (line: DeliveryLine): number =>
@@ -438,9 +453,10 @@ function StoreDeliveryList({
                 </>}
                 {isManager
                   ? <th className="px-3 md:px-4 py-3 text-center text-xs font-semibold text-[#1B5E20] uppercase tracking-wide">To Pack</th>
-                  : <th className="py-3 text-center text-xs font-semibold text-[#1B5E20] uppercase tracking-wide" style={{ width: '52px' }}>Pack</th>
+                  : <th className="py-3 text-center text-xs font-semibold text-[#1B5E20] uppercase tracking-wide" style={{ width: '52px' }}>To Pack</th>
                 }
                 {!isManager && <>
+                  <th className="py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wide" style={{ width: '56px' }}>Packed?</th>
                   <th className="py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wide" style={{ width: '68px' }}>Packed</th>
                 </>}
               </tr>
@@ -538,9 +554,12 @@ function StoreDeliveryList({
                             ) : <span className="text-gray-200 text-xs">—</span>}
                           </td>
                           {!isManager && (() => {
-                            const currentPacked = editingPackedQty[line.id] !== undefined
-                              ? (editingPackedQty[line.id] === '' ? null : parseFloat(editingPackedQty[line.id]))
-                              : line.packed_qty;
+                            const isYes = !!packedYes[line.id];
+                            const currentPacked = isYes
+                              ? deliverQty
+                              : editingPackedQty[line.id] !== undefined
+                                ? (editingPackedQty[line.id] === '' ? null : parseFloat(editingPackedQty[line.id]))
+                                : line.packed_qty;
                             const packedColor = !canPack
                               ? 'border-gray-100 bg-gray-50 text-gray-300 cursor-not-allowed'
                               : currentPacked === null || currentPacked === undefined
@@ -551,20 +570,51 @@ function StoreDeliveryList({
                                     ? 'border-amber-400 bg-amber-400 text-white'
                                     : 'border-red-500 bg-red-500 text-white';
                             return (
-                              <td className="px-1 py-3 text-center">
-                                {deliverQty > 0 ? (
-                                  <input
-                                    type="number" min="0" step="1"
-                                    value={packedVal}
-                                    placeholder="—"
-                                    disabled={!canPack}
-                                    onChange={e => onPackedQtyChange(line.id, e.target.value)}
-                                    onBlur={e => onPackedQtyBlur(line.id, e.target.value, deliverQty)}
-                                    className={`w-14 text-center border rounded-lg px-1 py-1.5 text-base font-bold focus:outline-none focus:ring-2 focus:ring-blue-400 tabular-nums shadow-sm ${packedColor}`}
-                                    title={!canPack ? 'Start packing first' : ''}
-                                  />
-                                ) : <span className="text-gray-200 text-xs">—</span>}
-                              </td>
+                              <>
+                                {/* Packed? toggle */}
+                                <td className="px-1 py-3 text-center">
+                                  {deliverQty > 0 ? (
+                                    <button
+                                      disabled={!canPack}
+                                      onClick={() => togglePackedYes(line.id, deliverQty)}
+                                      title={isYes ? 'Mark as not packed' : 'Mark as packed'}
+                                      className={`w-9 h-9 rounded-lg flex items-center justify-center mx-auto transition-colors shadow-sm border ${
+                                        !canPack
+                                          ? 'bg-gray-50 border-gray-100 cursor-not-allowed opacity-40'
+                                          : isYes
+                                            ? 'bg-green-500 border-green-500 hover:bg-green-600 text-white'
+                                            : 'bg-red-500 border-red-500 hover:bg-red-600 text-white'
+                                      }`}
+                                    >
+                                      {isYes
+                                        ? <CheckCircle2 size={16} />
+                                        : <XCircle size={16} />
+                                      }
+                                    </button>
+                                  ) : <span className="text-gray-200 text-xs">—</span>}
+                                </td>
+                                {/* Packed qty — auto-filled when Yes, manual when No */}
+                                <td className="px-1 py-3 text-center">
+                                  {deliverQty > 0 ? (
+                                    isYes ? (
+                                      <span className="inline-flex items-center justify-center w-14 py-1.5 text-base font-bold rounded-lg border border-green-500 bg-green-500 text-white tabular-nums shadow-sm">
+                                        {deliverQty}
+                                      </span>
+                                    ) : (
+                                      <input
+                                        type="number" min="0" step="1"
+                                        value={packedVal}
+                                        placeholder="—"
+                                        disabled={!canPack}
+                                        onChange={e => onPackedQtyChange(line.id, e.target.value)}
+                                        onBlur={e => onPackedQtyBlur(line.id, e.target.value, deliverQty)}
+                                        className={`w-14 text-center border rounded-lg px-1 py-1.5 text-base font-bold focus:outline-none focus:ring-2 focus:ring-blue-400 tabular-nums shadow-sm ${packedColor}`}
+                                        title={!canPack ? 'Start packing first' : ''}
+                                      />
+                                    )
+                                  ) : <span className="text-gray-200 text-xs">—</span>}
+                                </td>
+                              </>
                             );
                           })()}
                         </tr>
