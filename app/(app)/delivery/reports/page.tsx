@@ -519,10 +519,11 @@ export default function DeliveryReportsPage() {
     if (!activeRun) return;
     setResettingStep(`receipt-${store}`);
     try {
-      await supabase.from('store_delivery_receipts')
+      const { error } = await supabase.from('store_delivery_receipts')
         .delete()
         .eq('run_id', activeRun.id)
         .eq('location_name', store);
+      if (error) { alert(`Reset failed: ${error.message}`); return; }
       // Invalidate reports-page query
       qc.invalidateQueries({ queryKey: ['dr-receipts', activeRun.id] });
       // Also invalidate delivery-page receipt queries so StoreManagerView resets immediately
@@ -1207,34 +1208,19 @@ export default function DeliveryReportsPage() {
                     </div>
                   )}
 
-                  {/* Admin reset — inside expanded content to avoid conflict with row toggle */}
+                  {/* Admin reset */}
                   {isAdmin && receipt && (
                     <div className="flex justify-end pt-1 border-t border-gray-100">
-                      {pendingReset === `receipt-${store}` ? (
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs text-gray-400">Reset confirmation?</span>
-                          <button
-                            onClick={() => resetReceipt(store)}
-                            disabled={resettingStep === `receipt-${store}`}
-                            className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-red-500 text-white hover:bg-red-600 transition-colors disabled:opacity-50"
-                          >
-                            {resettingStep === `receipt-${store}` ? '…' : 'Yes'}
-                          </button>
-                          <button
-                            onClick={() => setPendingReset(null)}
-                            className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors"
-                          >
-                            No
-                          </button>
-                        </div>
-                      ) : (
-                        <button
-                          onClick={() => setPendingReset(`receipt-${store}`)}
-                          className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-orange-400 hover:bg-orange-500 transition-colors"
-                        >
-                          Reset
-                        </button>
-                      )}
+                      <button
+                        onClick={async () => {
+                          if (!window.confirm(`Reset ${store}'s delivery confirmation? This cannot be undone.`)) return;
+                          await resetReceipt(store);
+                        }}
+                        disabled={resettingStep === `receipt-${store}`}
+                        className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-orange-400 hover:bg-orange-500 transition-colors disabled:opacity-50"
+                      >
+                        {resettingStep === `receipt-${store}` ? 'Resetting…' : 'Reset'}
+                      </button>
                     </div>
                   )}
 
