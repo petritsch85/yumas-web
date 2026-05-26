@@ -350,8 +350,11 @@ export default function DeliveryReportsPage() {
 
   const activeRun = useMemo<Run | null>(() => {
     if (!runs.length) return null;
-    // 'upcoming' sentinel = user clicked the upcoming slot but no run exists yet
-    if (selectedRunId === 'upcoming') return null;
+    if (selectedRunId === 'upcoming') {
+      // Auto-select the run for the upcoming delivery date if it already exists in DB
+      const upcomingDate = getNextDeliveryDate();
+      return runs.find(r => r.delivery_date === upcomingDate) ?? null;
+    }
     if (selectedRunId) return runs.find(r => r.id === selectedRunId) ?? null;
     // Default: most recent past run (cutoff already passed), sorted desc so [0] is latest
     const now = new Date();
