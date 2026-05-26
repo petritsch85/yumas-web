@@ -855,15 +855,27 @@ function StoreManagerView({ run, lines, targetDate, myStore, sectionOrder, itemR
         <>
           {/* Packed items list */}
           <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-x-auto">
-            <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between min-w-[320px]">
-              <span className="text-sm font-semibold text-gray-700">
-                {storeLines.length} item{storeLines.length !== 1 ? 's' : ''} packed for you
-              </span>
-              {isConfirmed && (
-                <span className="text-xs text-gray-400">
-                  Confirmed at {new Date(receipt!.received_at).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}
+            <div className="px-4 py-3 border-b border-gray-100 min-w-[320px]">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-semibold text-gray-700">
+                  {storeLines.length} item{storeLines.length !== 1 ? 's' : ''} packed for you
                 </span>
-              )}
+                {isConfirmed && (
+                  <span className="text-xs text-gray-400">
+                    Confirmed at {new Date(receipt!.received_at).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-3 mt-1.5">
+                <span className="flex items-center gap-1.5 text-xs text-gray-500">
+                  <span className="inline-flex items-center justify-center w-6 h-5 rounded bg-[#1B5E20]/10 text-[#1B5E20] font-bold text-xs">n</span>
+                  confirmed packed qty
+                </span>
+                <span className="flex items-center gap-1.5 text-xs text-gray-400">
+                  <span className="inline-flex items-center justify-center w-6 h-5 rounded bg-gray-100 text-gray-400 font-bold text-xs border border-dashed border-gray-300">n</span>
+                  scheduled qty (not confirmed)
+                </span>
+              </div>
             </div>
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b border-gray-100">
@@ -884,16 +896,26 @@ function StoreManagerView({ run, lines, targetDate, myStore, sectionOrder, itemR
                       </td>
                     </tr>
                     {canonicalItems(storeLines.filter(l => l.section === section), storeItemRank).map(line => {
-                      const qty = line.packed_qty ?? line.delivery_qty;
                       const isComplete = !!itemComplete[line.id];
+                      const isConfirmedPacked = line.packed_qty !== null;
+                      const qty = isConfirmedPacked ? line.packed_qty! : line.delivery_qty;
                       return (
                         <tr key={line.id} className="border-t border-gray-50 hover:bg-gray-50/50">
                           <td className="px-4 py-3 font-medium text-gray-800 text-sm leading-snug">{line.item_name}</td>
                           <td className="hidden sm:table-cell px-3 py-3 text-xs text-gray-400 text-center">{line.unit}</td>
                           <td className="py-3 text-center">
-                            <span className="inline-flex items-center justify-center w-9 h-7 rounded-md bg-[#1B5E20]/10 text-[#1B5E20] font-bold text-sm">
-                              {qty}
-                            </span>
+                            {isConfirmedPacked ? (
+                              <span className="inline-flex items-center justify-center w-9 h-7 rounded-md bg-[#1B5E20]/10 text-[#1B5E20] font-bold text-sm">
+                                {qty}
+                              </span>
+                            ) : (
+                              <span
+                                className="inline-flex items-center justify-center w-9 h-7 rounded-md bg-gray-100 text-gray-400 font-bold text-sm border border-dashed border-gray-300"
+                                title="Scheduled quantity — packer did not confirm individual items"
+                              >
+                                {qty}
+                              </span>
+                            )}
                           </td>
                           <td className="py-3 text-center">
                             {!isComplete ? (
