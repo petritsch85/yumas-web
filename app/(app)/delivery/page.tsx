@@ -768,6 +768,7 @@ function StoreManagerView({ run, lines, targetDate, myStore, sectionOrder, itemR
   const qc = useQueryClient();
   const [activeTab, setActiveTab] = useState<Store>(myStore ?? 'Eschborn');
   const [notes, setNotes] = useState('');
+  const [editing, setEditing] = useState(false); // true = re-editing after confirmed
   // itemOk: undefined = untouched (red X), true = green ✓, false = red X (after toggle)
   const [itemOk, setItemOk] = useState<Record<string, boolean | undefined>>({});
   // itemManualQty: manual received qty entered when OK? is red
@@ -820,6 +821,7 @@ function StoreManagerView({ run, lines, targetDate, myStore, sectionOrder, itemR
       qc.invalidateQueries({ queryKey: ['store-receipt', run?.id, currentStore] });
       qc.invalidateQueries({ queryKey: ['store-receipts-status', run?.id] });
       setNotes('');
+      setEditing(false);
     },
   });
 
@@ -971,9 +973,16 @@ function StoreManagerView({ run, lines, targetDate, myStore, sectionOrder, itemR
           </div>
 
           {/* Confirm receipt */}
-          {!isConfirmed ? (
+          {(!isConfirmed || editing) ? (
             <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 space-y-3">
-              <p className="text-sm font-semibold text-gray-700">Confirm delivery received</p>
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-gray-700">Confirm delivery received</p>
+                {editing && (
+                  <button onClick={() => setEditing(false)} className="text-xs text-gray-400 hover:text-gray-600">
+                    Cancel
+                  </button>
+                )}
+              </div>
               <textarea
                 value={notes}
                 onChange={e => setNotes(e.target.value)}
@@ -1001,8 +1010,7 @@ function StoreManagerView({ run, lines, targetDate, myStore, sectionOrder, itemR
                 </p>
               )}
               <button
-                onClick={() => confirmReceipt.mutate()}
-                disabled={confirmReceipt.isPending}
+                onClick={() => { setNotes(receipt?.notes ?? ''); setEditing(true); }}
                 className="text-xs text-green-600 hover:text-green-800 underline"
               >
                 Update confirmation
