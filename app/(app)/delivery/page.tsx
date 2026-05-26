@@ -768,8 +768,10 @@ function StoreManagerView({ run, lines, targetDate, myStore, sectionOrder, itemR
   const qc = useQueryClient();
   const [activeTab, setActiveTab] = useState<Store>(myStore ?? 'Eschborn');
   const [notes, setNotes] = useState('');
-  // itemOk: undefined = untouched, true = green (received), false = red (not received / 0)
+  // itemOk: undefined = untouched (red X), true = green ✓, false = red X (after toggle)
   const [itemOk, setItemOk] = useState<Record<string, boolean | undefined>>({});
+  // itemManualQty: manual received qty entered when OK? is red
+  const [itemManualQty, setItemManualQty] = useState<Record<string, string>>({});
 
   const currentStore = myStore ?? activeTab;
   // Only show rows actually in the van:
@@ -908,9 +910,8 @@ function StoreManagerView({ run, lines, targetDate, myStore, sectionOrder, itemR
                     {canonicalItems(storeLines.filter(l => l.section === section), storeItemRank).map(line => {
                       const isConfirmedPacked = line.packed_qty !== null;
                       const packedQty = isConfirmedPacked ? line.packed_qty! : line.delivery_qty;
-                      const okState = itemOk[line.id]; // undefined=untouched, true=ok, false=not ok
-                      // Received: empty if untouched, packedQty if ok, 0 if not ok
-                      const receivedDisplay = okState === undefined ? null : okState ? packedQty : 0;
+                      const okState = itemOk[line.id]; // undefined=untouched (red), true=green, false=red
+                      const isOk = okState === true;
                       return (
                         <tr key={line.id} className="border-t border-gray-50 hover:bg-gray-50/50">
                           <td className="px-4 py-3 font-medium text-gray-800 text-sm leading-snug">{line.item_name}</td>
@@ -935,26 +936,29 @@ function StoreManagerView({ run, lines, targetDate, myStore, sectionOrder, itemR
                             <button
                               onClick={() => setItemOk(prev => ({ ...prev, [line.id]: !prev[line.id] }))}
                               className={`w-10 h-8 rounded-full text-sm font-bold transition-colors ${
-                                okState === true
+                                isOk
                                   ? 'bg-green-100 text-green-700 hover:bg-green-200'
                                   : 'bg-red-100 text-red-600 hover:bg-red-200'
                               }`}
                             >
-                              {okState === true ? '✓' : '✗'}
+                              {isOk ? '✓' : '✗'}
                             </button>
                           </td>
-                          {/* Received — empty until OK? is toggled */}
+                          {/* Received: read-only packed qty when OK ✓; manual input when red ✗ */}
                           <td className="py-3 text-center">
-                            {receivedDisplay === null ? (
-                              <span className="text-gray-300 text-xs select-none">—</span>
-                            ) : receivedDisplay > 0 ? (
+                            {isOk ? (
                               <span className="inline-flex items-center justify-center w-9 h-7 rounded-md bg-green-50 text-green-700 font-bold text-sm border border-green-200">
-                                {receivedDisplay}
+                                {packedQty}
                               </span>
                             ) : (
-                              <span className="inline-flex items-center justify-center w-9 h-7 rounded-md bg-red-50 text-red-500 font-bold text-sm border border-red-200">
-                                0
-                              </span>
+                              <input
+                                type="number"
+                                min={0}
+                                value={itemManualQty[line.id] ?? ''}
+                                onChange={e => setItemManualQty(prev => ({ ...prev, [line.id]: e.target.value }))}
+                                placeholder="—"
+                                className="w-14 text-center text-sm border border-gray-200 rounded-md px-1 py-1.5 focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20]/40"
+                              />
                             )}
                           </td>
                         </tr>
