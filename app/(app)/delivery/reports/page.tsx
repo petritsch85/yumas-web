@@ -34,6 +34,7 @@ type Run = {
   deleted_at: string | null;
   deleted_by: string | null;
   inventory_overrides: Record<string, string> | null;
+  store_packing_finished_at: Record<string, string> | null;
 };
 
 type DeliveryLine = {
@@ -956,17 +957,17 @@ export default function DeliveryReportsPage() {
 
           {/* ── Row 3: Packing Finished ── */}
           {(() => {
-            const done = !!activeRun.packing_finished_at;
+            const DELIVERY_STORES = ['Eschborn', 'Taunus', 'Westend'];
+            const allStoresPacked = DELIVERY_STORES.every(s => !!(activeRun.store_packing_finished_at ?? {})[s]);
+            const done = !!activeRun.packing_finished_at || allStoresPacked;
             const duration = fmtDuration(activeRun.packing_duration_seconds);
-            const accent = !done ? 'gray' : missingPacked > 0 ? 'amber' : 'green';
+            const accent = done ? 'green' : 'gray';
 
             let statusNode: React.ReactNode;
             if (!done) {
               statusNode = <GrayBadge label="In progress" />;
-            } else if (missingPacked > 0) {
-              statusNode = <AmberBadge label={`${missingPacked} missing`} />;
             } else {
-              statusNode = <GreenBadge label="All packed" />;
+              statusNode = <GreenBadge label="Complete" />;
             }
 
             return (
