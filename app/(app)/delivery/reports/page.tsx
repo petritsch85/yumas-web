@@ -963,9 +963,12 @@ export default function DeliveryReportsPage() {
             const DELIVERY_STORES = ['Eschborn', 'Taunus', 'Westend'];
             const storeTs = activeRun.store_packing_finished_at ?? {};
             const allStoresPacked = DELIVERY_STORES.every(s => !!storeTs[s]);
-            const done = !!activeRun.packing_finished_at || allStoresPacked;
+            // If store-level packing data exists, it is the authoritative source —
+            // packing_finished_at may be stale from a previous cycle that was undone.
+            const hasStoreData = Object.keys(storeTs).length > 0;
+            const done = hasStoreData ? allStoresPacked : !!activeRun.packing_finished_at;
 
-            // Use the latest store timestamp when allStoresPacked (avoids showing stale packing_finished_at)
+            // Timestamp: latest store pack time (live) or legacy packing_finished_at
             const effectiveFinishedAt: string | null = allStoresPacked
               ? DELIVERY_STORES.map(s => storeTs[s]).filter(Boolean).sort().at(-1) ?? null
               : activeRun.packing_finished_at;
