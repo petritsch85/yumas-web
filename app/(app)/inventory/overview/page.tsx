@@ -1157,21 +1157,13 @@ function StoreWeeklyView({ location, weekOffset, onOffsetChange }: {
 export default function InventoryOverviewPage() {
   const qc = useQueryClient();
   const { t } = useT();
-  const [activeTab,    setActiveTab]    = useState<TabView>('group');
-  const [weekOffset,   setWeekOffset]   = useState(0);
   const [refreshedAt,  setRefreshedAt]  = useState<number>(Date.now());
   const [isRefreshing, setIsRefreshing] = useState(false);
-
-  const weekStart = useMemo(() => toLocalDateStr(getWeekDays(weekOffset)[0]), [weekOffset]);
 
   const handleRefresh = async () => {
     setIsRefreshing(true);
     try {
-      if (activeTab === 'group') {
-        await qc.refetchQueries({ queryKey: ['inventory-overview'] });
-      } else {
-        await qc.refetchQueries({ queryKey: ['inventory-weekly', activeTab] });
-      }
+      await qc.refetchQueries({ queryKey: ['inventory-overview'] });
       setRefreshedAt(Date.now());
     } finally {
       setIsRefreshing(false);
@@ -1183,14 +1175,9 @@ export default function InventoryOverviewPage() {
       <div className="flex items-start justify-between gap-4 mb-6 flex-wrap">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">{t('inventory.overview.title')}</h1>
-          <p className="text-sm text-gray-500 mt-0.5">
-            {activeTab === 'group'
-              ? 'Latest submitted quantities per location'
-              : `Weekly inventory flow — ${activeTab}`}
-          </p>
+          <p className="text-sm text-gray-500 mt-0.5">Latest submitted quantities per location</p>
         </div>
         <div className="flex items-center gap-3 flex-wrap">
-          <TabBar active={activeTab} onChange={(v) => { setActiveTab(v); }} />
           <span className="text-xs text-gray-400 whitespace-nowrap">
             Updated {new Date(refreshedAt).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
           </span>
@@ -1205,15 +1192,7 @@ export default function InventoryOverviewPage() {
         </div>
       </div>
 
-      {activeTab === 'group' ? (
-        <GroupView />
-      ) : (
-        <StoreWeeklyView
-          location={activeTab}
-          weekOffset={weekOffset}
-          onOffsetChange={setWeekOffset}
-        />
-      )}
+      <GroupView />
     </div>
   );
 }
