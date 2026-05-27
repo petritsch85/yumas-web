@@ -169,6 +169,12 @@ export default function DashboardPage() {
 
   const visibleLinks = QUICK_LINKS.filter((l) => {
     if (l.adminOnly && !isAdmin) return false;
+    // Current Inventory tile: managers/admins with inventory perm; staff with inventory_current
+    if (l.href === '/inventory/overview') {
+      if (isAdmin) return true;
+      if (isManager) return !!(permsAny.inventory);
+      return !!(permsAny.inventory_current);
+    }
     if (l.managerOnly && isStaffRole) return false;
     // Delivery tile: managers use the delivery flag; staff need driver or store_receiver
     if (l.permKey === 'delivery') {
