@@ -43,6 +43,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase-browser';
 import { useEffect, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import type { Profile } from '@/types';
 import type { AppPermissions } from '@/types';
 import { useT } from '@/lib/i18n';
@@ -222,7 +223,6 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
   const { t } = useT();
-  const [profile, setProfile] = useState<Profile | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   useEffect(() => { onClose(); }, [pathname]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -248,20 +248,17 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
     }
   }, [pathname]);
 
-  useEffect(() => {
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      if (user) {
-        supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', user.id)
-          .single()
-          .then(({ data }) => {
-            if (data) setProfile(data as Profile);
-          });
-      }
-    });
-  }, []);
+  const { data: profile = null } = useQuery<Profile | null>({
+    queryKey: ['sidebar-profile'],
+    queryFn: async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return null;
+      const { data } = await supabase.from('profiles').select('*').eq('id', user.id).single();
+      return data ? (data as Profile) : null;
+    },
+    staleTime: 30_000,      // treat as fresh for 30 s
+    refetchOnWindowFocus: true,  // re-fetch whenever the tab/app regains focus
+  });
 
   const handleSignOut = async () => {
     await supabase.auth.signOut();
