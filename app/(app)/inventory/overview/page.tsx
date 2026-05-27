@@ -217,8 +217,12 @@ function GroupView() {
     }
 
     // DB items grouped by section, sorted by sort_order
+    // Deduplicate DB items by name (keep first occurrence per name)
+    const seenDbNames = new Set<string>();
     const dbItemsBySec: Record<string, DbItem[]> = {};
     for (const item of dbItems) {
+      if (seenDbNames.has(item.name)) continue;
+      seenDbNames.add(item.name);
       if (!dbItemsBySec[item.section]) dbItemsBySec[item.section] = [];
       dbItemsBySec[item.section].push(item);
     }
@@ -226,6 +230,9 @@ function GroupView() {
 
     // Only show items that appear in at least one of the three delivery store submissions
     const DELIVERY_LOCS: LocationName[] = ['Eschborn', 'Taunus', 'Westend'];
+
+    // Track every item name that has been added to avoid duplicates
+    const addedNames = new Set<string>();
 
     // Build sections in DB order
     const result: SectionGroup[] = [];
@@ -237,9 +244,10 @@ function GroupView() {
       const rows: ItemRow[] = secItems
         .filter(dbItem => {
           const q = quantityMap[dbItem.name] ?? {};
-          return DELIVERY_LOCS.some(loc => loc in q);
+          return DELIVERY_LOCS.some(loc => loc in q) && !addedNames.has(dbItem.name);
         })
         .map(dbItem => {
+          addedNames.add(dbItem.name);
           const quantities = quantityMap[dbItem.name] ?? {};
           return {
             section: secName,
@@ -257,6 +265,7 @@ function GroupView() {
     const legacyBySec: Record<string, ItemRow[]> = {};
     for (const [itemName, quantities] of Object.entries(quantityMap)) {
       if (dbItemNames.has(itemName)) continue;
+      if (addedNames.has(itemName)) continue; // already rendered via DB path
       // Only include if present in at least one delivery store submission
       if (!DELIVERY_LOCS.some(loc => loc in quantities)) continue;
       const secName = subSectionMap[itemName] ?? 'Other';
