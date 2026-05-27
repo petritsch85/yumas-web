@@ -295,8 +295,8 @@ function PermissionsEditor({
                               role="checkbox"
                               aria-checked={subChecked}
                               tabIndex={isReadOnly ? -1 : 0}
-                              onClick={() => !isReadOnly && onChange({ ...perms, [flag]: !perms[flag] })}
-                              onKeyDown={(e) => !isReadOnly && (e.key === ' ' || e.key === 'Enter') && onChange({ ...perms, [flag]: !perms[flag] })}
+                              onClick={(e) => { e.stopPropagation(); if (!isReadOnly) onChange({ ...perms, [flag]: !perms[flag] }); }}
+                              onKeyDown={(e) => { e.stopPropagation(); if (!isReadOnly && (e.key === ' ' || e.key === 'Enter')) onChange({ ...perms, [flag]: !perms[flag] }); }}
                               className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs transition-all select-none ${
                                 isReadOnly
                                   ? 'bg-indigo-100 border-indigo-300 text-indigo-800 font-semibold cursor-default opacity-70'
@@ -331,8 +331,8 @@ function PermissionsEditor({
                               role="checkbox"
                               aria-checked={subChecked}
                               tabIndex={0}
-                              onClick={() => onChange({ ...perms, [flag]: !subChecked })}
-                              onKeyDown={(e) => (e.key === ' ' || e.key === 'Enter') && onChange({ ...perms, [flag]: !subChecked })}
+                              onClick={(e) => { e.stopPropagation(); onChange({ ...perms, [flag]: !subChecked }); }}
+                              onKeyDown={(e) => { e.stopPropagation(); if (e.key === ' ' || e.key === 'Enter') onChange({ ...perms, [flag]: !subChecked }); }}
                               className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs cursor-pointer transition-all select-none ${
                                 subChecked
                                   ? 'bg-indigo-100 border-indigo-300 text-indigo-800 font-semibold'
