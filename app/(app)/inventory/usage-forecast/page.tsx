@@ -125,11 +125,20 @@ function UploadModal({ onClose }: { onClose: () => void }) {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['usage-standards'] });
+      setSaveError(null);
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 3000);
+    },
+    onError: (err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      setSaveError(msg);
     },
   });
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saveSuccess, setSaveSuccess] = useState(false);
 
   function setField(itemId: string, field: 'lunch' | 'dinner', value: string) {
     setForm(f => ({
@@ -272,7 +281,7 @@ function UploadModal({ onClose }: { onClose: () => void }) {
           {STORES.map(s => (
             <button
               key={s}
-              onClick={() => { setModalStore(s); setUploadError(null); }}
+              onClick={() => { setModalStore(s); setUploadError(null); setSaveError(null); setSaveSuccess(false); }}
               className={`px-4 py-1.5 rounded-lg text-sm font-semibold border transition-colors ${
                 modalStore === s
                   ? 'bg-[#1B5E20] text-white border-[#1B5E20]'
@@ -331,6 +340,18 @@ function UploadModal({ onClose }: { onClose: () => void }) {
             })
           )}
         </div>
+
+        {/* Save error / success banners */}
+        {saveError && (
+          <div className="mx-6 mb-2 px-4 py-2.5 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700 flex-shrink-0">
+            Save failed: {saveError}
+          </div>
+        )}
+        {saveSuccess && (
+          <div className="mx-6 mb-2 px-4 py-2.5 bg-green-50 border border-green-200 rounded-lg text-sm text-green-700 flex-shrink-0">
+            Saved successfully ✓
+          </div>
+        )}
 
         {/* Footer */}
         <div className="flex items-center justify-between px-6 py-4 border-t border-gray-100 flex-shrink-0">
