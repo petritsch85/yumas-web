@@ -225,6 +225,9 @@ function GroupView() {
     }
     const dbItemNames = new Set(dbItems.map(i => i.name));
 
+    // Only show items that appear in at least one of the three delivery store submissions
+    const DELIVERY_LOCS: LocationName[] = ['Eschborn', 'Taunus', 'Westend'];
+
     // Build sections in DB order
     const result: SectionGroup[] = [];
     for (const secName of sectionOrder) {
@@ -232,16 +235,21 @@ function GroupView() {
         .slice()
         .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
 
-      const rows: ItemRow[] = secItems.map(dbItem => {
-        const quantities = quantityMap[dbItem.name] ?? {};
-        return {
-          section: secName,
-          name: dbItem.name,
-          unit: dbItem.unit,
-          quantities,
-          total: Object.values(quantities).reduce((s, q) => s + (q ?? 0), 0),
-        };
-      });
+      const rows: ItemRow[] = secItems
+        .filter(dbItem => {
+          const q = quantityMap[dbItem.name] ?? {};
+          return DELIVERY_LOCS.some(loc => loc in q);
+        })
+        .map(dbItem => {
+          const quantities = quantityMap[dbItem.name] ?? {};
+          return {
+            section: secName,
+            name: dbItem.name,
+            unit: dbItem.unit,
+            quantities,
+            total: Object.values(quantities).reduce((s, q) => s + (q ?? 0), 0),
+          };
+        });
 
       if (rows.length > 0) result.push({ title: secName, items: rows });
     }
@@ -250,6 +258,8 @@ function GroupView() {
     const legacyBySec: Record<string, ItemRow[]> = {};
     for (const [itemName, quantities] of Object.entries(quantityMap)) {
       if (dbItemNames.has(itemName)) continue;
+      // Only include if present in at least one delivery store submission
+      if (!DELIVERY_LOCS.some(loc => loc in quantities)) continue;
       const secName = subSectionMap[itemName] ?? 'Other';
       if (!legacyBySec[secName]) legacyBySec[secName] = [];
       legacyBySec[secName].push({
