@@ -331,19 +331,22 @@ function GroupView() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-100">
-                  <th className="sticky left-0 bg-gray-50 px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wide min-w-[200px] z-10">Item</th>
-                  <th className="px-3 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wide min-w-[60px]">Unit</th>
+                  <th className="sticky left-0 bg-gray-50 px-3 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wide min-w-[130px] sm:min-w-[200px] z-10">Item</th>
+                  <th className="hidden sm:table-cell px-3 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wide min-w-[60px]">Unit</th>
                   {LOCATIONS.map((loc) => (
-                    <th key={loc} className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase tracking-wide min-w-[90px]">{loc}</th>
+                    <th key={loc} className="px-2 sm:px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase tracking-wide min-w-[48px] sm:min-w-[90px]">
+                      <span className="hidden sm:inline">{loc}</span>
+                      <span className="sm:hidden">{loc.slice(0, 3)}</span>
+                    </th>
                   ))}
-                  <th className="px-4 py-3 text-right text-xs font-semibold text-gray-900 uppercase tracking-wide min-w-[80px] border-l border-gray-100">Total</th>
+                  <th className="px-2 sm:px-4 py-3 text-right text-xs font-semibold text-gray-900 uppercase tracking-wide min-w-[48px] sm:min-w-[80px] border-l border-gray-100">Tot</th>
                 </tr>
               </thead>
               <tbody>
                 {sections.map((section) => (
                   <>
                     <tr key={`s-${section.title}`} className="bg-[#F1F8E9] border-y border-green-100">
-                      <td colSpan={2 + LOCATIONS.length + 1} className="sticky left-0 px-4 py-2 text-xs font-bold text-[#2E7D32] uppercase tracking-wider bg-[#F1F8E9]">
+                      <td colSpan={1 + LOCATIONS.length + 1} className="sticky left-0 px-3 py-2 text-xs font-bold text-[#2E7D32] uppercase tracking-wider bg-[#F1F8E9]">
                         {section.title}
                       </td>
                     </tr>
@@ -351,19 +354,22 @@ function GroupView() {
                       const isEven = idx % 2 === 0;
                       return (
                         <tr key={item.name} className={`border-b border-gray-50 hover:bg-blue-50/30 transition-colors ${isEven ? 'bg-white' : 'bg-gray-50/40'}`}>
-                          <td className={`sticky left-0 px-4 py-2.5 font-medium text-gray-800 ${isEven ? 'bg-white' : 'bg-gray-50/40'} z-10`}>{item.name}</td>
-                          <td className="px-3 py-2.5 text-gray-400 text-xs">{item.unit}</td>
+                          <td className={`sticky left-0 px-3 py-2.5 font-medium text-gray-800 ${isEven ? 'bg-white' : 'bg-gray-50/40'} z-10`}>
+                            {item.name}
+                            {item.unit && <span className="sm:hidden block text-gray-400 text-[11px] leading-tight mt-0.5">{item.unit}</span>}
+                          </td>
+                          <td className="hidden sm:table-cell px-3 py-2.5 text-gray-400 text-xs">{item.unit}</td>
                           {LOCATIONS.map((loc) => {
                             const qty = item.quantities[loc];
                             return (
-                              <td key={loc} className="px-4 py-2.5 text-right tabular-nums">
+                              <td key={loc} className="px-2 sm:px-4 py-2.5 text-right tabular-nums text-xs sm:text-sm">
                                 {qty == null ? <span className="text-gray-200">—</span>
                                   : qty === 0 ? <span className="text-gray-300">0</span>
                                   : <span className="text-[#2E7D32] font-semibold">{qty}</span>}
                               </td>
                             );
                           })}
-                          <td className="px-4 py-2.5 text-right tabular-nums font-bold text-gray-900 border-l border-gray-100">
+                          <td className="px-2 sm:px-4 py-2.5 text-right tabular-nums text-xs sm:text-sm font-bold text-gray-900 border-l border-gray-100">
                             {item.total === 0 ? <span className="text-gray-300">0</span> : item.total}
                           </td>
                         </tr>
