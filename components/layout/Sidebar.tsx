@@ -111,7 +111,7 @@ const NAV_GROUPS: NavGroup[] = [
         labelKey: 'sidebar.nav.inventory', href: '/inventory', icon: ClipboardList, permKey: 'inventory',
         children: [
           { labelKey: 'sidebar.nav.inventoryLists',   href: '/inventory/lists',          icon: LayoutList,   managerOnly: true },
-          { labelKey: 'sidebar.nav.addNewInventory',  href: '/inventory/add',            icon: FilePlus },
+          { labelKey: 'sidebar.nav.addNewInventory',  href: '/inventory/add',            icon: FilePlus,      permKey: 'inventory' },
           { labelKey: 'sidebar.nav.currentInventory', href: '/inventory/overview',        icon: BarChart3,    permKey: 'inventory_current' },
           { labelKey: 'sidebar.nav.inventoryReports', href: '/inventory/counts',          icon: ClipboardList, managerOnly: true },
           { labelKey: 'sidebar.nav.usageForecast',    href: '/inventory/usage-forecast',  icon: TrendingDown,  managerOnly: true },
@@ -124,7 +124,6 @@ const NAV_GROUPS: NavGroup[] = [
           { labelKey: 'sidebar.nav.deliveryReports',  href: '/delivery/reports',  icon: ClipboardList, managerOnly: true },
         ],
       },
-      { labelKey: 'sidebar.nav.packing', href: '/delivery', icon: Package, permKey: 'packer', staffOnly: true },
       { labelKey: 'sidebar.nav.recipes', href: '/products/semi-finished', icon: FlaskConical, permKey: 'production' },
       { labelKey: 'sidebar.nav.buying',      href: '/purchase-orders',         icon: ShoppingCart, permKey: 'buying' },
       { labelKey: 'sidebar.nav.controlling', href: '/coming-soon/controlling', icon: TrendingUp,   adminOnly: true },
@@ -280,12 +279,19 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
   const perms     = profile?.permissions ?? {};
 
   const canSeeItem = (item: NavItem): boolean => {
-    if (item.staffOnly && !isStaff) return false; // hide from admin/manager regardless
-    // Hide the full Delivery nav item for staff-packers — they already have the Packing item
-    if (item.permKey === 'delivery' && isStaff && !!(perms as any).packer) return false;
+    if (item.staffOnly && !isStaff) return false;
     if (isAdmin) return true;
     if (item.adminOnly) return false;
     if (item.managerOnly && isStaff) return false;
+    // Inventory: show if user has submission OR view permission
+    if (item.permKey === 'inventory') {
+      return !!(perms as any).inventory || !!(perms as any).inventory_current;
+    }
+    // Delivery: managers use the delivery flag; staff need any delivery sub-perm
+    if (item.permKey === 'delivery') {
+      if (isStaff) return !!(perms as any).packer || !!(perms as any).driver || !!(perms as any).store_receiver;
+      return !!(perms as any).delivery;
+    }
     if (item.permKey) return !!perms[item.permKey];
     return true;
   };

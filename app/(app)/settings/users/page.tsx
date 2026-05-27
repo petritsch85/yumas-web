@@ -38,13 +38,16 @@ const MODULE_GROUPS: ModuleGroup[] = [
   {
     group: 'Supply Chain',
     items: [
-      { key: 'products',   label: 'Products / Menus', description: 'Raw materials, semi-finished, finished, menus' },
-      { key: 'inventory',  label: 'Inventory',        description: 'Add counts, view stock levels, reports' },
-      { key: 'production', label: 'Production',       description: 'Batches & recipes' },
-      { key: 'buying',     label: 'Purchase Orders',  description: 'Create & view orders' },
-      { key: 'waste_log',  label: 'Waste Log',        description: 'Log waste entries' },
-      { key: 'delivery',   label: 'Delivery',         description: 'Runs, target levels, sales forecast' },
-      { key: 'analysis',   label: 'Analysis',         description: 'COGS & Store Yield' },
+      { key: 'products',          label: 'Products / Menus',      description: 'Raw materials, semi-finished, finished, menus' },
+      { key: 'inventory',         label: 'Inventory Submission',  description: 'Submit stock counts' },
+      { key: 'inventory_current', label: 'Inventory View',        description: 'View current stock levels' },
+      { key: 'production',        label: 'Production',            description: 'Batches & recipes' },
+      { key: 'buying',            label: 'Purchase Orders',       description: 'Create & view orders' },
+      { key: 'waste_log',         label: 'Waste Log',             description: 'Log waste entries' },
+      { key: 'packer',            label: 'Packer',                description: 'Pack items for delivery runs' },
+      { key: 'driver',            label: 'Driver',                description: 'Manage and track deliveries' },
+      { key: 'store_receiver',    label: 'Store Confirmation',    description: 'Confirm deliveries at store' },
+      { key: 'analysis',          label: 'Analysis',              description: 'COGS & Store Yield' },
     ],
   },
   {
@@ -194,14 +197,7 @@ function PermissionsEditor({
   }
 
   const toggle = (key: PermKey) => {
-    const newVal = !perms[key];
-    if (key === 'delivery' && !newVal) {
-      onChange({ ...perms, delivery: false, packer: false, driver: false, store_receiver: false });
-    } else if (key === 'inventory' && !newVal) {
-      onChange({ ...perms, inventory: false, inventory_current: false });
-    } else {
-      onChange({ ...perms, [key]: newVal });
-    }
+    onChange({ ...perms, [key]: !perms[key] });
   };
 
   const groupAllOn  = (group: ModuleGroup) => {
@@ -252,8 +248,6 @@ function PermissionsEditor({
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
               {group.items.map(({ key, label, description }) => {
                 const checked = !!perms[key];
-                const displayDesc = description;
-                const isNonManager = !role || (role !== 'admin' && role !== 'manager');
                 return (
                   <div key={key}>
                     {/* Plain div — no hidden input, no label → no browser scroll-to-element */}
@@ -275,80 +269,10 @@ function PermissionsEditor({
                       }
                       <div>
                         <div className={`text-xs font-semibold ${checked ? 'text-indigo-800' : 'text-gray-700'}`}>{label}</div>
-                        {displayDesc && <div className="text-xs text-gray-400 mt-0.5 leading-tight">{displayDesc}</div>}
+                        {description && <div className="text-xs text-gray-400 mt-0.5 leading-tight">{description}</div>}
                       </div>
                     </div>
 
-                    {/* Inventory sub-permissions: only for non-manager/admin when inventory is enabled */}
-                    {key === 'inventory' && checked && isNonManager && (
-                      <div className="mt-1.5 ml-3 flex gap-2">
-                        {([
-                          { flag: 'inventory' as PermKey,         label: '📋 Submit' },
-                          { flag: 'inventory_current' as PermKey, label: '📊 See Current' },
-                        ] as { flag: PermKey; label: string }[]).map(({ flag, label: subLabel }) => {
-                          // "Submit" mirrors the inventory flag itself (always on when inventory is on)
-                          const subChecked = flag === 'inventory' ? true : !!perms[flag];
-                          const isReadOnly = flag === 'inventory';
-                          return (
-                            <div
-                              key={flag}
-                              role="checkbox"
-                              aria-checked={subChecked}
-                              tabIndex={isReadOnly ? -1 : 0}
-                              onClick={(e) => { e.stopPropagation(); if (!isReadOnly) onChange({ ...perms, [flag]: !perms[flag] }); }}
-                              onKeyDown={(e) => { e.stopPropagation(); if (!isReadOnly && (e.key === ' ' || e.key === 'Enter')) onChange({ ...perms, [flag]: !perms[flag] }); }}
-                              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs transition-all select-none ${
-                                isReadOnly
-                                  ? 'bg-indigo-100 border-indigo-300 text-indigo-800 font-semibold cursor-default opacity-70'
-                                  : subChecked
-                                  ? 'bg-indigo-100 border-indigo-300 text-indigo-800 font-semibold cursor-pointer'
-                                  : 'bg-white border-gray-200 text-gray-500 hover:border-indigo-200 cursor-pointer'
-                              }`}
-                            >
-                              {subChecked
-                                ? <CheckSquare size={12} className="text-indigo-600 flex-shrink-0" />
-                                : <Square size={12} className="text-gray-300 flex-shrink-0" />
-                              }
-                              {subLabel}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-
-                    {/* Delivery sub-roles: only for non-manager/admin when delivery is enabled */}
-                    {key === 'delivery' && checked && isNonManager && (
-                      <div className="mt-1.5 ml-3 flex gap-2">
-                        {([
-                          { flag: 'packer' as PermKey, label: '📦 Packer' },
-                          { flag: 'driver' as PermKey, label: '🚚 Driver' },
-                          { flag: 'store_receiver' as PermKey, label: '🏪 Store' },
-                        ] as { flag: PermKey; label: string }[]).map(({ flag, label: subLabel }) => {
-                          const subChecked = !!perms[flag];
-                          return (
-                            <div
-                              key={flag}
-                              role="checkbox"
-                              aria-checked={subChecked}
-                              tabIndex={0}
-                              onClick={(e) => { e.stopPropagation(); onChange({ ...perms, [flag]: !subChecked }); }}
-                              onKeyDown={(e) => { e.stopPropagation(); if (e.key === ' ' || e.key === 'Enter') onChange({ ...perms, [flag]: !subChecked }); }}
-                              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs cursor-pointer transition-all select-none ${
-                                subChecked
-                                  ? 'bg-indigo-100 border-indigo-300 text-indigo-800 font-semibold'
-                                  : 'bg-white border-gray-200 text-gray-500 hover:border-indigo-200'
-                              }`}
-                            >
-                              {subChecked
-                                ? <CheckSquare size={12} className="text-indigo-600 flex-shrink-0" />
-                                : <Square size={12} className="text-gray-300 flex-shrink-0" />
-                              }
-                              {subLabel}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
                   </div>
                 );
               })}
