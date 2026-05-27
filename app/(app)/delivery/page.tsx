@@ -2088,7 +2088,7 @@ export default function DeliveryPage() {
 
               {/* Store tabs — with per-store confirmation badges */}
               <div className="flex gap-1 mb-3 bg-gray-100 rounded-xl p-1 w-fit">
-                {STORES.filter(s => viewMode !== 'packer' || s !== 'ZK').map(store => {
+                {STORES.filter(s => s !== 'ZK').map(store => {
                   const { full, total, complete } = storePackStats(store);
                   const isActive = activeStore === store;
                   const isPacker = viewMode === 'packer';
