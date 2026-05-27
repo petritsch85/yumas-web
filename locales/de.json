@@ -41,6 +41,7 @@
       "stages": "Phasen",
       "salesForecast": "Verkaufsprognose",
       "deliveryReports": "Lieferberichte",
+      "deliveryCycles": "Lieferzyklen",
       "production": "Produktion",
       "batches": "Chargen",
       "recipes": "Rezepte",

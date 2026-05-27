@@ -41,6 +41,7 @@
       "stages": "Stages",
       "salesForecast": "Sales Forecast",
       "deliveryReports": "Delivery Reports",
+      "deliveryCycles": "Delivery Cycles",
       "production": "Production",
       "batches": "Batches",
       "recipes": "Recipes",
