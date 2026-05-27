@@ -130,7 +130,12 @@ function UploadModal({ onClose }: { onClose: () => void }) {
       setTimeout(() => setSaveSuccess(false), 3000);
     },
     onError: (err: unknown) => {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg =
+        err instanceof Error
+          ? err.message
+          : typeof err === 'object' && err !== null && 'message' in err
+          ? String((err as Record<string, unknown>).message)
+          : JSON.stringify(err);
       setSaveError(msg);
     },
   });
