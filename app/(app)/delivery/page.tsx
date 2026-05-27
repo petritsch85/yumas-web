@@ -8,7 +8,7 @@ import {
   Eye, Settings2, Truck, Play, Timer, Flag, XCircle,
   Save, X, CalendarDays,
   Navigation, Store, ClipboardCheck, Clock,
-  ClipboardList, MessageSquare,
+  ClipboardList, MessageSquare, Lock,
 } from 'lucide-react';
 import type { Profile } from '@/types';
 import { useT } from '@/lib/i18n';
@@ -1210,6 +1210,7 @@ export default function DeliveryPage() {
   /* ─ Query: delivery run + live inventory (always fetched fresh) ─ */
   const { data: runData, isLoading } = useQuery({
     queryKey: ['delivery-run', targetDate],
+    refetchInterval: viewMode === 'packer' ? 15_000 : false,
     queryFn: async () => {
       // Always fetch the latest inventory submission per store (live, not baked-in snapshot)
       const invResults = await Promise.all(
@@ -1657,6 +1658,32 @@ export default function DeliveryPage() {
   const deliveryStores = STORES.filter(s => s !== 'ZK') as Store[];
   const allStoresPacked = deliveryStores.every(s => !!storePackingDone[s]);
 
+  /* ─ Packing lock: is another user currently packing? ─ */
+  const isLockedByOther =
+    !!run?.packing_started_at &&
+    !!run?.packed_by &&
+    run.packed_by !== profile?.id &&
+    !allStoresPacked;
+
+  /* ─ Sync packingStarted + timer from DB (page refresh / cross-device) ─ */
+  useEffect(() => {
+    if (!run || !profile) return;
+    // Resume timer if this user started packing and refreshed
+    if (run.packing_started_at && run.packed_by === profile.id && !allStoresPacked && !packingStarted) {
+      setPackingStarted(true);
+      const startMs = new Date(run.packing_started_at).getTime();
+      setElapsedSeconds(Math.floor((Date.now() - startMs) / 1000));
+      if (!packingInterval.current) {
+        packingInterval.current = setInterval(() => setElapsedSeconds(s => s + 1), 1000);
+      }
+    }
+    // Auto-complete when all stores done
+    if (allStoresPacked && packingStarted && !packingFinished) {
+      setPackingFinished(true);
+      if (packingInterval.current) { clearInterval(packingInterval.current); packingInterval.current = null; }
+    }
+  }, [run?.id, run?.packing_started_at, allStoresPacked, profile?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
   /* ─ Receipt status (for driver live view) ─ */
   const { data: receiptStatus = {} } = useQuery<Partial<Record<Store, boolean>>>({
     queryKey: ['store-receipts-status', run?.id],
@@ -1854,6 +1881,10 @@ export default function DeliveryPage() {
                       {deConfirmingAll ? 'Undoing…' : 'De-Confirm'}
                     </button>
                   </>
+                ) : isLockedByOther ? (
+                  <div className="flex items-center gap-2 px-4 py-2 bg-amber-50 border border-amber-200 rounded-lg text-sm font-semibold text-amber-700">
+                    <Lock size={14} /> Packing in progress — locked
+                  </div>
                 ) : !packingStarted ? (
                   <button onClick={startPacking} className="flex items-center gap-2 bg-[#1B5E20] text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-[#2E7D32] transition-colors shadow-sm">
                     <Play size={15} /> Start Packing
@@ -1902,6 +1933,10 @@ export default function DeliveryPage() {
                 >
                   {deConfirmingAll ? 'Undoing…' : 'De-Confirm'}
                 </button>
+              </div>
+            ) : isLockedByOther ? (
+              <div className="flex items-center justify-center gap-2 w-full px-4 py-3 bg-amber-50 border border-amber-200 rounded-xl text-sm font-semibold text-amber-700">
+                <Lock size={15} /> Packing in progress — locked for you
               </div>
             ) : !packingStarted ? (
               <button onClick={startPacking} className="w-full flex items-center justify-center gap-2 bg-[#1B5E20] text-white px-4 py-3 rounded-xl text-sm font-semibold hover:bg-[#2E7D32] transition-colors shadow-sm">

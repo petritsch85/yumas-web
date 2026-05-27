@@ -5,6 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
 import {
   Package, Truck, CheckCircle2, Clock, AlertTriangle, ChevronDown, ChevronUp, Trash2, RotateCcw, XCircle,
+  ClipboardList,
 } from 'lucide-react';
 import { useT } from '@/lib/i18n';
 
@@ -298,6 +299,10 @@ export default function DeliveryReportsPage() {
   /* ── Reset state ── */
   const [pendingReset, setPendingReset] = useState<string | null>(null); // step key awaiting confirm
   const [resettingStep, setResettingStep] = useState<string | null>(null);
+
+  /* ── Packing report state ── */
+  const [reportExpanded, setReportExpanded] = useState(false);
+  const [reportStore, setReportStore] = useState<Store>('Eschborn');
 
   /* ── Trash state ── */
   const [showTrash, setShowTrash] = useState(false);
@@ -1022,6 +1027,175 @@ export default function DeliveryReportsPage() {
               >
                 {null}
               </StepRow>
+            );
+          })()}
+
+          {/* ── Packing Report (shown once all stores have finished packing) ── */}
+          {(() => {
+            const storeTs = activeRun.store_packing_finished_at;
+            const storeMap = storeTs ?? {};
+            const DELIVERY_STORES_R = ['Eschborn', 'Taunus', 'Westend'] as const;
+            const packingDone = storeTs !== null
+              ? DELIVERY_STORES_R.every(s => !!storeMap[s])
+              : !!activeRun.packing_finished_at;
+            if (!packingDone || lines.length === 0) return null;
+
+            // Summary stats across all stores
+            const reportLines = lines.filter(l => l.delivery_qty > 0);
+            const perfect   = reportLines.filter(l => l.packed_qty !== null && l.packed_qty === l.delivery_qty).length;
+            const over      = reportLines.filter(l => l.packed_qty !== null && l.packed_qty > l.delivery_qty).length;
+            const under     = reportLines.filter(l => l.packed_qty !== null && l.packed_qty < l.delivery_qty).length;
+            const missed    = reportLines.filter(l => l.packed_qty === null).length;
+
+            const storeLines = (store: Store) =>
+              lines.filter(l => l.location_name === store && l.delivery_qty > 0);
+
+            return (
+              <div className="bg-white rounded-xl border border-indigo-100 shadow-sm overflow-hidden">
+                {/* Header */}
+                <div
+                  className="flex items-center gap-4 px-5 py-4 cursor-pointer hover:bg-gray-50/60 transition-colors"
+                  onClick={() => setReportExpanded(v => !v)}
+                >
+                  <div className="w-7 h-7 rounded-full bg-indigo-600 flex items-center justify-center flex-shrink-0">
+                    <ClipboardList size={13} className="text-white" />
+                  </div>
+                  <div className="w-28 flex-shrink-0">
+                    <p className="text-sm font-semibold text-gray-900">Packing Report</p>
+                    <p className="text-xs text-gray-400">Packed vs scheduled</p>
+                  </div>
+                  <div className="flex items-center gap-2 flex-1 flex-wrap">
+                    {perfect > 0 && (
+                      <span className="inline-flex items-center gap-1 text-xs font-semibold text-green-700 bg-green-50 border border-green-200 px-2 py-0.5 rounded-lg">
+                        <CheckCircle2 size={11} /> {perfect} exact
+                      </span>
+                    )}
+                    {over > 0 && (
+                      <span className="inline-flex items-center gap-1 text-xs font-semibold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-lg">
+                        ↑ {over} over
+                      </span>
+                    )}
+                    {under > 0 && (
+                      <span className="inline-flex items-center gap-1 text-xs font-semibold text-red-700 bg-red-50 border border-red-200 px-2 py-0.5 rounded-lg">
+                        ↓ {under} short
+                      </span>
+                    )}
+                    {missed > 0 && (
+                      <span className="inline-flex items-center gap-1 text-xs font-semibold text-gray-500 bg-gray-50 border border-gray-200 px-2 py-0.5 rounded-lg">
+                        — {missed} unrecorded
+                      </span>
+                    )}
+                  </div>
+                  <span className="inline-flex items-center gap-1 bg-indigo-50 text-indigo-700 border border-indigo-200 text-xs font-semibold px-2.5 py-1 rounded-lg whitespace-nowrap flex-shrink-0">
+                    {reportLines.length} items
+                  </span>
+                  <div className="flex-shrink-0 text-gray-400">
+                    {reportExpanded ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+                  </div>
+                </div>
+
+                {/* Expanded body */}
+                {reportExpanded && (
+                  <div className="border-t border-gray-100">
+                    {/* Store tabs */}
+                    <div className="flex gap-1 px-5 pt-4 pb-0">
+                      {DELIVERY_STORES_R.map(s => {
+                        const sl = storeLines(s);
+                        const hasDiff = sl.some(l => l.packed_qty !== l.delivery_qty);
+                        return (
+                          <button key={s} onClick={() => setReportStore(s)}
+                            className={`px-4 py-1.5 rounded-lg text-xs font-semibold border transition-colors flex items-center gap-1.5 ${
+                              reportStore === s
+                                ? 'bg-indigo-600 text-white border-indigo-600'
+                                : 'bg-white text-gray-600 border-gray-200 hover:border-indigo-300'
+                            }`}
+                          >
+                            {s}
+                            {hasDiff && <span className="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0" />}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {/* Table */}
+                    <div className="overflow-x-auto px-5 py-4">
+                      <table className="w-full text-sm border-collapse">
+                        <thead>
+                          <tr className="border-b border-gray-100">
+                            <th className="pb-2 text-left text-xs font-semibold text-gray-400 uppercase tracking-wide">Item</th>
+                            <th className="pb-2 text-center text-xs font-semibold text-gray-400 uppercase tracking-wide w-16">Unit</th>
+                            <th className="pb-2 text-center text-xs font-semibold text-[#1B5E20] uppercase tracking-wide w-20">To Pack</th>
+                            <th className="pb-2 text-center text-xs font-semibold text-indigo-600 uppercase tracking-wide w-20">Packed</th>
+                            <th className="pb-2 text-center text-xs font-semibold text-gray-400 uppercase tracking-wide w-20">Diff</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {storeLines(reportStore).map(line => {
+                            const diff = line.packed_qty !== null ? line.packed_qty - line.delivery_qty : null;
+                            const rowCls =
+                              diff === null ? 'text-gray-400' :
+                              diff === 0    ? 'text-green-700' :
+                              diff > 0      ? 'text-amber-700' : 'text-red-700';
+                            const diffLabel =
+                              diff === null ? '—' :
+                              diff === 0    ? '✓' :
+                              diff > 0      ? `+${diff}` : String(diff);
+                            const diffBg =
+                              diff === null ? '' :
+                              diff === 0    ? 'bg-green-50 rounded-md' :
+                              diff > 0      ? 'bg-amber-50 rounded-md' : 'bg-red-50 rounded-md';
+                            return (
+                              <tr key={line.id} className="border-b border-gray-50 hover:bg-gray-50/50">
+                                <td className="py-2.5 pr-3 text-gray-800 font-medium">{line.item_name}</td>
+                                <td className="py-2.5 text-center text-xs text-gray-400">{line.unit}</td>
+                                <td className="py-2.5 text-center">
+                                  <span className="inline-flex items-center justify-center min-w-[2rem] px-1.5 py-0.5 rounded-md bg-[#1B5E20]/10 text-[#1B5E20] font-bold text-xs">
+                                    {line.delivery_qty}
+                                  </span>
+                                </td>
+                                <td className="py-2.5 text-center">
+                                  {line.packed_qty !== null ? (
+                                    <span className="inline-flex items-center justify-center min-w-[2rem] px-1.5 py-0.5 rounded-md bg-indigo-50 text-indigo-700 font-bold text-xs">
+                                      {line.packed_qty}
+                                    </span>
+                                  ) : (
+                                    <span className="text-gray-300 text-xs">—</span>
+                                  )}
+                                </td>
+                                <td className={`py-2.5 text-center font-bold text-xs tabular-nums ${rowCls}`}>
+                                  <span className={`inline-flex items-center justify-center min-w-[2rem] px-1.5 py-0.5 ${diffBg}`}>
+                                    {diffLabel}
+                                  </span>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                        {/* Totals row */}
+                        {(() => {
+                          const sl = storeLines(reportStore);
+                          const totalTarget = sl.reduce((s, l) => s + l.delivery_qty, 0);
+                          const totalPacked = sl.reduce((s, l) => s + (l.packed_qty ?? 0), 0);
+                          const totalDiff   = totalPacked - totalTarget;
+                          return (
+                            <tfoot>
+                              <tr className="border-t-2 border-gray-200">
+                                <td className="pt-2 pb-1 text-xs font-bold text-gray-500 uppercase tracking-wide">Total</td>
+                                <td />
+                                <td className="pt-2 pb-1 text-center font-bold text-[#1B5E20]">{totalTarget}</td>
+                                <td className="pt-2 pb-1 text-center font-bold text-indigo-600">{totalPacked}</td>
+                                <td className={`pt-2 pb-1 text-center font-bold text-xs ${totalDiff === 0 ? 'text-green-700' : totalDiff > 0 ? 'text-amber-700' : 'text-red-700'}`}>
+                                  {totalDiff === 0 ? '✓' : totalDiff > 0 ? `+${totalDiff}` : String(totalDiff)}
+                                </td>
+                              </tr>
+                            </tfoot>
+                          );
+                        })()}
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </div>
             );
           })()}
 
