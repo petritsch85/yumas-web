@@ -52,6 +52,7 @@ type ChildItem = {
   href: string;
   icon: React.ComponentType<{ size?: number; style?: React.CSSProperties }>;
   managerOnly?: boolean; // hidden from role === 'staff'
+  permKey?: keyof AppPermissions; // shown only if staff has this permission
 };
 
 type NavItem = {
@@ -111,7 +112,7 @@ const NAV_GROUPS: NavGroup[] = [
         children: [
           { labelKey: 'sidebar.nav.inventoryLists',   href: '/inventory/lists',          icon: LayoutList,   managerOnly: true },
           { labelKey: 'sidebar.nav.addNewInventory',  href: '/inventory/add',            icon: FilePlus },
-          { labelKey: 'sidebar.nav.currentInventory', href: '/inventory/overview',        icon: BarChart3,    managerOnly: true },
+          { labelKey: 'sidebar.nav.currentInventory', href: '/inventory/overview',        icon: BarChart3,    permKey: 'inventory_current' },
           { labelKey: 'sidebar.nav.inventoryReports', href: '/inventory/counts',          icon: ClipboardList, managerOnly: true },
           { labelKey: 'sidebar.nav.usageForecast',    href: '/inventory/usage-forecast',  icon: TrendingDown,  managerOnly: true },
         ],
@@ -371,7 +372,11 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
 
                     {hasChildren && isExpanded && (
                       <div className="mt-0.5 space-y-0.5">
-                        {item.children!.filter(c => !c.managerOnly || !isStaff).map((child) => {
+                        {item.children!.filter(c => {
+                          if (c.permKey) return isAdmin || !!(perms as any)[c.permKey];
+                          if (c.managerOnly) return !isStaff;
+                          return true;
+                        }).map((child) => {
                           const ChildIcon = child.icon;
                           const childActive = pathname === child.href;
                           return (

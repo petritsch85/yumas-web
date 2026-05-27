@@ -11,21 +11,22 @@ type Location = { id: string; name: string };
 /* ─── Permissions ────────────────────────────────────────────────────────── */
 type AppPermissions = {
   // Web section access (booleans)
-  inventory:    boolean;
-  production:   boolean;
-  buying:       boolean;
-  waste_log:    boolean;
-  delivery:     boolean;
-  packer:         boolean; // delivery sub-role: auto-routes to Packer view
-  driver:         boolean; // delivery sub-role: auto-routes to Driver view
-  store_receiver: boolean; // delivery sub-role: auto-routes to Store receipt view
-  analysis:     boolean;
-  events:       boolean;
-  staff_videos: boolean;
-  bills:        boolean;
-  pl_reports:   boolean;
-  suppliers:    boolean;
-  products:     boolean;
+  inventory:         boolean;
+  inventory_current: boolean; // inventory sub: can view Current Inventory page
+  production:        boolean;
+  buying:            boolean;
+  waste_log:         boolean;
+  delivery:          boolean;
+  packer:            boolean; // delivery sub-role: auto-routes to Packer view
+  driver:            boolean; // delivery sub-role: auto-routes to Driver view
+  store_receiver:    boolean; // delivery sub-role: auto-routes to Store receipt view
+  analysis:          boolean;
+  events:            boolean;
+  staff_videos:      boolean;
+  bills:             boolean;
+  pl_reports:        boolean;
+  suppliers:         boolean;
+  products:          boolean;
 };
 
 type PermKey = keyof AppPermissions;
@@ -79,21 +80,21 @@ const MODULE_GROUPS: ModuleGroup[] = [
 ];
 
 const STAFF_DEFAULTS: AppPermissions = {
-  inventory: false, production: false, buying: false, waste_log: false,
+  inventory: false, inventory_current: false, production: false, buying: false, waste_log: false,
   delivery: false, packer: false, driver: false, store_receiver: false,
   analysis: false, events: false, staff_videos: false,
   bills: false, pl_reports: false, suppliers: false, products: false,
 };
 
 const MANAGER_DEFAULTS: AppPermissions = {
-  inventory: true, production: true, buying: true, waste_log: true,
+  inventory: true, inventory_current: true, production: true, buying: true, waste_log: true,
   delivery: true, packer: false, driver: false, store_receiver: false,
   analysis: true, events: true, staff_videos: true,
   bills: false, pl_reports: true, suppliers: true, products: true,
 };
 
 const ADMIN_DEFAULTS: AppPermissions = {
-  inventory: true, production: true, buying: true, waste_log: true,
+  inventory: true, inventory_current: true, production: true, buying: true, waste_log: true,
   delivery: true, packer: false, driver: false, store_receiver: false,
   analysis: true, events: true, staff_videos: true,
   bills: true, pl_reports: true, suppliers: true, products: true,
@@ -195,8 +196,9 @@ function PermissionsEditor({
   const toggle = (key: PermKey) => {
     const newVal = !perms[key];
     if (key === 'delivery' && !newVal) {
-      // Turning delivery OFF — also clear all delivery sub-roles
       onChange({ ...perms, delivery: false, packer: false, driver: false, store_receiver: false });
+    } else if (key === 'inventory' && !newVal) {
+      onChange({ ...perms, inventory: false, inventory_current: false });
     } else {
       onChange({ ...perms, [key]: newVal });
     }
@@ -250,9 +252,7 @@ function PermissionsEditor({
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
               {group.items.map(({ key, label, description }) => {
                 const checked = !!perms[key];
-                const displayDesc = key === 'inventory' && role?.startsWith('staff')
-                  ? 'Add counts only'
-                  : description;
+                const displayDesc = description;
                 const isNonManager = !role || (role !== 'admin' && role !== 'manager');
                 return (
                   <div key={key}>
@@ -278,6 +278,43 @@ function PermissionsEditor({
                         {displayDesc && <div className="text-xs text-gray-400 mt-0.5 leading-tight">{displayDesc}</div>}
                       </div>
                     </div>
+
+                    {/* Inventory sub-permissions: only for non-manager/admin when inventory is enabled */}
+                    {key === 'inventory' && checked && isNonManager && (
+                      <div className="mt-1.5 ml-3 flex gap-2">
+                        {([
+                          { flag: 'inventory' as PermKey,         label: '📋 Submit' },
+                          { flag: 'inventory_current' as PermKey, label: '📊 See Current' },
+                        ] as { flag: PermKey; label: string }[]).map(({ flag, label: subLabel }) => {
+                          // "Submit" mirrors the inventory flag itself (always on when inventory is on)
+                          const subChecked = flag === 'inventory' ? true : !!perms[flag];
+                          const isReadOnly = flag === 'inventory';
+                          return (
+                            <div
+                              key={flag}
+                              role="checkbox"
+                              aria-checked={subChecked}
+                              tabIndex={isReadOnly ? -1 : 0}
+                              onClick={() => !isReadOnly && onChange({ ...perms, [flag]: !perms[flag] })}
+                              onKeyDown={(e) => !isReadOnly && (e.key === ' ' || e.key === 'Enter') && onChange({ ...perms, [flag]: !perms[flag] })}
+                              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs transition-all select-none ${
+                                isReadOnly
+                                  ? 'bg-indigo-100 border-indigo-300 text-indigo-800 font-semibold cursor-default opacity-70'
+                                  : subChecked
+                                  ? 'bg-indigo-100 border-indigo-300 text-indigo-800 font-semibold cursor-pointer'
+                                  : 'bg-white border-gray-200 text-gray-500 hover:border-indigo-200 cursor-pointer'
+                              }`}
+                            >
+                              {subChecked
+                                ? <CheckSquare size={12} className="text-indigo-600 flex-shrink-0" />
+                                : <Square size={12} className="text-gray-300 flex-shrink-0" />
+                              }
+                              {subLabel}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
 
                     {/* Delivery sub-roles: only for non-manager/admin when delivery is enabled */}
                     {key === 'delivery' && checked && isNonManager && (
