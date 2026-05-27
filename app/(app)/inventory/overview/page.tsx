@@ -6,7 +6,7 @@ import { supabase } from '@/lib/supabase-browser';
 import { RefreshCw, ChevronLeft, ChevronRight, Trash2, X } from 'lucide-react';
 import { useT } from '@/lib/i18n';
 
-const LOCATIONS = ['Eschborn', 'Taunus', 'Westend', 'ZK'] as const;
+const LOCATIONS = ['Eschborn', 'Taunus', 'Westend'] as const;
 
 /* ─── Fallback section order (used while DB loads) ──────────────────────────── */
 const SECTION_ORDER_FALLBACK = ['Kühlhaus', 'Tiefkühler', 'Trockenware', 'Regale', 'Lager'];
