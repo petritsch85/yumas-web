@@ -74,8 +74,9 @@ export interface Transfer {
 }
 
 export interface AppPermissions {
-  inventory:    boolean;
-  production:   boolean;
+  inventory:         boolean;
+  inventory_current: boolean;
+  production:        boolean;
   buying:       boolean;
   waste_log:    boolean;
   delivery:     boolean;

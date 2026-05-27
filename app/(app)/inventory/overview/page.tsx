@@ -110,7 +110,6 @@ function TabBar({ active, onChange }: { active: TabView; onChange: (v: TabView) 
     { key: 'Westend',  label: 'Westend' },
     { key: 'Eschborn', label: 'Eschborn'},
     { key: 'Taunus',   label: 'Taunus'  },
-    { key: 'ZK',       label: 'ZK'      },
   ];
   return (
     <div className="flex items-center gap-1.5">
