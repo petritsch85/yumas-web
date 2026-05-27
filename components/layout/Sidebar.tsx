@@ -249,15 +249,16 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
   }, [pathname]);
 
   const { data: profile = null } = useQuery<Profile | null>({
-    queryKey: ['sidebar-profile'],
+    queryKey: ['my-profile'],   // shared with dashboard — same cache, one fetch
     queryFn: async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return null;
       const { data } = await supabase.from('profiles').select('*').eq('id', user.id).single();
       return data ? (data as Profile) : null;
     },
-    staleTime: 30_000,      // treat as fresh for 30 s
-    refetchOnWindowFocus: true,  // re-fetch whenever the tab/app regains focus
+    staleTime: 0,
+    refetchOnWindowFocus: true,
+    refetchInterval: 30_000,    // auto-refresh every 30 s so permission changes propagate
   });
 
   const handleSignOut = async () => {

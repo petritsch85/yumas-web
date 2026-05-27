@@ -40,13 +40,16 @@ export default function DashboardPage() {
   const { t } = useT();
 
   const { data: profile } = useQuery<Profile | null>({
-    queryKey: ['dashboard-profile'],
+    queryKey: ['my-profile'],
     queryFn: async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return null;
       const { data } = await supabase.from('profiles').select('*').eq('id', user.id).single();
       return data as Profile | null;
     },
+    staleTime: 0,
+    refetchOnWindowFocus: true,
+    refetchInterval: 30_000,
   });
 
   const isAdmin     = profile?.role === 'admin';
