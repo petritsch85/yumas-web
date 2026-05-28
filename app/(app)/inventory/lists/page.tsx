@@ -315,6 +315,8 @@ export default function InventoryListsPage() {
   const [showAddModal,          setShowAddModal]          = useState(false);
   const [showAddSectionModal,   setShowAddSectionModal]   = useState(false);
   const [confirmDeleteSection,  setConfirmDeleteSection]  = useState<string | null>(null);
+  const [renamingSection,       setRenamingSection]       = useState<string | null>(null);
+  const [renameValue,           setRenameValue]           = useState('');
 
   // Local editable targets: item_name → {mon_target, tue_target, wed_target, fri_target}
   const [localTargets, setLocalTargets] = useState<Map<string, LocalTarget>>(new Map());
@@ -607,6 +609,31 @@ export default function InventoryListsPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['inventory-items'] as const }),
   });
 
+  const renameSectionMutation = useMutation({
+    mutationFn: async ({ oldName, newName }: { oldName: string; newName: string }) => {
+      // Update section name in inventory_sections table
+      const sec = dbSections.find(s => s.name === oldName);
+      if (sec) {
+        const { error } = await supabase
+          .from('inventory_sections')
+          .update({ name: newName })
+          .eq('id', sec.id);
+        if (error) throw error;
+      }
+      // Update all items that reference this section name
+      const { error: itemsError } = await supabase
+        .from('inventory_items')
+        .update({ section: newName })
+        .eq('section', oldName);
+      if (itemsError) throw itemsError;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['inventory-sections'] });
+      qc.invalidateQueries({ queryKey: ['inventory-items'] });
+      setRenamingSection(null);
+    },
+  });
+
   const saveTargetMutation = useMutation({
     mutationFn: async ({ item, t }: { item: InventoryItem; t: LocalTarget }) => {
       const { error } = await supabase.rpc('set_item_store_target', {
@@ -876,10 +903,52 @@ export default function InventoryListsPage() {
                     <tr className="bg-[#F1F8E9] border-y border-green-100">
                       <td colSpan={colSpan} className="px-4 py-2">
                         <div className="flex items-center justify-between">
-                          <span className="text-xs font-bold text-[#2E7D32] uppercase tracking-wider">
-                            {section.title}
-                          </span>
-                          {editMode && (
+                          {/* Section name — click to rename in edit mode */}
+                          {editMode && renamingSection === section.title ? (
+                            <form
+                              className="flex items-center gap-2"
+                              onSubmit={e => {
+                                e.preventDefault();
+                                const trimmed = renameValue.trim();
+                                if (trimmed && trimmed !== section.title) {
+                                  renameSectionMutation.mutate({ oldName: section.title, newName: trimmed });
+                                } else {
+                                  setRenamingSection(null);
+                                }
+                              }}
+                            >
+                              <input
+                                autoFocus
+                                value={renameValue}
+                                onChange={e => setRenameValue(e.target.value)}
+                                onBlur={() => setRenamingSection(null)}
+                                onKeyDown={e => { if (e.key === 'Escape') setRenamingSection(null); }}
+                                className="text-xs font-bold text-[#2E7D32] uppercase tracking-wider bg-white border border-[#2E7D32] rounded px-2 py-0.5 focus:outline-none focus:ring-1 focus:ring-[#1B5E20] w-40"
+                              />
+                              <button
+                                type="submit"
+                                disabled={renameSectionMutation.isPending}
+                                className="px-2 py-0.5 rounded text-xs font-semibold bg-[#1B5E20] text-white hover:bg-[#2E7D32] disabled:opacity-50 transition-colors"
+                                onMouseDown={e => e.preventDefault()}
+                              >
+                                {renameSectionMutation.isPending ? '…' : 'Save'}
+                              </button>
+                            </form>
+                          ) : (
+                            <button
+                              onClick={() => {
+                                if (editMode) {
+                                  setRenamingSection(section.title);
+                                  setRenameValue(section.title);
+                                  setConfirmDeleteSection(null);
+                                }
+                              }}
+                              className={`text-xs font-bold text-[#2E7D32] uppercase tracking-wider ${editMode ? 'hover:text-[#1B5E20] hover:underline cursor-text' : ''}`}
+                            >
+                              {section.title}
+                            </button>
+                          )}
+                          {editMode && renamingSection !== section.title && (
                             confirmDeleteSection === section.title ? (
                               <div className="flex items-center gap-2">
                                 <span className="text-xs text-red-600 font-medium">
