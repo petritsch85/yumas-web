@@ -70,17 +70,14 @@ function toLocalDateStr(d: Date) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-/** Mon/Tue/Wed/Fri delivery dates spanning 7 days back → 14 days forward */
+/** Mon/Tue/Wed/Fri delivery dates: today or future only, max 3 results */
 const DELIVERY_DOW = [1, 2, 3, 5]; // Mon=1 Tue=2 Wed=3 Fri=5
 function getDeliveryDateOptions(): { date: string; label: string }[] {
   const today = new Date();
   const todayStr = toLocalDateStr(today);
   const results: { date: string; label: string }[] = [];
   const d = new Date(today);
-  d.setDate(today.getDate() - 7);
-  const end = new Date(today);
-  end.setDate(today.getDate() + 14);
-  while (d <= end) {
+  while (results.length < 3) {
     if (DELIVERY_DOW.includes(d.getDay())) {
       const dateStr = toLocalDateStr(d);
       const lbl = d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
