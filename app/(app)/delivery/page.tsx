@@ -521,12 +521,15 @@ function StoreDeliveryList({
                           }
                           {isManager && <>
                             <td className="px-3 md:px-4 py-2.5 text-center tabular-nums">
-                              {(() => {
-                                const qty = getLiveInventory(line);
-                                return qty > 0
-                                  ? <span className="text-[#2E7D32] font-semibold">{qty}</span>
-                                  : <span className="text-gray-300">0</span>;
-                              })()}
+                              {!storeTimestamp
+                                ? <span className="text-gray-200">—</span>
+                                : (() => {
+                                    const qty = getLiveInventory(line);
+                                    return qty > 0
+                                      ? <span className="text-[#2E7D32] font-semibold">{qty}</span>
+                                      : <span className="text-gray-300">0</span>;
+                                  })()
+                              }
                             </td>
                             {/* STD −25% */}
                             <td className={`px-3 md:px-4 py-2.5 text-center tabular-nums ${stdScaleMode === 'low' ? 'text-[#1B5E20] font-semibold' : 'text-gray-400'}`}>
