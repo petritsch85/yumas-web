@@ -407,20 +407,20 @@ export default function DeliveryReportsPage() {
     staleTime: Infinity,
   });
 
-  /* ── Inventory submissions — relative to active run's date (upcoming) or next delivery (fallback) ── */
+  /* ── Inventory submissions — only those explicitly linked to this delivery date ── */
   const invSubsDate = activeRun?.delivery_finished_at ? null : (activeRun?.delivery_date ?? getNextDeliveryDate());
   const { data: invSubs = [] } = useQuery<InventorySub[]>({
     queryKey: ['dr-inv-subs', invSubsDate],
     queryFn: async () => {
-      // Latest submission per store submitted BEFORE the cutoff of this run
-      const cutoffIso = deliveryCutoff(invSubsDate!).toISOString();
+      // Only submissions explicitly linked to this delivery date via linked_delivery_date
       const results = await Promise.all(
         STORES.map(store =>
           supabase
             .from('inventory_submissions')
             .select('location_name, submitted_at')
             .eq('location_name', store)
-            .lt('submitted_at', cutoffIso)
+            .eq('linked_delivery_date', invSubsDate!)
+            .is('deleted_at', null)
             .order('submitted_at', { ascending: false })
             .limit(1)
             .maybeSingle()
@@ -830,8 +830,13 @@ export default function DeliveryReportsPage() {
             };
 
             // Effective freshness: override → always green
-            const effectiveFreshness = (store: Store) =>
-              overrides[store] ? 'green' : inventoryFreshness(getSubmittedAt(store), evalDate);
+            // For past runs: use timing-based freshness from snapshot
+            // For live/upcoming runs: linked submission exists → green, not linked → red
+            const effectiveFreshness = (store: Store) => {
+              if (overrides[store]) return 'green';
+              if (isPastRun) return inventoryFreshness(getSubmittedAt(store), evalDate);
+              return getSubmittedAt(store) ? 'green' : 'red';
+            };
 
             const allGreen = STORES.every(s => effectiveFreshness(s) === 'green');
             const anyRed   = STORES.some(s  => effectiveFreshness(s) === 'red');
