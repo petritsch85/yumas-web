@@ -900,14 +900,6 @@ export default function DeliveryReportsPage() {
                               >
                                 undo
                               </button>
-                            ) : freshness !== 'green' ? (
-                              <button
-                                onClick={() => confirmInventory.mutate(store)}
-                                disabled={confirmInventory.isPending}
-                                className="mt-1 text-[10px] text-amber-600 hover:text-amber-800 underline leading-none disabled:opacity-50"
-                              >
-                                confirm for this delivery
-                              </button>
                             ) : null
                           )}
                         </div>
