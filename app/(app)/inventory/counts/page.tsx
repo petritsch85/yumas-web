@@ -671,10 +671,10 @@ export default function CurrentInventoryPage() {
                           {isManager && (
                             sub.linked_delivery_date ? (
                               /* ── Linked state ── */
-                              <div className="flex items-center justify-between px-4 py-2.5 bg-blue-50 border-t border-blue-100">
+                              <div className="flex items-center justify-between px-4 py-2.5 bg-green-50 border-t border-green-100">
                                 <div className="flex items-center gap-2">
-                                  <Link2 size={14} className="text-blue-500 flex-shrink-0" />
-                                  <span className="text-sm font-semibold text-blue-700">
+                                  <Link2 size={14} className="text-green-600 flex-shrink-0" />
+                                  <span className="text-sm font-semibold text-green-800">
                                     Linked to delivery:{' '}
                                     <span className="font-bold">
                                       {new Date(sub.linked_delivery_date + 'T12:00:00').toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })}
@@ -684,7 +684,7 @@ export default function CurrentInventoryPage() {
                                 <button
                                   onClick={() => linkMutation.mutate({ id: sub.id, date: null })}
                                   disabled={linkMutation.isPending}
-                                  className="text-xs text-blue-400 hover:text-red-500 font-medium transition-colors flex-shrink-0"
+                                  className="text-xs text-green-500 hover:text-red-500 font-medium transition-colors flex-shrink-0"
                                 >
                                   {linkMutation.isPending ? 'Saving…' : 'Remove link'}
                                 </button>
@@ -720,10 +720,10 @@ export default function CurrentInventoryPage() {
                               /* ── Not linked state ── */
                               <button
                                 onClick={() => setLinkingId(sub.id)}
-                                className="w-full flex items-center gap-2 px-4 py-2.5 border-t border-dashed border-gray-200 hover:bg-gray-50 transition-colors group"
+                                className="w-full flex items-center gap-2 px-4 py-2.5 bg-red-50 border-t border-red-100 hover:bg-red-100 transition-colors group"
                               >
-                                <Link2 size={14} className="text-gray-300 group-hover:text-[#1B5E20] flex-shrink-0 transition-colors" />
-                                <span className="text-sm text-gray-400 group-hover:text-[#1B5E20] font-medium transition-colors">
+                                <Link2 size={14} className="text-red-400 flex-shrink-0" />
+                                <span className="text-sm text-red-600 font-semibold">
                                   Not linked to any delivery — tap to link
                                 </span>
                               </button>
