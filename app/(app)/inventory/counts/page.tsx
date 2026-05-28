@@ -3,7 +3,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
 import { useState, useEffect } from 'react';
-import { ChevronDown, ChevronRight, Trash2, Pencil, X, Check, RotateCcw, AlertTriangle } from 'lucide-react';
+import { ChevronDown, ChevronRight, Trash2, Pencil, X, Check, RotateCcw, AlertTriangle, Link2 } from 'lucide-react';
 import { useT } from '@/lib/i18n';
 
 type DataItem = { section: string; name: string; unit: string; quantity: number };
@@ -20,6 +20,7 @@ type SubmissionRow = {
   original_data: DataItem[] | null;
   deleted_at: string | null;
   deleted_by: string | null;
+  linked_delivery_date: string | null;
   submitterName?: string;
 };
 
@@ -69,6 +70,27 @@ function toLocalDateStr(d: Date) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+/** Mon/Tue/Wed/Fri delivery dates spanning 7 days back → 14 days forward */
+const DELIVERY_DOW = [1, 2, 3, 5]; // Mon=1 Tue=2 Wed=3 Fri=5
+function getDeliveryDateOptions(): { date: string; label: string }[] {
+  const today = new Date();
+  const todayStr = toLocalDateStr(today);
+  const results: { date: string; label: string }[] = [];
+  const d = new Date(today);
+  d.setDate(today.getDate() - 7);
+  const end = new Date(today);
+  end.setDate(today.getDate() + 14);
+  while (d <= end) {
+    if (DELIVERY_DOW.includes(d.getDay())) {
+      const dateStr = toLocalDateStr(d);
+      const lbl = d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+      results.push({ date: dateStr, label: dateStr === todayStr ? `Today — ${lbl}` : lbl });
+    }
+    d.setDate(d.getDate() + 1);
+  }
+  return results;
+}
+
 export default function CurrentInventoryPage() {
   const { t } = useT();
   const [locationFilter, setLocationFilter] = useState('all');
@@ -80,6 +102,7 @@ export default function CurrentInventoryPage() {
   const [editingId, setEditingId]           = useState<string | null>(null);
   const [editDraft, setEditDraft]           = useState<Record<string, number>>({});
   const [editError, setEditError]           = useState<string | null>(null);
+  const [linkingId, setLinkingId]           = useState<string | null>(null);
 
   // Current user identity & role — drives permission checks
   const [currentUserId, setCurrentUserId]   = useState<string | null>(null);
@@ -197,6 +220,22 @@ export default function CurrentInventoryPage() {
     },
   });
 
+  const linkMutation = useMutation({
+    mutationFn: async ({ id, date }: { id: string; date: string | null }) => {
+      const { error } = await supabase
+        .from('inventory_submissions')
+        .update({ linked_delivery_date: date })
+        .eq('id', id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['inventory-submissions'] });
+      setLinkingId(null);
+    },
+  });
+
+  const deliveryDateOptions = getDeliveryDateOptions();
+
   // Date range — default: last 90 days
   const defaultFrom = toLocalDateStr(new Date(Date.now() - 90 * 86_400_000));
   const defaultTo   = toLocalDateStr(new Date());
@@ -217,7 +256,7 @@ export default function CurrentInventoryPage() {
     queryFn: async () => {
       let q = supabase
         .from('inventory_submissions')
-        .select('id, location_name, submitted_at, submitted_by, duration_seconds, data, comment, edited_at, edited_by, original_data, deleted_at, deleted_by')
+        .select('id, location_name, submitted_at, submitted_by, duration_seconds, data, comment, edited_at, edited_by, original_data, deleted_at, deleted_by, linked_delivery_date')
         .is('deleted_at', null)  // exclude soft-deleted
         .gte('submitted_at', `${fromDate}T00:00:00`)
         .lte('submitted_at', `${toDate}T23:59:59`)
@@ -250,7 +289,7 @@ export default function CurrentInventoryPage() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('inventory_submissions')
-        .select('id, location_name, submitted_at, submitted_by, duration_seconds, data, comment, edited_at, edited_by, original_data, deleted_at, deleted_by')
+        .select('id, location_name, submitted_at, submitted_by, duration_seconds, data, comment, edited_at, edited_by, original_data, deleted_at, deleted_by, linked_delivery_date')
         .not('deleted_at', 'is', null)
         .order('deleted_at', { ascending: false })
         .limit(500);
@@ -590,6 +629,50 @@ export default function CurrentInventoryPage() {
                                   <Pencil size={14} />
                                 </button>
                               ) : null}
+
+                              {/* Link to delivery — managers only */}
+                              {isManager && !isEditing && (
+                                sub.linked_delivery_date ? (
+                                  <div className="flex items-center gap-1 px-2 py-1 bg-blue-50 border border-blue-200 rounded-lg text-xs font-semibold text-blue-700 flex-shrink-0">
+                                    <Link2 size={11} className="flex-shrink-0" />
+                                    <span className="whitespace-nowrap">
+                                      {new Date(sub.linked_delivery_date + 'T12:00:00').toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}
+                                    </span>
+                                    <button
+                                      onClick={() => linkMutation.mutate({ id: sub.id, date: null })}
+                                      disabled={linkMutation.isPending}
+                                      className="ml-0.5 text-blue-400 hover:text-blue-700 transition-colors flex-shrink-0"
+                                      title="Unlink"
+                                    >
+                                      <X size={10} />
+                                    </button>
+                                  </div>
+                                ) : linkingId === sub.id ? (
+                                  <select
+                                    autoFocus
+                                    defaultValue=""
+                                    onChange={(e) => {
+                                      if (e.target.value) linkMutation.mutate({ id: sub.id, date: e.target.value });
+                                      setLinkingId(null);
+                                    }}
+                                    onBlur={() => setLinkingId(null)}
+                                    className="text-xs border border-blue-300 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white flex-shrink-0"
+                                  >
+                                    <option value="">Select delivery…</option>
+                                    {deliveryDateOptions.map(({ date, label }) => (
+                                      <option key={date} value={date}>{label}</option>
+                                    ))}
+                                  </select>
+                                ) : (
+                                  <button
+                                    onClick={() => setLinkingId(sub.id)}
+                                    className="flex items-center gap-1 p-1.5 text-gray-300 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                                    title="Link to a delivery date"
+                                  >
+                                    <Link2 size={14} />
+                                  </button>
+                                )
+                              )}
 
                               {/* Delete — managers only */}
                               {isManager && (

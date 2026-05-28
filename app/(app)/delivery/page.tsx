@@ -382,6 +382,17 @@ function StoreDeliveryList({
 
   return (
     <div className={isActive ? 'block' : 'hidden'}>
+      {/* No linked inventory warning (manager only) */}
+      {isManager && !storeTimestamp && (
+        <div className="flex items-center gap-2 mb-4 px-4 py-2.5 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-800">
+          <AlertCircle size={14} className="flex-shrink-0" />
+          <span>
+            No inventory linked for <strong>{store}</strong> — Current Inventory shows 0.
+            Go to <strong>Inventory Reports</strong> and link the correct reports to this delivery date.
+          </span>
+        </div>
+      )}
+
       {/* Summary */}
       <div className="flex items-center flex-wrap gap-x-4 gap-y-1 mb-4">
         <span className="text-sm font-medium text-gray-700">
@@ -1212,12 +1223,14 @@ export default function DeliveryPage() {
     queryKey: ['delivery-run', targetDate],
     refetchInterval: viewMode === 'packer' ? 15_000 : false,
     queryFn: async () => {
-      // Always fetch the latest inventory submission per store (live, not baked-in snapshot)
+      // Fetch the inventory submission linked to this specific delivery date (manager linked it on Inventory Reports page)
       const invResults = await Promise.all(
         STORES.map(store =>
           supabase.from('inventory_submissions')
             .select('data, submitted_at, comment')
             .eq('location_name', store)
+            .eq('linked_delivery_date', targetDate)
+            .is('deleted_at', null)
             .order('submitted_at', { ascending: false })
             .limit(1)
             .maybeSingle()
@@ -1716,10 +1729,16 @@ export default function DeliveryPage() {
         invItems: InvItemRow[];
       }[] = [];
 
+      const missingInventoryStores: Store[] = [];
+
       for (const store of deliveryStores) {
         const { data: submissions } = await supabase
-          .from('inventory_submissions').select('*').eq('location_name', store)
+          .from('inventory_submissions').select('*')
+          .eq('location_name', store)
+          .eq('linked_delivery_date', targetDate)
+          .is('deleted_at', null)
           .order('submitted_at', { ascending: false }).limit(1);
+        if (!submissions || submissions.length === 0) missingInventoryStores.push(store);
 
         const { data: invItemsRaw } = await supabase
           .from('inventory_items')
@@ -1798,6 +1817,9 @@ export default function DeliveryPage() {
 
       qc.invalidateQueries({ queryKey: ['delivery-run', targetDate] });
       qc.invalidateQueries({ queryKey: ['weekly-forecasts-today', targetDate] });
+      if (missingInventoryStores.length > 0) {
+        setGenerateError(`⚠️ No linked inventory for: ${missingInventoryStores.join(', ')}. Go to Inventory Reports and link the correct reports to this delivery date.`);
+      }
     } catch (err: any) {
       setGenerateError(err.message ?? 'Failed to generate delivery list');
     } finally {
@@ -2062,7 +2084,11 @@ export default function DeliveryPage() {
         )}
 
         {generateError && (
-          <div className="mb-4 flex items-center gap-3 p-4 bg-red-50 border border-red-100 rounded-xl text-sm text-red-700">
+          <div className={`mb-4 flex items-center gap-3 p-4 rounded-xl text-sm ${
+            generateError.startsWith('⚠️')
+              ? 'bg-amber-50 border border-amber-200 text-amber-800'
+              : 'bg-red-50 border border-red-100 text-red-700'
+          }`}>
             <AlertCircle size={16} className="flex-shrink-0" /> {generateError}
           </div>
         )}
