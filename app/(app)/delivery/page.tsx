@@ -2165,6 +2165,34 @@ export default function DeliveryPage() {
                 </div>
               )}
 
+              {/* Inventory link status — manager view only */}
+              {viewMode === 'manager' && (
+                <div className="flex flex-wrap items-center gap-2 mb-3 p-3 bg-white border border-gray-100 rounded-xl shadow-sm">
+                  <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider mr-1">Inventory linked:</span>
+                  {STORES.filter(s => s !== 'ZK').map(store => {
+                    const ts = liveInventoryTimestamps[store];
+                    const submitter = liveInventorySubmitters[store];
+                    return ts ? (
+                      <div key={store} className="flex items-center gap-1.5 px-2.5 py-1 bg-green-50 border border-green-200 rounded-lg text-xs font-semibold text-green-700">
+                        <CheckCircle2 size={12} />
+                        <span>{store}</span>
+                        <span className="font-normal text-green-500">
+                          {submitter
+                            ? `· ${submitter.name}, ${new Date(ts).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}`
+                            : `· ${new Date(ts).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}`}
+                        </span>
+                      </div>
+                    ) : (
+                      <div key={store} className="flex items-center gap-1.5 px-2.5 py-1 bg-red-50 border border-red-200 rounded-lg text-xs font-semibold text-red-600">
+                        <AlertCircle size={12} />
+                        <span>{store}</span>
+                        <span className="font-normal text-red-400">· not linked</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
               {/* Store tabs — with per-store confirmation badges */}
               <div className="flex gap-1 mb-3 bg-gray-100 rounded-xl p-1 w-fit">
                 {STORES.filter(s => s !== 'ZK').map(store => {
