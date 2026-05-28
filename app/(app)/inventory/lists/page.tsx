@@ -507,7 +507,8 @@ export default function InventoryListsPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['inventory-items'] as const }),
   });
 
-  // Swap sort order for the ACTIVE STORE only
+  // Move item for the ACTIVE STORE only — rewrite all positions in the section
+  // with clean sequential values so stores are fully independent of each other
   const moveMutation = useMutation({
     mutationFn: async ({
       item, direction, sectionItems,
@@ -515,17 +516,23 @@ export default function InventoryListsPage() {
       const idx     = sectionItems.findIndex(i => i.id === item.id);
       const swapIdx = direction === 'up' ? idx - 1 : idx + 1;
       if (swapIdx < 0 || swapIdx >= sectionItems.length) return;
-      const other     = sectionItems[swapIdx];
-      const itemOrd   = item.store_sort_orders?.[activeStore]  ?? item.sort_order;
-      const otherOrd  = other.store_sort_orders?.[activeStore] ?? other.sort_order;
-      await Promise.all([
-        supabase.rpc('set_item_store_sort_order', {
-          p_item_id: item.id, p_location_name: activeStore, p_sort_order: otherOrd,
-        }),
-        supabase.rpc('set_item_store_sort_order', {
-          p_item_id: other.id, p_location_name: activeStore, p_sort_order: itemOrd,
-        }),
-      ]);
+
+      // Build the new order by swapping the two items
+      const newOrder = [...sectionItems];
+      [newOrder[idx], newOrder[swapIdx]] = [newOrder[swapIdx], newOrder[idx]];
+
+      // Write fresh sequential sort orders for every item in this section
+      // for the active store only — never touches other stores' values
+      const { error } = await Promise.all(
+        newOrder.map((si, i) =>
+          supabase.rpc('set_item_store_sort_order', {
+            p_item_id:       si.id,
+            p_location_name: activeStore,
+            p_sort_order:    (i + 1) * 10,
+          })
+        )
+      ).then(results => results.find(r => r.error) ?? { error: null });
+      if (error) throw error;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['inventory-items'] as const }),
   });
