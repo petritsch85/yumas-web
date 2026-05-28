@@ -630,49 +630,6 @@ export default function CurrentInventoryPage() {
                                 </button>
                               ) : null}
 
-                              {/* Link to delivery — managers only */}
-                              {isManager && !isEditing && (
-                                sub.linked_delivery_date ? (
-                                  <div className="flex items-center gap-1 px-2 py-1 bg-blue-50 border border-blue-200 rounded-lg text-xs font-semibold text-blue-700 flex-shrink-0">
-                                    <Link2 size={11} className="flex-shrink-0" />
-                                    <span className="whitespace-nowrap">
-                                      {new Date(sub.linked_delivery_date + 'T12:00:00').toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}
-                                    </span>
-                                    <button
-                                      onClick={() => linkMutation.mutate({ id: sub.id, date: null })}
-                                      disabled={linkMutation.isPending}
-                                      className="ml-0.5 text-blue-400 hover:text-blue-700 transition-colors flex-shrink-0"
-                                      title="Unlink"
-                                    >
-                                      <X size={10} />
-                                    </button>
-                                  </div>
-                                ) : linkingId === sub.id ? (
-                                  <select
-                                    autoFocus
-                                    defaultValue=""
-                                    onChange={(e) => {
-                                      if (e.target.value) linkMutation.mutate({ id: sub.id, date: e.target.value });
-                                      setLinkingId(null);
-                                    }}
-                                    onBlur={() => setLinkingId(null)}
-                                    className="text-xs border border-blue-300 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white flex-shrink-0"
-                                  >
-                                    <option value="">Select delivery…</option>
-                                    {deliveryDateOptions.map(({ date, label }) => (
-                                      <option key={date} value={date}>{label}</option>
-                                    ))}
-                                  </select>
-                                ) : (
-                                  <button
-                                    onClick={() => setLinkingId(sub.id)}
-                                    className="flex items-center gap-1 p-1.5 text-gray-300 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                                    title="Link to a delivery date"
-                                  >
-                                    <Link2 size={14} />
-                                  </button>
-                                )
-                              )}
 
                               {/* Delete — managers only */}
                               {isManager && (
@@ -709,6 +666,69 @@ export default function CurrentInventoryPage() {
                               )}
                             </div>
                           </div>
+
+                          {/* Delivery link strip — managers only, always visible */}
+                          {isManager && (
+                            sub.linked_delivery_date ? (
+                              /* ── Linked state ── */
+                              <div className="flex items-center justify-between px-4 py-2.5 bg-blue-50 border-t border-blue-100">
+                                <div className="flex items-center gap-2">
+                                  <Link2 size={14} className="text-blue-500 flex-shrink-0" />
+                                  <span className="text-sm font-semibold text-blue-700">
+                                    Linked to delivery:{' '}
+                                    <span className="font-bold">
+                                      {new Date(sub.linked_delivery_date + 'T12:00:00').toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })}
+                                    </span>
+                                  </span>
+                                </div>
+                                <button
+                                  onClick={() => linkMutation.mutate({ id: sub.id, date: null })}
+                                  disabled={linkMutation.isPending}
+                                  className="text-xs text-blue-400 hover:text-red-500 font-medium transition-colors flex-shrink-0"
+                                >
+                                  {linkMutation.isPending ? 'Saving…' : 'Remove link'}
+                                </button>
+                              </div>
+                            ) : linkingId === sub.id ? (
+                              /* ── Picker open ── */
+                              <div className="flex items-center gap-3 px-4 py-2.5 bg-gray-50 border-t border-gray-100">
+                                <Link2 size={14} className="text-gray-400 flex-shrink-0" />
+                                <span className="text-sm text-gray-500 font-medium">Link to delivery:</span>
+                                <select
+                                  autoFocus
+                                  defaultValue=""
+                                  onChange={(e) => {
+                                    if (e.target.value) linkMutation.mutate({ id: sub.id, date: e.target.value });
+                                    setLinkingId(null);
+                                  }}
+                                  onBlur={() => setLinkingId(null)}
+                                  className="flex-1 text-sm border border-blue-300 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white"
+                                >
+                                  <option value="">Select delivery date…</option>
+                                  {deliveryDateOptions.map(({ date, label }) => (
+                                    <option key={date} value={date}>{label}</option>
+                                  ))}
+                                </select>
+                                <button
+                                  onClick={() => setLinkingId(null)}
+                                  className="text-xs text-gray-400 hover:text-gray-600 font-medium transition-colors flex-shrink-0"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            ) : (
+                              /* ── Not linked state ── */
+                              <button
+                                onClick={() => setLinkingId(sub.id)}
+                                className="w-full flex items-center gap-2 px-4 py-2.5 border-t border-dashed border-gray-200 hover:bg-gray-50 transition-colors group"
+                              >
+                                <Link2 size={14} className="text-gray-300 group-hover:text-[#1B5E20] flex-shrink-0 transition-colors" />
+                                <span className="text-sm text-gray-400 group-hover:text-[#1B5E20] font-medium transition-colors">
+                                  Not linked to any delivery — tap to link
+                                </span>
+                              </button>
+                            )
+                          )}
 
                           {/* Expanded detail */}
                           {isExpanded && (
