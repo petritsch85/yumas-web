@@ -1227,7 +1227,7 @@ export default function DeliveryPage() {
       const invResults = await Promise.all(
         STORES.map(store =>
           supabase.from('inventory_submissions')
-            .select('data, submitted_at, comment')
+            .select('data, submitted_at, comment, submitted_by')
             .eq('location_name', store)
             .eq('linked_delivery_date', targetDate)
             .is('deleted_at', null)
@@ -1240,6 +1240,7 @@ export default function DeliveryPage() {
       const liveInventory: Partial<Record<Store, Record<string, number>>> = {};
       const liveInventoryTimestamps: Partial<Record<Store, string>> = {};
       const liveInventoryComments: Partial<Record<Store, string>> = {};
+      const liveInventorySubmitterIds: Partial<Record<Store, string>> = {};
       STORES.forEach((store, i) => {
         const sub = invResults[i].data;
         if (sub?.data) {
@@ -1250,7 +1251,23 @@ export default function DeliveryPage() {
           liveInventory[store] = map;
           if ((sub as any).submitted_at) liveInventoryTimestamps[store] = (sub as any).submitted_at;
           if ((sub as any).comment)      liveInventoryComments[store]  = (sub as any).comment;
+          if ((sub as any).submitted_by) liveInventorySubmitterIds[store] = (sub as any).submitted_by;
         }
+      });
+
+      // Resolve submitter names for the note attribution
+      const uniqueSubmitterIds = [...new Set(Object.values(liveInventorySubmitterIds).filter(Boolean))] as string[];
+      let submitterProfileMap: Record<string, string> = {};
+      if (uniqueSubmitterIds.length > 0) {
+        const { data: profileRows } = await supabase
+          .from('profiles').select('id, full_name').in('id', uniqueSubmitterIds);
+        for (const p of profileRows ?? []) submitterProfileMap[p.id] = p.full_name;
+      }
+      const liveInventorySubmitters: Partial<Record<Store, { name: string; submittedAt: string }>> = {};
+      STORES.forEach(store => {
+        const uid = liveInventorySubmitterIds[store];
+        const ts  = liveInventoryTimestamps[store];
+        if (uid && ts) liveInventorySubmitters[store] = { name: submitterProfileMap[uid] ?? 'Unknown', submittedAt: ts };
       });
 
       const { data: run, error: runErr } = await supabase
@@ -1263,7 +1280,7 @@ export default function DeliveryPage() {
           .from('delivery_run_lines').select('*').eq('run_id', run.id)
           .order('location_name').order('section').order('item_name');
         if (linesErr) throw linesErr;
-        return { run: run as DeliveryRun, lines: (lines ?? []) as DeliveryLine[], isPreview: false, liveInventory, liveInventoryTimestamps, liveInventoryComments };
+        return { run: run as DeliveryRun, lines: (lines ?? []) as DeliveryLine[], isPreview: false, liveInventory, liveInventoryTimestamps, liveInventoryComments, liveInventorySubmitters };
       }
 
       // No run yet — build a preview from store_targets (reported = 0)
@@ -1309,7 +1326,7 @@ export default function DeliveryPage() {
         }
       });
 
-      return { run: null, lines: previewLines, isPreview: true, liveInventory, liveInventoryTimestamps, liveInventoryComments };
+      return { run: null, lines: previewLines, isPreview: true, liveInventory, liveInventoryTimestamps, liveInventoryComments, liveInventorySubmitters };
     },
   });
 
@@ -1595,7 +1612,8 @@ export default function DeliveryPage() {
   const isPreview = runData?.isPreview ?? false;
   const liveInventory = runData?.liveInventory ?? {};
   const liveInventoryTimestamps = runData?.liveInventoryTimestamps ?? {};
-  const liveInventoryComments = runData?.liveInventoryComments ?? {};
+  const liveInventoryComments   = runData?.liveInventoryComments ?? {};
+  const liveInventorySubmitters = runData?.liveInventorySubmitters ?? {};
 
   const confirmList = async () => {
     if (!run) return;
@@ -2266,10 +2284,9 @@ export default function DeliveryPage() {
                     {/* ── Store note (inventory comment / manager override) ── */}
                     {(() => {
                       const managerNote: string = run?.store_notes?.[store] ?? '';
-                      // Prefer the comment that was snapshotted when the list was generated;
-                      // fall back to the live latest-submission comment (covers preview / no-run state)
-                      const inventoryComment: string =
-                        run?.store_inventory_comments?.[store] ?? liveInventoryComments[store] ?? '';
+                      // Always use the live comment from the currently linked inventory report
+                      const inventoryComment: string = liveInventoryComments[store] ?? '';
+                      const inventorySubmitter = liveInventorySubmitters[store];
                       const displayNote = managerNote || inventoryComment;
                       const isEditing = editingNoteStore === store;
                       const canEdit = viewMode === 'manager' && !!run && !isPreview;
@@ -2330,6 +2347,11 @@ export default function DeliveryPage() {
                                 {managerNote ? "Manager's note for packer" : 'Note from inventory report'}
                               </p>
                               <p className="text-sm text-amber-800 leading-relaxed whitespace-pre-wrap">{displayNote}</p>
+                              {!managerNote && inventorySubmitter && (
+                                <p className="text-xs text-amber-500 mt-1.5">
+                                  {inventorySubmitter.name} · {new Date(inventorySubmitter.submittedAt).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                                </p>
+                              )}
                             </div>
                             {canEdit && (
                               <button
