@@ -273,6 +273,7 @@ function GroupView() {
       if (dbItemNames.has(itemName)) continue;
       if (addedNames.has(itemName)) continue; // already rendered via DB path
       // Only include if present in at least one delivery store submission
+      const DELIVERY_LOCS: LocationName[] = ['Eschborn', 'Taunus', 'Westend'];
       if (!DELIVERY_LOCS.some(loc => loc in quantities)) continue;
       const secName = subSectionMap[itemName] ?? 'Other';
       if (!legacyBySec[secName]) legacyBySec[secName] = [];
