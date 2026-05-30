@@ -216,82 +216,72 @@ function GroupView() {
       }
     }
 
-    // DB items grouped by section, sorted by sort_order
-    // Deduplicate DB items by name (keep first occurrence per name)
-    const seenDbNames = new Set<string>();
-    const dbItemsBySec: Record<string, DbItem[]> = {};
-    for (const item of dbItems) {
-      if (seenDbNames.has(item.name)) continue;
-      seenDbNames.add(item.name);
-      if (!dbItemsBySec[item.section]) dbItemsBySec[item.section] = [];
-      dbItemsBySec[item.section].push(item);
-    }
     const dbItemNames = new Set(dbItems.map(i => i.name));
 
-    // Show every item in inventory_items — the DB is the single source of truth,
-    // matching exactly what appears in Inventory Lists. No store filtering here;
-    // stores with no submission just show — for that column.
+    // ── Step 1: group ALL inventory_items by section (single source of truth) ──
+    // Walk dbItems directly — no intermediate map that could silently drop rows.
+    const sectionMap = new Map<string, ItemRow[]>();
+    const seenNames  = new Set<string>();
 
-    // Track every item name that has been added to avoid duplicates
-    const addedNames = new Set<string>();
+    for (const item of dbItems) {
+      if (seenNames.has(item.name)) continue; // deduplicate by name
+      seenNames.add(item.name);
+      const quantities = quantityMap[item.name] ?? {};
+      const row: ItemRow = {
+        section: item.section,
+        name:    item.name,
+        unit:    item.unit,
+        quantities,
+        total: Object.values(quantities).reduce((s, q) => s + (q ?? 0), 0),
+      };
+      if (!sectionMap.has(item.section)) sectionMap.set(item.section, []);
+      sectionMap.get(item.section)!.push(row);
+    }
 
-    const buildRows = (secName: string, secItems: DbItem[]): ItemRow[] =>
-      secItems
-        .slice()
-        .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
-        .filter(dbItem => !addedNames.has(dbItem.name))
-        .map(dbItem => {
-          addedNames.add(dbItem.name);
-          const quantities = quantityMap[dbItem.name] ?? {};
-          return {
-            section: secName,
-            name: dbItem.name,
-            unit: dbItem.unit,
-            quantities,
-            total: Object.values(quantities).reduce((s, q) => s + (q ?? 0), 0),
-          };
-        });
+    // ── Step 2: sort items within each section by sort_order ──
+    for (const rows of sectionMap.values()) {
+      rows.sort((a, b) => {
+        const ia = dbItems.find(d => d.name === a.name)?.sort_order ?? 0;
+        const ib = dbItems.find(d => d.name === b.name)?.sort_order ?? 0;
+        return ia - ib;
+      });
+    }
 
-    // Build sections in registered order first
+    // ── Step 3: order sections — registered order first, then extras ──
     const result: SectionGroup[] = [];
+    const addedSections = new Set<string>();
+
     for (const secName of sectionOrder) {
-      const rows = buildRows(secName, dbItemsBySec[secName] ?? []);
+      const rows = sectionMap.get(secName);
+      if (rows && rows.length > 0) {
+        result.push({ title: secName, items: rows });
+        addedSections.add(secName);
+      }
+    }
+    for (const [secName, rows] of sectionMap) {
+      if (addedSections.has(secName)) continue;
       if (rows.length > 0) result.push({ title: secName, items: rows });
     }
 
-    // Then append any sections present in inventory_items but not in inventory_sections
-    const coveredSections = new Set(sectionOrder);
-    for (const [secName, secItems] of Object.entries(dbItemsBySec)) {
-      if (coveredSections.has(secName)) continue;
-      const rows = buildRows(secName, secItems);
-      if (rows.length > 0) result.push({ title: secName, items: rows });
-    }
-
-    // Append legacy items from submissions not present in DB
+    // ── Step 4: append legacy items from submissions not in inventory_items ──
+    const DELIVERY_LOCS: LocationName[] = ['Eschborn', 'Taunus', 'Westend'];
     const legacyBySec: Record<string, ItemRow[]> = {};
     for (const [itemName, quantities] of Object.entries(quantityMap)) {
       if (dbItemNames.has(itemName)) continue;
-      if (addedNames.has(itemName)) continue; // already rendered via DB path
-      // Only include if present in at least one delivery store submission
-      const DELIVERY_LOCS: LocationName[] = ['Eschborn', 'Taunus', 'Westend'];
+      if (seenNames.has(itemName)) continue;
       if (!DELIVERY_LOCS.some(loc => loc in quantities)) continue;
       const secName = subSectionMap[itemName] ?? 'Other';
       if (!legacyBySec[secName]) legacyBySec[secName] = [];
       legacyBySec[secName].push({
-        section: secName,
-        name: itemName,
-        unit: subUnitMap[itemName] ?? '',
+        section: secName, name: itemName, unit: subUnitMap[itemName] ?? '',
         quantities,
         total: Object.values(quantities).reduce((s, q) => s + (q ?? 0), 0),
       });
     }
     for (const [secName, rows] of Object.entries(legacyBySec)) {
       const existing = result.find(s => s.title === secName);
-      if (existing) {
-        existing.items.push(...rows);
-      } else {
-        result.push({ title: secName, items: rows });
-      }
+      if (existing) existing.items.push(...rows);
+      else result.push({ title: secName, items: rows });
     }
 
     return result;
