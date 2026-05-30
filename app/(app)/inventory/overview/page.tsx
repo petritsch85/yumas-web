@@ -13,7 +13,7 @@ const SECTION_ORDER_FALLBACK = ['Kühlhaus', 'Tiefkühler', 'Trockenware', 'Rega
 
 /* ─── DB types ──────────────────────────────────────────────────────────────── */
 type DbSection = { id: string; name: string; sort_order: number };
-type DbItem    = { id: string; name: string; section: string; unit: string; sort_order: number; store_sort_orders: Record<string, number> | null };
+type DbItem    = { id: string; name: string; section: string; unit: string; sort_order: number; store_sort_orders: Record<string, number> | null; stores: string[] };
 
 /* ─── Sorting helpers (DB-driven order passed as params) ────────────────────── */
 function sortSections<T extends { title: string; items: unknown[] }>(
@@ -159,7 +159,7 @@ function GroupView() {
     queryFn: async () => {
       const { data } = await supabase
         .from('inventory_items')
-        .select('id, name, section, unit, sort_order, store_sort_orders')
+        .select('id, name, section, unit, sort_order, store_sort_orders, stores')
         .order('sort_order', { ascending: true });
       return (data ?? []) as DbItem[];
     },
@@ -228,7 +228,8 @@ function GroupView() {
     }
     const dbItemNames = new Set(dbItems.map(i => i.name));
 
-    // Only show items that appear in at least one of the three delivery store submissions
+    // Show all items that belong to at least one delivery store in the DB,
+    // regardless of whether they appear in a recent submission (missing = shown as —)
     const DELIVERY_LOCS: LocationName[] = ['Eschborn', 'Taunus', 'Westend'];
 
     // Track every item name that has been added to avoid duplicates
@@ -243,8 +244,9 @@ function GroupView() {
 
       const rows: ItemRow[] = secItems
         .filter(dbItem => {
-          const q = quantityMap[dbItem.name] ?? {};
-          return DELIVERY_LOCS.some(loc => loc in q) && !addedNames.has(dbItem.name);
+          // Include if the item belongs to at least one delivery store
+          const inDeliveryStore = DELIVERY_LOCS.some(loc => (dbItem.stores ?? []).includes(loc));
+          return inDeliveryStore && !addedNames.has(dbItem.name);
         })
         .map(dbItem => {
           addedNames.add(dbItem.name);
