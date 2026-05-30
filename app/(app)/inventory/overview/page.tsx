@@ -13,7 +13,7 @@ const SECTION_ORDER_FALLBACK = ['Kühlhaus', 'Tiefkühler', 'Trockenware', 'Rega
 
 /* ─── DB types ──────────────────────────────────────────────────────────────── */
 type DbSection = { id: string; name: string; sort_order: number };
-type DbItem    = { id: string; name: string; section: string; unit: string; sort_order: number; store_sort_orders: Record<string, number> | null; stores: string[] };
+type DbItem    = { id: string; name: string; section: string; unit: string; sort_order: number; store_sort_orders: Record<string, number> | null };
 
 /* ─── Sorting helpers (DB-driven order passed as params) ────────────────────── */
 function sortSections<T extends { title: string; items: unknown[] }>(
@@ -159,7 +159,7 @@ function GroupView() {
     queryFn: async () => {
       const { data } = await supabase
         .from('inventory_items')
-        .select('id, name, section, unit, sort_order, store_sort_orders, stores')
+        .select('id, name, section, unit, sort_order, store_sort_orders')
         .order('sort_order', { ascending: true });
       return (data ?? []) as DbItem[];
     },
@@ -228,26 +228,18 @@ function GroupView() {
     }
     const dbItemNames = new Set(dbItems.map(i => i.name));
 
-    // Show all items that belong to at least one delivery store in the DB,
-    // regardless of whether they appear in a recent submission (missing = shown as —)
-    const DELIVERY_LOCS: LocationName[] = ['Eschborn', 'Taunus', 'Westend'];
+    // Show every item in inventory_items — the DB is the single source of truth,
+    // matching exactly what appears in Inventory Lists. No store filtering here;
+    // stores with no submission just show — for that column.
 
     // Track every item name that has been added to avoid duplicates
     const addedNames = new Set<string>();
 
-    // Build sections in DB order
-    const result: SectionGroup[] = [];
-    for (const secName of sectionOrder) {
-      const secItems = (dbItemsBySec[secName] ?? [])
+    const buildRows = (secName: string, secItems: DbItem[]): ItemRow[] =>
+      secItems
         .slice()
-        .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
-
-      const rows: ItemRow[] = secItems
-        .filter(dbItem => {
-          // Include if the item belongs to at least one delivery store
-          const inDeliveryStore = DELIVERY_LOCS.some(loc => (dbItem.stores ?? []).includes(loc));
-          return inDeliveryStore && !addedNames.has(dbItem.name);
-        })
+        .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+        .filter(dbItem => !addedNames.has(dbItem.name))
         .map(dbItem => {
           addedNames.add(dbItem.name);
           const quantities = quantityMap[dbItem.name] ?? {};
@@ -260,32 +252,18 @@ function GroupView() {
           };
         });
 
+    // Build sections in registered order first
+    const result: SectionGroup[] = [];
+    for (const secName of sectionOrder) {
+      const rows = buildRows(secName, dbItemsBySec[secName] ?? []);
       if (rows.length > 0) result.push({ title: secName, items: rows });
     }
 
-    // Also include DB items whose section is NOT registered in inventory_sections
-    // (matches the Inventory Lists behaviour of surfacing "extra" sections)
+    // Then append any sections present in inventory_items but not in inventory_sections
     const coveredSections = new Set(sectionOrder);
     for (const [secName, secItems] of Object.entries(dbItemsBySec)) {
-      if (coveredSections.has(secName)) continue; // already processed above
-      const rows: ItemRow[] = secItems
-        .slice()
-        .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
-        .filter(dbItem => {
-          const inDeliveryStore = DELIVERY_LOCS.some(loc => (dbItem.stores ?? []).includes(loc));
-          return inDeliveryStore && !addedNames.has(dbItem.name);
-        })
-        .map(dbItem => {
-          addedNames.add(dbItem.name);
-          const quantities = quantityMap[dbItem.name] ?? {};
-          return {
-            section: secName,
-            name: dbItem.name,
-            unit: dbItem.unit,
-            quantities,
-            total: Object.values(quantities).reduce((s, q) => s + (q ?? 0), 0),
-          };
-        });
+      if (coveredSections.has(secName)) continue;
+      const rows = buildRows(secName, secItems);
       if (rows.length > 0) result.push({ title: secName, items: rows });
     }
 
