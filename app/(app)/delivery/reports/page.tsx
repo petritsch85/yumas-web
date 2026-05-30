@@ -92,16 +92,16 @@ function fmtDuration(seconds: number | null): string {
 
 const DELIVERY_DAYS = [1, 2, 3, 5]; // Mon Tue Wed Fri
 
-/** Next upcoming delivery date string (YYYY-MM-DD) where cutoff (14:00) is still in the future */
+/** Next upcoming delivery date string (YYYY-MM-DD) where 20:00 cutoff is still in the future */
 function getNextDeliveryDate(): string {
   const now = new Date();
   for (let i = 0; i <= 7; i++) {
     const d = new Date(now);
     d.setDate(now.getDate() + i);
     if (DELIVERY_DAYS.includes(d.getDay())) {
-      // Check cutoff is still ahead
+      // Stay on today's delivery until 20:00 to allow store confirmations
       const cutoff = new Date(
-        d.getFullYear(), d.getMonth(), d.getDate(), 14, 0, 0
+        d.getFullYear(), d.getMonth(), d.getDate(), 20, 0, 0
       );
       if (cutoff > now) {
         const y = d.getFullYear();
