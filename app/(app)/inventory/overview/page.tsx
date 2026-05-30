@@ -157,11 +157,10 @@ function GroupView() {
   const { data: dbItems = [], isLoading: itemsLoading } = useQuery<DbItem[]>({
     queryKey: ['inventory-items-all'],
     queryFn: async () => {
-      const { data, error } = await supabase
+      const { data } = await supabase
         .from('inventory_items')
-        .select('id, name, section, unit, sort_order, store_sort_orders');
-      if (error) console.error('[inventory-items-all] error:', error);
-      console.log('[inventory-items-all] rows:', data?.length, data?.map(i => i.name));
+        .select('id, name, section, unit, sort_order, store_sort_orders')
+        .order('sort_order', { ascending: true });
       return (data ?? []) as DbItem[];
     },
     staleTime: 0,
@@ -229,13 +228,16 @@ function GroupView() {
     const dbItemNames = new Set(dbItems.map(i => i.name));
 
     // ── Step 1: group ALL inventory_items by section (single source of truth) ──
-    // Walk dbItems directly — no intermediate map that could silently drop rows.
+    // Deduplicate by (name + section) pair so the same item in two different
+    // sections (e.g. added per-store with different section assignments) shows
+    // in both sections rather than being silently dropped.
     const sectionMap = new Map<string, ItemRow[]>();
-    const seenNames  = new Set<string>();
+    const seenKeys   = new Set<string>(); // key = `${section}::${name}`
 
     for (const item of dbItems) {
-      if (seenNames.has(item.name)) continue; // deduplicate by name
-      seenNames.add(item.name);
+      const key = `${item.section}::${item.name}`;
+      if (seenKeys.has(key)) continue;
+      seenKeys.add(key);
       const quantities = quantityMap[item.name] ?? {};
       const row: ItemRow = {
         section: item.section,
@@ -280,10 +282,11 @@ function GroupView() {
     const legacyBySec: Record<string, ItemRow[]> = {};
     for (const [itemName, meta] of Object.entries(allItemMeta)) {
       if (dbItemNames.has(itemName)) continue;   // already shown via DB path
-      if (seenNames.has(itemName)) continue;      // already added somehow
-      seenNames.add(itemName);
-      const quantities = quantityMap[itemName] ?? {};
       const secName = meta.section || 'Other';
+      const key = `${secName}::${itemName}`;
+      if (seenKeys.has(key)) continue;
+      seenKeys.add(key);
+      const quantities = quantityMap[itemName] ?? {};
       if (!legacyBySec[secName]) legacyBySec[secName] = [];
       legacyBySec[secName].push({
         section: secName, name: itemName, unit: meta.unit ?? '',
@@ -303,12 +306,6 @@ function GroupView() {
   const latestByLocation = data?.latestByLocation ?? {};
   const anySubmissions = Object.keys(latestByLocation).length > 0;
   const allLoading = isLoading || itemsLoading || sectionsLoading;
-
-  /* ── Debug: unique sections in DB items ── */
-  const dbSectionNames = [...new Set(dbItems.map(i => i.section))];
-  const allItemMetaKeys = Object.keys(data?.allItemMeta ?? {});
-  const cevicheInDb   = dbItems.filter(i => i.name.toLowerCase().includes('cevich'));
-  const cevicheInSubs = allItemMetaKeys.filter(n => n.toLowerCase().includes('cevich'));
 
   return (
     <>
@@ -334,22 +331,6 @@ function GroupView() {
           );
         })}
       </div>
-
-      {/* Temporary diagnostic panel — remove once Ceviche issue is resolved */}
-      {!allLoading && (
-        <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg text-xs space-y-1">
-          <p className="font-bold text-yellow-800">🔍 Debug info (temporary)</p>
-          <p className="text-yellow-700"><b>DB items loaded:</b> {dbItems.length} | <b>DB sections:</b> {dbSectionNames.join(', ') || '—'}</p>
-          <p className="text-yellow-700"><b>Submission items (all time):</b> {allItemMetaKeys.length}</p>
-          <p className={cevicheInDb.length > 0 ? 'text-green-700' : 'text-red-700'}>
-            <b>Ceviche in inventory_items:</b> {cevicheInDb.length > 0 ? cevicheInDb.map(i => `"${i.name}" (section: ${i.section})`).join(', ') : 'NONE'}
-          </p>
-          <p className={cevicheInSubs.length > 0 ? 'text-green-700' : 'text-red-700'}>
-            <b>Ceviche in submissions:</b> {cevicheInSubs.length > 0 ? cevicheInSubs.map(n => `"${n}" (section: ${data?.allItemMeta?.[n]?.section})`).join(', ') : 'NONE'}
-          </p>
-          <p className="text-yellow-700"><b>Group sections shown:</b> {sections.map(s => `${s.title}(${s.items.length})`).join(', ') || '—'}</p>
-        </div>
-      )}
 
       {allLoading ? (
         <div className="space-y-2">
