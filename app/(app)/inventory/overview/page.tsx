@@ -190,20 +190,31 @@ function GroupView() {
           latestByLocation[loc] = { submitted_at: sub.submitted_at, data: sub.data ?? [] };
         }
       }
-      return { latestByLocation };
+
+      // Collect item metadata from ALL submissions (not just latest per store).
+      // This ensures items that were counted historically but not in the most
+      // recent submission still appear in the group view (legacy path).
+      const allItemMeta: Record<string, { section: string; unit: string }> = {};
+      for (const sub of submissions ?? []) {
+        for (const item of (sub.data ?? []) as { section: string; name: string; unit: string; quantity: number }[]) {
+          if (item.name && !allItemMeta[item.name]) {
+            allItemMeta[item.name] = { section: item.section ?? 'Other', unit: item.unit ?? '' };
+          }
+        }
+      }
+
+      return { latestByLocation, allItemMeta };
     },
   });
 
   /* ── Build section groups: DB as canonical, quantities from submissions ── */
   const sections = useMemo<SectionGroup[]>(() => {
     const latestByLocation = data?.latestByLocation ?? {};
+    // allItemMeta covers ALL items ever seen across all submissions
+    const allItemMeta = data?.allItemMeta ?? {};
 
-    // Quantity lookup: itemName -> location -> qty
+    // Quantity lookup: itemName -> location -> qty (from latest submission per store only)
     const quantityMap: Record<string, Partial<Record<LocationName, number>>> = {};
-    // Unit lookup from submissions (for legacy items not in DB)
-    const subUnitMap: Record<string, string> = {};
-    // Section lookup from submissions (for legacy items)
-    const subSectionMap: Record<string, string> = {};
 
     for (const loc of LOCATIONS) {
       const sub = latestByLocation[loc];
@@ -211,8 +222,6 @@ function GroupView() {
       for (const item of sub.data) {
         if (!quantityMap[item.name]) quantityMap[item.name] = {};
         quantityMap[item.name][loc] = item.quantity;
-        if (!subUnitMap[item.name])    subUnitMap[item.name]    = item.unit;
-        if (!subSectionMap[item.name]) subSectionMap[item.name] = item.section;
       }
     }
 
@@ -263,17 +272,20 @@ function GroupView() {
       if (rows.length > 0) result.push({ title: secName, items: rows });
     }
 
-    // ── Step 4: append legacy items from submissions not in inventory_items ──
-    const DELIVERY_LOCS: LocationName[] = ['Eschborn', 'Taunus', 'Westend'];
+    // ── Step 4: append legacy items — any item ever counted in ANY submission
+    //           that is NOT already in inventory_items (i.e. not in dbItemNames).
+    //           We use allItemMeta which spans all submissions, not just the latest.
+    //           Quantities come from the latest submission per store (may be —).
     const legacyBySec: Record<string, ItemRow[]> = {};
-    for (const [itemName, quantities] of Object.entries(quantityMap)) {
-      if (dbItemNames.has(itemName)) continue;
-      if (seenNames.has(itemName)) continue;
-      if (!DELIVERY_LOCS.some(loc => loc in quantities)) continue;
-      const secName = subSectionMap[itemName] ?? 'Other';
+    for (const [itemName, meta] of Object.entries(allItemMeta)) {
+      if (dbItemNames.has(itemName)) continue;   // already shown via DB path
+      if (seenNames.has(itemName)) continue;      // already added somehow
+      seenNames.add(itemName);
+      const quantities = quantityMap[itemName] ?? {};
+      const secName = meta.section || 'Other';
       if (!legacyBySec[secName]) legacyBySec[secName] = [];
       legacyBySec[secName].push({
-        section: secName, name: itemName, unit: subUnitMap[itemName] ?? '',
+        section: secName, name: itemName, unit: meta.unit ?? '',
         quantities,
         total: Object.values(quantities).reduce((s, q) => s + (q ?? 0), 0),
       });
