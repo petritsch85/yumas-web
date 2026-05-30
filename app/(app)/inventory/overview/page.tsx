@@ -263,6 +263,32 @@ function GroupView() {
       if (rows.length > 0) result.push({ title: secName, items: rows });
     }
 
+    // Also include DB items whose section is NOT registered in inventory_sections
+    // (matches the Inventory Lists behaviour of surfacing "extra" sections)
+    const coveredSections = new Set(sectionOrder);
+    for (const [secName, secItems] of Object.entries(dbItemsBySec)) {
+      if (coveredSections.has(secName)) continue; // already processed above
+      const rows: ItemRow[] = secItems
+        .slice()
+        .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+        .filter(dbItem => {
+          const inDeliveryStore = DELIVERY_LOCS.some(loc => (dbItem.stores ?? []).includes(loc));
+          return inDeliveryStore && !addedNames.has(dbItem.name);
+        })
+        .map(dbItem => {
+          addedNames.add(dbItem.name);
+          const quantities = quantityMap[dbItem.name] ?? {};
+          return {
+            section: secName,
+            name: dbItem.name,
+            unit: dbItem.unit,
+            quantities,
+            total: Object.values(quantities).reduce((s, q) => s + (q ?? 0), 0),
+          };
+        });
+      if (rows.length > 0) result.push({ title: secName, items: rows });
+    }
+
     // Append legacy items from submissions not present in DB
     const legacyBySec: Record<string, ItemRow[]> = {};
     for (const [itemName, quantities] of Object.entries(quantityMap)) {
