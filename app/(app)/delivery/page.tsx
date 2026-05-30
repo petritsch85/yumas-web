@@ -179,10 +179,10 @@ function getDefaultDeliveryDate(): string {
   return toLocalDateString(next);
 }
 
-/** Packer's current delivery: today if delivery day and before 16:00, else next delivery day. */
+/** Packer's current delivery: today if delivery day and before 20:00, else next delivery day. */
 function getPackerDeliveryDate(): string {
   const now = new Date();
-  const CUTOFF_HOUR = 16; // 14:00 departs + 2 h grace
+  const CUTOFF_HOUR = 20; // stay on today's delivery until 20:00 to allow store confirmations
   // If today is a delivery day and we're before the cutoff, today is still active
   if (DELIVERY_DAYS.includes(now.getDay()) && now.getHours() < CUTOFF_HOUR) {
     return toLocalDateString(now);
