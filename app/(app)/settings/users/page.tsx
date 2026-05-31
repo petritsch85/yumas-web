@@ -34,6 +34,14 @@ type PermKey = keyof AppPermissions;
 type ModuleItem = { key: PermKey; label: string; description?: string };
 type ModuleGroup = { group: string; items: ModuleItem[] };
 
+const CHAT_ROOMS: { id: string; label: string; description?: string }[] = [
+  { id: 'general',  label: 'General',  description: 'Company-wide announcements and conversation' },
+  { id: 'eschborn', label: 'Eschborn', description: 'Eschborn store team channel' },
+  { id: 'taunus',   label: 'Taunus',   description: 'Taunus store team channel' },
+  { id: 'westend',  label: 'Westend',  description: 'Westend store team channel' },
+  { id: 'zk',       label: 'ZK',       description: 'Production facility (Zentralküche) channel' },
+];
+
 const MODULE_GROUPS: ModuleGroup[] = [
   {
     group: 'Supply Chain',
@@ -123,6 +131,7 @@ type UserRow = {
   is_active: boolean;
   language?: string;
   permissions?: Partial<AppPermissions>;
+  chat_rooms?: string[];
   location?: { name: string } | null;
 };
 
@@ -134,7 +143,7 @@ type AddDraft = {
 type EditDraft = {
   role: string; jobRole: string; locationId: string; isActive: boolean;
   permissions: AppPermissions; newPassword: string; newEmail: string;
-  language: string;
+  language: string; chatRooms: string[];
 };
 
 const ROLES = ['staff', 'manager', 'admin']; // used for the legend only
@@ -178,20 +187,36 @@ const roleColor: Record<string, string> = {
 function PermissionsEditor({
   perms,
   onChange,
+  chatRooms,
+  onChatRoomsChange,
   isAdmin,
   role,
 }: {
   perms: AppPermissions;
   onChange: (p: AppPermissions) => void;
+  chatRooms: string[];
+  onChatRoomsChange: (rooms: string[]) => void;
   isAdmin?: boolean;
   role?: string;
 }) {
   const { t } = useT();
 
+  const toggleRoom = (roomId: string) => {
+    onChatRoomsChange(
+      chatRooms.includes(roomId)
+        ? chatRooms.filter(r => r !== roomId)
+        : [...chatRooms, roomId],
+    );
+  };
+
   if (isAdmin) {
     return (
-      <div className="mt-4 pt-4 border-t border-gray-100">
+      <div className="mt-4 pt-4 border-t border-gray-100 space-y-4">
         <p className="text-xs text-gray-400 italic">{t('team.permissions.adminNote')}</p>
+        <div>
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Chat Channels</p>
+          <p className="text-xs text-gray-400 italic">Admin users have access to all chat channels automatically.</p>
+        </div>
       </div>
     );
   }
@@ -250,7 +275,6 @@ function PermissionsEditor({
                 const checked = !!perms[key];
                 return (
                   <div key={key}>
-                    {/* Plain div — no hidden input, no label → no browser scroll-to-element */}
                     <div
                       role="checkbox"
                       aria-checked={checked}
@@ -272,7 +296,6 @@ function PermissionsEditor({
                         {description && <div className="text-xs text-gray-400 mt-0.5 leading-tight">{description}</div>}
                       </div>
                     </div>
-
                   </div>
                 );
               })}
@@ -280,6 +303,59 @@ function PermissionsEditor({
           </div>
         );
       })}
+
+      {/* ── Chat Channels ── */}
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Chat Channels</p>
+          <div className="flex gap-3">
+            <button
+              type="button"
+              onClick={() => onChatRoomsChange(CHAT_ROOMS.map(r => r.id))}
+              className="text-xs text-indigo-600 hover:underline font-medium"
+            >
+              {t('team.permissions.selectAll')}
+            </button>
+            <button
+              type="button"
+              onClick={() => onChatRoomsChange([])}
+              className="text-xs text-gray-400 hover:underline"
+            >
+              {t('team.permissions.deselectAll')}
+            </button>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+          {CHAT_ROOMS.map(({ id, label, description }) => {
+            const checked = chatRooms.includes(id);
+            return (
+              <div key={id}>
+                <div
+                  role="checkbox"
+                  aria-checked={checked}
+                  tabIndex={0}
+                  onClick={() => toggleRoom(id)}
+                  onKeyDown={(e) => (e.key === ' ' || e.key === 'Enter') && toggleRoom(id)}
+                  className={`flex items-start gap-2.5 p-3 rounded-xl border cursor-pointer transition-all select-none ${
+                    checked
+                      ? 'bg-indigo-50 border-indigo-300 text-indigo-900'
+                      : 'bg-white border-gray-200 text-gray-600 hover:border-indigo-200 hover:bg-gray-50'
+                  }`}
+                >
+                  {checked
+                    ? <CheckSquare size={15} className="text-indigo-600 flex-shrink-0 mt-0.5" />
+                    : <Square size={15} className="text-gray-300 flex-shrink-0 mt-0.5" />
+                  }
+                  <div>
+                    <div className={`text-xs font-semibold ${checked ? 'text-indigo-800' : 'text-gray-700'}`}>{label}</div>
+                    {description && <div className="text-xs text-gray-400 mt-0.5 leading-tight">{description}</div>}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
 }
@@ -300,13 +376,14 @@ export default function TeamPage() {
     fullName: '', email: '', password: 'Yumas2026!', role: 'staff', jobRole: 'food_production', locationId: '', language: 'en',
   });
   const [addPerms, setAddPerms] = useState<AppPermissions>(defaultsForRole('staff'));
+  const [addChatRooms, setAddChatRooms] = useState<string[]>([]);
   const [showPassword, setShowPassword] = useState(false);
   const [addError, setAddError] = useState('');
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<EditDraft>({
     role: 'staff', jobRole: '', locationId: '', isActive: true,
-    permissions: { ...STAFF_DEFAULTS }, newPassword: '', newEmail: '', language: 'en',
+    permissions: { ...STAFF_DEFAULTS }, newPassword: '', newEmail: '', language: 'en', chatRooms: [],
   });
 
   const { data: users, isLoading } = useQuery({
@@ -342,7 +419,7 @@ export default function TeamPage() {
   });
 
   const createUser = useMutation({
-    mutationFn: async ({ draft, perms }: { draft: AddDraft; perms: AppPermissions }) => {
+    mutationFn: async ({ draft, perms, chatRooms }: { draft: AddDraft; perms: AppPermissions; chatRooms: string[] }) => {
       const res = await fetch('/api/admin/users', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -355,6 +432,7 @@ export default function TeamPage() {
           locationId:  draft.locationId || null,
           permissions: draft.role !== 'admin' ? perms : null,
           language:    draft.language || 'en',
+          chatRooms,
         }),
       });
       const json = await res.json();
@@ -366,6 +444,7 @@ export default function TeamPage() {
       setShowAdd(false);
       setAddDraft({ fullName: '', email: '', password: 'Yumas2026!', role: 'staff', jobRole: 'food_production', locationId: '', language: 'en' });
       setAddPerms(defaultsForRole('staff'));
+      setAddChatRooms([]);
       setAddError('');
       setShowPassword(false);
     },
@@ -380,6 +459,7 @@ export default function TeamPage() {
         locationId: draft.locationId || null,
         isActive:   draft.isActive,
         language:   draft.language || 'en',
+        chatRooms:  draft.chatRooms,
       };
       if (draft.role !== 'admin') body.permissions = draft.permissions;
       if (draft.newPassword.trim()) body.newPassword = draft.newPassword.trim();
@@ -427,6 +507,7 @@ export default function TeamPage() {
       newPassword: '',
       newEmail:    emailMap?.[user.id] ?? '',
       language:    user.language ?? 'en',
+      chatRooms:   user.chat_rooms ?? [],
     });
   };
 
@@ -572,6 +653,8 @@ export default function TeamPage() {
           <PermissionsEditor
             perms={addPerms}
             onChange={setAddPerms}
+            chatRooms={addChatRooms}
+            onChatRoomsChange={setAddChatRooms}
             isAdmin={addDraft.role === 'admin'}
             role={addDraft.role}
           />
@@ -584,7 +667,7 @@ export default function TeamPage() {
               {t('common.cancel')}
             </button>
             <button
-              onClick={() => createUser.mutate({ draft: addDraft, perms: addPerms })}
+              onClick={() => createUser.mutate({ draft: addDraft, perms: addPerms, chatRooms: addChatRooms })}
               disabled={createUser.isPending || !canCreate}
               className="bg-[#1B5E20] text-white px-5 py-2 rounded-lg text-sm font-medium hover:bg-[#2E7D32] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
@@ -797,6 +880,8 @@ export default function TeamPage() {
                           <PermissionsEditor
                             perms={editDraft.permissions}
                             onChange={p => setEditDraft(d => ({ ...d, permissions: p }))}
+                            chatRooms={editDraft.chatRooms}
+                            onChatRoomsChange={rooms => setEditDraft(d => ({ ...d, chatRooms: rooms }))}
                             isAdmin={editDraft.role === 'admin'}
                             role={editDraft.role}
                           />

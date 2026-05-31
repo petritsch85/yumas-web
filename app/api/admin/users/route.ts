@@ -18,7 +18,7 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    const { fullName, email, password, role, jobRole, locationId, permissions, language } = await request.json();
+    const { fullName, email, password, role, jobRole, locationId, permissions, language, chatRooms } = await request.json();
 
     if (!fullName || !email || !password || !role) {
       return NextResponse.json({ error: 'Name, email, password and role are required' }, { status: 400 });
@@ -52,6 +52,7 @@ export async function POST(request: Request) {
     };
     if (permissions !== undefined) profilePayload.permissions = permissions;
     if (language)  profilePayload.language  = language;
+    if (chatRooms !== undefined) profilePayload.chat_rooms = chatRooms;
 
     const { error: profileError } = await admin
       .from('profiles')

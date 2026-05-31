@@ -48,7 +48,7 @@ function fmtTime(iso: string) {
 
 /* ─── Room Sidebar ───────────────────────────────────────────────────────────── */
 function RoomSidebar({
-  activeRoom, myId, otherProfiles, unread, onSelect, onClose,
+  activeRoom, myId, otherProfiles, unread, onSelect, onClose, visibleRooms,
 }: {
   activeRoom: string;
   myId: string;
@@ -56,6 +56,7 @@ function RoomSidebar({
   unread: Set<string>;
   onSelect: (room: string) => void;
   onClose?: () => void;
+  visibleRooms: typeof ROOMS;
 }) {
   return (
     <div className="flex flex-col h-full">
@@ -72,7 +73,7 @@ function RoomSidebar({
         {/* Rooms */}
         <div className="px-3 mb-4">
           <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest px-2 mb-1.5">Rooms</p>
-          {ROOMS.map(room => {
+          {visibleRooms.map(room => {
             const isActive = activeRoom === room.id;
             const hasUnread = unread.has(room.id);
             return (
@@ -196,6 +197,16 @@ export default function ChatPage() {
   // Keep ref in sync so realtime callback is always current
   useEffect(() => { activeRoomRef.current = activeRoom; }, [activeRoom]);
 
+  // When profile loads, if current room is not in visibleRooms, switch to first available
+  useEffect(() => {
+    if (!profile) return;
+    if (visibleRooms.length === 0) return;
+    if (!activeRoom.startsWith('dm::') && !visibleRooms.find(r => r.id === activeRoom)) {
+      setActiveRoom(visibleRooms[0].id);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profile?.id]);
+
   /* ── Current user ── */
   const { data: profile } = useQuery<Profile | null>({
     queryKey: ['my-profile'],
@@ -224,6 +235,12 @@ export default function ChatPage() {
 
   const myId = profile?.id ?? '';
   const otherProfiles = allProfiles.filter(p => p.id !== myId);
+
+  // Filter rooms: admins see all, others see only rooms in their chat_rooms profile field
+  const isAdmin = profile?.role === 'admin';
+  const visibleRooms = isAdmin
+    ? ROOMS
+    : ROOMS.filter(r => profile?.chat_rooms?.includes(r.id));
 
   /* ── Messages for active room ── */
   const { data: messages = [], isLoading } = useQuery<ChatMessage[]>({
@@ -363,7 +380,7 @@ export default function ChatPage() {
 
   /* ── Room label ── */
   const activeLabel =
-    ROOMS.find(r => r.id === activeRoom)?.label ??
+    visibleRooms.find(r => r.id === activeRoom)?.label ??
     otherProfiles.find(p => activeRoom === dmRoom(myId, p.id))?.full_name ??
     'Chat';
 
@@ -388,6 +405,7 @@ export default function ChatPage() {
               unread={unread}
               onSelect={handleRoomSelect}
               onClose={() => setShowMobileSidebar(false)}
+              visibleRooms={visibleRooms}
             />
           </div>
         </div>
@@ -401,6 +419,7 @@ export default function ChatPage() {
           otherProfiles={otherProfiles}
           unread={unread}
           onSelect={handleRoomSelect}
+          visibleRooms={visibleRooms}
         />
         {/* Current user footer */}
         {profile && (

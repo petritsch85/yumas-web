@@ -98,4 +98,5 @@ export interface Profile {
   location_id: string | null; is_active: boolean;
   permissions?: Partial<AppPermissions>;
   language?: 'en' | 'de' | 'es';
+  chat_rooms?: string[];
 }
