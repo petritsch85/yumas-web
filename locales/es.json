@@ -18,6 +18,7 @@
     },
     "nav": {
       "dashboard": "Panel",
+      "chat": "Chat",
       "suppliers": "Proveedores",
       "menus": "Menús",
       "products": "Productos",

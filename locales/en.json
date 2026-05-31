@@ -19,6 +19,7 @@
     },
     "nav": {
       "dashboard": "Dashboard",
+      "chat": "Chat",
       "suppliers": "Suppliers",
       "menus": "Menus",
       "products": "Products",

@@ -307,11 +307,6 @@ function GroupView() {
   const anySubmissions = Object.keys(latestByLocation).length > 0;
   const allLoading = isLoading || itemsLoading || sectionsLoading;
 
-  /* ── Targeted debug for Salsa Ceviche ── */
-  const salsaInDb      = dbItems.filter(i => i.name === 'Salsa Ceviche').map(i => i.section);
-  const salsaInSubs    = data?.allItemMeta?.['Salsa Ceviche']?.section ?? null;
-  const salsaInGroups  = sections.flatMap(s => s.items.filter(i => i.name === 'Salsa Ceviche').map(() => s.title));
-
   return (
     <>
       {/* As-of timestamps */}
@@ -336,16 +331,6 @@ function GroupView() {
           );
         })}
       </div>
-
-      {/* Salsa Ceviche debug — remove once fixed */}
-      {!allLoading && (
-        <div className="mb-3 p-2 bg-yellow-50 border border-yellow-200 rounded text-xs text-yellow-800">
-          <b>Salsa Ceviche debug:</b>{' '}
-          DB sections: [{salsaInDb.join(', ') || 'NOT IN DB'}] |{' '}
-          Subs section: {salsaInSubs ?? 'not in subs'} |{' '}
-          Shown in groups: [{salsaInGroups.join(', ') || 'NOT RENDERED'}]
-        </div>
-      )}
 
       {allLoading ? (
         <div className="space-y-2">

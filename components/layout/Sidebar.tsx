@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
   LayoutDashboard,
+  MessageCircle,
   Store,
   MapPin,
   UtensilsCrossed,
@@ -78,6 +79,7 @@ const NAV_GROUPS: NavGroup[] = [
     labelKey: 'sidebar.groups.overview',
     items: [
       { labelKey: 'sidebar.nav.dashboard', href: '/', icon: LayoutDashboard },
+      { labelKey: 'sidebar.nav.chat', href: '/chat', icon: MessageCircle },
     ],
   },
   {

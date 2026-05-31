@@ -19,6 +19,7 @@
     },
     "nav": {
       "dashboard": "Dashboard",
+      "chat": "Chat",
       "suppliers": "Lieferanten",
       "menus": "Speisekarten",
       "products": "Produkte",
