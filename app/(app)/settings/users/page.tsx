@@ -477,9 +477,12 @@ export default function TeamPage() {
       qc.invalidateQueries({ queryKey: ['team-users'] });
       qc.invalidateQueries({ queryKey: ['team-emails'] });
       setEditingId(null);
+      setUpdateError('');
     },
+    onError: (e: any) => setUpdateError(e.message),
   });
 
+  const [updateError, setUpdateError] = useState('');
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   const deleteUser = useMutation({
@@ -886,15 +889,18 @@ export default function TeamPage() {
                             role={editDraft.role}
                           />
 
+                          {updateError && (
+                            <p className="text-red-500 text-xs mt-3 font-medium">{updateError}</p>
+                          )}
                           <div className="flex gap-2 mt-4">
                             <button
-                              onClick={() => updateUser.mutate({ id: user.id, draft: editDraft })}
+                              onClick={() => { setUpdateError(''); updateUser.mutate({ id: user.id, draft: editDraft }); }}
                               disabled={updateUser.isPending}
                               className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-xs font-semibold hover:bg-indigo-700 transition-colors disabled:opacity-50"
                             >
                               {updateUser.isPending ? t('team.saving') : t('team.saveChanges')}
                             </button>
-                            <button onClick={() => setEditingId(null)}
+                            <button onClick={() => { setEditingId(null); setUpdateError(''); }}
                               className="px-4 py-2 text-xs text-gray-500 hover:text-gray-700">
                               {t('common.cancel')}
                             </button>

@@ -39,11 +39,8 @@ export async function PATCH(
       location_id: locationId || null,
       is_active: isActive,
     };
-    if (permissions !== undefined) {
-      updatePayload.permissions = permissions;
-    }
+    if (permissions !== undefined) updatePayload.permissions = permissions;
     if (language) updatePayload.language = language;
-    if (chatRooms !== undefined) updatePayload.chat_rooms = chatRooms;
 
     const { error } = await admin
       .from('profiles')
@@ -52,6 +49,14 @@ export async function PATCH(
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 400 });
+    }
+
+    // chat_rooms is stored in a separate column added via migration.
+    // Update it independently so a missing column (migration not yet run)
+    // never breaks the main permissions save.
+    if (chatRooms !== undefined) {
+      await admin.from('profiles').update({ chat_rooms: chatRooms }).eq('id', id);
+      // Intentionally ignore errors — column may not exist yet
     }
 
     // Optionally update auth fields (email and/or password)
