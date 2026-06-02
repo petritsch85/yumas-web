@@ -197,16 +197,6 @@ export default function ChatPage() {
   // Keep ref in sync so realtime callback is always current
   useEffect(() => { activeRoomRef.current = activeRoom; }, [activeRoom]);
 
-  // When profile loads, if current room is not in visibleRooms, switch to first available
-  useEffect(() => {
-    if (!profile) return;
-    if (visibleRooms.length === 0) return;
-    if (!activeRoom.startsWith('dm::') && !visibleRooms.find(r => r.id === activeRoom)) {
-      setActiveRoom(visibleRooms[0].id);
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profile?.id]);
-
   /* ── Current user ── */
   const { data: profile } = useQuery<Profile | null>({
     queryKey: ['my-profile'],
@@ -241,6 +231,16 @@ export default function ChatPage() {
   const visibleRooms = isAdmin
     ? ROOMS
     : ROOMS.filter(r => profile?.chat_rooms?.includes(r.id));
+
+  // When profile loads, if current room is not in visibleRooms, switch to first available
+  useEffect(() => {
+    if (!profile) return;
+    if (visibleRooms.length === 0) return;
+    if (!activeRoom.startsWith('dm::') && !visibleRooms.find(r => r.id === activeRoom)) {
+      setActiveRoom(visibleRooms[0].id);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profile?.id]);
 
   /* ── Messages for active room ── */
   const { data: messages = [], isLoading } = useQuery<ChatMessage[]>({
