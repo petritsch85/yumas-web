@@ -121,13 +121,15 @@ const NAV_GROUPS: NavGroup[] = [
         ],
       },
       {
-        labelKey: 'sidebar.nav.delivery', href: '/delivery', icon: Truck, permKey: 'delivery',
+        labelKey: 'sidebar.nav.delivery', href: '/delivery', icon: Truck, permKey: 'delivery', managerOnly: true,
         children: [
           { labelKey: 'sidebar.nav.stages',           href: '/delivery',             icon: Truck },
           { labelKey: 'sidebar.nav.deliveryCycles',  href: '/delivery/cycles',      icon: CalendarDays, managerOnly: true },
           { labelKey: 'sidebar.nav.deliveryReports', href: '/delivery/reports',     icon: ClipboardList, managerOnly: true },
         ],
       },
+      { labelKey: 'sidebar.nav.packing',  href: '/delivery', icon: Package, staffOnly: true, permKey: 'packer' },
+      { labelKey: 'sidebar.nav.delivery', href: '/delivery', icon: Truck,   staffOnly: true, permKey: 'driver' },
       { labelKey: 'sidebar.nav.recipes', href: '/products/semi-finished', icon: FlaskConical, permKey: 'production' },
       { labelKey: 'sidebar.nav.buying',      href: '/purchase-orders',         icon: ShoppingCart, permKey: 'buying' },
       { labelKey: 'sidebar.nav.controlling', href: '/coming-soon/controlling', icon: TrendingUp,   adminOnly: true },
@@ -288,11 +290,8 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
     if (item.permKey === 'inventory') {
       return !!(perms as any).inventory || !!(perms as any).inventory_current;
     }
-    // Delivery: managers use the delivery flag; staff need any delivery sub-perm
-    if (item.permKey === 'delivery') {
-      if (isStaff) return !!(perms as any).packer || !!(perms as any).driver || !!(perms as any).store_receiver;
-      return !!(perms as any).delivery;
-    }
+    // Delivery (manager dropdown): uses the delivery flag
+    if (item.permKey === 'delivery') return !!(perms as any).delivery;
     if (item.permKey) return !!perms[item.permKey];
     return true;
   };

@@ -184,8 +184,8 @@ export default function DashboardPage() {
       if (isStaffRole) return hasDriver || hasStoreReceiver;
       return !!(permsAny.delivery);
     }
-    // Packing tile: staff with packer but NOT driver/store (those use the Delivery tile)
-    if (l.permKey === 'packer') return isStaffRole && hasPacker && !hasDriver && !hasStoreReceiver;
+    // Packing tile: any staff with packer permission (independent of other delivery sub-roles)
+    if (l.permKey === 'packer') return isStaffRole && hasPacker;
     if (!can(l.permKey, l.adminOnly)) return false;
     return true;
   });
