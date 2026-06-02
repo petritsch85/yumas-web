@@ -231,7 +231,8 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
   const { t } = useT();
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
-  useEffect(() => { onClose(); }, [pathname]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Close on any navigation — pathname OR search-param changes (e.g. ?view=packer vs ?view=driver)
+  useEffect(() => { onClose(); }, [pathname, searchParams?.toString()]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const toExpand: string[] = [];
