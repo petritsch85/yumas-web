@@ -62,7 +62,7 @@ export default function AddInventoryPage() {
   }, [locations]);
 
   // Fallback source: DB query (catches cross-device and post-localStorage-clear cases)
-  const { data: dbRecent = {} } = useQuery<Record<string, string>>({
+  const { data: dbRecent } = useQuery<Record<string, string>>({
     queryKey: ['my-editable-submissions'],
     staleTime: 0,
     queryFn: async () => {
@@ -77,6 +77,7 @@ export default function AddInventoryPage() {
         .select('location_id, submitted_at')
         .eq('submitted_by', user.id)
         .gte('submitted_at', since.toISOString())
+        .is('deleted_at', null)
         .order('submitted_at', { ascending: false });
 
       if (!data?.length) return {};
@@ -91,8 +92,20 @@ export default function AddInventoryPage() {
     },
   });
 
-  // Merge: localStorage wins (it's always fresher on the same device)
-  const recentByLocation: Record<string, string> = { ...dbRecent, ...localRecent };
+  // Once DB has loaded, evict any localStorage entries for locations the server no longer
+  // has an active submission for (e.g. user moved it to trash from another device/tab).
+  useEffect(() => {
+    if (!dbRecent || !locations?.length) return;
+    for (const loc of locations) {
+      if (localRecent[loc.id] && !dbRecent[loc.id]) {
+        localStorage.removeItem(`yumas_recent_inv_${loc.id}`);
+        setLocalRecent(prev => { const next = { ...prev }; delete next[loc.id]; return next; });
+      }
+    }
+  }, [dbRecent]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Merge: localStorage wins for instant feedback on same device; DB eviction above keeps it honest
+  const recentByLocation: Record<string, string> = { ...(dbRecent ?? {}), ...localRecent };
 
   return (
     <div>
