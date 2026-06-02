@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import {
   LayoutDashboard,
   MessageCircle,
@@ -128,8 +128,8 @@ const NAV_GROUPS: NavGroup[] = [
           { labelKey: 'sidebar.nav.deliveryReports', href: '/delivery/reports',     icon: ClipboardList, managerOnly: true },
         ],
       },
-      { labelKey: 'sidebar.nav.packing',  href: '/delivery', icon: Package, staffOnly: true, permKey: 'packer' },
-      { labelKey: 'sidebar.nav.delivery', href: '/delivery', icon: Truck,   staffOnly: true, permKey: 'driver' },
+      { labelKey: 'sidebar.nav.packing',  href: '/delivery?view=packer', icon: Package, staffOnly: true, permKey: 'packer' },
+      { labelKey: 'sidebar.nav.delivery', href: '/delivery?view=driver', icon: Truck,   staffOnly: true, permKey: 'driver' },
       { labelKey: 'sidebar.nav.recipes', href: '/products/semi-finished', icon: FlaskConical, permKey: 'production' },
       { labelKey: 'sidebar.nav.buying',      href: '/purchase-orders',         icon: ShoppingCart, permKey: 'buying' },
       { labelKey: 'sidebar.nav.controlling', href: '/coming-soon/controlling', icon: TrendingUp,   adminOnly: true },
@@ -227,6 +227,7 @@ type SidebarProps = { isOpen: boolean; onClose: () => void };
 export default function Sidebar({ isOpen, onClose }: SidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { t } = useT();
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
@@ -273,6 +274,15 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
 
   const isActive = (href: string) => {
     if (href === '/') return pathname === '/';
+    if (href.includes('?')) {
+      const [hrefPath, hrefQuery] = href.split('?');
+      if (pathname !== hrefPath) return false;
+      const params = new URLSearchParams(hrefQuery);
+      for (const [key, value] of params.entries()) {
+        if (searchParams?.get(key) !== value) return false;
+      }
+      return true;
+    }
     return pathname === href || pathname.startsWith(href + '/');
   };
 

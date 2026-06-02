@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
 import {
@@ -1163,8 +1164,11 @@ export default function DeliveryPage() {
   const [generating, setGenerating] = useState(false);
   const [generateError, setGenerateError] = useState('');
 
-  /* View mode */
+  /* View mode — URL ?view= param takes priority (used by sidebar/quick-access links) */
+  const searchParams = useSearchParams();
+  const urlView = searchParams?.get('view') as ViewMode | null;
   const [viewMode, setViewMode] = useState<ViewMode>(() => {
+    if (urlView && ['manager', 'packer', 'driver', 'store'].includes(urlView)) return urlView;
     if (typeof window !== 'undefined') {
       return (localStorage.getItem('delivery-view-mode') as ViewMode) ?? 'packer';
     }
@@ -1372,10 +1376,11 @@ export default function DeliveryPage() {
   });
   const canManage = profile?.role === 'admin' || profile?.role === 'manager';
 
-  // For non-managers: auto-set view based purely on permissions (independent of role/category/location)
+  // For non-managers: auto-set view based on permissions — skipped when URL ?view= is set
   const permsKey = JSON.stringify(profile?.permissions ?? null);
   useEffect(() => {
     if (!profile || canManage) return;
+    if (urlView) return; // URL param wins; don't override
     const perms = profile.permissions as any;
     if (perms?.store_receiver) { setViewMode('store');  return; }
     if (perms?.driver)         { setViewMode('driver'); return; }
