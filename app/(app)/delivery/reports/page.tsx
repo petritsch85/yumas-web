@@ -1247,7 +1247,15 @@ export default function DeliveryReportsPage() {
             const total = storeLines.length;
             const missing = (confirmed !== null && total > 0) ? Math.max(0, total - confirmed) : 0;
             const checkedCount = checkedForStore(store);
-            const note = receipt?.notes ?? '';
+            const note = (() => {
+              const raw = receipt?.notes ?? '';
+              if (!raw) return '';
+              try {
+                const p = JSON.parse(raw);
+                if (p && typeof p === 'object' && p._v === 1) return p.note ?? '';
+              } catch {}
+              return raw; // legacy plain-text note
+            })();
             const localNote = localNotes[store] ?? '';
 
             // Accent & status — always green once store has confirmed

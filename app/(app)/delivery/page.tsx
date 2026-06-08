@@ -771,6 +771,24 @@ function DriverView({ run, targetDate, onStart, onFinish, startingDelivery, fini
   );
 }
 
+/* ─── Receipt notes helpers ─────────────────────────────────────────────── */
+// Notes are stored as JSON { _v:1, note?: string, items: Record<string, boolean> }
+// Fall back to treating raw string as a plain note for backward compat.
+function parseReceiptNotes(raw: string | null): { note: string; items: Record<string, boolean> } {
+  if (!raw) return { note: '', items: {} };
+  try {
+    const p = JSON.parse(raw);
+    if (p && typeof p === 'object' && p._v === 1) {
+      return { note: p.note ?? '', items: p.items ?? {} };
+    }
+  } catch {}
+  return { note: raw, items: {} }; // legacy plain-text note
+}
+
+function buildReceiptNotes(note: string, items: Record<string, boolean | undefined>): string {
+  return JSON.stringify({ _v: 1, ...(note.trim() && { note: note.trim() }), items });
+}
+
 /* ─── Store Manager Receipt View ─────────────────────────────────────────── */
 function StoreManagerView({ run, lines, targetDate, myStore, sectionOrder, itemRankByStore }: {
   run: DeliveryRun | null;
@@ -822,13 +840,15 @@ function StoreManagerView({ run, lines, targetDate, myStore, sectionOrder, itemR
   const confirmReceipt = useMutation({
     mutationFn: async () => {
       const { data: { user } } = await supabase.auth.getUser();
+      const confirmedCount = storeLines.filter(l => itemOk[l.id] === true).length;
+      const notesPayload = buildReceiptNotes(notes, itemOk);
       const { error } = await supabase.from('store_delivery_receipts').upsert({
         run_id: run!.id,
         location_name: currentStore,
         received_at: new Date().toISOString(),
         received_by: user?.id ?? null,
-        notes: notes.trim() || null,
-        items_confirmed_count: storeLines.length,
+        notes: notesPayload,
+        items_confirmed_count: confirmedCount,
       }, { onConflict: 'run_id,location_name' });
       if (error) throw error;
     },
@@ -852,6 +872,16 @@ function StoreManagerView({ run, lines, targetDate, myStore, sectionOrder, itemR
       setNotes('');
     }
   }, [isConfirmed]);
+
+  // Restore per-item OK state from saved receipt notes when receipt loads
+  useEffect(() => {
+    if (isConfirmed && receipt) {
+      const { items } = parseReceiptNotes(receipt.notes ?? null);
+      if (Object.keys(items).length > 0) {
+        setItemOk(items as Record<string, boolean | undefined>);
+      }
+    }
+  }, [receipt?.id, isConfirmed]);
   const storeItemRank = itemRankByStore[currentStore] ?? {};
   const sections = canonicalSections([...new Set(storeLines.map(l => l.section))], sectionOrder);
 
@@ -962,11 +992,10 @@ function StoreManagerView({ run, lines, targetDate, myStore, sectionOrder, itemR
                           {/* OK? toggle — locked after Send */}
                           <td className="py-3 text-center">
                             {locked ? (
-                              // Always show green ✓ when locked — itemOk is local state
-                              // that doesn't survive navigation; the receipt being confirmed
-                              // is the source of truth, so all items default to received.
-                              <span className="w-10 h-8 rounded-full text-sm font-bold inline-flex items-center justify-center bg-green-100 text-green-700">
-                                ✓
+                              <span className={`w-10 h-8 rounded-full text-sm font-bold inline-flex items-center justify-center ${
+                                isOk ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'
+                              }`}>
+                                {isOk ? '✓' : '✗'}
                               </span>
                             ) : (
                               <button
@@ -984,10 +1013,15 @@ function StoreManagerView({ run, lines, targetDate, myStore, sectionOrder, itemR
                           {/* Received — locked after Send */}
                           <td className="py-3 text-center">
                             {locked ? (
-                              // Show packed qty as the received quantity (default: all received)
-                              <span className="inline-flex items-center justify-center w-9 h-7 rounded-md bg-green-50 text-green-700 font-bold text-sm border border-green-200">
-                                {packedQty}
-                              </span>
+                              isOk ? (
+                                <span className="inline-flex items-center justify-center w-9 h-7 rounded-md bg-green-50 text-green-700 font-bold text-sm border border-green-200">
+                                  {packedQty}
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center justify-center w-9 h-7 rounded-md bg-red-50 text-red-500 font-bold text-sm border border-red-200">
+                                  —
+                                </span>
+                              )
                             ) : isOk ? (
                               <span className="inline-flex items-center justify-center w-9 h-7 rounded-md bg-green-50 text-green-700 font-bold text-sm border border-green-200">
                                 {packedQty}
@@ -1044,13 +1078,20 @@ function StoreManagerView({ run, lines, targetDate, myStore, sectionOrder, itemR
               <div className="flex items-center gap-2 text-green-800 font-semibold">
                 <CheckCircle2 size={18} className="text-green-500" /> Receipt confirmed
               </div>
-              {receipt?.notes && (
-                <p className="text-sm text-green-700 bg-white/60 rounded-lg p-2 border border-green-100">
-                  <span className="font-medium">Note: </span>{receipt.notes}
-                </p>
-              )}
+              {(() => {
+                const { note: displayNote } = parseReceiptNotes(receipt?.notes ?? null);
+                return displayNote ? (
+                  <p className="text-sm text-green-700 bg-white/60 rounded-lg p-2 border border-green-100">
+                    <span className="font-medium">Note: </span>{displayNote}
+                  </p>
+                ) : null;
+              })()}
               <button
-                onClick={() => { setNotes(receipt?.notes ?? ''); setEditing(true); }}
+                onClick={() => {
+                  const { note: savedNote } = parseReceiptNotes(receipt?.notes ?? null);
+                  setNotes(savedNote);
+                  setEditing(true);
+                }}
                 className="text-xs text-green-600 hover:text-green-800 underline"
               >
                 Update confirmation
