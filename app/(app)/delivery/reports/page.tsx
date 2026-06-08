@@ -299,6 +299,7 @@ export default function DeliveryReportsPage() {
   /* ── Reset state ── */
   const [pendingReset, setPendingReset] = useState<string | null>(null); // step key awaiting confirm
   const [resettingStep, setResettingStep] = useState<string | null>(null);
+  const [resetError, setResetError] = useState<string | null>(null);
 
   /* ── Packing report state ── */
   const [reportExpanded, setReportExpanded] = useState(false);
@@ -523,12 +524,19 @@ export default function DeliveryReportsPage() {
   const resetReceipt = async (store: Store) => {
     if (!activeRun) return;
     setResettingStep(`receipt-${store}`);
+    setResetError(null);
     try {
-      const { error } = await supabase.from('store_delivery_receipts')
-        .delete()
-        .eq('run_id', activeRun.id)
-        .eq('location_name', store);
-      if (error) { alert(`Reset failed: ${error.message}`); return; }
+      // Use admin API route — client-side supabase lacks DELETE permission on this table
+      const res = await fetch('/api/admin/delivery-receipts', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ runId: activeRun.id, locationName: store }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setResetError(data.error ?? 'Reset failed — please try again');
+        return;
+      }
       // Invalidate reports-page query
       qc.invalidateQueries({ queryKey: ['dr-receipts', activeRun.id] });
       // Also invalidate delivery-page receipt queries so StoreManagerView resets immediately
@@ -1372,7 +1380,10 @@ export default function DeliveryReportsPage() {
 
                   {/* Admin reset */}
                   {isAdmin && receipt && (
-                    <div className="flex justify-end items-center gap-2 pt-1 border-t border-gray-100">
+                    <div className="flex justify-end items-center gap-2 pt-1 border-t border-gray-100 flex-wrap">
+                      {resetError && (
+                        <span className="text-xs text-red-500 flex-1">{resetError}</span>
+                      )}
                       {pendingReset === `receipt-${store}` ? (
                         <>
                           <span className="text-xs text-gray-400 whitespace-nowrap">Reset confirmation?</span>
