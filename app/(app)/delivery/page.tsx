@@ -9,7 +9,7 @@ import {
   Eye, Settings2, Truck, Play, Timer, Flag, XCircle,
   Save, X, CalendarDays,
   Navigation, Store, ClipboardCheck, Clock,
-  ClipboardList, MessageSquare, Lock,
+  ClipboardList, MessageSquare, Lock, Ban,
 } from 'lucide-react';
 import type { Profile } from '@/types';
 import { useT } from '@/lib/i18n';
@@ -74,6 +74,7 @@ type DeliveryRun = {
   store_packing_finished_at:  Record<string, string> | null;
   store_notes:                Record<string, string> | null;
   store_inventory_comments:   Record<string, string> | null;
+  skipped_stores:             string[] | null;
 };
 
 type StoreReceipt = {
@@ -681,7 +682,9 @@ function DriverView({ run, targetDate, onStart, onFinish, startingDelivery, fini
   const canStart      = packingDone && !run?.delivery_started_at;
   const inProgress    = !!run?.delivery_started_at && !run?.delivery_finished_at;
   const done          = !!run?.delivery_finished_at;
-  const allConfirmed  = STORES.every(s => receiptStatus[s]);
+  const skippedInRun  = new Set(run?.skipped_stores ?? []);
+  const deliveryStoresOnly = STORES.filter(s => s !== 'ZK');
+  const allConfirmed  = deliveryStoresOnly.filter(s => !skippedInRun.has(s)).every(s => receiptStatus[s]);
 
   return (
     <div className="max-w-md mx-auto space-y-4 pt-2">
@@ -755,10 +758,12 @@ function DriverView({ run, targetDate, onStart, onFinish, startingDelivery, fini
         <div className="space-y-2">
           {STORES.map(store => (
             <div key={store} className="flex items-center justify-between py-1.5 border-b border-gray-50 last:border-0">
-              <span className="text-sm font-medium text-gray-700">{store}</span>
-              {receiptStatus[store]
-                ? <span className="flex items-center gap-1.5 text-xs text-green-700 font-semibold bg-green-50 px-2 py-0.5 rounded-full"><CheckCircle2 size={12} /> Confirmed</span>
-                : <span className="text-xs text-gray-400 bg-gray-50 px-2 py-0.5 rounded-full">Pending</span>
+              <span className={`text-sm font-medium ${skippedInRun.has(store) ? 'text-gray-400 line-through' : 'text-gray-700'}`}>{store}</span>
+              {skippedInRun.has(store)
+                ? <span className="text-xs text-gray-400 bg-gray-50 px-2 py-0.5 rounded-full">Not scheduled</span>
+                : receiptStatus[store]
+                  ? <span className="flex items-center gap-1.5 text-xs text-green-700 font-semibold bg-green-50 px-2 py-0.5 rounded-full"><CheckCircle2 size={12} /> Confirmed</span>
+                  : <span className="text-xs text-gray-400 bg-gray-50 px-2 py-0.5 rounded-full">Pending</span>
               }
             </div>
           ))}
@@ -916,6 +921,12 @@ function StoreManagerView({ run, lines, targetDate, myStore, sectionOrder, itemR
         <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-10 text-center">
           <Package size={36} className="text-gray-200 mx-auto mb-3" />
           <p className="text-sm text-gray-400">No delivery scheduled yet for this date.</p>
+        </div>
+      ) : (run.skipped_stores ?? []).includes(currentStore) ? (
+        <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-10 text-center">
+          <Ban size={36} className="text-gray-200 mx-auto mb-3" />
+          <p className="text-sm font-semibold text-gray-500">Not scheduled for this delivery</p>
+          <p className="text-xs text-gray-400 mt-1">{currentStore} was excluded from this delivery run.</p>
         </div>
       ) : storeLines.length === 0 ? (
         <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-10 text-center">
@@ -1728,13 +1739,33 @@ export default function DeliveryPage() {
     }
   };
 
+  const [skippingStore, setSkippingStore] = useState<Store | null>(null);
+  const skipStore = async (store: Store, skip: boolean) => {
+    if (!run) return;
+    setSkippingStore(store);
+    try {
+      const current = run.skipped_stores ?? [];
+      const updated = skip ? [...current, store] : current.filter(s => s !== store);
+      const res = await fetch('/api/admin/delivery-runs', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ runId: run.id, skippedStores: updated }),
+      });
+      if (res.ok) qc.invalidateQueries({ queryKey: ['delivery-run', targetDate] });
+    } finally {
+      setSkippingStore(null);
+    }
+  };
+
   /* ─ Per-store confirmation derived state ─ */
   const storeConfirmedAt = (store: Store): string | null => {
     const col = STORE_CONFIRM_COL[store];
     return (run && col) ? (run[col] as string | null) : null;
   };
-  // ZK has no confirm column — only require the 3 restaurant stores to be confirmed
-  const allStoresConfirmed = STORES.filter(s => s in STORE_CONFIRM_COL).every(s => !!storeConfirmedAt(s));
+  // ZK has no confirm column — only require the 3 restaurant stores to be confirmed (skipped stores excluded)
+  const skippedStores = new Set(run?.skipped_stores ?? []);
+  const requiredStores = STORES.filter(s => s in STORE_CONFIRM_COL && !skippedStores.has(s));
+  const allStoresConfirmed = requiredStores.every(s => !!storeConfirmedAt(s));
   const deliveryStarted = !!run?.delivery_started_at;
   const storePackingDone: Record<string, string> = run?.store_packing_finished_at ?? {};
   const deliveryStores = STORES.filter(s => s !== 'ZK') as Store[];
@@ -2129,7 +2160,7 @@ export default function DeliveryPage() {
                 <div>
                   <p className="text-xs font-semibold text-red-500 uppercase tracking-wide mb-0.5">Status</p>
                   <p className="text-base font-bold text-red-700">Delivery NOT confirmed yet</p>
-                  <p className="text-xs text-red-400 mt-0.5">{STORES.filter(s => !!storeConfirmedAt(s)).length} of 3 stores confirmed</p>
+                  <p className="text-xs text-red-400 mt-0.5">{requiredStores.filter(s => !!storeConfirmedAt(s)).length} of {requiredStores.length} stores confirmed</p>
                 </div>
               </div>
             )}
@@ -2255,11 +2286,13 @@ export default function DeliveryPage() {
                       className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 ${isActive ? 'bg-white text-[#1B5E20] shadow-sm font-semibold' : 'text-gray-500 hover:text-gray-700'}`}
                     >
                       {store}
-                      {/* Manager view: show confirmation checkmark */}
+                      {/* Manager view: show confirmation checkmark / skip indicator */}
                       {viewMode === 'manager' && run && !isPreview && (
-                        confirmed
-                          ? <CheckCircle2 size={13} className={isActive ? 'text-[#1B5E20]' : 'text-green-500'} />
-                          : <span className={`w-2 h-2 rounded-full ${isActive ? 'bg-amber-400' : 'bg-gray-300'}`} />
+                        skippedStores.has(store)
+                          ? <Ban size={13} className={isActive ? 'text-gray-400' : 'text-gray-300'} />
+                          : confirmed
+                            ? <CheckCircle2 size={13} className={isActive ? 'text-[#1B5E20]' : 'text-green-500'} />
+                            : <span className={`w-2 h-2 rounded-full ${isActive ? 'bg-amber-400' : 'bg-gray-300'}`} />
                       )}
                       {/* Packer view: green tick when store marked done, else item counts */}
                       {isPacker && packingStarted && (
@@ -2289,7 +2322,7 @@ export default function DeliveryPage() {
                     <AlertCircle size={18} className="text-red-500 flex-shrink-0" />
                     <div className="flex-1">
                       <span className="text-sm font-bold text-red-700">Delivery NOT confirmed yet</span>
-                      <span className="text-xs text-red-400 ml-2">{STORES.filter(s => !!storeConfirmedAt(s)).length} of 3 stores confirmed</span>
+                      <span className="text-xs text-red-400 ml-2">{requiredStores.filter(s => !!storeConfirmedAt(s)).length} of {requiredStores.length} stores confirmed</span>
                     </div>
                   </div>
                 )
@@ -2297,6 +2330,27 @@ export default function DeliveryPage() {
 
               {/* ── Per-store confirm banner (manager only, run exists, not preview, not locked) ── */}
               {viewMode === 'manager' && run && !isPreview && (() => {
+                // Skipped store — not delivering today
+                if (skippedStores.has(activeStore)) {
+                  return (
+                    <div className="mb-4 flex items-center gap-3 px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl">
+                      <Ban size={16} className="text-gray-400 flex-shrink-0" />
+                      <p className="text-sm text-gray-500 flex-1">
+                        {activeStore} is not scheduled for this delivery.
+                      </p>
+                      {canManage && (
+                        <button
+                          onClick={() => skipStore(activeStore, false)}
+                          disabled={skippingStore === activeStore}
+                          className="text-xs text-gray-500 hover:text-gray-700 underline whitespace-nowrap"
+                        >
+                          {skippingStore === activeStore ? '…' : 'Undo skip'}
+                        </button>
+                      )}
+                    </div>
+                  );
+                }
+
                 const confirmedAt = storeConfirmedAt(activeStore);
                 if (confirmedAt) {
                   return (
@@ -2334,14 +2388,25 @@ export default function DeliveryPage() {
                     <p className="text-sm text-gray-700 flex-1">
                       Review the {activeStore} packing quantities, then confirm the list.
                     </p>
-                    <button
-                      onClick={() => confirmStore(activeStore)}
-                      disabled={confirmingStore === activeStore}
-                      className="flex items-center gap-1.5 bg-[#1B5E20] text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-[#2E7D32] transition-colors disabled:opacity-60 whitespace-nowrap shadow-sm"
-                    >
-                      <CheckCircle2 size={14} />
-                      {confirmingStore === activeStore ? 'Confirming…' : `Confirm ${activeStore}`}
-                    </button>
+                    <div className="flex items-center gap-3">
+                      {canManage && (
+                        <button
+                          onClick={() => skipStore(activeStore, true)}
+                          disabled={skippingStore === activeStore}
+                          className="text-xs text-gray-400 hover:text-gray-600 underline whitespace-nowrap"
+                        >
+                          {skippingStore === activeStore ? '…' : 'Skip store'}
+                        </button>
+                      )}
+                      <button
+                        onClick={() => confirmStore(activeStore)}
+                        disabled={confirmingStore === activeStore}
+                        className="flex items-center gap-1.5 bg-[#1B5E20] text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-[#2E7D32] transition-colors disabled:opacity-60 whitespace-nowrap shadow-sm"
+                      >
+                        <CheckCircle2 size={14} />
+                        {confirmingStore === activeStore ? 'Confirming…' : `Confirm ${activeStore}`}
+                      </button>
+                    </div>
                   </div>
                 );
               })()}

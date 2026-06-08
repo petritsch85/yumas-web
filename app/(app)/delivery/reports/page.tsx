@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
 import {
   Package, Truck, CheckCircle2, Clock, AlertTriangle, ChevronDown, ChevronUp, Trash2, RotateCcw, XCircle,
-  ClipboardList,
+  ClipboardList, Ban,
 } from 'lucide-react';
 import { useT } from '@/lib/i18n';
 
@@ -36,6 +36,7 @@ type Run = {
   deleted_by: string | null;
   inventory_overrides: Record<string, string> | null;
   store_packing_finished_at: Record<string, string> | null;
+  skipped_stores: string[] | null;
 };
 
 type DeliveryLine = {
@@ -546,6 +547,19 @@ export default function DeliveryReportsPage() {
       setResettingStep(null);
       setPendingReset(null);
     }
+  };
+
+  /* ── Skip / unskip a store for this run ── */
+  const skipStoreOnRun = async (store: string, skip: boolean) => {
+    if (!activeRun) return;
+    const current = activeRun.skipped_stores ?? [];
+    const updated = skip ? [...current, store] : current.filter(s => s !== store);
+    const res = await fetch('/api/admin/delivery-runs', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ runId: activeRun.id, skippedStores: updated }),
+    });
+    if (res.ok) qc.invalidateQueries({ queryKey: ['delivery-runs-list'] });
   };
 
   /* ── Confirm / unconfirm inventory for a store (override freshness check) ── */
@@ -1258,21 +1272,51 @@ export default function DeliveryReportsPage() {
             })();
             const localNote = localNotes[store] ?? '';
 
-            // Accent & status — always green once store has confirmed
+            const isSkipped = (activeRun?.skipped_stores ?? []).includes(store);
+
+            // Accent & status — green once confirmed, gray if skipped, gray if awaiting
             let accent: 'green' | 'amber' | 'gray' = 'gray';
             let statusNode: React.ReactNode;
 
-            if (!receipt) {
-              statusNode = <GrayBadge label="Awaiting" />;
+            if (isSkipped) {
+              statusNode = (
+                <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-gray-100 text-gray-500 border border-gray-200">
+                    <Ban size={10} /> Not scheduled
+                  </span>
+                  {isAdmin && (
+                    <button
+                      onClick={() => skipStoreOnRun(store, false)}
+                      className="text-xs text-gray-400 hover:text-gray-600 underline whitespace-nowrap"
+                    >
+                      Undo
+                    </button>
+                  )}
+                </div>
+              );
+            } else if (!receipt) {
+              statusNode = (
+                <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
+                  <GrayBadge label="Awaiting" />
+                  {isAdmin && !activeRun?.delivery_finished_at && (
+                    <button
+                      onClick={() => skipStoreOnRun(store, true)}
+                      className="text-xs text-gray-400 hover:text-gray-600 underline whitespace-nowrap"
+                    >
+                      Skip
+                    </button>
+                  )}
+                </div>
+              );
             } else {
               accent = 'green';
               statusNode = <GreenBadge label="Confirmed" />;
             }
 
             // Store managers can always confirm receipt — independent of driver's delivery_started / delivery_finished state
-            const canInteract = isMyStore && !isAdmin;
+            const canInteract = isMyStore && !isAdmin && !isSkipped;
             // Anyone can expand to view (admin/manager can read all, store managers see their own)
-            const canExpand = (isAdmin && receipt != null) || canInteract || (isMyStore && receipt != null);
+            const canExpand = !isSkipped && ((isAdmin && receipt != null) || canInteract || (isMyStore && receipt != null));
 
             return (
               <StepRow
