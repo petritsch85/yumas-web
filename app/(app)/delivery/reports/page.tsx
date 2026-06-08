@@ -855,7 +855,7 @@ export default function DeliveryReportsPage() {
             // For past runs: green if a linked submission was submitted before cutoff (timing
             //   window irrelevant — Saturday inventory for Monday delivery is perfectly valid).
             // For live/upcoming runs: linked submission exists → green, not linked → red
-            const effectiveFreshness = (store: Store) => {
+            const effectiveFreshness = (store: Store): 'green' | 'amber' | 'red' => {
               if (overrides[store]) return 'green';
               const submittedAt = getSubmittedAt(store);
               if (!submittedAt) return 'red';
