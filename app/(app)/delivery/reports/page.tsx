@@ -838,12 +838,19 @@ export default function DeliveryReportsPage() {
             };
 
             // Effective freshness: override → always green
-            // For past runs: use timing-based freshness from snapshot
+            // For past runs: green if a linked submission was submitted before cutoff (timing
+            //   window irrelevant — Saturday inventory for Monday delivery is perfectly valid).
             // For live/upcoming runs: linked submission exists → green, not linked → red
             const effectiveFreshness = (store: Store) => {
               if (overrides[store]) return 'green';
-              if (isPastRun) return inventoryFreshness(getSubmittedAt(store), evalDate);
-              return getSubmittedAt(store) ? 'green' : 'red';
+              const submittedAt = getSubmittedAt(store);
+              if (!submittedAt) return 'red';
+              if (isPastRun) {
+                // Historical record: valid as long as it was before the delivery cutoff
+                const submitted = new Date(submittedAt).getTime();
+                return submitted < deliveryCutoff(evalDate).getTime() ? 'green' : 'red';
+              }
+              return 'green';
             };
 
             const allGreen = STORES.every(s => effectiveFreshness(s) === 'green');
