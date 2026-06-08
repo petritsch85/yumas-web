@@ -1246,8 +1246,8 @@ export default function DeliveryReportsPage() {
               statusNode = <GreenBadge label="Confirmed" />;
             }
 
-            // Can interact: own store manager (non-admin) before delivery starts? No — only after delivery started
-            const canInteract = isMyStore && !isAdmin && deliveryStarted;
+            // Store managers can always confirm receipt — independent of driver's delivery_started / delivery_finished state
+            const canInteract = isMyStore && !isAdmin;
             // Anyone can expand to view (admin/manager can read all, store managers see their own)
             const canExpand = (isAdmin && receipt != null) || canInteract || (isMyStore && receipt != null);
 
