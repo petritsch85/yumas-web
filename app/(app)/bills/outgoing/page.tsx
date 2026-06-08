@@ -1467,38 +1467,38 @@ export default function OutgoingBillsPage() {
             </div>
           ) : (
             <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
-              <table className="w-full text-sm">
+              <table className="w-full text-xs">
                 <thead>
                   <tr className="bg-gray-50 border-b border-gray-200">
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Customer</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Invoice #</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Issue Date</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Event Date</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Location</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Shift</th>
-                    <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Net</th>
-                    <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Gross</th>
-                    <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Tips</th>
-                    <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Total Payable</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Status</th>
-                    <th className="px-4 py-3 w-20"></th>
+                    <th className="px-2 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Customer</th>
+                    <th className="px-2 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Invoice #</th>
+                    <th className="px-2 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Issue Date</th>
+                    <th className="px-2 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Event Date</th>
+                    <th className="px-2 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Location</th>
+                    <th className="px-2 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Shift</th>
+                    <th className="px-2 py-2 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Net</th>
+                    <th className="px-2 py-2 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Gross</th>
+                    <th className="px-2 py-2 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Tips</th>
+                    <th className="px-2 py-2 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Total Payable</th>
+                    <th className="px-2 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Status</th>
+                    <th className="px-2 py-2 w-16"></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
                   {sortedBills.map((bill) => (
                     <React.Fragment key={bill.id}>
                       <tr className="hover:bg-gray-50 transition-colors">
-                        <td className="px-4 py-3 font-semibold text-gray-900">{bill.customer_name}</td>
-                        <td className="px-4 py-3 text-gray-500 font-mono text-xs">{bill.invoice_number ?? '—'}</td>
-                        <td className="px-4 py-3 text-gray-600 whitespace-nowrap text-xs">{fmtDate(bill.invoice_date)}</td>
-                        <td className="px-4 py-3 text-gray-600 whitespace-nowrap text-xs">{fmtDate(bill.event_date)}</td>
-                        <td className="px-4 py-3">
+                        <td className="px-2 py-2 font-semibold text-gray-900">{bill.customer_name}</td>
+                        <td className="px-2 py-2 text-gray-500 font-mono text-xs">{bill.invoice_number ?? '—'}</td>
+                        <td className="px-2 py-2 text-gray-600 whitespace-nowrap text-xs">{fmtDate(bill.invoice_date)}</td>
+                        <td className="px-2 py-2 text-gray-600 whitespace-nowrap text-xs">{fmtDate(bill.event_date)}</td>
+                        <td className="px-2 py-2">
                           {bill.issuing_location
                             ? <span className="inline-flex items-center px-2 py-0.5 bg-indigo-50 text-indigo-700 text-xs rounded-full">{bill.issuing_location}</span>
                             : <span className="text-xs text-red-400">—</span>
                           }
                         </td>
-                        <td className="px-4 py-3">
+                        <td className="px-2 py-2">
                           {bill.shift_type
                             ? <span className={`inline-flex items-center px-2 py-0.5 text-xs rounded-full font-semibold ${bill.shift_type === 'lunch' ? 'bg-amber-50 text-amber-700' : 'bg-blue-50 text-blue-700'}`}>
                                 {bill.shift_type === 'lunch' ? '☀️ Lunch' : '🌙 Dinner'}
@@ -1506,18 +1506,18 @@ export default function OutgoingBillsPage() {
                             : <span className="text-xs text-red-400">—</span>
                           }
                         </td>
-                        <td className="px-4 py-3 text-right tabular-nums text-gray-700">{fmt(bill.net_total)}</td>
-                        <td className="px-4 py-3 text-right tabular-nums text-gray-900">{fmt(bill.gross_total)}</td>
-                        <td className="px-4 py-3 text-right tabular-nums text-amber-700">{bill.tips > 0 ? fmt(bill.tips) : '—'}</td>
-                        <td className="px-4 py-3 text-right font-bold text-[#1B5E20] tabular-nums">{fmt(bill.total_payable)}</td>
-                        <td className="px-4 py-3">
+                        <td className="px-2 py-2 text-right tabular-nums text-gray-700">{fmt(bill.net_total)}</td>
+                        <td className="px-2 py-2 text-right tabular-nums text-gray-900">{fmt(bill.gross_total)}</td>
+                        <td className="px-2 py-2 text-right tabular-nums text-amber-700">{bill.tips > 0 ? fmt(bill.tips) : '—'}</td>
+                        <td className="px-2 py-2 text-right font-bold text-[#1B5E20] tabular-nums">{fmt(bill.total_payable)}</td>
+                        <td className="px-2 py-2">
                           <select value={bill.status} onChange={(e) => updateStatus(bill.id, e.target.value)}
                             className={`text-xs font-semibold px-2 py-1 rounded-full border cursor-pointer focus:outline-none ${STATUS_STYLES[bill.status]}`}>
                             <option value="pending">Pending</option>
                             <option value="paid">Paid</option>
                           </select>
                         </td>
-                        <td className="px-4 py-3">
+                        <td className="px-2 py-2">
                           <div className="flex items-center gap-2">
                             {bill.file_path && (
                               <a href={`${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/bills/${bill.file_path}`}
@@ -1639,10 +1639,10 @@ export default function OutgoingBillsPage() {
                 <tfoot>
                   <tr className="bg-gray-50 border-t-2 border-gray-200">
                     <td colSpan={6} className="px-4 py-3 text-xs font-semibold text-gray-500">{filtered.length} invoices</td>
-                    <td className="px-4 py-3 text-right font-bold text-gray-700 tabular-nums">{fmt(totals.net)}</td>
-                    <td className="px-4 py-3 text-right font-bold text-gray-900 tabular-nums">{fmt(totals.gross)}</td>
-                    <td className="px-4 py-3 text-right font-bold text-amber-700 tabular-nums">{fmt(totals.tips)}</td>
-                    <td className="px-4 py-3 text-right font-bold text-[#1B5E20] tabular-nums">{fmt(totals.total)}</td>
+                    <td className="px-2 py-2 text-right font-bold text-gray-700 tabular-nums">{fmt(totals.net)}</td>
+                    <td className="px-2 py-2 text-right font-bold text-gray-900 tabular-nums">{fmt(totals.gross)}</td>
+                    <td className="px-2 py-2 text-right font-bold text-amber-700 tabular-nums">{fmt(totals.tips)}</td>
+                    <td className="px-2 py-2 text-right font-bold text-[#1B5E20] tabular-nums">{fmt(totals.total)}</td>
                     <td colSpan={2} />
                   </tr>
                 </tfoot>
