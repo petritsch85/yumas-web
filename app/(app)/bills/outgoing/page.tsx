@@ -435,6 +435,15 @@ export default function OutgoingBillsPage() {
     return true;
   });
 
+  // Sort by invoice number descending: parse {seq}-{yy} → sort by year then seq, both desc
+  const sortedBills = [...filtered].sort((a, b) => {
+    const parse = (inv: string | null) => {
+      const m = inv?.match(/^(\d+)-(\d+)$/);
+      return m ? parseInt(m[2], 10) * 100000 + parseInt(m[1], 10) : -1;
+    };
+    return parse(b.invoice_number) - parse(a.invoice_number);
+  });
+
   const totals = {
     gross: filtered.reduce((s, b) => s + b.gross_total,   0),
     net:   filtered.reduce((s, b) => s + b.net_total,     0),
@@ -1463,6 +1472,7 @@ export default function OutgoingBillsPage() {
                   <tr className="bg-gray-50 border-b border-gray-200">
                     <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Customer</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Invoice #</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Issue Date</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Event Date</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Location</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Shift</th>
@@ -1475,11 +1485,12 @@ export default function OutgoingBillsPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                  {filtered.map((bill) => (
+                  {sortedBills.map((bill) => (
                     <React.Fragment key={bill.id}>
                       <tr className="hover:bg-gray-50 transition-colors">
                         <td className="px-4 py-3 font-semibold text-gray-900">{bill.customer_name}</td>
                         <td className="px-4 py-3 text-gray-500 font-mono text-xs">{bill.invoice_number ?? '—'}</td>
+                        <td className="px-4 py-3 text-gray-600 whitespace-nowrap text-xs">{fmtDate(bill.invoice_date)}</td>
                         <td className="px-4 py-3 text-gray-600 whitespace-nowrap text-xs">{fmtDate(bill.event_date)}</td>
                         <td className="px-4 py-3">
                           {bill.issuing_location
@@ -1532,7 +1543,7 @@ export default function OutgoingBillsPage() {
                       {/* Inline edit row */}
                       {editingId === bill.id && editDraft && (
                         <tr className="bg-indigo-50/60">
-                          <td colSpan={11} className="px-4 py-4">
+                          <td colSpan={12} className="px-4 py-4">
                             <div className="grid grid-cols-4 gap-3 mb-3">
                               {([
                                 { label: 'Customer',       field: 'customer_name'  as keyof OutgoingBill, type: 'text' },
@@ -1627,7 +1638,7 @@ export default function OutgoingBillsPage() {
                 </tbody>
                 <tfoot>
                   <tr className="bg-gray-50 border-t-2 border-gray-200">
-                    <td colSpan={5} className="px-4 py-3 text-xs font-semibold text-gray-500">{filtered.length} invoices</td>
+                    <td colSpan={6} className="px-4 py-3 text-xs font-semibold text-gray-500">{filtered.length} invoices</td>
                     <td className="px-4 py-3 text-right font-bold text-gray-700 tabular-nums">{fmt(totals.net)}</td>
                     <td className="px-4 py-3 text-right font-bold text-gray-900 tabular-nums">{fmt(totals.gross)}</td>
                     <td className="px-4 py-3 text-right font-bold text-amber-700 tabular-nums">{fmt(totals.tips)}</td>
