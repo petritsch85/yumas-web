@@ -1,5 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { NextRequest, NextResponse } from 'next/server';
+import { getSupabaseAdmin } from '@/lib/supabase-admin';
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -67,8 +68,16 @@ function cleanResponse(text: string): string {
 
 export async function POST(req: NextRequest) {
   try {
-    const { pdfBase64, fileName } = await req.json();
-    if (!pdfBase64) return NextResponse.json({ error: 'No PDF data provided' }, { status: 400 });
+    const { storagePath, fileName } = await req.json();
+    if (!storagePath) return NextResponse.json({ error: 'No storage path provided' }, { status: 400 });
+
+    // Download PDF from Supabase Storage (server-side, no size limit)
+    const admin = getSupabaseAdmin();
+    const { data: fileBlob, error: dlErr } = await admin.storage.from('bills').download(storagePath);
+    if (dlErr || !fileBlob) {
+      return NextResponse.json({ error: `Could not download PDF: ${dlErr?.message ?? 'unknown'}` }, { status: 500 });
+    }
+    const pdfBase64 = Buffer.from(await fileBlob.arrayBuffer()).toString('base64');
 
     const response = await client.messages.create({
       model: 'claude-opus-4-5',

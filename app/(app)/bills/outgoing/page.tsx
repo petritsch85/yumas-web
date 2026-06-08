@@ -33,13 +33,13 @@ type Extracted = {
 };
 
 type QueueItem = {
-  id:       string;
-  fileName: string;
-  base64:   string;
-  status:   'waiting' | 'extracting' | 'done' | 'error';
-  data?:    Extracted;
-  error?:   string;
-  saved?:   boolean;
+  id:          string;
+  fileName:    string;
+  storagePath: string;
+  status:      'uploading' | 'waiting' | 'extracting' | 'done' | 'error';
+  data?:       Extracted;
+  error?:      string;
+  saved?:      boolean;
 };
 
 type OutgoingBill = {
@@ -453,25 +453,18 @@ export default function OutgoingBillsPage() {
 
   // ── Extract via Claude ────────────────────────────────────────────────────
 
-  // Base64 of a 3 MB PDF ≈ 4 MB — stay under Vercel's 4.5 MB body limit
-  const MAX_PDF_BYTES = 3 * 1024 * 1024;
-
   const extractItem = useCallback(async (item: QueueItem) => {
     setQueue((q) => q.map((i) => i.id === item.id ? { ...i, status: 'extracting' } : i));
     try {
       const res = await fetch('/api/extract-outgoing-bill', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ pdfBase64: item.base64, fileName: item.fileName }),
+        body:    JSON.stringify({ storagePath: item.storagePath, fileName: item.fileName }),
       });
-      // Server may return plain text on 413 — always read as text first
       const text = await res.text();
-      if (res.status === 413) {
-        throw new Error('PDF is too large (max ~3 MB). Please compress the file and try again.');
-      }
       let json: any;
       try { json = JSON.parse(text); } catch {
-        throw new Error(`Unexpected server response (HTTP ${res.status}) — try again or compress the file.`);
+        throw new Error(`Unexpected server response (HTTP ${res.status}) — try again.`);
       }
       if (!res.ok) throw new Error(json.error ?? 'Extraction failed');
       setQueue((q) => q.map((i) => i.id === item.id ? { ...i, status: 'done', data: json.data } : i));
@@ -483,29 +476,27 @@ export default function OutgoingBillsPage() {
   const processFiles = useCallback(async (files: File[]) => {
     const pdfs = files.filter((f) => f.name.toLowerCase().endsWith('.pdf'));
     if (!pdfs.length) return;
-    const newItems: QueueItem[] = await Promise.all(
-      pdfs.map((file) => new Promise<QueueItem>((resolve) => {
-        // Check size before reading — fail fast with a clear message
-        if (file.size > MAX_PDF_BYTES) {
-          resolve({
-            id: uid(), fileName: file.name, base64: '',
-            status: 'error',
-            error: `PDF is too large (${(file.size / 1024 / 1024).toFixed(1)} MB — max 3 MB). Please compress and re-upload.`,
-          });
-          return;
-        }
-        const reader = new FileReader();
-        reader.onload = (e) => {
-          const dataUrl = e.target?.result as string;
-          resolve({ id: uid(), fileName: file.name, base64: dataUrl.split(',')[1], status: 'waiting' });
-        };
-        reader.readAsDataURL(file);
-      }))
-    );
-    setQueue((q) => [...q, ...newItems]);
+    // Create placeholder items immediately so the user sees them
+    const placeholders: QueueItem[] = pdfs.map((file) => ({
+      id: uid(), fileName: file.name, storagePath: '', status: 'uploading',
+    }));
+    setQueue((q) => [...q, ...placeholders]);
     setTab('upload');
-    for (const item of newItems) {
-      if (item.status !== 'error') await extractItem(item);
+    // Upload each PDF directly to Supabase Storage (no Vercel size limit)
+    for (let i = 0; i < pdfs.length; i++) {
+      const file = pdfs[i];
+      const placeholder = placeholders[i];
+      const safeFileName = file.name.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-zA-Z0-9._-]/g, '_');
+      const storagePath = `outgoing-bills/${Date.now()}_${safeFileName}`;
+      const { error: upErr } = await supabase.storage.from('bills').upload(storagePath, file);
+      if (upErr) {
+        setQueue((q) => q.map((qi) => qi.id === placeholder.id
+          ? { ...qi, status: 'error', error: `Upload failed: ${upErr.message}` } : qi));
+        continue;
+      }
+      const readyItem: QueueItem = { ...placeholder, storagePath, status: 'waiting' };
+      setQueue((q) => q.map((qi) => qi.id === placeholder.id ? readyItem : qi));
+      await extractItem(readyItem);
     }
   }, [extractItem]);
 
@@ -533,12 +524,7 @@ export default function OutgoingBillsPage() {
       const { data: { user } } = await supabase.auth.getUser();
       for (const item of toSave) {
         const d = item.data!;
-        const bytes    = Uint8Array.from(atob(item.base64), (c) => c.charCodeAt(0));
-        const blob     = new Blob([bytes], { type: 'application/pdf' });
-        const safeFileName = item.fileName.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-zA-Z0-9._-]/g, '_');
-        const path     = `outgoing-bills/${Date.now()}_${safeFileName}`;
-        const { error: upErr } = await supabase.storage.from('bills').upload(path, blob);
-        if (upErr) throw new Error(`PDF upload failed: ${upErr.message}`);
+        // PDF already uploaded to storage during extraction step
         const { error } = await supabase.from('outgoing_bills').insert({
           invoice_number:   d.invoice_number   ?? null,
           invoice_date:     d.invoice_date     ?? null,
@@ -556,7 +542,7 @@ export default function OutgoingBillsPage() {
           tips:             d.tips             ?? 0,
           total_payable:    d.total_payable    ?? 0,
           status:           'pending',
-          file_path:        path,
+          file_path:        item.storagePath,
           uploaded_by:      user?.id ?? null,
         });
         if (error) throw error;
@@ -761,6 +747,7 @@ export default function OutgoingBillsPage() {
                   }`}>
                   <div className="flex items-center gap-3 px-4 py-3">
                     <div className="flex-shrink-0">
+                      {item.status === 'uploading'  && <Loader2      size={18} className="text-gray-400 animate-spin" />}
                       {item.status === 'waiting'    && <Clock        size={18} className="text-gray-300" />}
                       {item.status === 'extracting' && <Loader2      size={18} className="text-blue-500 animate-spin" />}
                       {item.status === 'done' && !item.saved && !missingFields && <FileCheck    size={18} className="text-green-500" />}
@@ -770,6 +757,7 @@ export default function OutgoingBillsPage() {
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-xs text-gray-400 truncate">{item.fileName}</p>
+                      {item.status === 'uploading'  && <p className="text-sm text-gray-400">Uploading…</p>}
                       {item.status === 'extracting' && <p className="text-sm font-semibold text-blue-600">Claude is reading…</p>}
                       {item.status === 'waiting'    && <p className="text-sm text-gray-400">Waiting…</p>}
                       {item.status === 'done' && item.data && (
