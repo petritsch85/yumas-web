@@ -453,15 +453,26 @@ export default function OutgoingBillsPage() {
 
   // ── Extract via Claude ────────────────────────────────────────────────────
 
+  // Base64 of a 3 MB PDF ≈ 4 MB — stay under Vercel's 4.5 MB body limit
+  const MAX_PDF_BYTES = 3 * 1024 * 1024;
+
   const extractItem = useCallback(async (item: QueueItem) => {
     setQueue((q) => q.map((i) => i.id === item.id ? { ...i, status: 'extracting' } : i));
     try {
-      const res  = await fetch('/api/extract-outgoing-bill', {
+      const res = await fetch('/api/extract-outgoing-bill', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({ pdfBase64: item.base64, fileName: item.fileName }),
       });
-      const json = await res.json();
+      // Server may return plain text on 413 — always read as text first
+      const text = await res.text();
+      if (res.status === 413) {
+        throw new Error('PDF is too large (max ~3 MB). Please compress the file and try again.');
+      }
+      let json: any;
+      try { json = JSON.parse(text); } catch {
+        throw new Error(`Unexpected server response (HTTP ${res.status}) — try again or compress the file.`);
+      }
       if (!res.ok) throw new Error(json.error ?? 'Extraction failed');
       setQueue((q) => q.map((i) => i.id === item.id ? { ...i, status: 'done', data: json.data } : i));
     } catch (err: any) {
@@ -474,6 +485,15 @@ export default function OutgoingBillsPage() {
     if (!pdfs.length) return;
     const newItems: QueueItem[] = await Promise.all(
       pdfs.map((file) => new Promise<QueueItem>((resolve) => {
+        // Check size before reading — fail fast with a clear message
+        if (file.size > MAX_PDF_BYTES) {
+          resolve({
+            id: uid(), fileName: file.name, base64: '',
+            status: 'error',
+            error: `PDF is too large (${(file.size / 1024 / 1024).toFixed(1)} MB — max 3 MB). Please compress and re-upload.`,
+          });
+          return;
+        }
         const reader = new FileReader();
         reader.onload = (e) => {
           const dataUrl = e.target?.result as string;
@@ -484,7 +504,9 @@ export default function OutgoingBillsPage() {
     );
     setQueue((q) => [...q, ...newItems]);
     setTab('upload');
-    for (const item of newItems) await extractItem(item);
+    for (const item of newItems) {
+      if (item.status !== 'error') await extractItem(item);
+    }
   }, [extractItem]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
@@ -513,7 +535,8 @@ export default function OutgoingBillsPage() {
         const d = item.data!;
         const bytes    = Uint8Array.from(atob(item.base64), (c) => c.charCodeAt(0));
         const blob     = new Blob([bytes], { type: 'application/pdf' });
-        const path     = `outgoing-bills/${Date.now()}_${item.fileName}`;
+        const safeFileName = item.fileName.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-zA-Z0-9._-]/g, '_');
+        const path     = `outgoing-bills/${Date.now()}_${safeFileName}`;
         const { error: upErr } = await supabase.storage.from('bills').upload(path, blob);
         if (upErr) throw new Error(`PDF upload failed: ${upErr.message}`);
         const { error } = await supabase.from('outgoing_bills').insert({
