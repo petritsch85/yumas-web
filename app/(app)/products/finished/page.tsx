@@ -126,7 +126,7 @@ export default function FinishedGoodsPage() {
       vat_rate:         editState.vat === '19' ? 0.19 : 0.07,
       occasion:         editState.occasion,
       menu_category:    editState.menu_category,
-      guest_multiplier: parseInt(editState.guest_multiplier)   || 0,
+      guest_multiplier: parseFloat(editState.guest_multiplier)  || 0,
     }).eq('id', id);
     setSaving(false);
     if (!error) {
