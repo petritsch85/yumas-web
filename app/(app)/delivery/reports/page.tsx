@@ -1372,17 +1372,32 @@ export default function DeliveryReportsPage() {
 
                   {/* Admin reset */}
                   {isAdmin && receipt && (
-                    <div className="flex justify-end pt-1 border-t border-gray-100">
-                      <button
-                        onClick={async () => {
-                          if (!window.confirm(`Reset ${store}'s delivery confirmation? This cannot be undone.`)) return;
-                          await resetReceipt(store);
-                        }}
-                        disabled={resettingStep === `receipt-${store}`}
-                        className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-orange-400 hover:bg-orange-500 transition-colors disabled:opacity-50"
-                      >
-                        {resettingStep === `receipt-${store}` ? 'Resetting…' : 'Reset'}
-                      </button>
+                    <div className="flex justify-end items-center gap-2 pt-1 border-t border-gray-100">
+                      {pendingReset === `receipt-${store}` ? (
+                        <>
+                          <span className="text-xs text-gray-400 whitespace-nowrap">Reset confirmation?</span>
+                          <button
+                            onClick={() => resetReceipt(store)}
+                            disabled={resettingStep === `receipt-${store}`}
+                            className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-red-500 text-white hover:bg-red-600 transition-colors disabled:opacity-50 whitespace-nowrap"
+                          >
+                            {resettingStep === `receipt-${store}` ? '…' : 'Yes'}
+                          </button>
+                          <button
+                            onClick={() => setPendingReset(null)}
+                            className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors"
+                          >
+                            No
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          onClick={() => setPendingReset(`receipt-${store}`)}
+                          className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-orange-400 hover:bg-orange-500 transition-colors"
+                        >
+                          Reset
+                        </button>
+                      )}
                     </div>
                   )}
 
