@@ -1280,9 +1280,6 @@ export default function DeliveryReportsPage() {
                             {(canInteract && !receipt) && (
                               <th className="px-4 py-2.5 text-center text-xs font-semibold text-gray-400 uppercase tracking-wide w-10">✓</th>
                             )}
-                            {receipt && (
-                              <th className="px-4 py-2.5 text-center text-xs font-semibold text-gray-400 uppercase tracking-wide w-10">✓</th>
-                            )}
                           </tr>
                         </thead>
                         <tbody>
@@ -1312,12 +1309,6 @@ export default function DeliveryReportsPage() {
                                     >
                                       {isChecked && <CheckCircle2 size={12} className="text-white" />}
                                     </button>
-                                  </td>
-                                )}
-                                {/* Read-only confirmed state */}
-                                {receipt && (
-                                  <td className="px-4 py-2.5 text-center">
-                                    <CheckCircle2 size={14} className="text-[#1B5E20] mx-auto" />
                                   </td>
                                 )}
                               </tr>

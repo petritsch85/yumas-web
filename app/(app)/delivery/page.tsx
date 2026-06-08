@@ -962,10 +962,11 @@ function StoreManagerView({ run, lines, targetDate, myStore, sectionOrder, itemR
                           {/* OK? toggle — locked after Send */}
                           <td className="py-3 text-center">
                             {locked ? (
-                              <span className={`w-10 h-8 rounded-full text-sm font-bold inline-flex items-center justify-center ${
-                                isOk ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'
-                              }`}>
-                                {isOk ? '✓' : '✗'}
+                              // Always show green ✓ when locked — itemOk is local state
+                              // that doesn't survive navigation; the receipt being confirmed
+                              // is the source of truth, so all items default to received.
+                              <span className="w-10 h-8 rounded-full text-sm font-bold inline-flex items-center justify-center bg-green-100 text-green-700">
+                                ✓
                               </span>
                             ) : (
                               <button
@@ -982,13 +983,14 @@ function StoreManagerView({ run, lines, targetDate, myStore, sectionOrder, itemR
                           </td>
                           {/* Received — locked after Send */}
                           <td className="py-3 text-center">
-                            {isOk ? (
+                            {locked ? (
+                              // Show packed qty as the received quantity (default: all received)
                               <span className="inline-flex items-center justify-center w-9 h-7 rounded-md bg-green-50 text-green-700 font-bold text-sm border border-green-200">
                                 {packedQty}
                               </span>
-                            ) : locked ? (
-                              <span className="text-gray-400 text-sm font-bold">
-                                {itemManualQty[line.id] || '—'}
+                            ) : isOk ? (
+                              <span className="inline-flex items-center justify-center w-9 h-7 rounded-md bg-green-50 text-green-700 font-bold text-sm border border-green-200">
+                                {packedQty}
                               </span>
                             ) : (
                               <input
