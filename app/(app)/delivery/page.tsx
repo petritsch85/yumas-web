@@ -2161,15 +2161,14 @@ export default function DeliveryPage() {
             </div>
           ) : (
             <>
-              {/* Preview banner — shown when no real run exists yet */}
-              {isPreview && (
+              {/* Preview banner — manager view only */}
+              {isPreview && viewMode === 'manager' && (
                 <div className="mb-5 flex items-start gap-3 p-4 bg-amber-50 border border-amber-200 rounded-xl">
                   <AlertCircle size={17} className="flex-shrink-0 text-amber-500 mt-0.5" />
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-semibold text-amber-800">Showing standard targets — inventory not yet reported</p>
                     <p className="text-xs text-amber-600 mt-0.5">
-                      Quantities below are based on standard targets only. Once inventory reports come in,{' '}
-                      {viewMode === 'manager' ? 'click "Generate List" to calculate actual delivery quantities.' : 'ask a manager to generate the list.'}
+                      Quantities below are based on standard targets only. Click "Generate List" to calculate actual delivery quantities once inventory reports are in.
                     </p>
                   </div>
                 </div>
