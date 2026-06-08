@@ -750,6 +750,8 @@ export default function ProductDetailsPage() {
                       Product <SortIcon k="product_name" />
                     </button>
                   </th>
+                  <th className="px-4 py-3 text-center text-xs font-semibold text-white/70 uppercase tracking-wide border-r border-white/10">Category</th>
+                  <th className="px-4 py-3 text-center text-xs font-semibold text-white/70 uppercase tracking-wide border-r border-white/10">Guest ×</th>
                   <th className="px-4 py-3 text-right border-r border-white/10">
                     <button onClick={() => handleSort('quantity')} className="flex items-center gap-1 text-xs font-semibold text-white/70 uppercase tracking-wide hover:text-white ml-auto">
                       Qty <SortIcon k="quantity" />
@@ -772,6 +774,40 @@ export default function ProductDetailsPage() {
                     className={`border-b border-gray-200 hover:bg-[#1B5E20]/5 transition-colors ${i % 2 === 0 ? 'bg-white' : 'bg-gray-50/60'}`}>
                     <td className="px-4 py-2.5 text-xs text-gray-400 font-mono border-r border-gray-200">{i + 1}</td>
                     <td className="px-4 py-2.5 font-medium text-gray-800 border-r border-gray-200">{row.product_name}</td>
+                    <td className="px-4 py-2.5 text-center border-r border-gray-200">
+                      {(() => {
+                        const cat = itemMap.get(row.product_name.toLowerCase())?.menu_category;
+                        if (!cat) return <span className="text-gray-300">—</span>;
+                        const colors: Record<string, string> = {
+                          Main:    'bg-[#1B5E20]/10 text-[#1B5E20]',
+                          Starter: 'bg-amber-50 text-amber-700',
+                          Drinks:  'bg-blue-50 text-blue-600',
+                          Salsas:  'bg-orange-50 text-orange-600',
+                          Dessert: 'bg-pink-50 text-pink-600',
+                          Other:   'bg-gray-100 text-gray-500',
+                        };
+                        return (
+                          <span className={`text-xs font-medium px-1.5 py-0.5 rounded whitespace-nowrap ${colors[cat] ?? 'bg-gray-100 text-gray-500'}`}>
+                            {cat}
+                          </span>
+                        );
+                      })()}
+                    </td>
+                    <td className="px-4 py-2.5 text-center border-r border-gray-200">
+                      {(() => {
+                        const gm = itemMap.get(row.product_name.toLowerCase())?.guest_multiplier;
+                        if (gm == null) return <span className="text-gray-300">—</span>;
+                        return (
+                          <span className={`text-xs font-medium px-1.5 py-0.5 rounded tabular-nums ${
+                            gm === 1   ? 'bg-[#1B5E20]/10 text-[#1B5E20]' :
+                            gm === 0.5 ? 'bg-amber-50 text-amber-700' :
+                                         'bg-gray-100 text-gray-400'
+                          }`}>
+                            {gm}
+                          </span>
+                        );
+                      })()}
+                    </td>
                     <td className="px-4 py-2.5 text-right text-gray-600 border-r border-gray-200 tabular-nums">
                       {new Intl.NumberFormat('de-DE').format(row.quantity)}
                     </td>
@@ -799,6 +835,8 @@ export default function ProductDetailsPage() {
                 <tr className="bg-[#1B5E20]/10 border-t-2 border-[#1B5E20]/30">
                   <td className="px-4 py-3 border-r border-gray-200" />
                   <td className="px-4 py-3 text-xs font-bold text-gray-700 uppercase tracking-wide border-r border-gray-200">Total</td>
+                  <td className="px-4 py-3 border-r border-gray-200" />
+                  <td className="px-4 py-3 border-r border-gray-200" />
                   <td className="px-4 py-3 text-right font-bold text-gray-800 border-r border-gray-200 tabular-nums">
                     {new Intl.NumberFormat('de-DE').format(totals.quantity)}
                   </td>
