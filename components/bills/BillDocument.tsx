@@ -226,8 +226,8 @@ export function BillDocument({ data }: { data: BillData }) {
           <View>
             {/* Group 1: Brutto split */}
             <View style={s.groupGap}>
-              <AmtRow label={`Essen Brutto (${data.mwstEssenPct ?? 7}%)`}    value={essenBrutto} />
-              <AmtRow label={`Getränke Brutto (${data.mwstGetraenkePct ?? 19}%)`} value={getraenkeBrutto} />
+              <AmtRow label={`Essen Brutto (${data.mwstEssenPct ?? 7}% MwSt)`}    value={essenBrutto} />
+              <AmtRow label={`Getränke Brutto (${data.mwstGetraenkePct ?? 19}% MwSt)`} value={getraenkeBrutto} />
               <AmtRow label="Gesamt Brutto (€)"   value={gesamtBrutto} />
             </View>
 
