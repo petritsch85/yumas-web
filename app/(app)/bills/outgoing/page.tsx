@@ -445,10 +445,11 @@ export default function OutgoingBillsPage() {
   });
 
   const totals = {
-    gross: filtered.reduce((s, b) => s + b.gross_total,   0),
-    net:   filtered.reduce((s, b) => s + b.net_total,     0),
-    tips:  filtered.reduce((s, b) => s + b.tips,          0),
-    total: filtered.reduce((s, b) => s + b.total_payable, 0),
+    gross:   filtered.reduce((s, b) => s + b.gross_total,   0),
+    net:     filtered.reduce((s, b) => s + b.net_total,     0),
+    tips:    filtered.reduce((s, b) => s + b.tips,          0),
+    total:   filtered.reduce((s, b) => s + b.total_payable, 0),
+    pending: bills.reduce((s, b) => b.status === 'pending' ? s + b.total_payable : s, 0),
   };
 
   // ── Extract via Claude ────────────────────────────────────────────────────
@@ -1420,12 +1421,13 @@ export default function OutgoingBillsPage() {
         <div>
           {/* Summary cards */}
           {bills.length > 0 && (
-            <div className="grid grid-cols-4 gap-4 mb-5">
+            <div className="grid grid-cols-5 gap-4 mb-5">
               {[
-                { label: 'Net Total',     value: fmt(totals.net),   color: 'text-blue-700' },
-                { label: 'Gross Total',   value: fmt(totals.gross), color: 'text-gray-900' },
-                { label: 'Tips Total',    value: fmt(totals.tips),  color: 'text-amber-700' },
-                { label: 'Total Payable', value: fmt(totals.total), color: 'text-[#1B5E20]' },
+                { label: 'Net Total',      value: fmt(totals.net),     color: 'text-blue-700' },
+                { label: 'Gross Total',    value: fmt(totals.gross),   color: 'text-gray-900' },
+                { label: 'Tips Total',     value: fmt(totals.tips),    color: 'text-amber-700' },
+                { label: 'Total Payable',  value: fmt(totals.total),   color: 'text-[#1B5E20]' },
+                { label: 'Total Pending',  value: fmt(totals.pending), color: 'text-orange-600' },
               ].map((s) => (
                 <div key={s.label} className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm">
                   <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">{s.label}</p>
