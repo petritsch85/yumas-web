@@ -49,7 +49,21 @@ Rules:
 - All amounts as plain numbers with dot as decimal separator (e.g. 2119.63 not 2.119,63)
 - Dates in YYYY-MM-DD format
 - customer_name is the RECIPIENT, never Yumas GmbH
-- If a field is not found set it to null (for strings) or 0 (for numbers)`;
+- If a field is not found set it to null (for strings) or 0 (for numbers)
+
+CRITICAL — POS receipt tax classification:
+When the document is a POS/cash register receipt (Kassenbon), each line item has a tax code letter printed in the RIGHTMOST column of the receipt (far right edge), after the line total. This letter is ALWAYS either A or B:
+- A = 19% MwSt = Getränke (drinks) → counts toward net_drinks / gross drinks
+- B = 7% MwSt = Essen (food) → counts toward net_food / gross food
+
+You MUST use ONLY this rightmost column tax letter to classify each item. Do NOT use the item name text to infer the tax bracket. For example, a dish called "Gamba Chipotle B" has the letter B as part of its name — this is NOT a tax code. Only the standalone letter printed at the far right end of the line is the tax code.
+
+To extract gross_food and gross_drinks from a POS receipt:
+- Sum all line totals where the rightmost tax letter = B → gross_food (7% tax applies)
+- Sum all line totals where the rightmost tax letter = A → gross_drinks (19% tax applies)
+- Derive net and VAT amounts from the brutto totals using the respective tax rates
+
+The receipt footer may show a summary table (USt.% / Brutto / Netto / USt.) — use this as a cross-check, but always prefer the per-line classification over the footer if there is a discrepancy.`;
 
 function extractJSONObject(text: string): string {
   const start = text.indexOf('{');
