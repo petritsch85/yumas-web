@@ -153,7 +153,9 @@ export default function OutgoingBillsPage() {
   const [poNumber,          setPoNumber]          = useState('');
   const [att,               setAtt]               = useState('');
   const [introText,         setIntroText]         = useState(makeIntroDinner(''));
-  const [inputMode,         setInputMode]         = useState<'brutto' | 'netto'>('brutto');
+  const [inputMode,         setInputMode]         = useState<'brutto' | 'netto' | 'pauschale'>('brutto');
+  const [pauschaleTotal,    setPauschaleTotal]    = useState('');
+  const [pauschaleIsNetto,  setPauschaleIsNetto]  = useState(false);
   const [essenBrutto,       setEssenBrutto]       = useState('');
   const [getraenkeBrutto,   setGetraenkeBrutto]   = useState('');
   const [essenNettoInput,   setEssenNettoInput]   = useState('');
@@ -260,19 +262,28 @@ export default function OutgoingBillsPage() {
   const mwstEssenRate     = (parseFloat(mwstEssen)    || 7)  / 100;
   const mwstGetraenkeRate = (parseFloat(mwstGetraenke) || 19) / 100;
 
-  // In netto mode: user enters netto → brutto calculated. In brutto mode: opposite.
-  const essenBruttoN = inputMode === 'brutto'
-    ? (parseFloat(essenBrutto)    || 0)
-    : (parseFloat(essenNettoInput) || 0) * (1 + mwstEssenRate);
-  const getraenkeBruttoN = inputMode === 'brutto'
-    ? (parseFloat(getraenkeBrutto)     || 0)
-    : (parseFloat(getraenkeNettoInput) || 0) * (1 + mwstGetraenkeRate);
-  const essenN = inputMode === 'brutto'
-    ? essenBruttoN    / (1 + mwstEssenRate)
-    : (parseFloat(essenNettoInput) || 0);
-  const getraenkeN = inputMode === 'brutto'
-    ? getraenkeBruttoN / (1 + mwstGetraenkeRate)
-    : (parseFloat(getraenkeNettoInput) || 0);
+  // Pauschale: single total, 70% food @ 7% VAT / 30% drinks @ 19% VAT
+  const pauschaleN = parseFloat(pauschaleTotal) || 0;
+  const essenBruttoN =
+    inputMode === 'brutto'   ? (parseFloat(essenBrutto) || 0) :
+    inputMode === 'netto'    ? (parseFloat(essenNettoInput) || 0) * (1 + mwstEssenRate) :
+    pauschaleIsNetto         ? pauschaleN * 0.70 * (1 + mwstEssenRate) :
+                               pauschaleN * 0.70;
+  const getraenkeBruttoN =
+    inputMode === 'brutto'   ? (parseFloat(getraenkeBrutto) || 0) :
+    inputMode === 'netto'    ? (parseFloat(getraenkeNettoInput) || 0) * (1 + mwstGetraenkeRate) :
+    pauschaleIsNetto         ? pauschaleN * 0.30 * (1 + mwstGetraenkeRate) :
+                               pauschaleN * 0.30;
+  const essenN =
+    inputMode === 'brutto'   ? essenBruttoN / (1 + mwstEssenRate) :
+    inputMode === 'netto'    ? (parseFloat(essenNettoInput) || 0) :
+    pauschaleIsNetto         ? pauschaleN * 0.70 :
+                               essenBruttoN / (1 + mwstEssenRate);
+  const getraenkeN =
+    inputMode === 'brutto'   ? getraenkeBruttoN / (1 + mwstGetraenkeRate) :
+    inputMode === 'netto'    ? (parseFloat(getraenkeNettoInput) || 0) :
+    pauschaleIsNetto         ? pauschaleN * 0.30 :
+                               getraenkeBruttoN / (1 + mwstGetraenkeRate);
   const bruttoGesamt    = essenBruttoN + getraenkeBruttoN;
   const mwstVatEssen    = essenBruttoN    - essenN;
   const mwstVatGetraenke = getraenkeBruttoN - getraenkeN;
@@ -1207,8 +1218,45 @@ export default function OutgoingBillsPage() {
                   >
                     Netto → Brutto
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => setInputMode('pauschale')}
+                    className={`px-3 py-1.5 transition-colors border-l border-gray-200 ${inputMode === 'pauschale' ? 'bg-[#1B5E20] text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}
+                  >
+                    Pauschale
+                  </button>
                 </div>
               </div>
+
+              {/* Pauschale: single total input with brutto/netto sub-toggle */}
+              {inputMode === 'pauschale' && (
+                <div className="mb-4 p-3 bg-emerald-50 rounded-lg border border-emerald-200">
+                  <div className="flex items-end gap-3">
+                    <div className="flex-1">
+                      <label className={labelCls}>Gesamtbetrag {pauschaleIsNetto ? 'Netto' : 'Brutto'} (€)</label>
+                      <input
+                        type={focusedField === 'pauschaleTotal' ? 'number' : 'text'}
+                        step="0.01" min="0" className={inputCls} placeholder="0,00 €"
+                        value={focusedField === 'pauschaleTotal' ? pauschaleTotal : (pauschaleN > 0 ? fmtEur(pauschaleN) : '')}
+                        onFocus={() => setFocusedField('pauschaleTotal')}
+                        onBlur={() => setFocusedField(null)}
+                        onChange={(e) => setPauschaleTotal(e.target.value)}
+                      />
+                    </div>
+                    <div className="flex rounded-lg border border-gray-200 overflow-hidden text-xs font-semibold mb-px">
+                      <button type="button" onClick={() => setPauschaleIsNetto(false)}
+                        className={`px-3 py-1.5 transition-colors ${!pauschaleIsNetto ? 'bg-[#1B5E20] text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}>
+                        Brutto
+                      </button>
+                      <button type="button" onClick={() => setPauschaleIsNetto(true)}
+                        className={`px-3 py-1.5 transition-colors border-l border-gray-200 ${pauschaleIsNetto ? 'bg-[#1B5E20] text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}>
+                        Netto
+                      </button>
+                    </div>
+                  </div>
+                  <p className="text-xs text-emerald-700 mt-1.5">70% Essen (7% MwSt) · 30% Getränke (19% MwSt) — alle Felder werden automatisch berechnet</p>
+                </div>
+              )}
 
               {/* Row 1: Brutto */}
               <div className="grid grid-cols-3 gap-4 mb-4">
@@ -1256,13 +1304,21 @@ export default function OutgoingBillsPage() {
               <div className="grid grid-cols-3 gap-4 mb-4">
                 <div>
                   <label className={labelCls}>Mwst Essen (%)</label>
-                  <input type="number" step="0.1" min="0" max="100" className={inputCls}
-                    value={mwstEssen} onChange={(e) => setMwstEssen(e.target.value)} />
+                  {inputMode === 'pauschale' ? (
+                    <div className={`${inputCls} !bg-gray-200 !border-gray-300 !shadow-none text-gray-500 cursor-not-allowed select-none`}>7 %</div>
+                  ) : (
+                    <input type="number" step="0.1" min="0" max="100" className={inputCls}
+                      value={mwstEssen} onChange={(e) => setMwstEssen(e.target.value)} />
+                  )}
                 </div>
                 <div>
                   <label className={labelCls}>Mwst Getränke (%)</label>
-                  <input type="number" step="0.1" min="0" max="100" className={inputCls}
-                    value={mwstGetraenke} onChange={(e) => setMwstGetraenke(e.target.value)} />
+                  {inputMode === 'pauschale' ? (
+                    <div className={`${inputCls} !bg-gray-200 !border-gray-300 !shadow-none text-gray-500 cursor-not-allowed select-none`}>19 %</div>
+                  ) : (
+                    <input type="number" step="0.1" min="0" max="100" className={inputCls}
+                      value={mwstGetraenke} onChange={(e) => setMwstGetraenke(e.target.value)} />
+                  )}
                 </div>
                 <div>
                   <label className={labelCls}>Mwst Gesamt (%)</label>
