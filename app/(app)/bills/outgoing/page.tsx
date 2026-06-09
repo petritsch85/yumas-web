@@ -168,6 +168,8 @@ export default function OutgoingBillsPage() {
   const [invoiceNumberLocked,   setInvoiceNumberLocked]   = useState(true);
   const [extractingReceipt,     setExtractingReceipt]     = useState(false);
   const [receiptSuccess,        setReceiptSuccess]        = useState(false);
+  const [receiptDataUrl,        setReceiptDataUrl]        = useState<string | null>(null);
+  const [includeReceipt,        setIncludeReceipt]        = useState(false);
 
   // Customer CRM search
   const [customerQuery,       setCustomerQuery]       = useState('');
@@ -314,24 +316,27 @@ export default function OutgoingBillsPage() {
     mwstGetraenkePct: billType === 'dinner'  ? (parseFloat(mwstGetraenke) || 19) : undefined,
     essenNetto:       billType === 'dinner'  ? essenN           : undefined,
     getraenkeNetto:   billType === 'dinner'  ? getraenkeN       : undefined,
-    trinkgeld:        billType === 'dinner'  ? trinkgeldN       : undefined,
+    trinkgeld:             billType === 'dinner'  ? trinkgeldN       : undefined,
+    receiptImageDataUrl:   includeReceipt && receiptDataUrl ? receiptDataUrl : undefined,
   }), [invoiceNumber, billDate, billEventDate, billIssuingLoc, billType, company, extra,
        contactName, street, postcode, city, poNumber, att, introText, lineItems,
-       essenBruttoN, getraenkeBruttoN, essenN, getraenkeN, mwstEssen, mwstGetraenke, trinkgeldN]);
+       essenBruttoN, getraenkeBruttoN, essenN, getraenkeN, mwstEssen, mwstGetraenke, trinkgeldN,
+       includeReceipt, receiptDataUrl]);
 
   const handleReceiptImage = async (file: File) => {
     setExtractingReceipt(true);
     setReceiptSuccess(false);
     try {
-      const base64 = await new Promise<string>((resolve, reject) => {
+      const { base64, dataUrl: fullDataUrl } = await new Promise<{ base64: string; dataUrl: string }>((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = (e) => {
           const dataUrl = e.target?.result as string;
-          resolve(dataUrl.split(',')[1]);
+          resolve({ base64: dataUrl.split(',')[1], dataUrl });
         };
         reader.onerror = reject;
         reader.readAsDataURL(file);
       });
+      setReceiptDataUrl(fullDataUrl);
 
       const mediaType = file.type || 'image/jpeg';
       const res  = await fetch('/api/extract-receipt-image', {
@@ -957,6 +962,20 @@ export default function OutgoingBillsPage() {
               <p className="text-xs text-gray-400 mt-0.5">Take a photo of the POS Kassenbon — amounts, VAT split and date are filled in automatically</p>
             </div>
             <div className="flex items-center gap-3 flex-shrink-0">
+              {receiptDataUrl && (
+                <button
+                  type="button"
+                  onClick={() => setIncludeReceipt(v => !v)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-colors ${
+                    includeReceipt
+                      ? 'bg-[#1B5E20] text-white border-[#1B5E20]'
+                      : 'bg-white text-gray-600 border-gray-300 hover:border-gray-400'
+                  }`}
+                >
+                  <FileCheck size={13} />
+                  {includeReceipt ? 'Receipt on bill ✓' : 'Include receipt on bill'}
+                </button>
+              )}
               {receiptSuccess && (
                 <span className="flex items-center gap-1.5 text-xs font-semibold text-green-600">
                   <CheckCircle2 size={14} /> Filled in!

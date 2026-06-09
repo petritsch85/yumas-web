@@ -36,7 +36,8 @@ export type BillData = {
   mwstGetraenkePct?: number;  // e.g. 19
   essenNetto?     : number;
   getraenkeNetto? : number;
-  trinkgeld?      : number;
+  trinkgeld?           : number;
+  receiptImageDataUrl? : string;  // base64 data URL — appended as page 2 when set
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -283,6 +284,24 @@ export function BillDocument({ data }: { data: BillData }) {
         </View>
 
       </Page>
+
+      {/* ── Page 2: Receipt image (optional) ─────────────────────────── */}
+      {data.receiptImageDataUrl && (
+        <Page size="A4" style={[s.page, { display: 'flex', alignItems: 'center', justifyContent: 'center' }]}>
+          <Text style={{ fontSize: 9, color: '#888', marginBottom: 10, alignSelf: 'flex-start' }}>
+            Kassenbon / POS Receipt
+          </Text>
+          <Image
+            src={data.receiptImageDataUrl}
+            style={{ width: '100%', objectFit: 'contain' }}
+          />
+          <View style={s.footer} fixed>
+            <Text style={s.footerText}>{FOOTER_1}</Text>
+            <Text style={s.footerText}>{FOOTER_2}</Text>
+          </View>
+        </Page>
+      )}
+
     </Document>
   );
 }
