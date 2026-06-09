@@ -166,6 +166,13 @@ export default function OutgoingBillsPage() {
   const [lineItems,             setLineItems]             = useState<LineItem[]>([{ qty: 1, item: '', unitPrice: 0 }]);
   const [generating,            setGenerating]            = useState(false);
   const [invoiceNumberLocked,   setInvoiceNumberLocked]   = useState(true);
+  // Send modal
+  const [sendModal,        setSendModal]        = useState(false);
+  const [pendingBlob,      setPendingBlob]      = useState<Blob | null>(null);
+  const [pendingPdfUrl,    setPendingPdfUrl]    = useState<string | null>(null);
+  const [sendEmail,        setSendEmail]        = useState('');
+  const [sending,          setSending]          = useState(false);
+  const [sendError,        setSendError]        = useState<string | null>(null);
   const [extractingReceipt,     setExtractingReceipt]     = useState(false);
   const [receiptSuccess,        setReceiptSuccess]        = useState(false);
   const [receiptDataUrl,        setReceiptDataUrl]        = useState<string | null>(null);
@@ -384,19 +391,91 @@ export default function OutgoingBillsPage() {
       ]);
       const data = buildBillData();
       const blob = await pdf(<BillDoc data={data} />).toBlob();
-      const url  = URL.createObjectURL(blob);
-      const a    = document.createElement('a');
-      a.href     = url;
-      a.download = `${invoiceNumber || 'Rechnung'}.pdf`;
-      a.click();
-      URL.revokeObjectURL(url);
-      // Silently save/update customer in CRM
-      saveCustomerSilently();
+      // Revoke any previous URL
+      if (pendingPdfUrl) URL.revokeObjectURL(pendingPdfUrl);
+      const url = URL.createObjectURL(blob);
+      setPendingBlob(blob);
+      setPendingPdfUrl(url);
+      setSendEmail('');
+      setSendError(null);
+      setSendModal(true);
     } catch (err: any) {
       console.error('PDF generation failed:', err);
       alert(`Could not generate PDF: ${err?.message ?? 'Unknown error'}`);
     } finally {
       setGenerating(false);
+    }
+  };
+
+  // Helper: DD.MM.YYYY → YYYY-MM-DD (or null)
+  const toIsoDate = (ddmmyyyy: string): string | null => {
+    const p = ddmmyyyy.trim().split('.');
+    return p.length === 3 ? `${p[2]}-${p[1]}-${p[0]}` : null;
+  };
+
+  const handleApproveAndSend = async () => {
+    if (!pendingBlob || !sendEmail.trim()) return;
+    setSending(true);
+    setSendError(null);
+    try {
+      // 1. Convert blob to base64
+      const arrayBuffer = await pendingBlob.arrayBuffer();
+      const pdfBase64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
+
+      // 2. Send email via Resend
+      const emailRes = await fetch('/api/send-bill-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          to: sendEmail.trim(),
+          invoiceNumber,
+          companyName: company,
+          pdfBase64,
+        }),
+      });
+      const emailJson = await emailRes.json();
+      if (!emailRes.ok) throw new Error(emailJson.error ?? 'Email sending failed');
+
+      // 3. Upload PDF to Supabase Storage
+      const { data: { user } } = await supabase.auth.getUser();
+      const safeInv = invoiceNumber.replace(/[^a-zA-Z0-9._-]/g, '_');
+      const storagePath = `outgoing-bills/${Date.now()}_${safeInv}.pdf`;
+      const { error: upErr } = await supabase.storage.from('bills').upload(storagePath, pendingBlob, { contentType: 'application/pdf' });
+      if (upErr) throw new Error(`PDF storage failed: ${upErr.message}`);
+
+      // 4. Save to outgoing_bills DB
+      const { error: dbErr } = await supabase.from('outgoing_bills').insert({
+        invoice_number:   invoiceNumber || null,
+        invoice_date:     toIsoDate(billDate),
+        event_date:       billEventDate ? toIsoDate(billEventDate) : null,
+        customer_name:    company,
+        customer_address: [street, postcode, city].filter(Boolean).join(', ') || null,
+        issuing_location: billIssuingLoc || null,
+        shift_type:       (billType === 'dinner' ? 'dinner' : null) as 'dinner' | 'lunch' | null,
+        net_food:         billType === 'dinner' ? essenN         : 0,
+        net_drinks:       billType === 'dinner' ? getraenkeN     : 0,
+        net_total:        netto,
+        vat_7:            mwst7,
+        vat_19:           mwst19,
+        gross_total:      brutto,
+        tips:             trinkgeldN,
+        total_payable:    billTotal,
+        status:           'pending',
+        file_path:        storagePath,
+        uploaded_by:      user?.id ?? null,
+      });
+      if (dbErr) throw dbErr;
+
+      // 5. Done — refresh list, save customer, close modal
+      queryClient.invalidateQueries({ queryKey: ['outgoing-bills'] });
+      saveCustomerSilently();
+      setSendModal(false);
+      setPendingBlob(null);
+      if (pendingPdfUrl) { URL.revokeObjectURL(pendingPdfUrl); setPendingPdfUrl(null); }
+    } catch (err: any) {
+      setSendError(err.message ?? 'Unexpected error');
+    } finally {
+      setSending(false);
     }
   };
 
@@ -1485,7 +1564,7 @@ export default function OutgoingBillsPage() {
             className="w-full flex items-center justify-center gap-2 bg-[#1B5E20] text-white py-3 rounded-lg text-sm font-bold hover:bg-[#2E7D32] transition-colors disabled:opacity-50"
           >
             <FileDown size={16} />
-            {generating ? 'Generating PDF…' : 'Generate & Download PDF'}
+            {generating ? 'Generating PDF…' : 'Generate, Approve and Send PDF'}
           </button>
 
         </div>
@@ -1739,6 +1818,77 @@ export default function OutgoingBillsPage() {
           )}
         </div>
       )}
+
+      {/* ═══════ APPROVE & SEND MODAL ═══════ */}
+      {sendModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-gray-100">
+              <h2 className="text-base font-bold text-gray-900">Approve &amp; Send Invoice</h2>
+              <button type="button" onClick={() => setSendModal(false)}
+                className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors">
+                <X size={16} className="text-gray-500" />
+              </button>
+            </div>
+
+            <div className="px-6 py-5 space-y-4">
+              {/* Invoice info */}
+              <div className="bg-gray-50 rounded-xl px-4 py-3 text-sm text-gray-700">
+                <span className="font-semibold">{invoiceNumber}</span>
+                {company && <> · {company}</>}
+                {billTotal > 0 && <> · <span className="font-semibold">{fmtEur(billTotal)}</span></>}
+              </div>
+
+              {/* View PDF */}
+              <button
+                type="button"
+                onClick={() => pendingPdfUrl && window.open(pendingPdfUrl, '_blank')}
+                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 border border-gray-300 rounded-lg text-sm font-semibold text-gray-700 hover:bg-gray-50 transition-colors"
+              >
+                <Eye size={15} /> View PDF
+              </button>
+
+              {/* Email input */}
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
+                  Send to email address
+                </label>
+                <input
+                  type="email"
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20]"
+                  placeholder="customer@company.com"
+                  value={sendEmail}
+                  onChange={(e) => setSendEmail(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && !sending && sendEmail.trim() && handleApproveAndSend()}
+                />
+              </div>
+
+              {/* Error */}
+              {sendError && (
+                <p className="text-xs text-red-600 bg-red-50 rounded-lg px-3 py-2">{sendError}</p>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="px-6 pb-5 flex gap-3">
+              <button type="button" onClick={() => setSendModal(false)}
+                className="flex-1 py-2.5 rounded-lg border border-gray-300 text-sm font-semibold text-gray-600 hover:bg-gray-50 transition-colors">
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleApproveAndSend}
+                disabled={sending || !sendEmail.trim()}
+                className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg bg-[#1B5E20] text-white text-sm font-bold hover:bg-[#2E7D32] disabled:opacity-50 transition-colors"
+              >
+                {sending ? <><Loader2 size={14} className="animate-spin" /> Sending…</> : <><CheckCircle2 size={14} /> Approve &amp; Send</>}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
