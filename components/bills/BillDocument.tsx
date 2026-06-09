@@ -226,16 +226,16 @@ export function BillDocument({ data }: { data: BillData }) {
           <View>
             {/* Group 1: Brutto split */}
             <View style={s.groupGap}>
-              <AmtRow label="Essen Brutto (€)"    value={essenBrutto} />
-              <AmtRow label="Getränke Brutto (€)" value={getraenkeBrutto} />
+              <AmtRow label={`Essen Brutto (${data.mwstEssenPct ?? 7}%)`}    value={essenBrutto} />
+              <AmtRow label={`Getränke Brutto (${data.mwstGetraenkePct ?? 19}%)`} value={getraenkeBrutto} />
               <AmtRow label="Gesamt Brutto (€)"   value={gesamtBrutto} />
             </View>
 
             {/* Group 2: MwSt */}
             <View style={s.groupGap}>
-              <AmtRow label={`Mwst Essen (${data.mwstEssenPct ?? 7}%)`}    value={mwstEssenAmt} />
-              <AmtRow label={`Mwst Getränke (${data.mwstGetraenkePct ?? 19}%)`} value={mwstGetraenkeAmt} />
-              <AmtRow label="Mwst Gesamt"                                   value={mwstGesamtAmt} />
+              <AmtRow label={`MwSt Essen (${data.mwstEssenPct ?? 7}%)`}    value={mwstEssenAmt} />
+              <AmtRow label={`MwSt Getränke (${data.mwstGetraenkePct ?? 19}%)`} value={mwstGetraenkeAmt} />
+              <AmtRow label="MwSt Gesamt"                                   value={mwstGesamtAmt} />
             </View>
 
             {/* Group 3: Netto split */}

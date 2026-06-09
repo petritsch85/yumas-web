@@ -1300,10 +1300,10 @@ export default function OutgoingBillsPage() {
                 </div>
               </div>
 
-              {/* Row 2: Mwst rate inputs */}
+              {/* Row 2: MwSt rate inputs */}
               <div className="grid grid-cols-3 gap-4 mb-4">
                 <div>
-                  <label className={labelCls}>Mwst Essen (%)</label>
+                  <label className={labelCls}>MwSt Essen (%)</label>
                   {inputMode === 'pauschale' ? (
                     <div className={`${inputCls} !bg-gray-200 !border-gray-300 !shadow-none text-gray-500 cursor-not-allowed select-none`}>7 %</div>
                   ) : (
@@ -1312,7 +1312,7 @@ export default function OutgoingBillsPage() {
                   )}
                 </div>
                 <div>
-                  <label className={labelCls}>Mwst Getränke (%)</label>
+                  <label className={labelCls}>MwSt Getränke (%)</label>
                   {inputMode === 'pauschale' ? (
                     <div className={`${inputCls} !bg-gray-200 !border-gray-300 !shadow-none text-gray-500 cursor-not-allowed select-none`}>19 %</div>
                   ) : (
@@ -1321,7 +1321,7 @@ export default function OutgoingBillsPage() {
                   )}
                 </div>
                 <div>
-                  <label className={labelCls}>Mwst Gesamt (%)</label>
+                  <label className={labelCls}>MwSt Gesamt (%)</label>
                   <div className={`${inputCls} !bg-gray-200 !border-gray-300 !shadow-none text-gray-500 cursor-not-allowed select-none`}>
                     {mwstGesamtPct > 0 ? mwstGesamtPct.toFixed(2) + ' %' : '—'}
                   </div>
@@ -1400,17 +1400,17 @@ export default function OutgoingBillsPage() {
                     <td className="py-2 px-3 text-right tabular-nums font-semibold text-gray-900 bg-gray-50 border border-gray-200 border-t-0">{fmtEur(bruttoGesamt)}</td>
                   </tr>
 
-                  {/* ── Mwst block ── */}
+                  {/* ── MwSt block ── */}
                   <tr className="border-t-2 border-gray-300">
-                    <td className="py-2 px-3 text-gray-600 bg-gray-50 border border-gray-200">Mwst Essen ({mwstEssen || 7}%)</td>
+                    <td className="py-2 px-3 text-gray-600 bg-gray-50 border border-gray-200">MwSt Essen ({mwstEssen || 7}%)</td>
                     <td className="py-2 px-3 text-right tabular-nums text-gray-800 bg-gray-50 border border-gray-200">{fmtEur(mwstVatEssen)}</td>
                   </tr>
                   <tr>
-                    <td className="py-2 px-3 text-gray-600 border border-gray-200 border-t-0">Mwst Getränke ({mwstGetraenke || 19}%)</td>
+                    <td className="py-2 px-3 text-gray-600 border border-gray-200 border-t-0">MwSt Getränke ({mwstGetraenke || 19}%)</td>
                     <td className="py-2 px-3 text-right tabular-nums text-gray-800 border border-gray-200 border-t-0">{fmtEur(mwstVatGetraenke)}</td>
                   </tr>
                   <tr>
-                    <td className="py-2 px-3 font-semibold text-gray-700 bg-gray-50 border border-gray-200 border-t-0">Mwst Gesamt</td>
+                    <td className="py-2 px-3 font-semibold text-gray-700 bg-gray-50 border border-gray-200 border-t-0">MwSt Gesamt</td>
                     <td className="py-2 px-3 text-right tabular-nums font-semibold text-gray-900 bg-gray-50 border border-gray-200 border-t-0">{fmtEur(mwstVatEssen + mwstVatGetraenke)}</td>
                   </tr>
 
@@ -1441,7 +1441,7 @@ export default function OutgoingBillsPage() {
                     <td className="py-2 px-3 text-right tabular-nums text-gray-800 bg-gray-50 border border-gray-200">{fmtEur(netto)}</td>
                   </tr>
                   <tr>
-                    <td className="py-2 px-3 text-gray-600 border border-gray-200 border-t-0">Mwst (7%)</td>
+                    <td className="py-2 px-3 text-gray-600 border border-gray-200 border-t-0">MwSt (7%)</td>
                     <td className="py-2 px-3 text-right tabular-nums text-gray-800 border border-gray-200 border-t-0">{fmtEur(mwst7)}</td>
                   </tr>
                   <tr>
