@@ -189,6 +189,15 @@ export default function DashboardPage() {
     if (!can(l.permKey, l.adminOnly)) return false;
     return true;
   });
+
+  // For staff with store_receiver but no driver perm, route delivery tile to store view
+  const resolvedLinks = visibleLinks.map((l) => {
+    if (l.permKey === 'delivery' && isStaffRole && hasStoreReceiver && !hasDriver) {
+      return { ...l, href: '/delivery?view=store' };
+    }
+    return l;
+  });
+
   const showPOPanel       = can('buying');
   const showLowStockPanel = can('analysis');
   const showPanelRow      = showPOPanel || showLowStockPanel;
@@ -288,13 +297,13 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {visibleLinks.length > 0 && (
+      {resolvedLinks.length > 0 && (
         <div className="bg-white rounded-lg shadow-sm border border-gray-100">
           <div className="px-6 py-4 border-b border-gray-100">
             <h3 className="font-semibold text-gray-900">{t('dashboard.quickAccess')}</h3>
           </div>
           <div className="p-4 md:p-6 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
-            {visibleLinks.map((link) => {
+            {resolvedLinks.map((link) => {
               const Icon = link.icon;
               return (
                 <Link
