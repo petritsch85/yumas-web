@@ -1442,13 +1442,8 @@ export default function DeliveryPage() {
     setViewMode('packer');
   }, [profile?.id, permsKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Which store does this user belong to? (for Store Manager auto-filter to their own store tab)
-  // Only applies if they have a store location AND store_receiver permission
-  const myStore: Store | null = (() => {
-    if (!(profile?.permissions as any)?.store_receiver) return null;
-    const loc = profile?.locationName;
-    return loc && STORES.includes(loc as Store) ? (loc as Store) : null;
-  })();
+  // store_receiver users can switch between all stores — always return null so tabs are shown
+  const myStore: Store | null = null;
 
   /* ─ Std scale mode (per store) ─ */
   type ScaleMode = 'low' | 'std' | 'high';
