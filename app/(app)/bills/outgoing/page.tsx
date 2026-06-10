@@ -365,13 +365,20 @@ export default function OutgoingBillsPage() {
         lineItems?:       { name: string; qty: number; total: number; taxCode: 'A' | 'B' }[];
       };
 
+      if (d.lineItems?.length) setReceiptLineItems(d.lineItems);
+
+      // Derive food/drink totals from line items (more reliable than AI aggregates)
+      const computedEssen     = d.lineItems?.reduce((s, i) => i.taxCode === 'B' ? s + i.total : s, 0) ?? 0;
+      const computedGetraenke = d.lineItems?.reduce((s, i) => i.taxCode === 'A' ? s + i.total : s, 0) ?? 0;
+      const essenVal     = computedEssen     > 0 ? computedEssen     : d.essenBrutto;
+      const getraenkeVal = computedGetraenke > 0 ? computedGetraenke : d.getraenkeBrutto;
+
       // Populate form fields
       setInputMode('brutto');
-      if (d.essenBrutto     > 0) setEssenBrutto(String(d.essenBrutto));
-      if (d.getraenkeBrutto > 0) setGetraenkeBrutto(String(d.getraenkeBrutto));
+      if (essenVal     > 0) setEssenBrutto(String(essenVal));
+      if (getraenkeVal > 0) setGetraenkeBrutto(String(getraenkeVal));
       if (d.trinkgeld       > 0) setTrinkgeld(String(d.trinkgeld));
       if (d.issuingLocation)     setBillIssuingLoc(d.issuingLocation);
-      if (d.lineItems?.length)   setReceiptLineItems(d.lineItems);
       if (d.eventDate) {
         // Convert YYYY-MM-DD → DD.MM.YYYY for the form field
         const [y, m, day] = d.eventDate.split('-');
