@@ -177,6 +177,8 @@ export default function OutgoingBillsPage() {
   const [receiptSuccess,        setReceiptSuccess]        = useState(false);
   const [receiptDataUrl,        setReceiptDataUrl]        = useState<string | null>(null);
   const [includeReceipt,        setIncludeReceipt]        = useState(false);
+  const [receiptLineItems,      setReceiptLineItems]      = useState<{ name: string; qty: number; total: number; taxCode: 'A' | 'B' }[]>([]);
+  const [valueDetailsOpen,      setValueDetailsOpen]      = useState(false);
 
   // Customer CRM search
   const [customerQuery,       setCustomerQuery]       = useState('');
@@ -360,6 +362,7 @@ export default function OutgoingBillsPage() {
         trinkgeld:        number;
         eventDate:        string | null;
         issuingLocation:  string | null;
+        lineItems?:       { name: string; qty: number; total: number; taxCode: 'A' | 'B' }[];
       };
 
       // Populate form fields
@@ -368,6 +371,7 @@ export default function OutgoingBillsPage() {
       if (d.getraenkeBrutto > 0) setGetraenkeBrutto(String(d.getraenkeBrutto));
       if (d.trinkgeld       > 0) setTrinkgeld(String(d.trinkgeld));
       if (d.issuingLocation)     setBillIssuingLoc(d.issuingLocation);
+      if (d.lineItems?.length)   setReceiptLineItems(d.lineItems);
       if (d.eventDate) {
         // Convert YYYY-MM-DD → DD.MM.YYYY for the form field
         const [y, m, day] = d.eventDate.split('-');
@@ -1300,7 +1304,18 @@ export default function OutgoingBillsPage() {
             <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
               {/* Header + mode toggle */}
               <div className="flex items-center justify-between mb-4 pb-3 border-b border-gray-100">
-                <p className="text-sm font-bold text-gray-800">Amounts</p>
+                <div className="flex items-center gap-3">
+                  <p className="text-sm font-bold text-gray-800">Amounts</p>
+                  {receiptLineItems.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setValueDetailsOpen(true)}
+                      className="text-xs font-semibold text-[#1B5E20] border border-[#1B5E20] px-2.5 py-1 rounded-lg hover:bg-green-50 transition-colors"
+                    >
+                      Value Details
+                    </button>
+                  )}
+                </div>
                 <div className="flex rounded-lg border border-gray-200 overflow-hidden text-xs font-semibold">
                   <button
                     type="button"
@@ -1818,6 +1833,102 @@ export default function OutgoingBillsPage() {
           )}
         </div>
       )}
+
+      {/* ═══════ VALUE DETAILS MODAL ═══════ */}
+      {valueDetailsOpen && receiptLineItems.length > 0 && (() => {
+        const essenItems     = receiptLineItems.filter((i) => i.taxCode === 'B');
+        const getraenkeItems = receiptLineItems.filter((i) => i.taxCode === 'A');
+        const essenSum       = essenItems.reduce((s, i) => s + i.total, 0);
+        const getraenkeSum   = getraenkeItems.reduce((s, i) => s + i.total, 0);
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col">
+              <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-gray-100">
+                <h2 className="text-base font-bold text-gray-900">Value Details</h2>
+                <button type="button" onClick={() => setValueDetailsOpen(false)}
+                  className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors">
+                  <X size={16} className="text-gray-500" />
+                </button>
+              </div>
+              <div className="px-6 py-5 overflow-y-auto space-y-5 flex-1">
+
+                {/* Essen (B / 7%) */}
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-xs font-bold text-gray-500 uppercase tracking-wider">Essen (B · 7% MwSt)</p>
+                    <p className="text-sm font-bold text-gray-800">{fmtEur(essenSum)}</p>
+                  </div>
+                  <table className="w-full text-xs border-collapse">
+                    <thead>
+                      <tr className="bg-gray-50">
+                        <th className="text-left px-2 py-1.5 font-semibold text-gray-500 border border-gray-200">Item</th>
+                        <th className="text-center px-2 py-1.5 font-semibold text-gray-500 border border-gray-200 w-12">Qty</th>
+                        <th className="text-right px-2 py-1.5 font-semibold text-gray-500 border border-gray-200 w-24">Total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {essenItems.map((item, i) => (
+                        <tr key={i} className="border-b border-gray-100 last:border-0">
+                          <td className="px-2 py-1.5 text-gray-700 border border-gray-200">{item.name}</td>
+                          <td className="px-2 py-1.5 text-center text-gray-500 border border-gray-200">{item.qty}×</td>
+                          <td className="px-2 py-1.5 text-right tabular-nums text-gray-800 border border-gray-200">{fmtEur(item.total)}</td>
+                        </tr>
+                      ))}
+                      <tr className="bg-green-50 font-semibold">
+                        <td className="px-2 py-1.5 text-gray-700 border border-gray-200" colSpan={2}>Total Essen Brutto</td>
+                        <td className="px-2 py-1.5 text-right tabular-nums text-[#1B5E20] border border-gray-200">{fmtEur(essenSum)}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Getränke (A / 19%) */}
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-xs font-bold text-gray-500 uppercase tracking-wider">Getränke (A · 19% MwSt)</p>
+                    <p className="text-sm font-bold text-gray-800">{fmtEur(getraenkeSum)}</p>
+                  </div>
+                  <table className="w-full text-xs border-collapse">
+                    <thead>
+                      <tr className="bg-gray-50">
+                        <th className="text-left px-2 py-1.5 font-semibold text-gray-500 border border-gray-200">Item</th>
+                        <th className="text-center px-2 py-1.5 font-semibold text-gray-500 border border-gray-200 w-12">Qty</th>
+                        <th className="text-right px-2 py-1.5 font-semibold text-gray-500 border border-gray-200 w-24">Total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {getraenkeItems.map((item, i) => (
+                        <tr key={i} className="border-b border-gray-100 last:border-0">
+                          <td className="px-2 py-1.5 text-gray-700 border border-gray-200">{item.name}</td>
+                          <td className="px-2 py-1.5 text-center text-gray-500 border border-gray-200">{item.qty}×</td>
+                          <td className="px-2 py-1.5 text-right tabular-nums text-gray-800 border border-gray-200">{fmtEur(item.total)}</td>
+                        </tr>
+                      ))}
+                      <tr className="bg-blue-50 font-semibold">
+                        <td className="px-2 py-1.5 text-gray-700 border border-gray-200" colSpan={2}>Total Getränke Brutto</td>
+                        <td className="px-2 py-1.5 text-right tabular-nums text-blue-700 border border-gray-200">{fmtEur(getraenkeSum)}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Grand total */}
+                <div className="border-t-2 border-gray-200 pt-3 flex items-center justify-between">
+                  <p className="text-sm font-bold text-gray-700">Gesamt Brutto</p>
+                  <p className="text-base font-bold text-gray-900">{fmtEur(essenSum + getraenkeSum)}</p>
+                </div>
+              </div>
+
+              <div className="px-6 pb-5">
+                <button type="button" onClick={() => setValueDetailsOpen(false)}
+                  className="w-full py-2.5 rounded-lg border border-gray-300 text-sm font-semibold text-gray-600 hover:bg-gray-50 transition-colors">
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ═══════ APPROVE & SEND MODAL ═══════ */}
       {sendModal && (

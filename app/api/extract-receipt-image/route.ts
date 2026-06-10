@@ -39,8 +39,18 @@ Each line item on the receipt has a letter printed in the RIGHTMOST column (far 
   "getraenkeBrutto": number,
   "trinkgeld": number,
   "eventDate": "YYYY-MM-DD or null",
-  "issuingLocation": "Westend | Eschborn | Taunus | null"
-}`;
+  "issuingLocation": "Westend | Eschborn | Taunus | null",
+  "lineItems": [
+    {
+      "name": "string — item name as printed on receipt",
+      "qty": number,
+      "total": number,
+      "taxCode": "A" | "B"
+    }
+  ]
+}
+
+For lineItems: include every chargeable line from the receipt. Use the qty and per-line total as printed. The taxCode MUST be the letter from the rightmost column of that line — never infer it from the item name.`;
 
 const ALLOWED_TYPES = new Set([
   'image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp',
@@ -70,7 +80,7 @@ export async function POST(req: NextRequest) {
 
     const response = await client.messages.create({
       model: 'claude-opus-4-5',
-      max_tokens: 1024,
+      max_tokens: 4096,
       system: SYSTEM_PROMPT,
       messages: [{
         role: 'user',
