@@ -180,6 +180,17 @@ export default function OutgoingBillsPage() {
   const [receiptLineItems,      setReceiptLineItems]      = useState<{ name: string; qty: number; total: number; taxCode: 'A' | 'B' }[]>([]);
   const [valueDetailsOpen,      setValueDetailsOpen]      = useState(false);
 
+  const moveReceiptItem = useCallback((idx: number, to: 'A' | 'B') => {
+    setReceiptLineItems((prev) => {
+      const next = prev.map((item, i) => i === idx ? { ...item, taxCode: to } : item);
+      const essen     = next.reduce((s, i) => i.taxCode === 'B' ? s + i.total : s, 0);
+      const getraenke = next.reduce((s, i) => i.taxCode === 'A' ? s + i.total : s, 0);
+      setEssenBrutto(String(essen));
+      setGetraenkeBrutto(String(getraenke));
+      return next;
+    });
+  }, []);
+
   // Customer CRM search
   const [customerQuery,       setCustomerQuery]       = useState('');
   const [customerSuggestions, setCustomerSuggestions] = useState<Customer[]>([]);
@@ -1843,8 +1854,8 @@ export default function OutgoingBillsPage() {
 
       {/* ═══════ VALUE DETAILS MODAL ═══════ */}
       {valueDetailsOpen && receiptLineItems.length > 0 && (() => {
-        const essenItems     = receiptLineItems.filter((i) => i.taxCode === 'B');
-        const getraenkeItems = receiptLineItems.filter((i) => i.taxCode === 'A');
+        const essenItems     = receiptLineItems.map((item, idx) => ({ ...item, idx })).filter((i) => i.taxCode === 'B');
+        const getraenkeItems = receiptLineItems.map((item, idx) => ({ ...item, idx })).filter((i) => i.taxCode === 'A');
         const essenSum       = essenItems.reduce((s, i) => s + i.total, 0);
         const getraenkeSum   = getraenkeItems.reduce((s, i) => s + i.total, 0);
         return (
@@ -1871,19 +1882,29 @@ export default function OutgoingBillsPage() {
                         <th className="text-left px-2 py-1.5 font-semibold text-gray-500 border border-gray-200">Item</th>
                         <th className="text-center px-2 py-1.5 font-semibold text-gray-500 border border-gray-200 w-12">Qty</th>
                         <th className="text-right px-2 py-1.5 font-semibold text-gray-500 border border-gray-200 w-24">Total</th>
+                        <th className="border border-gray-200 w-8"></th>
                       </tr>
                     </thead>
                     <tbody>
-                      {essenItems.map((item, i) => (
-                        <tr key={i} className="border-b border-gray-100 last:border-0">
+                      {essenItems.map((item) => (
+                        <tr key={item.idx} className="border-b border-gray-100 last:border-0">
                           <td className="px-2 py-1.5 text-gray-700 border border-gray-200">{item.name}</td>
                           <td className="px-2 py-1.5 text-center text-gray-500 border border-gray-200">{item.qty}×</td>
                           <td className="px-2 py-1.5 text-right tabular-nums text-gray-800 border border-gray-200">{fmtEur(item.total)}</td>
+                          <td className="px-1 py-1.5 text-center border border-gray-200">
+                            <button
+                              type="button"
+                              title="Move to Getränke"
+                              onClick={() => moveReceiptItem(item.idx, 'A')}
+                              className="text-blue-500 hover:text-blue-700 hover:bg-blue-50 rounded px-1 py-0.5 transition-colors"
+                            >↓</button>
+                          </td>
                         </tr>
                       ))}
                       <tr className="bg-green-50 font-semibold">
                         <td className="px-2 py-1.5 text-gray-700 border border-gray-200" colSpan={2}>Total Essen Brutto</td>
                         <td className="px-2 py-1.5 text-right tabular-nums text-[#1B5E20] border border-gray-200">{fmtEur(essenSum)}</td>
+                        <td className="border border-gray-200"></td>
                       </tr>
                     </tbody>
                   </table>
@@ -1901,19 +1922,29 @@ export default function OutgoingBillsPage() {
                         <th className="text-left px-2 py-1.5 font-semibold text-gray-500 border border-gray-200">Item</th>
                         <th className="text-center px-2 py-1.5 font-semibold text-gray-500 border border-gray-200 w-12">Qty</th>
                         <th className="text-right px-2 py-1.5 font-semibold text-gray-500 border border-gray-200 w-24">Total</th>
+                        <th className="border border-gray-200 w-8"></th>
                       </tr>
                     </thead>
                     <tbody>
-                      {getraenkeItems.map((item, i) => (
-                        <tr key={i} className="border-b border-gray-100 last:border-0">
+                      {getraenkeItems.map((item) => (
+                        <tr key={item.idx} className="border-b border-gray-100 last:border-0">
                           <td className="px-2 py-1.5 text-gray-700 border border-gray-200">{item.name}</td>
                           <td className="px-2 py-1.5 text-center text-gray-500 border border-gray-200">{item.qty}×</td>
                           <td className="px-2 py-1.5 text-right tabular-nums text-gray-800 border border-gray-200">{fmtEur(item.total)}</td>
+                          <td className="px-1 py-1.5 text-center border border-gray-200">
+                            <button
+                              type="button"
+                              title="Move to Essen"
+                              onClick={() => moveReceiptItem(item.idx, 'B')}
+                              className="text-green-600 hover:text-green-800 hover:bg-green-50 rounded px-1 py-0.5 transition-colors"
+                            >↑</button>
+                          </td>
                         </tr>
                       ))}
                       <tr className="bg-blue-50 font-semibold">
                         <td className="px-2 py-1.5 text-gray-700 border border-gray-200" colSpan={2}>Total Getränke Brutto</td>
                         <td className="px-2 py-1.5 text-right tabular-nums text-blue-700 border border-gray-200">{fmtEur(getraenkeSum)}</td>
+                        <td className="border border-gray-200"></td>
                       </tr>
                     </tbody>
                   </table>
