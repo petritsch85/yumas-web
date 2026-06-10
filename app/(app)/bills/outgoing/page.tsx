@@ -440,9 +440,14 @@ export default function OutgoingBillsPage() {
     setSending(true);
     setSendError(null);
     try {
-      // 1. Convert blob to base64
+      // 1. Convert blob to base64 (chunked to avoid call stack overflow on large PDFs)
       const arrayBuffer = await pendingBlob.arrayBuffer();
-      const pdfBase64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
+      const uint8 = new Uint8Array(arrayBuffer);
+      let binary = '';
+      for (let i = 0; i < uint8.length; i += 8192) {
+        binary += String.fromCharCode(...uint8.subarray(i, i + 8192));
+      }
+      const pdfBase64 = btoa(binary);
 
       // 2. Send email via Resend
       const emailRes = await fetch('/api/send-bill-email', {
