@@ -56,6 +56,7 @@ type Receipt = {
   received_at: string;
   received_by: string | null;
   items_confirmed_count: number | null;
+  confirmed_item_ids: string[] | null;
   notes: string | null;
 };
 
@@ -440,7 +441,7 @@ export default function DeliveryReportsPage() {
 
   /* ── Submit receipt ── */
   const submitReceipt = useMutation({
-    mutationFn: async ({ locationName, count, notes }: { locationName: string; count: number; notes: string }) => {
+    mutationFn: async ({ locationName, count, confirmedItemIds, notes }: { locationName: string; count: number; confirmedItemIds: string[]; notes: string }) => {
       const { data: { user } } = await supabase.auth.getUser();
       const { error } = await supabase.from('store_delivery_receipts').upsert({
         run_id: activeRun!.id,
@@ -448,6 +449,7 @@ export default function DeliveryReportsPage() {
         received_at: new Date().toISOString(),
         received_by: user?.id ?? null,
         items_confirmed_count: count,
+        confirmed_item_ids: confirmedItemIds,
         notes: notes.trim() || null,
       }, { onConflict: 'run_id,location_name' });
       if (error) throw error;
@@ -473,9 +475,11 @@ export default function DeliveryReportsPage() {
   const handleConfirm = async (store: Store) => {
     setSubmittingStore(store);
     try {
+      const confirmedIds = linesFor(store).filter(l => localChecked[l.id]).map(l => l.id);
       await submitReceipt.mutateAsync({
         locationName: store,
-        count: checkedForStore(store),
+        count: confirmedIds.length,
+        confirmedItemIds: confirmedIds,
         notes: localNotes[store] ?? '',
       });
       setLocalChecked({});
@@ -1333,10 +1337,67 @@ export default function DeliveryReportsPage() {
               >
                 <div className="px-5 py-4 space-y-4">
 
-                  {/* Item checklist */}
+                  {/* Item checklist / confirmed report */}
                   {storeLines.length === 0 ? (
                     <p className="text-sm text-gray-400">No items scheduled for {store}</p>
+                  ) : receipt ? (
+                    /* ── POST-CONFIRM: Scheduled vs Confirmed table ── */
+                    <div className="overflow-x-auto rounded-lg border border-gray-100">
+                      <table className="w-full text-sm">
+                        <thead className="bg-gray-50">
+                          <tr>
+                            <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-400 uppercase tracking-wide">Item</th>
+                            <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-400 uppercase tracking-wide hidden sm:table-cell">Unit</th>
+                            <th className="px-4 py-2.5 text-center text-xs font-semibold text-gray-500 uppercase tracking-wide">Scheduled</th>
+                            <th className="px-4 py-2.5 text-center text-xs font-semibold text-[#1B5E20] uppercase tracking-wide">Confirmed</th>
+                            <th className="px-4 py-2.5 text-center text-xs font-semibold text-gray-400 uppercase tracking-wide">Diff</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {storeLines.map(line => {
+                            const hasItemData = receipt.confirmed_item_ids != null && receipt.confirmed_item_ids.length > 0;
+                            const isConfirmed = hasItemData ? receipt.confirmed_item_ids!.includes(line.id) : null;
+                            const scheduledQty = line.packed_qty ?? line.delivery_qty;
+                            return (
+                              <tr key={line.id} className={`border-t border-gray-50 ${isConfirmed === false ? 'bg-red-50/40' : 'hover:bg-gray-50/40'}`}>
+                                <td className={`px-4 py-2.5 font-medium ${isConfirmed === false ? 'text-red-700' : 'text-gray-800'}`}>
+                                  {line.item_name}
+                                  <div className="text-xs text-gray-400 font-normal sm:hidden">{line.unit}</div>
+                                </td>
+                                <td className="px-4 py-2.5 text-xs text-gray-500 hidden sm:table-cell">{line.unit}</td>
+                                <td className="px-4 py-2.5 text-center">
+                                  <span className="inline-flex items-center justify-center min-w-[2rem] px-2 py-0.5 rounded-md bg-gray-100 text-gray-600 font-bold text-xs">
+                                    {scheduledQty}
+                                  </span>
+                                </td>
+                                <td className="px-4 py-2.5 text-center">
+                                  {isConfirmed === true && (
+                                    <span className="inline-flex items-center justify-center min-w-[2rem] px-2 py-0.5 rounded-md bg-[#1B5E20]/10 text-[#1B5E20] font-bold text-xs">
+                                      {scheduledQty}
+                                    </span>
+                                  )}
+                                  {isConfirmed === false && (
+                                    <span className="inline-flex items-center justify-center min-w-[2rem] px-2 py-0.5 rounded-md bg-red-100 text-red-600 font-bold text-xs">
+                                      0
+                                    </span>
+                                  )}
+                                  {isConfirmed === null && (
+                                    <span className="text-xs text-gray-400">—</span>
+                                  )}
+                                </td>
+                                <td className="px-4 py-2.5 text-center text-base">
+                                  {isConfirmed === true  && <span className="text-[#1B5E20]">✓</span>}
+                                  {isConfirmed === false && <span className="text-red-500 font-bold text-xs">✗ missing</span>}
+                                  {isConfirmed === null  && <span className="text-gray-300">—</span>}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
                   ) : (
+                    /* ── PRE-CONFIRM: interactive checklist ── */
                     <div className="overflow-x-auto rounded-lg border border-gray-100">
                       <table className="w-full text-sm">
                         <thead className="bg-gray-50">
@@ -1344,7 +1405,7 @@ export default function DeliveryReportsPage() {
                             <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-400 uppercase tracking-wide">Item</th>
                             <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-400 uppercase tracking-wide hidden sm:table-cell">Unit</th>
                             <th className="px-4 py-2.5 text-center text-xs font-semibold text-[#1B5E20] uppercase tracking-wide">Qty</th>
-                            {(canInteract && !receipt) && (
+                            {canInteract && (
                               <th className="px-4 py-2.5 text-center text-xs font-semibold text-gray-400 uppercase tracking-wide w-10">✓</th>
                             )}
                           </tr>
@@ -1352,10 +1413,9 @@ export default function DeliveryReportsPage() {
                         <tbody>
                           {storeLines.map(line => {
                             const isChecked = !!localChecked[line.id];
-                            const wasConfirmed = !!receipt;
                             return (
-                              <tr key={line.id} className={`border-t border-gray-50 ${(isChecked || wasConfirmed) ? 'opacity-50' : 'hover:bg-gray-50/40'}`}>
-                                <td className={`px-4 py-2.5 font-medium ${(isChecked || wasConfirmed) ? 'line-through text-gray-400' : 'text-gray-800'}`}>
+                              <tr key={line.id} className={`border-t border-gray-50 ${isChecked ? 'opacity-50' : 'hover:bg-gray-50/40'}`}>
+                                <td className={`px-4 py-2.5 font-medium ${isChecked ? 'line-through text-gray-400' : 'text-gray-800'}`}>
                                   {line.item_name}
                                   <div className="text-xs text-gray-400 font-normal sm:hidden">{line.unit}</div>
                                 </td>
@@ -1365,8 +1425,7 @@ export default function DeliveryReportsPage() {
                                     {line.packed_qty ?? line.delivery_qty}
                                   </span>
                                 </td>
-                                {/* Interactive checkbox */}
-                                {(canInteract && !receipt) && (
+                                {canInteract && (
                                   <td className="px-4 py-2.5 text-center">
                                     <button
                                       onClick={() => setLocalChecked(prev => ({ ...prev, [line.id]: !prev[line.id] }))}
