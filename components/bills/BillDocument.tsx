@@ -245,9 +245,9 @@ export function BillDocument({ data }: { data: BillData }) {
           <View>
             {/* Group 1: Netto split */}
             <View style={s.groupGap}>
-              <AmtRow label="Essen Netto (€)"    value={essenNetto} />
-              <AmtRow label="Getränke Netto (€)" value={getraenkeNetto} />
-              <AmtRowBold label="Gesamt Netto (€)" value={gesamtNettoD} />
+              <AmtRow label="Essen Netto"    value={essenNetto} />
+              <AmtRow label="Getränke Netto" value={getraenkeNetto} />
+              <AmtRowBold label="Gesamt Netto" value={gesamtNettoD} />
             </View>
 
             {/* Group 2: MwSt */}
@@ -261,13 +261,13 @@ export function BillDocument({ data }: { data: BillData }) {
             <View style={s.groupGap}>
               <AmtRow label={`Essen Brutto (${data.mwstEssenPct ?? 7}% MwSt)`}         value={essenBrutto} />
               <AmtRow label={`Getränke Brutto (${data.mwstGetraenkePct ?? 19}% MwSt)`} value={getraenkeBrutto} />
-              <AmtRowBold label="Gesamt Brutto (€)" value={gesamtBrutto} />
+              <AmtRowBold label="Gesamt Brutto" value={gesamtBrutto} />
             </View>
 
             {/* Group 4: Trinkgeld (only if > 0) */}
             {tip > 0 && (
               <View style={s.groupGap}>
-                <AmtRow label="Trinkgeld (€)" value={tip} />
+                <AmtRow label="Trinkgeld" value={tip} />
               </View>
             )}
 
