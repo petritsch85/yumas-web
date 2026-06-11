@@ -1282,21 +1282,21 @@ export default function DeliveryPage() {
   /* ─ Query: most recent store receipt notes (for previous-delivery reminders) ─ */
   const { data: prevReceiptNotes = {} } = useQuery<Partial<Record<string, { note: string; deliveryDate: string }>>>({
     queryKey: ['prev-receipt-notes'],
-    enabled: viewMode === 'manager',
     staleTime: 60_000,
     queryFn: async () => {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('store_delivery_receipts')
-        .select('location_name, notes, received_at, run_id, delivery_runs(delivery_date)')
+        .select('location_name, notes, received_at')
         .not('notes', 'is', null)
         .neq('notes', '')
         .order('received_at', { ascending: false });
+      if (error) return {};
       const map: Partial<Record<string, { note: string; deliveryDate: string }>> = {};
-      for (const r of (data ?? []) as any[]) {
+      for (const r of (data ?? [])) {
         if (!map[r.location_name] && r.notes?.trim()) {
           map[r.location_name] = {
             note: r.notes.trim(),
-            deliveryDate: r.delivery_runs?.delivery_date ?? r.received_at.slice(0, 10),
+            deliveryDate: r.received_at.slice(0, 10),
           };
         }
       }
