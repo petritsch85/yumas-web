@@ -792,22 +792,22 @@ export default function OutgoingBillsPage() {
   return (
     <div>
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">{t('bills.outgoingTitle')}</h1>
           <p className="text-sm text-gray-500 mt-0.5">{t('bills.outgoingSubtitle')}</p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
           <button
             onClick={() => setTab('create')}
-            className="flex items-center gap-2 px-4 py-2 bg-white text-[#1B5E20] border border-[#1B5E20] text-sm font-semibold rounded-xl hover:bg-green-50 transition-colors"
+            className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2 bg-white text-[#1B5E20] border border-[#1B5E20] text-sm font-semibold rounded-xl hover:bg-green-50 transition-colors"
           >
             <FilePlus size={15} />
             Create Bill
           </button>
           <button
             onClick={() => { setTab('upload'); setTimeout(() => fileInputRef.current?.click(), 100); }}
-            className="flex items-center gap-2 px-4 py-2 bg-[#1B5E20] text-white text-sm font-semibold rounded-xl hover:bg-[#2E7D32] transition-colors"
+            className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2 bg-[#1B5E20] text-white text-sm font-semibold rounded-xl hover:bg-[#2E7D32] transition-colors"
           >
             <Upload size={15} />
             Upload Invoice
@@ -1669,7 +1669,7 @@ export default function OutgoingBillsPage() {
         <div>
           {/* Summary cards */}
           {bills.length > 0 && (
-            <div className="grid grid-cols-5 gap-4 mb-5">
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-5">
               {[
                 { label: 'Net Total',      value: fmt(totals.net),     color: 'text-blue-700' },
                 { label: 'Gross Total',    value: fmt(totals.gross),   color: 'text-gray-900' },
@@ -1677,33 +1677,33 @@ export default function OutgoingBillsPage() {
                 { label: 'Total Payable',  value: fmt(totals.total),   color: 'text-[#1B5E20]' },
                 { label: 'Total Pending',  value: fmt(totals.pending), color: 'text-orange-600' },
               ].map((s) => (
-                <div key={s.label} className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm">
+                <div key={s.label} className="bg-white border border-gray-100 rounded-xl p-3 shadow-sm">
                   <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">{s.label}</p>
-                  <p className={`text-xl font-bold ${s.color}`}>{s.value}</p>
+                  <p className={`text-base sm:text-xl font-bold ${s.color}`}>{s.value}</p>
                 </div>
               ))}
             </div>
           )}
 
           {/* Filters */}
-          <div className="flex items-center gap-3 mb-4 flex-wrap">
+          <div className="flex items-center gap-2 mb-4 flex-wrap">
             <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}
-              className="border border-gray-200 rounded-lg px-3 py-1.5 text-xs font-semibold text-gray-600 focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30">
+              className="flex-1 sm:flex-none border border-gray-200 rounded-lg px-3 py-1.5 text-xs font-semibold text-gray-600 focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30">
               <option value="all">All statuses</option>
               <option value="pending">Pending</option>
               <option value="paid">Paid</option>
             </select>
             <select value={filterLocation} onChange={(e) => setFilterLocation(e.target.value)}
-              className="border border-gray-200 rounded-lg px-3 py-1.5 text-xs font-semibold text-gray-600 focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30">
+              className="flex-1 sm:flex-none border border-gray-200 rounded-lg px-3 py-1.5 text-xs font-semibold text-gray-600 focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30">
               <option value="all">All locations</option>
               {LOCATIONS.map((l) => <option key={l}>{l}</option>)}
             </select>
             <select value={filterMonth} onChange={(e) => setFilterMonth(e.target.value)}
-              className="border border-gray-200 rounded-lg px-3 py-1.5 text-xs font-semibold text-gray-600 focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30">
+              className="w-full sm:w-auto border border-gray-200 rounded-lg px-3 py-1.5 text-xs font-semibold text-gray-600 focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30">
               <option value="all">All dates</option>
               {uniqueMonths.map(({ value, label }) => <option key={value} value={value}>{label}</option>)}
             </select>
-            <span className="text-xs text-gray-400 ml-auto">{filtered.length} invoice{filtered.length !== 1 ? 's' : ''}</span>
+            <span className="text-xs text-gray-400 sm:ml-auto w-full sm:w-auto">{filtered.length} invoice{filtered.length !== 1 ? 's' : ''}</span>
           </div>
 
           {/* Table */}
@@ -1727,195 +1727,325 @@ export default function OutgoingBillsPage() {
               </div>
             </div>
           ) : (
-            <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="bg-gray-50 border-b border-gray-200">
-                    <th className="px-2 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Customer</th>
-                    <th className="px-2 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Invoice #</th>
-                    <th className="px-2 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Issue Date</th>
-                    <th className="px-2 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Event Date</th>
-                    <th className="px-2 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Location</th>
-                    <th className="px-2 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Shift</th>
-                    <th className="px-2 py-2 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Net</th>
-                    <th className="px-2 py-2 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Gross</th>
-                    <th className="px-2 py-2 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Tips</th>
-                    <th className="px-2 py-2 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Total Payable</th>
-                    <th className="px-2 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Status</th>
-                    <th className="px-2 py-2 w-16"></th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {sortedBills.map((bill) => (
-                    <React.Fragment key={bill.id}>
-                      <tr className="hover:bg-gray-50 transition-colors">
-                        <td className="px-2 py-2 font-semibold text-gray-900">{bill.customer_name}</td>
-                        <td className="px-2 py-2 text-gray-500 font-mono text-xs">{bill.invoice_number ?? '—'}</td>
-                        <td className="px-2 py-2 text-gray-600 whitespace-nowrap text-xs">{fmtDate(bill.invoice_date)}</td>
-                        <td className="px-2 py-2 text-gray-600 whitespace-nowrap text-xs">{fmtDate(bill.event_date)}</td>
-                        <td className="px-2 py-2">
-                          {bill.issuing_location
-                            ? <span className="inline-flex items-center px-2 py-0.5 bg-indigo-50 text-indigo-700 text-xs rounded-full">{bill.issuing_location}</span>
-                            : <span className="text-xs text-red-400">—</span>
-                          }
-                        </td>
-                        <td className="px-2 py-2">
-                          {bill.shift_type
-                            ? <span className={`inline-flex items-center px-2 py-0.5 text-xs rounded-full font-semibold ${bill.shift_type === 'lunch' ? 'bg-amber-50 text-amber-700' : 'bg-blue-50 text-blue-700'}`}>
-                                {bill.shift_type === 'lunch' ? '☀️ Lunch' : '🌙 Dinner'}
-                              </span>
-                            : <span className="text-xs text-red-400">—</span>
-                          }
-                        </td>
-                        <td className="px-2 py-2 text-right tabular-nums text-gray-700">{fmt(bill.net_total)}</td>
-                        <td className="px-2 py-2 text-right tabular-nums text-gray-900">{fmt(bill.gross_total)}</td>
-                        <td className="px-2 py-2 text-right tabular-nums text-amber-700">{bill.tips > 0 ? fmt(bill.tips) : '—'}</td>
-                        <td className="px-2 py-2 text-right font-bold text-[#1B5E20] tabular-nums">{fmt(bill.total_payable)}</td>
-                        <td className="px-2 py-2">
-                          <select value={bill.status} onChange={(e) => updateStatus(bill.id, e.target.value)}
-                            className={`text-xs font-semibold px-2 py-1 rounded-full border cursor-pointer focus:outline-none ${STATUS_STYLES[bill.status]}`}>
-                            <option value="pending">Pending</option>
-                            <option value="paid">Paid</option>
-                          </select>
-                        </td>
-                        <td className="px-2 py-2">
-                          <div className="flex items-center gap-2">
-                            {bill.file_path && (
-                              <>
-                                <a href={`${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/bills/${bill.file_path}`}
-                                  target="_blank" rel="noopener noreferrer"
-                                  className="text-gray-300 hover:text-blue-500 transition-colors" title="View PDF">
-                                  <Eye size={14} />
-                                </a>
-                                <a href={`${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/bills/${bill.file_path}`}
-                                  download
-                                  className="text-gray-300 hover:text-green-500 transition-colors" title="Download PDF">
-                                  <Download size={14} />
-                                </a>
-                              </>
-                            )}
-                            <button
-                              onClick={() => editingId === bill.id ? setEditingId(null) : startEdit(bill)}
-                              className={`transition-colors ${editingId === bill.id ? 'text-indigo-500' : 'text-gray-300 hover:text-indigo-500'}`}
-                              title="Edit"
-                            >
-                              <Pencil size={14} />
-                            </button>
-                            <button onClick={() => deleteBill(bill.id)} className="text-gray-300 hover:text-red-500 transition-colors">
-                              <Trash2 size={14} />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
+            <>
+              {/* ── Mobile card list (< sm) ──────────────────────────────── */}
+              <div className="sm:hidden space-y-2">
+                {sortedBills.map((bill) => (
+                  <div key={bill.id} className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+                    <div className="px-4 py-3">
+                      {/* Row 1: customer + invoice # + status */}
+                      <div className="flex items-start justify-between gap-2 mb-1.5">
+                        <div className="flex-1 min-w-0">
+                          <p className="font-semibold text-gray-900 text-sm truncate">{bill.customer_name}</p>
+                          {bill.invoice_number && (
+                            <p className="text-xs font-mono text-gray-400">#{bill.invoice_number}</p>
+                          )}
+                        </div>
+                        <select value={bill.status} onChange={(e) => updateStatus(bill.id, e.target.value)}
+                          className={`flex-shrink-0 text-xs font-semibold px-2 py-1 rounded-full border cursor-pointer focus:outline-none ${STATUS_STYLES[bill.status]}`}>
+                          <option value="pending">Pending</option>
+                          <option value="paid">Paid</option>
+                        </select>
+                      </div>
 
-                      {/* Inline edit row */}
-                      {editingId === bill.id && editDraft && (
-                        <tr className="bg-indigo-50/60">
-                          <td colSpan={12} className="px-4 py-4">
-                            <div className="grid grid-cols-4 gap-3 mb-3">
-                              {([
-                                { label: 'Customer',       field: 'customer_name'  as keyof OutgoingBill, type: 'text' },
-                                { label: 'Invoice Number', field: 'invoice_number' as keyof OutgoingBill, type: 'text' },
-                                { label: 'Invoice Date',   field: 'invoice_date'   as keyof OutgoingBill, type: 'date' },
-                                { label: 'Event Date',     field: 'event_date'     as keyof OutgoingBill, type: 'date' },
-                              ]).map(({ label, field, type }) => (
-                                <div key={field}>
-                                  <label className="block text-xs font-semibold text-gray-500 mb-1">{label}</label>
-                                  <input type={type} value={(editDraft as any)[field] ?? ''}
-                                    onChange={(e) => setEditDraft((d) => d ? { ...d, [field]: e.target.value || null } : d)}
-                                    className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300" />
-                                </div>
-                              ))}
+                      {/* Row 2: event date + location + shift */}
+                      <div className="flex items-center flex-wrap gap-x-2 gap-y-1 mb-2">
+                        {bill.event_date && (
+                          <span className="text-xs text-gray-500">{fmtDate(bill.event_date)}</span>
+                        )}
+                        {bill.issuing_location && (
+                          <span className="text-xs px-1.5 py-0.5 bg-indigo-50 text-indigo-700 rounded-full">{bill.issuing_location}</span>
+                        )}
+                        {bill.shift_type && (
+                          <span className={`text-xs px-1.5 py-0.5 rounded-full font-semibold ${bill.shift_type === 'lunch' ? 'bg-amber-50 text-amber-700' : 'bg-blue-50 text-blue-700'}`}>
+                            {bill.shift_type === 'lunch' ? '☀️ Lunch' : '🌙 Dinner'}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Row 3: total + actions */}
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-base font-bold text-[#1B5E20] tabular-nums">{fmt(bill.total_payable)}</p>
+                          {bill.tips > 0 && (
+                            <p className="text-xs text-amber-600">incl. {fmt(bill.tips)} tips</p>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-3">
+                          {bill.file_path && (
+                            <>
+                              <a href={`${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/bills/${bill.file_path}`}
+                                target="_blank" rel="noopener noreferrer"
+                                className="text-gray-400 hover:text-blue-500 transition-colors" title="View PDF">
+                                <Eye size={16} />
+                              </a>
+                              <a href={`${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/bills/${bill.file_path}`}
+                                download
+                                className="text-gray-400 hover:text-green-500 transition-colors" title="Download PDF">
+                                <Download size={16} />
+                              </a>
+                            </>
+                          )}
+                          <button
+                            onClick={() => editingId === bill.id ? setEditingId(null) : startEdit(bill)}
+                            className={`transition-colors ${editingId === bill.id ? 'text-indigo-500' : 'text-gray-400 hover:text-indigo-500'}`}
+                          >
+                            <Pencil size={16} />
+                          </button>
+                          <button onClick={() => deleteBill(bill.id)} className="text-gray-400 hover:text-red-500 transition-colors">
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Inline edit (mobile) */}
+                    {editingId === bill.id && editDraft && (
+                      <div className="border-t border-indigo-100 bg-indigo-50/60 px-4 py-4 space-y-3">
+                        <div className="grid grid-cols-2 gap-3">
+                          {([
+                            { label: 'Customer',       field: 'customer_name'  as keyof OutgoingBill, type: 'text' },
+                            { label: 'Invoice #',      field: 'invoice_number' as keyof OutgoingBill, type: 'text' },
+                            { label: 'Invoice Date',   field: 'invoice_date'   as keyof OutgoingBill, type: 'date' },
+                            { label: 'Event Date',     field: 'event_date'     as keyof OutgoingBill, type: 'date' },
+                          ]).map(({ label, field, type }) => (
+                            <div key={field}>
+                              <label className="block text-xs font-semibold text-gray-500 mb-1">{label}</label>
+                              <input type={type} value={(editDraft as any)[field] ?? ''}
+                                onChange={(e) => setEditDraft((d) => d ? { ...d, [field]: e.target.value || null } : d)}
+                                className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300" />
                             </div>
-                            <div className="grid grid-cols-4 gap-3 mb-3">
-                              {([
-                                { label: 'Net Food (€)',    field: 'net_food'    as keyof OutgoingBill },
-                                { label: 'Net Drinks (€)',  field: 'net_drinks'  as keyof OutgoingBill },
-                                { label: 'Net Total (€)',   field: 'net_total'   as keyof OutgoingBill },
-                                { label: 'Gross Total (€)', field: 'gross_total' as keyof OutgoingBill },
-                              ]).map(({ label, field }) => (
-                                <div key={field}>
-                                  <label className="block text-xs font-semibold text-gray-500 mb-1">{label}</label>
-                                  <input type="number" step="0.01" value={(editDraft as any)[field] ?? 0}
-                                    onChange={(e) => setEditDraft((d) => d ? { ...d, [field]: parseFloat(e.target.value) || 0 } : d)}
-                                    className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300" />
-                                </div>
-                              ))}
+                          ))}
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                          {([
+                            { label: 'Net Total (€)',   field: 'net_total'     as keyof OutgoingBill },
+                            { label: 'Gross Total (€)', field: 'gross_total'   as keyof OutgoingBill },
+                            { label: 'Tips (€)',        field: 'tips'          as keyof OutgoingBill },
+                            { label: 'Total Payable (€)',field:'total_payable' as keyof OutgoingBill },
+                          ]).map(({ label, field }) => (
+                            <div key={field}>
+                              <label className="block text-xs font-semibold text-gray-500 mb-1">{label}</label>
+                              <input type="number" step="0.01" value={(editDraft as any)[field] ?? 0}
+                                onChange={(e) => setEditDraft((d) => d ? { ...d, [field]: parseFloat(e.target.value) || 0 } : d)}
+                                className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300" />
                             </div>
-                            <div className="grid grid-cols-4 gap-3 mb-3">
-                              {([
-                                { label: 'VAT 7% (€)',        field: 'vat_7'         as keyof OutgoingBill },
-                                { label: 'VAT 19% (€)',       field: 'vat_19'        as keyof OutgoingBill },
-                                { label: 'Tips (€)',          field: 'tips'          as keyof OutgoingBill },
-                                { label: 'Total Payable (€)', field: 'total_payable' as keyof OutgoingBill },
-                              ]).map(({ label, field }) => (
-                                <div key={field}>
-                                  <label className="block text-xs font-semibold text-gray-500 mb-1">{label}</label>
-                                  <input type="number" step="0.01" value={(editDraft as any)[field] ?? 0}
-                                    onChange={(e) => setEditDraft((d) => d ? { ...d, [field]: parseFloat(e.target.value) || 0 } : d)}
-                                    className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300" />
-                                </div>
-                              ))}
-                            </div>
-                            <div className="grid grid-cols-4 gap-3 mb-3">
-                              <div>
-                                <label className="block text-xs font-semibold text-gray-500 mb-1">Issuing Location</label>
-                                <div className="relative">
-                                  <select value={editDraft.issuing_location ?? ''}
-                                    onChange={(e) => setEditDraft((d) => d ? { ...d, issuing_location: e.target.value || null } : d)}
-                                    className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300 appearance-none pr-6">
-                                    <option value="">— Select —</option>
-                                    {LOCATIONS.map((l) => <option key={l}>{l}</option>)}
-                                  </select>
-                                  <ChevronDown size={12} className="absolute right-2 top-2 text-gray-400 pointer-events-none" />
-                                </div>
-                              </div>
-                              <div>
-                                <label className="block text-xs font-semibold text-gray-500 mb-1">Shift Type</label>
-                                <div className="flex gap-2">
-                                  {(['lunch', 'dinner'] as const).map((s) => (
-                                    <button key={s}
-                                      onClick={() => setEditDraft((d) => d ? { ...d, shift_type: d.shift_type === s ? null : s } : d)}
-                                      className={`flex-1 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
-                                        editDraft.shift_type === s
-                                          ? s === 'lunch' ? 'bg-amber-500 text-white border-amber-500' : 'bg-blue-600 text-white border-blue-600'
-                                          : 'bg-white text-gray-500 border-gray-200 hover:border-gray-400'
-                                      }`}>
-                                      {s === 'lunch' ? '☀️ Lunch' : '🌙 Dinner'}
-                                    </button>
-                                  ))}
-                                </div>
-                              </div>
-                            </div>
+                          ))}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button onClick={saveEdit} disabled={savingEdit}
+                            className="flex items-center gap-1.5 px-3 py-2 bg-indigo-600 text-white text-xs font-bold rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors">
+                            {savingEdit ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+                            {savingEdit ? 'Saving…' : 'Save'}
+                          </button>
+                          <button onClick={() => { setEditingId(null); setEditDraft(null); }}
+                            className="px-3 py-2 text-xs font-semibold text-gray-500 border border-gray-200 rounded-lg bg-white transition-colors">
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+
+                {/* Mobile totals bar */}
+                <div className="bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 flex items-center justify-between">
+                  <span className="text-xs text-gray-500 font-semibold">{filtered.length} invoices</span>
+                  <span className="text-sm font-bold text-[#1B5E20] tabular-nums">{fmt(totals.total)}</span>
+                </div>
+              </div>
+
+              {/* ── Desktop table (≥ sm) ─────────────────────────────────── */}
+              <div className="hidden sm:block bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="bg-gray-50 border-b border-gray-200">
+                      <th className="px-2 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Customer</th>
+                      <th className="px-2 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Invoice #</th>
+                      <th className="px-2 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Issue Date</th>
+                      <th className="px-2 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Event Date</th>
+                      <th className="px-2 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Location</th>
+                      <th className="px-2 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Shift</th>
+                      <th className="px-2 py-2 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Net</th>
+                      <th className="px-2 py-2 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Gross</th>
+                      <th className="px-2 py-2 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Tips</th>
+                      <th className="px-2 py-2 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Total Payable</th>
+                      <th className="px-2 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Status</th>
+                      <th className="px-2 py-2 w-16"></th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {sortedBills.map((bill) => (
+                      <React.Fragment key={bill.id}>
+                        <tr className="hover:bg-gray-50 transition-colors">
+                          <td className="px-2 py-2 font-semibold text-gray-900">{bill.customer_name}</td>
+                          <td className="px-2 py-2 text-gray-500 font-mono text-xs">{bill.invoice_number ?? '—'}</td>
+                          <td className="px-2 py-2 text-gray-600 whitespace-nowrap text-xs">{fmtDate(bill.invoice_date)}</td>
+                          <td className="px-2 py-2 text-gray-600 whitespace-nowrap text-xs">{fmtDate(bill.event_date)}</td>
+                          <td className="px-2 py-2">
+                            {bill.issuing_location
+                              ? <span className="inline-flex items-center px-2 py-0.5 bg-indigo-50 text-indigo-700 text-xs rounded-full">{bill.issuing_location}</span>
+                              : <span className="text-xs text-red-400">—</span>
+                            }
+                          </td>
+                          <td className="px-2 py-2">
+                            {bill.shift_type
+                              ? <span className={`inline-flex items-center px-2 py-0.5 text-xs rounded-full font-semibold ${bill.shift_type === 'lunch' ? 'bg-amber-50 text-amber-700' : 'bg-blue-50 text-blue-700'}`}>
+                                  {bill.shift_type === 'lunch' ? '☀️ Lunch' : '🌙 Dinner'}
+                                </span>
+                              : <span className="text-xs text-red-400">—</span>
+                            }
+                          </td>
+                          <td className="px-2 py-2 text-right tabular-nums text-gray-700">{fmt(bill.net_total)}</td>
+                          <td className="px-2 py-2 text-right tabular-nums text-gray-900">{fmt(bill.gross_total)}</td>
+                          <td className="px-2 py-2 text-right tabular-nums text-amber-700">{bill.tips > 0 ? fmt(bill.tips) : '—'}</td>
+                          <td className="px-2 py-2 text-right font-bold text-[#1B5E20] tabular-nums">{fmt(bill.total_payable)}</td>
+                          <td className="px-2 py-2">
+                            <select value={bill.status} onChange={(e) => updateStatus(bill.id, e.target.value)}
+                              className={`text-xs font-semibold px-2 py-1 rounded-full border cursor-pointer focus:outline-none ${STATUS_STYLES[bill.status]}`}>
+                              <option value="pending">Pending</option>
+                              <option value="paid">Paid</option>
+                            </select>
+                          </td>
+                          <td className="px-2 py-2">
                             <div className="flex items-center gap-2">
-                              <button onClick={saveEdit} disabled={savingEdit}
-                                className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white text-xs font-bold rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors">
-                                {savingEdit ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
-                                {savingEdit ? 'Saving…' : 'Save Changes'}
+                              {bill.file_path && (
+                                <>
+                                  <a href={`${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/bills/${bill.file_path}`}
+                                    target="_blank" rel="noopener noreferrer"
+                                    className="text-gray-300 hover:text-blue-500 transition-colors" title="View PDF">
+                                    <Eye size={14} />
+                                  </a>
+                                  <a href={`${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/bills/${bill.file_path}`}
+                                    download
+                                    className="text-gray-300 hover:text-green-500 transition-colors" title="Download PDF">
+                                    <Download size={14} />
+                                  </a>
+                                </>
+                              )}
+                              <button
+                                onClick={() => editingId === bill.id ? setEditingId(null) : startEdit(bill)}
+                                className={`transition-colors ${editingId === bill.id ? 'text-indigo-500' : 'text-gray-300 hover:text-indigo-500'}`}
+                                title="Edit"
+                              >
+                                <Pencil size={14} />
                               </button>
-                              <button onClick={() => { setEditingId(null); setEditDraft(null); }}
-                                className="px-3 py-1.5 text-xs font-semibold text-gray-500 hover:text-gray-700 border border-gray-200 rounded-lg bg-white transition-colors">
-                                Cancel
+                              <button onClick={() => deleteBill(bill.id)} className="text-gray-300 hover:text-red-500 transition-colors">
+                                <Trash2 size={14} />
                               </button>
                             </div>
                           </td>
                         </tr>
-                      )}
-                    </React.Fragment>
-                  ))}
-                </tbody>
-                <tfoot>
-                  <tr className="bg-gray-50 border-t-2 border-gray-200">
-                    <td colSpan={6} className="px-4 py-3 text-xs font-semibold text-gray-500">{filtered.length} invoices</td>
-                    <td className="px-2 py-2 text-right font-bold text-gray-700 tabular-nums">{fmt(totals.net)}</td>
-                    <td className="px-2 py-2 text-right font-bold text-gray-900 tabular-nums">{fmt(totals.gross)}</td>
-                    <td className="px-2 py-2 text-right font-bold text-amber-700 tabular-nums">{fmt(totals.tips)}</td>
-                    <td className="px-2 py-2 text-right font-bold text-[#1B5E20] tabular-nums">{fmt(totals.total)}</td>
-                    <td colSpan={2} />
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
+
+                        {/* Inline edit row */}
+                        {editingId === bill.id && editDraft && (
+                          <tr className="bg-indigo-50/60">
+                            <td colSpan={12} className="px-4 py-4">
+                              <div className="grid grid-cols-4 gap-3 mb-3">
+                                {([
+                                  { label: 'Customer',       field: 'customer_name'  as keyof OutgoingBill, type: 'text' },
+                                  { label: 'Invoice Number', field: 'invoice_number' as keyof OutgoingBill, type: 'text' },
+                                  { label: 'Invoice Date',   field: 'invoice_date'   as keyof OutgoingBill, type: 'date' },
+                                  { label: 'Event Date',     field: 'event_date'     as keyof OutgoingBill, type: 'date' },
+                                ]).map(({ label, field, type }) => (
+                                  <div key={field}>
+                                    <label className="block text-xs font-semibold text-gray-500 mb-1">{label}</label>
+                                    <input type={type} value={(editDraft as any)[field] ?? ''}
+                                      onChange={(e) => setEditDraft((d) => d ? { ...d, [field]: e.target.value || null } : d)}
+                                      className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300" />
+                                  </div>
+                                ))}
+                              </div>
+                              <div className="grid grid-cols-4 gap-3 mb-3">
+                                {([
+                                  { label: 'Net Food (€)',    field: 'net_food'    as keyof OutgoingBill },
+                                  { label: 'Net Drinks (€)',  field: 'net_drinks'  as keyof OutgoingBill },
+                                  { label: 'Net Total (€)',   field: 'net_total'   as keyof OutgoingBill },
+                                  { label: 'Gross Total (€)', field: 'gross_total' as keyof OutgoingBill },
+                                ]).map(({ label, field }) => (
+                                  <div key={field}>
+                                    <label className="block text-xs font-semibold text-gray-500 mb-1">{label}</label>
+                                    <input type="number" step="0.01" value={(editDraft as any)[field] ?? 0}
+                                      onChange={(e) => setEditDraft((d) => d ? { ...d, [field]: parseFloat(e.target.value) || 0 } : d)}
+                                      className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300" />
+                                  </div>
+                                ))}
+                              </div>
+                              <div className="grid grid-cols-4 gap-3 mb-3">
+                                {([
+                                  { label: 'VAT 7% (€)',        field: 'vat_7'         as keyof OutgoingBill },
+                                  { label: 'VAT 19% (€)',       field: 'vat_19'        as keyof OutgoingBill },
+                                  { label: 'Tips (€)',          field: 'tips'          as keyof OutgoingBill },
+                                  { label: 'Total Payable (€)', field: 'total_payable' as keyof OutgoingBill },
+                                ]).map(({ label, field }) => (
+                                  <div key={field}>
+                                    <label className="block text-xs font-semibold text-gray-500 mb-1">{label}</label>
+                                    <input type="number" step="0.01" value={(editDraft as any)[field] ?? 0}
+                                      onChange={(e) => setEditDraft((d) => d ? { ...d, [field]: parseFloat(e.target.value) || 0 } : d)}
+                                      className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300" />
+                                  </div>
+                                ))}
+                              </div>
+                              <div className="grid grid-cols-4 gap-3 mb-3">
+                                <div>
+                                  <label className="block text-xs font-semibold text-gray-500 mb-1">Issuing Location</label>
+                                  <div className="relative">
+                                    <select value={editDraft.issuing_location ?? ''}
+                                      onChange={(e) => setEditDraft((d) => d ? { ...d, issuing_location: e.target.value || null } : d)}
+                                      className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300 appearance-none pr-6">
+                                      <option value="">— Select —</option>
+                                      {LOCATIONS.map((l) => <option key={l}>{l}</option>)}
+                                    </select>
+                                    <ChevronDown size={12} className="absolute right-2 top-2 text-gray-400 pointer-events-none" />
+                                  </div>
+                                </div>
+                                <div>
+                                  <label className="block text-xs font-semibold text-gray-500 mb-1">Shift Type</label>
+                                  <div className="flex gap-2">
+                                    {(['lunch', 'dinner'] as const).map((s) => (
+                                      <button key={s}
+                                        onClick={() => setEditDraft((d) => d ? { ...d, shift_type: d.shift_type === s ? null : s } : d)}
+                                        className={`flex-1 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
+                                          editDraft.shift_type === s
+                                            ? s === 'lunch' ? 'bg-amber-500 text-white border-amber-500' : 'bg-blue-600 text-white border-blue-600'
+                                            : 'bg-white text-gray-500 border-gray-200 hover:border-gray-400'
+                                        }`}>
+                                        {s === 'lunch' ? '☀️ Lunch' : '🌙 Dinner'}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <button onClick={saveEdit} disabled={savingEdit}
+                                  className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white text-xs font-bold rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors">
+                                  {savingEdit ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+                                  {savingEdit ? 'Saving…' : 'Save Changes'}
+                                </button>
+                                <button onClick={() => { setEditingId(null); setEditDraft(null); }}
+                                  className="px-3 py-1.5 text-xs font-semibold text-gray-500 hover:text-gray-700 border border-gray-200 rounded-lg bg-white transition-colors">
+                                  Cancel
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr className="bg-gray-50 border-t-2 border-gray-200">
+                      <td colSpan={6} className="px-4 py-3 text-xs font-semibold text-gray-500">{filtered.length} invoices</td>
+                      <td className="px-2 py-2 text-right font-bold text-gray-700 tabular-nums">{fmt(totals.net)}</td>
+                      <td className="px-2 py-2 text-right font-bold text-gray-900 tabular-nums">{fmt(totals.gross)}</td>
+                      <td className="px-2 py-2 text-right font-bold text-amber-700 tabular-nums">{fmt(totals.tips)}</td>
+                      <td className="px-2 py-2 text-right font-bold text-[#1B5E20] tabular-nums">{fmt(totals.total)}</td>
+                      <td colSpan={2} />
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </>
           )}
         </div>
       )}
