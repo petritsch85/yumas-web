@@ -6,7 +6,7 @@ import { supabase } from '@/lib/supabase-browser';
 import {
   Upload, FileCheck, AlertCircle, Loader2,
   CheckCircle2, Clock, Banknote, Trash2,
-  ChevronDown, Eye, X, Save, Pencil, Download,
+  ChevronDown, Eye, X, Save, Pencil, Download, BookOpen,
   FilePlus, Plus, FileDown, Camera,
 } from 'lucide-react';
 import type { BillData, LineItem } from '@/components/bills/BillDocument';
@@ -196,6 +196,32 @@ export default function OutgoingBillsPage() {
   const [customerSuggestions, setCustomerSuggestions] = useState<Customer[]>([]);
   const [showSuggestions,     setShowSuggestions]     = useState(false);
   const crmRef = useRef<HTMLDivElement>(null);
+
+  // Client Registry modal
+  const [registryOpen,      setRegistryOpen]      = useState(false);
+  const [registryCustomers, setRegistryCustomers] = useState<Customer[]>([]);
+  const [registrySearch,    setRegistrySearch]    = useState('');
+  const [registryLoading,   setRegistryLoading]   = useState(false);
+
+  const openRegistry = async () => {
+    setRegistryOpen(true);
+    setRegistryLoading(true);
+    try {
+      const res = await fetch('/api/customers/all');
+      if (res.ok) setRegistryCustomers(await res.json());
+    } finally {
+      setRegistryLoading(false);
+    }
+  };
+
+  const deleteCustomer = async (id: string) => {
+    await fetch(`/api/customers/${id}`, { method: 'DELETE' });
+    setRegistryCustomers(prev => prev.filter(c => c.id !== id));
+  };
+
+  const filteredRegistry = registrySearch.trim().length > 0
+    ? registryCustomers.filter(c => c.company_name.toLowerCase().includes(registrySearch.toLowerCase()))
+    : registryCustomers;
 
   // Auto-update intro text when event date, location or bill type changes
   useEffect(() => {
@@ -1195,7 +1221,14 @@ export default function OutgoingBillsPage() {
 
               {/* CRM customer search */}
               <div ref={crmRef} className="relative">
-                <label className={labelCls}>Search Saved Customers</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className={labelCls} style={{marginBottom:0}}>Search Saved Customers</label>
+                  <button type="button" onClick={openRegistry}
+                    className="flex items-center gap-1 text-xs font-semibold text-indigo-600 hover:text-indigo-800 transition-colors">
+                    <BookOpen size={13} />
+                    Client Registry
+                  </button>
+                </div>
                 <div className="relative">
                   <input
                     className={`${inputCls} pl-8`}
@@ -2045,6 +2078,102 @@ export default function OutgoingBillsPage() {
               >
                 {sending ? <><Loader2 size={14} className="animate-spin" /> Sending…</> : <><CheckCircle2 size={14} /> Approve &amp; Send</>}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Client Registry Modal ─────────────────────────────────────── */}
+      {registryOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[80vh] flex flex-col">
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+              <div className="flex items-center gap-2">
+                <BookOpen size={18} className="text-indigo-600" />
+                <h2 className="text-base font-bold text-gray-900">Client Registry</h2>
+                <span className="text-xs text-gray-400 font-normal ml-1">({registryCustomers.length} customers)</span>
+              </div>
+              <button onClick={() => { setRegistryOpen(false); setRegistrySearch(''); }}
+                className="text-gray-400 hover:text-gray-700 transition-colors">
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Search */}
+            <div className="px-6 py-3 border-b border-gray-100">
+              <div className="relative">
+                <input
+                  className="w-full pl-8 pr-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                  placeholder="Filter by company name…"
+                  value={registrySearch}
+                  onChange={(e) => setRegistrySearch(e.target.value)}
+                  autoFocus
+                />
+                <svg className="absolute left-2.5 top-2.5 text-gray-400 pointer-events-none" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+              </div>
+            </div>
+
+            {/* Table */}
+            <div className="overflow-y-auto flex-1">
+              {registryLoading ? (
+                <div className="flex items-center justify-center py-12 text-gray-400 text-sm gap-2">
+                  <Loader2 size={16} className="animate-spin" /> Loading…
+                </div>
+              ) : filteredRegistry.length === 0 ? (
+                <p className="text-center text-sm text-gray-400 py-12">No customers found.</p>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-gray-50 text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                      <th className="px-4 py-2 text-left">Company</th>
+                      <th className="px-4 py-2 text-left">Address</th>
+                      <th className="px-4 py-2 text-left">Contact</th>
+                      <th className="px-4 py-2 text-left">PO / Att</th>
+                      <th className="px-2 py-2"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredRegistry.map((c) => (
+                      <tr key={c.id} className="border-t border-gray-100 hover:bg-indigo-50/40 transition-colors group">
+                        <td className="px-4 py-2.5">
+                          <p className="font-semibold text-gray-900">{c.company_name}</p>
+                          {c.extra_line && <p className="text-xs text-gray-400">{c.extra_line}</p>}
+                        </td>
+                        <td className="px-4 py-2.5 text-gray-600">
+                          {[c.street, c.postcode, c.city].filter(Boolean).join(', ') || <span className="text-gray-300">—</span>}
+                        </td>
+                        <td className="px-4 py-2.5 text-gray-600">
+                          {c.contact_name || <span className="text-gray-300">—</span>}
+                        </td>
+                        <td className="px-4 py-2.5 text-gray-600 text-xs">
+                          {c.po_number && <div>PO: {c.po_number}</div>}
+                          {c.att && <div>Att: {c.att}</div>}
+                          {!c.po_number && !c.att && <span className="text-gray-300">—</span>}
+                        </td>
+                        <td className="px-3 py-2.5">
+                          <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button
+                              type="button"
+                              onClick={() => { applyCustomer(c); setRegistryOpen(false); setRegistrySearch(''); }}
+                              className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 transition-colors whitespace-nowrap"
+                              title="Use this customer">
+                              Select
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => deleteCustomer(c.id)}
+                              className="text-gray-300 hover:text-red-500 transition-colors"
+                              title="Delete">
+                              <Trash2 size={13} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
             </div>
           </div>
         </div>
