@@ -153,6 +153,7 @@ export default function DashboardPage() {
     { labelKey: 'dashboard.quickLinks.events',       href: '/events',                   icon: PartyPopper,     color: '#AD1457', permKey: 'events' },
     { labelKey: 'dashboard.quickLinks.staffVideos',  href: '/staff-videos',             icon: Users,           color: '#37474F', permKey: 'staff_videos' },
     { labelKey: 'dashboard.quickLinks.bills',        href: '/bills',                    icon: FilePlus,        color: '#558B2F', permKey: 'bills' },
+    { labelKey: 'dashboard.quickLinks.createBill',  href: '/bills/outgoing',            icon: FilePlus,        color: '#558B2F', permKey: 'bills_create' },
     { labelKey: 'dashboard.quickLinks.salesReports', href: '/pl-reports/sales-reports', icon: LineChart,       color: '#283593', permKey: 'pl_reports' },
     { labelKey: 'dashboard.quickLinks.team',         href: '/settings/users',           icon: Users,           color: '#4E342E', adminOnly: true },
     { labelKey: 'dashboard.quickLinks.plReports',    href: '/reports',                  icon: TrendingUp,      color: '#00695C', adminOnly: true },
@@ -186,6 +187,10 @@ export default function DashboardPage() {
     }
     // Packing tile: any staff with packer permission (independent of other delivery sub-roles)
     if (l.permKey === 'packer') return isStaffRole && hasPacker;
+    // bills_create tile: only show if user has bills_create but NOT full bills access (avoid duplicate)
+    if (l.permKey === 'bills_create') {
+      return !!(permsAny.bills_create) && !isAdmin && !!(permsAny.bills) === false;
+    }
     if (!can(l.permKey, l.adminOnly)) return false;
     return true;
   });
