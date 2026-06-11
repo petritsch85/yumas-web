@@ -225,11 +225,11 @@ export function BillDocument({ data }: { data: BillData }) {
         {/* ── TYPE B: dinner amounts ───────────────────────────────── */}
         {!isMonthly && (
           <View>
-            {/* Group 1: Brutto split */}
+            {/* Group 1: Netto split */}
             <View style={s.groupGap}>
-              <AmtRow label={`Essen Brutto (${data.mwstEssenPct ?? 7}% MwSt)`}    value={essenBrutto} />
-              <AmtRow label={`Getränke Brutto (${data.mwstGetraenkePct ?? 19}% MwSt)`} value={getraenkeBrutto} />
-              <AmtRow label="Gesamt Brutto (€)"   value={gesamtBrutto} />
+              <AmtRow label="Essen Netto (€)"    value={essenNetto} />
+              <AmtRow label="Getränke Netto (€)" value={getraenkeNetto} />
+              <AmtRow label="Gesamt Netto (€)"   value={gesamtNettoD} />
             </View>
 
             {/* Group 2: MwSt */}
@@ -239,11 +239,11 @@ export function BillDocument({ data }: { data: BillData }) {
               <AmtRow label="MwSt Gesamt"                                   value={mwstGesamtAmt} />
             </View>
 
-            {/* Group 3: Netto split */}
+            {/* Group 3: Brutto split */}
             <View style={s.groupGap}>
-              <AmtRow label="Essen Netto (€)"    value={essenNetto} />
-              <AmtRow label="Getränke Netto (€)" value={getraenkeNetto} />
-              <AmtRow label="Gesamt Netto (€)"   value={gesamtNettoD} />
+              <AmtRow label={`Essen Brutto (${data.mwstEssenPct ?? 7}% MwSt)`}    value={essenBrutto} />
+              <AmtRow label={`Getränke Brutto (${data.mwstGetraenkePct ?? 19}% MwSt)`} value={getraenkeBrutto} />
+              <AmtRow label="Gesamt Brutto (€)"   value={gesamtBrutto} />
             </View>
 
             {/* Group 4: Trinkgeld (only if > 0) */}
