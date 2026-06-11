@@ -89,7 +89,7 @@ const s = StyleSheet.create({
   },
 
   // Intro paragraph
-  intro: { lineHeight: 1.55, marginBottom: 16 },
+  intro: { lineHeight: 1.2, marginBottom: 16 },
 
   // Amount rows — label left, value right
   amountRow: {
