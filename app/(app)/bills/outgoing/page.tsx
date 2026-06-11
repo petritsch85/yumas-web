@@ -379,7 +379,7 @@ export default function OutgoingBillsPage() {
           const dataUrl = e.target?.result as string;
           resolve({ base64: dataUrl.split(',')[1], dataUrl });
         };
-        reader.onerror = reject;
+        reader.onerror = () => reject(new Error('Failed to read file'));
         reader.readAsDataURL(file);
       });
       setReceiptDataUrl(fullDataUrl);
@@ -424,7 +424,11 @@ export default function OutgoingBillsPage() {
       setReceiptSuccess(true);
       setTimeout(() => setReceiptSuccess(false), 4000);
     } catch (err: any) {
-      alert(`Could not read receipt: ${err?.message ?? 'Unknown error'}`);
+      const msg = typeof err === 'string' ? err
+        : err?.message ? String(err.message)
+        : err?.error   ? String(err.error)
+        : 'Unknown error';
+      alert(`Could not read receipt: ${msg}`);
     } finally {
       setExtractingReceipt(false);
     }
