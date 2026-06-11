@@ -121,6 +121,20 @@ export default function OutgoingBillsPage() {
   const receiptInputRef  = useRef<HTMLInputElement>(null);
   const { t } = useT();
 
+  // ── Permission check ─────────────────────────────────────────────────────
+  const { data: myProfile } = useQuery({
+    queryKey: ['my-profile'],
+    queryFn: async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return null;
+      const { data } = await supabase.from('profiles').select('role, permissions').eq('id', user.id).single();
+      return data as { role: string; permissions: Record<string, boolean> } | null;
+    },
+  });
+  const isAdmin       = myProfile?.role === 'admin';
+  const canViewAll    = isAdmin || !!myProfile?.permissions?.bills;
+  const canCreate     = isAdmin || !!myProfile?.permissions?.bills || !!myProfile?.permissions?.bills_create;
+
   const [focusedField, setFocusedField] = useState<string | null>(null);
   const [tab, setTab]               = useState<'bills' | 'upload' | 'create'>('bills');
   const [isDragging, setIsDragging] = useState(false);
@@ -223,6 +237,11 @@ export default function OutgoingBillsPage() {
   const filteredRegistry = registrySearch.trim().length > 0
     ? registryCustomers.filter(c => c.company_name.toLowerCase().includes(registrySearch.toLowerCase()))
     : registryCustomers;
+
+  // Force create-only users to the Create Bill tab
+  useEffect(() => {
+    if (myProfile && !canViewAll && tab !== 'create') setTab('create');
+  }, [myProfile, canViewAll, tab]);
 
   // Auto-update intro text when event date, location or bill type changes
   useEffect(() => {
@@ -805,30 +824,34 @@ export default function OutgoingBillsPage() {
             <FilePlus size={15} />
             Create Bill
           </button>
-          <button
-            onClick={() => { setTab('upload'); setTimeout(() => fileInputRef.current?.click(), 100); }}
-            className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2 bg-[#1B5E20] text-white text-sm font-semibold rounded-xl hover:bg-[#2E7D32] transition-colors"
-          >
-            <Upload size={15} />
-            Upload Invoice
-          </button>
+          {canViewAll && (
+            <button
+              onClick={() => { setTab('upload'); setTimeout(() => fileInputRef.current?.click(), 100); }}
+              className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2 bg-[#1B5E20] text-white text-sm font-semibold rounded-xl hover:bg-[#2E7D32] transition-colors"
+            >
+              <Upload size={15} />
+              Upload Invoice
+            </button>
+          )}
         </div>
       </div>
 
       {/* Tabs */}
       <div className="border-b border-gray-200 mb-6">
         <nav className="flex gap-6">
-          <button onClick={() => setTab('bills')}
-            className={`flex items-center gap-2 pb-3 text-sm font-semibold border-b-2 transition-colors ${
-              tab === 'bills' ? 'border-[#1B5E20] text-[#1B5E20]' : 'border-transparent text-gray-500 hover:text-gray-700'
-            }`}
-          >
-            <Banknote size={14} />
-            All Invoices
-            {bills.length > 0 && (
-              <span className="bg-gray-100 text-gray-600 text-xs font-bold px-1.5 py-0.5 rounded-full">{bills.length}</span>
-            )}
-          </button>
+          {canViewAll && (
+            <button onClick={() => setTab('bills')}
+              className={`flex items-center gap-2 pb-3 text-sm font-semibold border-b-2 transition-colors ${
+                tab === 'bills' ? 'border-[#1B5E20] text-[#1B5E20]' : 'border-transparent text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              <Banknote size={14} />
+              All Invoices
+              {bills.length > 0 && (
+                <span className="bg-gray-100 text-gray-600 text-xs font-bold px-1.5 py-0.5 rounded-full">{bills.length}</span>
+              )}
+            </button>
+          )}
           {(tab === 'upload' || tab === 'create') && (
             <button onClick={() => setTab(tab)}
               className="flex items-center gap-2 pb-3 text-sm font-semibold border-b-2 border-[#1B5E20] text-[#1B5E20]"

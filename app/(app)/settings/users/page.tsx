@@ -24,6 +24,7 @@ type AppPermissions = {
   events:            boolean;
   staff_videos:      boolean;
   bills:             boolean;
+  bills_create:      boolean;
   pl_reports:        boolean;
   suppliers:         boolean;
   products:          boolean;
@@ -85,7 +86,8 @@ const MODULE_GROUPS: ModuleGroup[] = [
   {
     group: 'Admin',
     items: [
-      { key: 'bills', label: 'Bills', description: 'Upload & review supplier invoices' },
+      { key: 'bills',        label: 'Bills (full access)',  description: 'View all outgoing invoices, upload & review' },
+      { key: 'bills_create', label: 'Bills (create only)',  description: 'Create new outgoing bills only — no access to invoice overview' },
     ],
   },
 ];
@@ -94,21 +96,21 @@ const STAFF_DEFAULTS: AppPermissions = {
   inventory: false, inventory_current: false, production: false, buying: false, waste_log: false,
   delivery: false, packer: false, driver: false, store_receiver: false,
   analysis: false, events: false, staff_videos: false,
-  bills: false, pl_reports: false, suppliers: false, products: false,
+  bills: false, bills_create: false, pl_reports: false, suppliers: false, products: false,
 };
 
 const MANAGER_DEFAULTS: AppPermissions = {
   inventory: true, inventory_current: true, production: true, buying: true, waste_log: true,
   delivery: true, packer: false, driver: false, store_receiver: false,
   analysis: true, events: true, staff_videos: true,
-  bills: false, pl_reports: true, suppliers: true, products: true,
+  bills: false, bills_create: false, pl_reports: true, suppliers: true, products: true,
 };
 
 const ADMIN_DEFAULTS: AppPermissions = {
   inventory: true, inventory_current: true, production: true, buying: true, waste_log: true,
   delivery: true, packer: false, driver: false, store_receiver: false,
   analysis: true, events: true, staff_videos: true,
-  bills: true, pl_reports: true, suppliers: true, products: true,
+  bills: true, bills_create: true, pl_reports: true, suppliers: true, products: true,
 };
 
 function defaultsForRole(role: string): AppPermissions {

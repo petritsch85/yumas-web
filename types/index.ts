@@ -84,6 +84,7 @@ export interface AppPermissions {
   events:       boolean;
   staff_videos: boolean;
   bills:        boolean;
+  bills_create: boolean;
   pl_reports:   boolean;
   suppliers:    boolean;
   products:     boolean;

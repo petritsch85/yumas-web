@@ -195,8 +195,8 @@ const NAV_GROUPS: NavGroup[] = [
       {
         labelKey: 'sidebar.nav.bills', href: '/bills', icon: FilePlus, permKey: 'bills',
         children: [
-          { labelKey: 'sidebar.nav.incoming', href: '/bills',          icon: FilePlus },
-          { labelKey: 'sidebar.nav.outgoing', href: '/bills/outgoing', icon: FileCheck },
+          { labelKey: 'sidebar.nav.incoming', href: '/bills',          icon: FilePlus,  permKey: 'bills' },
+          { labelKey: 'sidebar.nav.outgoing', href: '/bills/outgoing', icon: FileCheck, permKey: 'bills_create' },
         ],
       },
       { labelKey: 'sidebar.nav.approveBills', href: '/coming-soon/approve-bills', icon: FileCheck, adminOnly: true },
@@ -300,6 +300,10 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
     // Inventory: show if user has submission OR view permission
     if (item.permKey === 'inventory') {
       return !!(perms as any).inventory || !!(perms as any).inventory_current;
+    }
+    // Bills: show parent if user has full bills OR bills_create
+    if (item.permKey === 'bills') {
+      return !!(perms as any).bills || !!(perms as any).bills_create;
     }
     // Delivery (manager dropdown): uses the delivery flag
     if (item.permKey === 'delivery') return !!(perms as any).delivery;
