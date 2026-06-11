@@ -1279,6 +1279,31 @@ export default function DeliveryPage() {
     return () => { if (packingInterval.current) clearInterval(packingInterval.current); };
   }, []);
 
+  /* ─ Query: most recent store receipt notes (for previous-delivery reminders) ─ */
+  const { data: prevReceiptNotes = {} } = useQuery<Partial<Record<string, { note: string; deliveryDate: string }>>>({
+    queryKey: ['prev-receipt-notes'],
+    enabled: viewMode === 'manager',
+    staleTime: 60_000,
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('store_delivery_receipts')
+        .select('location_name, notes, received_at, run_id, delivery_runs(delivery_date)')
+        .not('notes', 'is', null)
+        .neq('notes', '')
+        .order('received_at', { ascending: false });
+      const map: Partial<Record<string, { note: string; deliveryDate: string }>> = {};
+      for (const r of (data ?? []) as any[]) {
+        if (!map[r.location_name] && r.notes?.trim()) {
+          map[r.location_name] = {
+            note: r.notes.trim(),
+            deliveryDate: r.delivery_runs?.delivery_date ?? r.received_at.slice(0, 10),
+          };
+        }
+      }
+      return map;
+    },
+  });
+
   /* ─ Query: delivery run + live inventory (always fetched fresh) ─ */
   const { data: runData, isLoading } = useQuery({
     queryKey: ['delivery-run', targetDate],
@@ -2516,6 +2541,26 @@ export default function DeliveryPage() {
                       }
 
                       return null;
+                    })()}
+
+                    {/* ── Previous delivery note from store manager ── */}
+                    {viewMode === 'manager' && (() => {
+                      const prev = prevReceiptNotes[store];
+                      if (!prev) return null;
+                      // Don't show if this note is from the current run's date
+                      if (run && prev.deliveryDate === run.delivery_date) return null;
+                      const dateLabel = new Date(prev.deliveryDate + 'T12:00:00').toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
+                      return (
+                        <div className="mb-4 flex items-start gap-3 px-4 py-3 bg-blue-50 border border-blue-200 rounded-xl">
+                          <MessageSquare size={15} className="text-blue-400 flex-shrink-0 mt-0.5" />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs font-semibold text-blue-500 uppercase tracking-wide mb-1">
+                              Note from store — previous delivery ({dateLabel})
+                            </p>
+                            <p className="text-sm text-blue-800 leading-relaxed whitespace-pre-wrap">{prev.note}</p>
+                          </div>
+                        </div>
+                      );
                     })()}
 
                     <StoreDeliveryList
