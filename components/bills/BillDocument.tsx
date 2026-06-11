@@ -1,5 +1,9 @@
 import { Document, Page, View, Text, Image, StyleSheet } from '@react-pdf/renderer';
-import { YUMAS_LOGO } from './yumasLogo';
+import { YUMAS_LOGO_PATH } from './yumasLogo';
+
+const YUMAS_LOGO = typeof window !== 'undefined'
+  ? `${window.location.origin}${YUMAS_LOGO_PATH}`
+  : YUMAS_LOGO_PATH;
 
 // ── Company address (always shown, regardless of event location) ─────────────
 const COMPANY_SENDER  = ['Yumas GmbH', 'Feuerbachstraße 46', '60325 Frankfurt'];
