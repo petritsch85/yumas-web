@@ -51,7 +51,7 @@ const fmt = (n: number) =>
 // ── Styles ────────────────────────────────────────────────────────────────────
 const s = StyleSheet.create({
   page: {
-    fontFamily   : 'Helvetica',
+    fontFamily   : 'Courier',
     fontSize     : 10,
     paddingTop   : 36,
     paddingBottom: 70,
@@ -71,7 +71,7 @@ const s = StyleSheet.create({
     flex       : 1,
     alignItems : 'center',
   },
-  logo: { width: 88, height: 88 },
+  logo: { width: 72, height: 91 },
   senderBlock: {
     width     : 110,
     textAlign : 'right',
@@ -89,11 +89,11 @@ const s = StyleSheet.create({
   metaWrap: {
     alignItems  : 'flex-end',
     marginBottom: 18,
-    lineHeight  : 1.55,
+    lineHeight  : 1.15,
   },
 
   // Intro paragraph
-  intro: { lineHeight: 1.3, marginBottom: 18 },
+  intro: { lineHeight: 1.15, marginBottom: 18 },
 
   // Amount rows — label left, value right
   amountRow: {
@@ -132,8 +132,8 @@ function AmtRow({ label, value }: { label: string; value: number }) {
 function AmtRowBold({ label, value }: { label: string; value: number }) {
   return (
     <View style={s.amountRowBold}>
-      <Text style={{ fontFamily: 'Helvetica-Bold' }}>{label}</Text>
-      <Text style={{ fontFamily: 'Helvetica-Bold' }}>{fmt(value)}</Text>
+      <Text style={{ fontFamily: 'Courier-Bold' }}>{label}</Text>
+      <Text style={{ fontFamily: 'Courier-Bold' }}>{fmt(value)}</Text>
     </View>
   );
 }
@@ -224,10 +224,10 @@ export function BillDocument({ data }: { data: BillData }) {
               paddingBottom: 3,
               marginBottom: 4,
             }]}>
-              <Text style={{ width: 28, fontFamily: 'Helvetica-Bold' }}>Anz.</Text>
-              <Text style={{ flex: 1, fontFamily: 'Helvetica-Bold' }}>Artikel</Text>
-              <Text style={{ width: 85, textAlign: 'right', fontFamily: 'Helvetica-Bold' }}>Einzelpreis</Text>
-              <Text style={{ width: 75, textAlign: 'right', fontFamily: 'Helvetica-Bold' }}>Gesamt</Text>
+              <Text style={{ width: 28, fontFamily: 'Courier-Bold' }}>Anz.</Text>
+              <Text style={{ flex: 1, fontFamily: 'Courier-Bold' }}>Artikel</Text>
+              <Text style={{ width: 85, textAlign: 'right', fontFamily: 'Courier-Bold' }}>Einzelpreis</Text>
+              <Text style={{ width: 75, textAlign: 'right', fontFamily: 'Courier-Bold' }}>Gesamt</Text>
             </View>
             {data.lineItems.map((item, i) => (
               <View key={i} style={s.amountRow}>
@@ -295,7 +295,7 @@ export function BillDocument({ data }: { data: BillData }) {
         <Text style={{ marginTop: 22, textAlign: 'center', lineHeight: 1.55 }}>{PAYMENT}</Text>
 
         {/* ── Vielen Dank! ──────────────────────────────────────────── */}
-        <Text style={{ marginTop: 12, textAlign: 'center', fontFamily: 'Helvetica-Bold', fontSize: 11 }}>Vielen Dank!</Text>
+        <Text style={{ marginTop: 12, textAlign: 'center', fontFamily: 'Courier-Bold', fontSize: 11 }}>Vielen Dank!</Text>
 
         {/* ── Footer (fixed at bottom of every page) ───────────────── */}
         <View style={s.footer} fixed>
