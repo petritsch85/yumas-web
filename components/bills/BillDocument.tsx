@@ -291,11 +291,11 @@ export function BillDocument({ data }: { data: BillData }) {
           </View>
         )}
 
-        {/* ── Payment terms ─────────────────────────────────────────── */}
-        <Text style={{ marginTop: 22, textAlign: 'center', lineHeight: 1.55 }}>{PAYMENT}</Text>
-
-        {/* ── Vielen Dank! ──────────────────────────────────────────── */}
-        <Text style={{ marginTop: 12, textAlign: 'center', fontFamily: 'Courier-Bold', fontSize: 11 }}>Vielen Dank!</Text>
+        {/* ── Payment terms + Vielen Dank! — centred in remaining space ── */}
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+          <Text style={{ textAlign: 'center', lineHeight: 1.55, marginBottom: 14 }}>{PAYMENT}</Text>
+          <Text style={{ textAlign: 'center', fontFamily: 'Courier-Bold', fontSize: 11 }}>Vielen Dank!</Text>
+        </View>
 
         {/* ── Footer (fixed at bottom of every page) ───────────────── */}
         <View style={s.footer} fixed>
