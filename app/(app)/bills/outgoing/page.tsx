@@ -6,7 +6,7 @@ import { supabase } from '@/lib/supabase-browser';
 import {
   Upload, FileCheck, AlertCircle, Loader2,
   CheckCircle2, Clock, Banknote, Trash2,
-  ChevronDown, Eye, X, Save, Pencil, Download, BookOpen,
+  ChevronDown, Eye, X, Save, Pencil, Download, BookOpen, Send,
   FilePlus, Plus, FileDown, Camera,
 } from 'lucide-react';
 import type { BillData, LineItem } from '@/components/bills/BillDocument';
@@ -172,6 +172,7 @@ export default function OutgoingBillsPage() {
   const [pendingPdfUrl,    setPendingPdfUrl]    = useState<string | null>(null);
   const [sendEmail,        setSendEmail]        = useState('');
   const [sending,          setSending]          = useState(false);
+  const [approving,        setApproving]        = useState(false);
   const [sendError,        setSendError]        = useState<string | null>(null);
   const [extractingReceipt,     setExtractingReceipt]     = useState(false);
   const [receiptSuccess,        setReceiptSuccess]        = useState(false);
@@ -465,12 +466,68 @@ export default function OutgoingBillsPage() {
     return p.length === 3 ? `${p[2]}-${p[1]}-${p[0]}` : null;
   };
 
-  const handleApproveAndSend = async () => {
+  // Shared: upload PDF to storage + save to DB
+  const uploadAndSave = async () => {
+    if (!pendingBlob) throw new Error('No PDF to save');
+    const { data: { user } } = await supabase.auth.getUser();
+    const safeInv = invoiceNumber.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const storagePath = `outgoing-bills/${Date.now()}_${safeInv}.pdf`;
+    const { error: upErr } = await supabase.storage.from('bills').upload(storagePath, pendingBlob, { contentType: 'application/pdf' });
+    if (upErr) throw new Error(`PDF storage failed: ${upErr.message}`);
+    const { error: dbErr } = await supabase.from('outgoing_bills').insert({
+      invoice_number:   invoiceNumber || null,
+      invoice_date:     toIsoDate(billDate),
+      event_date:       billEventDate ? toIsoDate(billEventDate) : null,
+      customer_name:    company,
+      customer_address: [street, postcode, city].filter(Boolean).join(', ') || null,
+      issuing_location: billIssuingLoc || null,
+      shift_type:       (billType === 'dinner' ? 'dinner' : null) as 'dinner' | 'lunch' | null,
+      net_food:         billType === 'dinner' ? essenN         : 0,
+      net_drinks:       billType === 'dinner' ? getraenkeN     : 0,
+      net_total:        netto,
+      vat_7:            mwst7,
+      vat_19:           mwst19,
+      gross_total:      brutto,
+      tips:             trinkgeldN,
+      total_payable:    billTotal,
+      status:           'pending',
+      file_path:        storagePath,
+      uploaded_by:      user?.id ?? null,
+    });
+    if (dbErr) throw dbErr;
+    return storagePath;
+  };
+
+  const closeModal = () => {
+    setSendModal(false);
+    setPendingBlob(null);
+    if (pendingPdfUrl) { URL.revokeObjectURL(pendingPdfUrl); setPendingPdfUrl(null); }
+    queryClient.invalidateQueries({ queryKey: ['outgoing-bills'] });
+    saveCustomerSilently();
+  };
+
+  // Approve only — save to DB, no email
+  const handleApprove = async () => {
+    if (!pendingBlob) return;
+    setApproving(true);
+    setSendError(null);
+    try {
+      await uploadAndSave();
+      closeModal();
+    } catch (err: any) {
+      setSendError(err.message ?? 'Unexpected error');
+    } finally {
+      setApproving(false);
+    }
+  };
+
+  // Send — email + save to DB
+  const handleSend = async () => {
     if (!pendingBlob || !sendEmail.trim()) return;
     setSending(true);
     setSendError(null);
     try {
-      // 1. Convert blob to base64 (chunked to avoid call stack overflow on large PDFs)
+      // Convert blob to base64 (chunked to avoid call stack overflow on large PDFs)
       const arrayBuffer = await pendingBlob.arrayBuffer();
       const uint8 = new Uint8Array(arrayBuffer);
       let binary = '';
@@ -479,56 +536,18 @@ export default function OutgoingBillsPage() {
       }
       const pdfBase64 = btoa(binary);
 
-      // 2. Send email via Resend
+      // Send email via Resend
       const emailRes = await fetch('/api/send-bill-email', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          to: sendEmail.trim(),
-          invoiceNumber,
-          companyName: company,
-          pdfBase64,
-        }),
+        body: JSON.stringify({ to: sendEmail.trim(), invoiceNumber, companyName: company, pdfBase64 }),
       });
       const emailJson = await emailRes.json();
       if (!emailRes.ok) throw new Error(emailJson.error ?? 'Email sending failed');
 
-      // 3. Upload PDF to Supabase Storage
-      const { data: { user } } = await supabase.auth.getUser();
-      const safeInv = invoiceNumber.replace(/[^a-zA-Z0-9._-]/g, '_');
-      const storagePath = `outgoing-bills/${Date.now()}_${safeInv}.pdf`;
-      const { error: upErr } = await supabase.storage.from('bills').upload(storagePath, pendingBlob, { contentType: 'application/pdf' });
-      if (upErr) throw new Error(`PDF storage failed: ${upErr.message}`);
-
-      // 4. Save to outgoing_bills DB
-      const { error: dbErr } = await supabase.from('outgoing_bills').insert({
-        invoice_number:   invoiceNumber || null,
-        invoice_date:     toIsoDate(billDate),
-        event_date:       billEventDate ? toIsoDate(billEventDate) : null,
-        customer_name:    company,
-        customer_address: [street, postcode, city].filter(Boolean).join(', ') || null,
-        issuing_location: billIssuingLoc || null,
-        shift_type:       (billType === 'dinner' ? 'dinner' : null) as 'dinner' | 'lunch' | null,
-        net_food:         billType === 'dinner' ? essenN         : 0,
-        net_drinks:       billType === 'dinner' ? getraenkeN     : 0,
-        net_total:        netto,
-        vat_7:            mwst7,
-        vat_19:           mwst19,
-        gross_total:      brutto,
-        tips:             trinkgeldN,
-        total_payable:    billTotal,
-        status:           'pending',
-        file_path:        storagePath,
-        uploaded_by:      user?.id ?? null,
-      });
-      if (dbErr) throw dbErr;
-
-      // 5. Done — refresh list, save customer, close modal
-      queryClient.invalidateQueries({ queryKey: ['outgoing-bills'] });
-      saveCustomerSilently();
-      setSendModal(false);
-      setPendingBlob(null);
-      if (pendingPdfUrl) { URL.revokeObjectURL(pendingPdfUrl); setPendingPdfUrl(null); }
+      // Upload + save to DB
+      await uploadAndSave();
+      closeModal();
     } catch (err: any) {
       setSendError(err.message ?? 'Unexpected error');
     } finally {
@@ -2023,7 +2042,7 @@ export default function OutgoingBillsPage() {
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
             {/* Header */}
             <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-gray-100">
-              <h2 className="text-base font-bold text-gray-900">Approve &amp; Send Invoice</h2>
+              <h2 className="text-base font-bold text-gray-900">Invoice Ready</h2>
               <button type="button" onClick={() => setSendModal(false)}
                 className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors">
                 <X size={16} className="text-gray-500" />
@@ -2047,19 +2066,33 @@ export default function OutgoingBillsPage() {
                 <Eye size={15} /> View PDF
               </button>
 
-              {/* Email input */}
+              {/* Divider */}
+              <div className="border-t border-gray-100" />
+
+              {/* Send by email (optional) */}
               <div>
                 <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
-                  Send to email address
+                  Send by email <span className="normal-case font-normal text-gray-400">(optional)</span>
                 </label>
-                <input
-                  type="email"
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20]"
-                  placeholder="customer@company.com"
-                  value={sendEmail}
-                  onChange={(e) => setSendEmail(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && !sending && sendEmail.trim() && handleApproveAndSend()}
-                />
+                <div className="flex gap-2">
+                  <input
+                    type="email"
+                    className="flex-1 border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400"
+                    placeholder="customer@company.com"
+                    value={sendEmail}
+                    onChange={(e) => setSendEmail(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && !sending && sendEmail.trim() && handleSend()}
+                  />
+                  <button
+                    type="button"
+                    onClick={handleSend}
+                    disabled={sending || approving || !sendEmail.trim()}
+                    className="flex items-center gap-1.5 px-4 py-2.5 rounded-lg bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 disabled:opacity-40 transition-colors whitespace-nowrap"
+                  >
+                    {sending ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+                    {sending ? 'Sending…' : 'Send'}
+                  </button>
+                </div>
               </div>
 
               {/* Error */}
@@ -2076,11 +2109,11 @@ export default function OutgoingBillsPage() {
               </button>
               <button
                 type="button"
-                onClick={handleApproveAndSend}
-                disabled={sending || !sendEmail.trim()}
+                onClick={handleApprove}
+                disabled={approving || sending}
                 className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg bg-[#1B5E20] text-white text-sm font-bold hover:bg-[#2E7D32] disabled:opacity-50 transition-colors"
               >
-                {sending ? <><Loader2 size={14} className="animate-spin" /> Sending…</> : <><CheckCircle2 size={14} /> Approve &amp; Send</>}
+                {approving ? <><Loader2 size={14} className="animate-spin" /> Approving…</> : <><CheckCircle2 size={14} /> Approve</>}
               </button>
             </div>
           </div>
