@@ -1293,9 +1293,11 @@ export default function DeliveryPage() {
       if (error) return {};
       const map: Partial<Record<string, { note: string; deliveryDate: string }>> = {};
       for (const r of (data ?? [])) {
-        if (!map[r.location_name] && r.notes?.trim()) {
+        const noteText = r.notes?.trim() ?? '';
+        if (!noteText || noteText.startsWith('{') || noteText.startsWith('[')) continue;
+        if (!map[r.location_name]) {
           map[r.location_name] = {
-            note: r.notes.trim(),
+            note: noteText,
             deliveryDate: r.received_at.slice(0, 10),
           };
         }
