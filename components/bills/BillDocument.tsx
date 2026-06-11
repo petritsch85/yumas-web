@@ -47,7 +47,7 @@ const fmt = (n: number) =>
 // ── Styles ────────────────────────────────────────────────────────────────────
 const s = StyleSheet.create({
   page: {
-    fontFamily   : 'Courier',
+    fontFamily   : 'Helvetica',
     fontSize     : 10,
     paddingTop   : 36,
     paddingBottom: 70,
@@ -89,16 +89,21 @@ const s = StyleSheet.create({
   },
 
   // Intro paragraph
-  intro: { lineHeight: 1.2, marginBottom: 16 },
+  intro: { lineHeight: 1.3, marginBottom: 18 },
 
   // Amount rows — label left, value right
   amountRow: {
     flexDirection : 'row',
     justifyContent: 'space-between',
-    marginBottom  : 1.5,
+    marginBottom  : 2,
+  },
+  amountRowBold: {
+    flexDirection : 'row',
+    justifyContent: 'space-between',
+    marginBottom  : 2,
   },
   // Spacing between logical groups
-  groupGap: { marginBottom: 7 },
+  groupGap: { marginBottom: 10 },
 
   // Footer fixed at bottom
   footer: {
@@ -110,12 +115,21 @@ const s = StyleSheet.create({
   footerText: { fontSize: 9, textAlign: 'center', lineHeight: 1.55 },
 });
 
-// ── Amount row helper ─────────────────────────────────────────────────────────
+// ── Amount row helpers ────────────────────────────────────────────────────────
 function AmtRow({ label, value }: { label: string; value: number }) {
   return (
     <View style={s.amountRow}>
       <Text>{label}</Text>
       <Text>{fmt(value)}</Text>
+    </View>
+  );
+}
+
+function AmtRowBold({ label, value }: { label: string; value: number }) {
+  return (
+    <View style={s.amountRowBold}>
+      <Text style={{ fontFamily: 'Helvetica-Bold' }}>{label}</Text>
+      <Text style={{ fontFamily: 'Helvetica-Bold' }}>{fmt(value)}</Text>
     </View>
   );
 }
@@ -176,7 +190,7 @@ export function BillDocument({ data }: { data: BillData }) {
             data.recipient.street,
             `${data.recipient.postcode} ${data.recipient.city}`,
           ].filter(Boolean).map((line, i) => (
-            <Text key={i} style={{ fontSize: 10, lineHeight: 1.2, marginBottom: 0 }}>{line as string}</Text>
+            <Text key={i} style={{ fontSize: 10, lineHeight: 1.3, marginBottom: 0 }}>{line as string}</Text>
           ))}
         </View>
 
@@ -206,10 +220,10 @@ export function BillDocument({ data }: { data: BillData }) {
               paddingBottom: 3,
               marginBottom: 4,
             }]}>
-              <Text style={{ width: 28 }}>Anz.</Text>
-              <Text style={{ flex: 1 }}>Artikel</Text>
-              <Text style={{ width: 85, textAlign: 'right' }}>Einzelpreis</Text>
-              <Text style={{ width: 75, textAlign: 'right' }}>Gesamt</Text>
+              <Text style={{ width: 28, fontFamily: 'Helvetica-Bold' }}>Anz.</Text>
+              <Text style={{ flex: 1, fontFamily: 'Helvetica-Bold' }}>Artikel</Text>
+              <Text style={{ width: 85, textAlign: 'right', fontFamily: 'Helvetica-Bold' }}>Einzelpreis</Text>
+              <Text style={{ width: 75, textAlign: 'right', fontFamily: 'Helvetica-Bold' }}>Gesamt</Text>
             </View>
             {data.lineItems.map((item, i) => (
               <View key={i} style={s.amountRow}>
@@ -229,21 +243,21 @@ export function BillDocument({ data }: { data: BillData }) {
             <View style={s.groupGap}>
               <AmtRow label="Essen Netto (€)"    value={essenNetto} />
               <AmtRow label="Getränke Netto (€)" value={getraenkeNetto} />
-              <AmtRow label="Gesamt Netto (€)"   value={gesamtNettoD} />
+              <AmtRowBold label="Gesamt Netto (€)" value={gesamtNettoD} />
             </View>
 
             {/* Group 2: MwSt */}
             <View style={s.groupGap}>
-              <AmtRow label={`MwSt Essen (${data.mwstEssenPct ?? 7}%)`}    value={mwstEssenAmt} />
-              <AmtRow label={`MwSt Getränke (${data.mwstGetraenkePct ?? 19}%)`} value={mwstGetraenkeAmt} />
-              <AmtRow label="MwSt Gesamt"                                   value={mwstGesamtAmt} />
+              <AmtRow label={`MwSt Essen (${data.mwstEssenPct ?? 7}%)`}          value={mwstEssenAmt} />
+              <AmtRow label={`MwSt Getränke (${data.mwstGetraenkePct ?? 19}%)`}  value={mwstGetraenkeAmt} />
+              <AmtRow label="MwSt Gesamt"                                          value={mwstGesamtAmt} />
             </View>
 
             {/* Group 3: Brutto split */}
             <View style={s.groupGap}>
-              <AmtRow label={`Essen Brutto (${data.mwstEssenPct ?? 7}% MwSt)`}    value={essenBrutto} />
+              <AmtRow label={`Essen Brutto (${data.mwstEssenPct ?? 7}% MwSt)`}         value={essenBrutto} />
               <AmtRow label={`Getränke Brutto (${data.mwstGetraenkePct ?? 19}% MwSt)`} value={getraenkeBrutto} />
-              <AmtRow label="Gesamt Brutto (€)"   value={gesamtBrutto} />
+              <AmtRowBold label="Gesamt Brutto (€)" value={gesamtBrutto} />
             </View>
 
             {/* Group 4: Trinkgeld (only if > 0) */}
@@ -254,7 +268,9 @@ export function BillDocument({ data }: { data: BillData }) {
             )}
 
             {/* Final: Gesamtbetrag */}
-            <AmtRow label="Gesamtbetrag (€, zu zahlen)" value={gesamtBetrag} />
+            <View style={{ marginTop: 2 }}>
+              <AmtRowBold label="Gesamtbetrag (zu zahlen)" value={gesamtBetrag} />
+            </View>
           </View>
         )}
 
@@ -262,20 +278,20 @@ export function BillDocument({ data }: { data: BillData }) {
         {isMonthly && (
           <View style={{ marginTop: 6 }}>
             <View style={s.groupGap}>
-              <AmtRow label="Gesamt Netto" value={gesamtNetto} />
+              <AmtRowBold label="Gesamt Netto" value={gesamtNetto} />
             </View>
             <View style={s.groupGap}>
               <AmtRow label="Mwst 7%" value={mwst7monthly} />
             </View>
-            <AmtRow label="Gesamtbetrag (zu zahlen)" value={bruttoMonthly} />
+            <AmtRowBold label="Gesamtbetrag (zu zahlen)" value={bruttoMonthly} />
           </View>
         )}
 
         {/* ── Payment terms ─────────────────────────────────────────── */}
-        <Text style={{ marginTop: 20, lineHeight: 1.55 }}>{PAYMENT}</Text>
+        <Text style={{ marginTop: 22, textAlign: 'center', lineHeight: 1.55 }}>{PAYMENT}</Text>
 
         {/* ── Vielen Dank! ──────────────────────────────────────────── */}
-        <Text style={{ marginTop: 18, textAlign: 'center' }}>Vielen Dank!</Text>
+        <Text style={{ marginTop: 12, textAlign: 'center', fontFamily: 'Helvetica-Bold', fontSize: 11 }}>Vielen Dank!</Text>
 
         {/* ── Footer (fixed at bottom of every page) ───────────────── */}
         <View style={s.footer} fixed>
