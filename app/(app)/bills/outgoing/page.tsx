@@ -6,7 +6,7 @@ import { supabase } from '@/lib/supabase-browser';
 import {
   Upload, FileCheck, AlertCircle, Loader2,
   CheckCircle2, Clock, Banknote, Trash2,
-  ChevronDown, Eye, X, Save, Pencil,
+  ChevronDown, Eye, X, Save, Pencil, Download,
   FilePlus, Plus, FileDown, Camera,
 } from 'lucide-react';
 import type { BillData, LineItem } from '@/components/bills/BillDocument';
@@ -1725,11 +1725,18 @@ export default function OutgoingBillsPage() {
                         <td className="px-2 py-2">
                           <div className="flex items-center gap-2">
                             {bill.file_path && (
-                              <a href={`${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/bills/${bill.file_path}`}
-                                target="_blank" rel="noopener noreferrer"
-                                className="text-gray-300 hover:text-blue-500 transition-colors" title="View PDF">
-                                <Eye size={14} />
-                              </a>
+                              <>
+                                <a href={`${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/bills/${bill.file_path}`}
+                                  target="_blank" rel="noopener noreferrer"
+                                  className="text-gray-300 hover:text-blue-500 transition-colors" title="View PDF">
+                                  <Eye size={14} />
+                                </a>
+                                <a href={`${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/bills/${bill.file_path}`}
+                                  download
+                                  className="text-gray-300 hover:text-green-500 transition-colors" title="Download PDF">
+                                  <Download size={14} />
+                                </a>
+                              </>
                             )}
                             <button
                               onClick={() => editingId === bill.id ? setEditingId(null) : startEdit(bill)}
