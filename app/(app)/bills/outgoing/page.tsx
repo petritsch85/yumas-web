@@ -818,26 +818,24 @@ export default function OutgoingBillsPage() {
       {/* Tabs */}
       <div className="border-b border-gray-200 mb-6">
         <nav className="flex gap-6">
-          {([
-            ['bills',  'All Invoices', <Banknote size={14} />],
-            ['upload', 'Upload',       <Upload   size={14} />],
-            ['create', 'Create Bill',  <FilePlus size={14} />],
-          ] as const).map(([t, label, icon]) => (
-            <button key={t} onClick={() => setTab(t)}
-              className={`flex items-center gap-2 pb-3 text-sm font-semibold border-b-2 transition-colors ${
-                tab === t ? 'border-[#1B5E20] text-[#1B5E20]' : 'border-transparent text-gray-500 hover:text-gray-700'
-              }`}
+          <button onClick={() => setTab('bills')}
+            className={`flex items-center gap-2 pb-3 text-sm font-semibold border-b-2 transition-colors ${
+              tab === 'bills' ? 'border-[#1B5E20] text-[#1B5E20]' : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            <Banknote size={14} />
+            All Invoices
+            {bills.length > 0 && (
+              <span className="bg-gray-100 text-gray-600 text-xs font-bold px-1.5 py-0.5 rounded-full">{bills.length}</span>
+            )}
+          </button>
+          {(tab === 'upload' || tab === 'create') && (
+            <button onClick={() => setTab(tab)}
+              className="flex items-center gap-2 pb-3 text-sm font-semibold border-b-2 border-[#1B5E20] text-[#1B5E20]"
             >
-              {icon}
-              {label}
-              {t === 'bills' && bills.length > 0 && (
-                <span className="bg-gray-100 text-gray-600 text-xs font-bold px-1.5 py-0.5 rounded-full">{bills.length}</span>
-              )}
-              {t === 'upload' && activeCount > 0 && (
-                <span className="bg-[#1B5E20] text-white text-xs font-bold px-1.5 py-0.5 rounded-full">{activeCount}</span>
-              )}
+              {tab === 'upload' ? <><Upload size={14} /> Upload{activeCount > 0 && <span className="bg-[#1B5E20] text-white text-xs font-bold px-1.5 py-0.5 rounded-full">{activeCount}</span>}</> : <><FilePlus size={14} /> Create Bill</>}
             </button>
-          ))}
+          )}
         </nav>
       </div>
 
