@@ -3,8 +3,8 @@ import { YUMAS_LOGO } from './yumasLogo';
 
 // ── Company address (always shown, regardless of event location) ─────────────
 const COMPANY_SENDER  = ['Yumas GmbH', 'Feuerbachstraße 46', '60325 Frankfurt'];
-const FOOTER_1 = 'Yumas GmbH │ Feuerbachstraße 46 │ 60325 Frankfurt';
-const FOOTER_2 = 'Sparkasse Rhein-Nahe │ IBAN DE98 5605 0180 0017 1489 25 │ Steuernummer: 014 249 10458';
+const FOOTER_1 = 'Yumas GmbH  ·  Feuerbachstraße 46  ·  60325 Frankfurt';
+const FOOTER_2 = 'Sparkasse Rhein-Nahe  ·  IBAN DE98 5605 0180 0017 1489 25  ·  Steuernummer: 014 249 10458';
 const PAYMENT  = 'Die Rechnung ist zahlbar innerhalb von 7 Tagen nach Rechnungseingang.';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
