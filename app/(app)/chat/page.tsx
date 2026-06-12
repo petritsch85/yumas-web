@@ -347,7 +347,7 @@ function ChatInput({
             rows={1}
             disabled={sendMutation.isPending || uploading}
             className="flex-1 bg-transparent text-sm text-gray-900 placeholder-gray-400 resize-none outline-none leading-5 min-w-0"
-            style={{ height: '20px', maxHeight: '128px' }}
+            style={{ height: '20px', maxHeight: '128px', fontSize: '16px' }}
           />
           <button
             onClick={() => fileInputRef.current?.click()}
