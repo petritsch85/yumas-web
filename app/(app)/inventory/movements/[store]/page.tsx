@@ -47,16 +47,16 @@ function fmtDeliveryHeader(isoDate: string): string {
   return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
 }
 
-// Short versions for compact two-row header (no weekday)
+// Short versions for compact two-row header
 function fmtInvDateLabel(iso: string | null): string | null {
   const d = submissionDate(iso);
   if (!d) return null;
-  return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+  return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
 }
 
 function fmtDateLabel(isoDate: string): string | null {
   const d = new Date(isoDate + 'T12:00:00');
-  return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+  return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
 }
 
 /** Returns the Monday (YYYY-MM-DD) of the ISO week containing dateStr. */
