@@ -639,10 +639,10 @@ export default function InventoryMovementsPage({
                                       className="w-full py-1.5 px-1 text-center tabular-nums cursor-pointer hover:brightness-95 transition-all"
                                     >
                                       {isOverridden ? (
-                                        <span className="flex items-baseline justify-center gap-0.5 leading-none">
-                                          <span className="text-orange-700 font-semibold">{adHoc > 0 ? '+' : ''}{adHoc}</span>
-                                          <span className="text-[9px] text-gray-400 mx-0.5">+</span>
-                                          <span className="text-orange-500/80 text-[10px]">{override!.original_qty ?? rawVal ?? 0}</span>
+                                        <span className="flex items-center justify-center gap-0.5">
+                                          <span className="text-red-500 font-medium">{adHoc > 0 ? '+' : ''}{adHoc}</span>
+                                          <span className="text-gray-400">+</span>
+                                          <span className="text-gray-800">{override!.original_qty ?? rawVal ?? 0}</span>
                                         </span>
                                       ) : (
                                         <span className={effectiveVal === null || effectiveVal === 0 ? 'text-gray-300' : 'text-gray-800'}>
