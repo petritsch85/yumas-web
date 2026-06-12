@@ -1,8 +1,8 @@
 'use client';
 
-import { use } from 'react';
+import { use, useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, Loader2 } from 'lucide-react';
+import { ArrowLeft, Loader2, ChevronDown } from 'lucide-react';
 import Link from 'next/link';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -45,18 +45,35 @@ function fmtDeliveryHeader(isoDate: string): string {
   return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
 }
 
+/** Returns the Monday (YYYY-MM-DD) of the ISO week containing dateStr. */
+function getWeekStart(dateStr: string): string {
+  const d = new Date(dateStr + 'T12:00:00');
+  const day = d.getDay(); // 0=Sun … 6=Sat
+  const diff = day === 0 ? -6 : 1 - day;
+  d.setDate(d.getDate() + diff);
+  return d.toISOString().slice(0, 10);
+}
+
+function fmtWeekLabel(weekStart: string): string {
+  const start = new Date(weekStart + 'T12:00:00');
+  const end   = new Date(weekStart + 'T12:00:00');
+  end.setDate(end.getDate() + 6);
+  const fmt = (d: Date) =>
+    d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+  return `Week of ${fmt(start)} – ${fmt(end)}`;
+}
+
 // ── Column definitions ─────────────────────────────────────────────────────────
 
 type Col =
-  | { type: 'inv';  label: string; getValue: (item: string, cycles: Cycle[]) => number | null }
-  | { type: 'del';  label: string; getValue: (item: string, cycles: Cycle[]) => number | null }
-  | { type: 'cons'; label: string; getValue: (item: string, cycles: Cycle[]) => number | null };
+  | { type: 'inv';  label: string; getValue: (item: string) => number | null }
+  | { type: 'del';  label: string; getValue: (item: string) => number | null }
+  | { type: 'cons'; label: string; getValue: (item: string) => number | null };
 
 function buildColumns(cycles: Cycle[]): Col[] {
   const cols: Col[] = [];
   if (!cycles.length) return cols;
 
-  // Opening inventory (preInv of first cycle)
   cols.push({
     type: 'inv',
     label: `Inv ${fmtInvHeader(cycles[0].preInvDate)}`,
@@ -81,8 +98,6 @@ function buildColumns(cycles: Cycle[]): Col[] {
       getValue: (item) => c.consumption?.[item] ?? null,
     });
 
-    // Closing inventory for this cycle
-    // Use postInvDate directly; fall back to preInvDate of next cycle for label
     const postLabel = c.postInvDate
       ? fmtInvHeader(c.postInvDate)
       : i + 1 < cycles.length
@@ -93,7 +108,6 @@ function buildColumns(cycles: Cycle[]): Col[] {
       type: 'inv',
       label: `Inv ${postLabel}`,
       getValue: (item) => {
-        // postInv of this cycle == preInv of next cycle (same data, deduplicated)
         if (c.postInv) return c.postInv[item] ?? null;
         if (i + 1 < cycles.length) return cycles[i + 1].preInv[item] ?? null;
         return null;
@@ -137,22 +151,43 @@ export default function InventoryMovementsPage({
     },
   });
 
-  const cols = buildColumns(data?.cycles ?? []);
+  // ── Week picker ──────────────────────────────────────────────────────────────
+
+  const weeks = useMemo(() => {
+    const seen = new Set<string>();
+    for (const c of data?.cycles ?? []) seen.add(getWeekStart(c.deliveryDate));
+    return Array.from(seen).sort((a, b) => b.localeCompare(a)); // newest first
+  }, [data]);
+
+  const [selectedWeek, setSelectedWeek] = useState<string | null>(null);
+
+  // Always track the effective week — default to most recent once data arrives
+  const effectiveWeek = selectedWeek ?? weeks[0] ?? null;
+
+  const filteredCycles = useMemo(
+    () => (data?.cycles ?? []).filter((c) => getWeekStart(c.deliveryDate) === effectiveWeek),
+    [data, effectiveWeek],
+  );
+
+  const cols = buildColumns(filteredCycles);
 
   // Group items by section
-  const sections: { title: string; items: { name: string; unit: string }[] }[] = [];
-  for (const item of data?.items ?? []) {
-    const last = sections[sections.length - 1];
-    if (!last || last.title !== item.section) {
-      sections.push({ title: item.section, items: [] });
+  const sections = useMemo(() => {
+    const result: { title: string; items: { name: string; unit: string }[] }[] = [];
+    for (const item of data?.items ?? []) {
+      const last = result[result.length - 1];
+      if (!last || last.title !== item.section) {
+        result.push({ title: item.section, items: [] });
+      }
+      result[result.length - 1].items.push({ name: item.name, unit: item.unit });
     }
-    sections[sections.length - 1].items.push({ name: item.name, unit: item.unit });
-  }
+    return result;
+  }, [data]);
 
   return (
     <div>
       {/* Header */}
-      <div className="flex items-center justify-between gap-4 mb-6 flex-wrap">
+      <div className="flex items-start justify-between gap-4 mb-6 flex-wrap">
         <div className="flex items-center gap-3">
           <Link
             href="/inventory/overview"
@@ -171,6 +206,27 @@ export default function InventoryMovementsPage({
             </p>
           </div>
         </div>
+
+        {/* Week picker */}
+        {weeks.length > 0 && (
+          <div className="relative">
+            <select
+              value={effectiveWeek ?? ''}
+              onChange={(e) => setSelectedWeek(e.target.value)}
+              className="appearance-none pl-3 pr-8 py-2 rounded-lg border border-gray-200 bg-white text-sm text-gray-700 shadow-sm hover:border-gray-300 focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/20 cursor-pointer"
+            >
+              {weeks.map((w) => (
+                <option key={w} value={w}>
+                  {fmtWeekLabel(w)}
+                </option>
+              ))}
+            </select>
+            <ChevronDown
+              size={14}
+              className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400"
+            />
+          </div>
+        )}
       </div>
 
       {isLoading && (
@@ -197,15 +253,12 @@ export default function InventoryMovementsPage({
               <table className="text-xs border-collapse min-w-full">
                 <thead>
                   <tr>
-                    {/* Fixed columns */}
                     <th className="sticky left-0 z-20 bg-gray-50 px-4 py-3 text-left font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap border-b border-r border-gray-200 min-w-[200px]">
                       Item
                     </th>
                     <th className="bg-gray-50 px-3 py-3 text-left font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap border-b border-r border-gray-200">
                       Unit
                     </th>
-
-                    {/* Dynamic columns */}
                     {cols.map((col, ci) => (
                       <th
                         key={ci}
@@ -220,7 +273,6 @@ export default function InventoryMovementsPage({
                 <tbody>
                   {sections.map((section) => (
                     <>
-                      {/* Section header row */}
                       <tr key={`section-${section.title}`} className="bg-green-50/80">
                         <td
                           colSpan={2 + cols.length}
@@ -230,26 +282,23 @@ export default function InventoryMovementsPage({
                         </td>
                       </tr>
 
-                      {/* Item rows */}
                       {section.items.map((item, idx) => {
                         const isEven = idx % 2 === 0;
                         const rowBg = isEven ? 'bg-white' : 'bg-gray-50/50';
 
                         return (
-                          <tr key={item.name} className={`${rowBg} hover:bg-blue-50/20 transition-colors border-b border-gray-100`}>
-                            {/* Item name — sticky */}
+                          <tr
+                            key={item.name}
+                            className={`${rowBg} hover:bg-blue-50/20 transition-colors border-b border-gray-100`}
+                          >
                             <td className={`sticky left-0 z-10 px-4 py-2.5 font-medium text-gray-800 border-r border-gray-100 ${rowBg}`}>
                               {item.name}
                             </td>
-
-                            {/* Unit */}
                             <td className="px-3 py-2.5 text-gray-400 whitespace-nowrap border-r border-gray-100">
                               {item.unit}
                             </td>
-
-                            {/* Dynamic columns */}
                             {cols.map((col, ci) => {
-                              const val = col.getValue(item.name, data.cycles);
+                              const val = col.getValue(item.name);
                               const isConsumption = col.type === 'cons';
                               const isNegative    = isConsumption && val !== null && val < 0;
 
@@ -280,7 +329,6 @@ export default function InventoryMovementsPage({
             </div>
           )}
 
-          {/* Legend */}
           {cols.length > 0 && (
             <div className="flex items-center gap-4 mt-4 text-xs text-gray-500 flex-wrap">
               <div className="flex items-center gap-1.5">
