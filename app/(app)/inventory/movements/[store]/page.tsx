@@ -356,8 +356,8 @@ export default function InventoryMovementsPage({
                               return (
                                 <td
                                   key={ci}
-                                  className={`px-1 py-2 text-center tabular-nums border-r border-gray-100 ${COL_STYLES[col.type]} ${
-                                    isNegative ? 'text-red-600 font-semibold' : 'text-gray-800'
+                                  className={`px-1 py-2 text-center tabular-nums border-r border-gray-100 text-gray-800 ${
+                                    isNegative ? 'bg-red-100' : COL_STYLES[col.type]
                                   }`}
                                 >
                                   {val === null || val === undefined ? (
