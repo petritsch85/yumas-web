@@ -296,24 +296,26 @@ export default function InventoryMovementsPage({
             <div className="rounded-xl border border-gray-200 shadow-sm">
               <table className="text-xs border-collapse w-full table-fixed">
                 <thead>
-                  <tr>
-                    <th className="sticky top-0 left-0 z-30 w-[160px] bg-gray-50 px-3 py-3 text-left font-semibold text-gray-600 uppercase tracking-wide border-b border-r border-gray-200">
+                  <tr className="[&>th]:shadow-[0_2px_4px_rgba(0,0,0,0.08)]">
+                    <th className="sticky top-0 left-0 z-30 w-[160px] bg-white px-3 py-3 text-left font-semibold text-gray-600 uppercase tracking-wide border-b-2 border-r border-b-gray-300 border-r-gray-200">
                       Item
                     </th>
-                    <th className="sticky top-0 z-20 w-[70px] bg-gray-50 px-2 py-3 text-left font-semibold text-gray-500 uppercase tracking-wide border-b border-r border-gray-200">
+                    <th className="sticky top-0 z-20 w-[70px] bg-white px-2 py-3 text-left font-semibold text-gray-500 uppercase tracking-wide border-b-2 border-r border-b-gray-300 border-r-gray-200">
                       Unit
                     </th>
                     {cols.map((col, ci) => (
                       <th
                         key={ci}
-                        className={`sticky top-0 z-10 px-1 py-2 text-center border-b border-r border-gray-200 ${HEADER_STYLES[col.type]}`}
+                        className={`sticky top-0 z-10 px-1 py-2.5 text-center border-b-2 border-r border-b-gray-300 border-r-gray-200 ${HEADER_STYLES[col.type]}`}
                       >
-                        <div className="font-bold text-[10px] uppercase tracking-widest leading-tight">
+                        <div className="font-bold text-[11px] uppercase tracking-widest leading-tight">
                           {col.typeLabel}
                         </div>
-                        <div className="font-normal text-[10px] leading-tight mt-0.5 opacity-80">
-                          {col.dateLabel ?? ''}
-                        </div>
+                        {col.dateLabel && (
+                          <div className="font-normal text-[10px] leading-tight mt-0.5 opacity-70">
+                            {col.dateLabel}
+                          </div>
+                        )}
                       </th>
                     ))}
                   </tr>
