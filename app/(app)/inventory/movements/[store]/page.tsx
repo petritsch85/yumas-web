@@ -293,7 +293,7 @@ export default function InventoryMovementsPage({
               <p className="text-xs text-gray-300">Make sure inventory submissions are linked to delivery dates.</p>
             </div>
           ) : (
-            <div className="rounded-xl border border-gray-200 shadow-sm">
+            <div className="overflow-y-auto rounded-xl border border-gray-200 shadow-sm max-h-[calc(100vh-220px)]">
               <table className="text-xs border-separate border-spacing-0 w-full table-fixed">
                 <thead>
                   <tr className="[&>th]:shadow-[0_2px_4px_rgba(0,0,0,0.08)]">
