@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
-import { Send, Paperclip, MessageCircle, ChevronLeft, X } from 'lucide-react';
+import { Send, Paperclip, MessageCircle, ChevronLeft, X, Users } from 'lucide-react';
 import type { Profile } from '@/types';
 
 /* ─── Types ──────────────────────────────────────────────────────────────────── */
@@ -392,6 +392,7 @@ export default function ChatPage() {
   const [unread, setUnread] = useState<Record<string, number>>({});
   const [uploading, setUploading] = useState(false);
   const [mobileView, setMobileView] = useState<'list' | 'chat'>('list');
+  const [showMobileMembers, setShowMobileMembers] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -609,15 +610,61 @@ export default function ChatPage() {
             >
               <ChevronLeft size={20} />
             </button>
-            <div className="flex items-center gap-2 min-w-0">
+            <div className="flex items-center gap-2 min-w-0 flex-1">
               <span className="font-semibold text-gray-900 truncate">{activeLabel}</span>
               {activeRoom.startsWith('dm::') && (
                 <span className="text-[11px] text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full flex-shrink-0">DM</span>
               )}
             </div>
+            {!activeRoom.startsWith('dm::') && roomMembers.length > 0 && (
+              <button
+                onClick={() => setShowMobileMembers(true)}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors flex-shrink-0"
+              >
+                <Users size={14} />
+                <span className="text-xs font-medium">{roomMembers.length}</span>
+              </button>
+            )}
           </div>
           <ChatMessages messages={messages} isLoading={isLoading} myId={myId} messagesEndRef={messagesEndRef} />
           <ChatInput {...sharedInputProps} />
+
+          {/* Members bottom sheet */}
+          {showMobileMembers && (
+            <div className="fixed inset-0 z-50 flex flex-col justify-end" onClick={() => setShowMobileMembers(false)}>
+              <div className="absolute inset-0 bg-black/40" />
+              <div
+                className="relative bg-white rounded-t-2xl shadow-2xl max-h-[70vh] flex flex-col"
+                onClick={e => e.stopPropagation()}
+              >
+                {/* Sheet handle */}
+                <div className="flex justify-center pt-3 pb-1 flex-shrink-0">
+                  <div className="w-10 h-1 rounded-full bg-gray-300" />
+                </div>
+                {/* Sheet header */}
+                <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
+                  <span className="font-semibold text-gray-900">Members · {roomMembers.length}</span>
+                  <button onClick={() => setShowMobileMembers(false)} className="text-gray-400 hover:text-gray-600 p-1">
+                    <X size={18} />
+                  </button>
+                </div>
+                {/* Members list */}
+                <div className="overflow-y-auto py-2">
+                  {roomMembers.map(p => (
+                    <div key={p.id} className="flex items-center gap-3 px-4 py-3">
+                      <div className="w-9 h-9 rounded-full bg-[#1B5E20]/15 flex items-center justify-center text-[11px] font-bold text-[#1B5E20] flex-shrink-0">
+                        {initials(p.full_name)}
+                      </div>
+                      <span className="flex-1 text-sm text-gray-800">{p.full_name}</span>
+                      {p.role === 'admin' && (
+                        <span className="text-[10px] text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full flex-shrink-0">Admin</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
