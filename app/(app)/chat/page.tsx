@@ -440,8 +440,8 @@ export default function ChatPage() {
         )}
       </div>
 
-      {/* Main chat area — grid: header / content / input */}
-      <div className="flex-1 min-w-0 grid grid-rows-[auto_1fr_auto]">
+      {/* Main chat area */}
+      <div className="flex-1 flex flex-col min-w-0">
 
         {/* Header */}
         <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-3 flex-shrink-0">
@@ -473,57 +473,28 @@ export default function ChatPage() {
           )}
         </div>
 
-        {/* Messages + Members row */}
-        <div className="flex overflow-hidden">
-          {/* Messages */}
-          <div className="flex-1 overflow-y-auto px-4 py-3">
-            {isLoading ? (
-              <div className="flex items-center justify-center h-full">
-                <span className="text-sm text-gray-400">Loading…</span>
-              </div>
-            ) : messages.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-full text-gray-400 select-none">
-                <MessageCircle size={36} className="mb-2 opacity-25" />
-                <p className="text-sm">No messages yet — say hello!</p>
-              </div>
-            ) : (
-              <>
-                {messages.map((msg, idx) => {
-                  const isOwn = msg.sender_id === myId;
-                  const prev = messages[idx - 1];
-                  const showMeta = !prev || prev.sender_id !== msg.sender_id;
-                  return <MessageBubble key={msg.id} msg={msg} isOwn={isOwn} showMeta={showMeta} />;
-                })}
-              </>
-            )}
-            <div ref={messagesEndRef} />
-          </div>
-
-          {/* Members panel */}
-          {showMembers && !isActiveRoomDM && (
-            <div className="w-52 border-l border-gray-100 flex-shrink-0 overflow-y-auto bg-gray-50/50">
-              <div className="px-3 py-3 border-b border-gray-100">
-                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">
-                  Members · {roomMembers.length}
-                </p>
-              </div>
-              <div className="py-2">
-                {roomMembers.map(p => (
-                  <div key={p.id} className="flex items-center gap-2.5 px-3 py-1.5">
-                    <div className="w-7 h-7 rounded-full bg-[#1B5E20]/15 flex items-center justify-center text-[10px] font-bold text-[#1B5E20] flex-shrink-0">
-                      {initials(p.full_name)}
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-xs font-medium text-gray-800 truncate">{p.full_name}</p>
-                      {p.role === 'admin' && (
-                        <p className="text-[10px] text-gray-400">Admin</p>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
+        {/* Messages */}
+        <div className="flex-1 overflow-y-auto px-4 py-3">
+          {isLoading ? (
+            <div className="flex items-center justify-center h-full">
+              <span className="text-sm text-gray-400">Loading…</span>
             </div>
+          ) : messages.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-full text-gray-400 select-none">
+              <MessageCircle size={36} className="mb-2 opacity-25" />
+              <p className="text-sm">No messages yet — say hello!</p>
+            </div>
+          ) : (
+            <>
+              {messages.map((msg, idx) => {
+                const isOwn = msg.sender_id === myId;
+                const prev = messages[idx - 1];
+                const showMeta = !prev || prev.sender_id !== msg.sender_id;
+                return <MessageBubble key={msg.id} msg={msg} isOwn={isOwn} showMeta={showMeta} />;
+              })}
+            </>
           )}
+          <div ref={messagesEndRef} />
         </div>
 
         {/* Input */}
@@ -578,6 +549,32 @@ export default function ChatPage() {
           <p className="text-[10px] text-gray-400 mt-1.5 ml-1">Enter to send · Shift+Enter for new line</p>
         </div>
       </div>
+
+      {/* Members panel — sibling of main area, right column */}
+      {showMembers && !isActiveRoomDM && (
+        <div className="hidden md:flex flex-col w-52 border-l border-gray-100 flex-shrink-0 bg-gray-50/50">
+          <div className="px-3 py-3 border-b border-gray-100 flex-shrink-0">
+            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">
+              Members · {roomMembers.length}
+            </p>
+          </div>
+          <div className="flex-1 overflow-y-auto py-2">
+            {roomMembers.map(p => (
+              <div key={p.id} className="flex items-center gap-2.5 px-3 py-1.5">
+                <div className="w-7 h-7 rounded-full bg-[#1B5E20]/15 flex items-center justify-center text-[10px] font-bold text-[#1B5E20] flex-shrink-0">
+                  {initials(p.full_name)}
+                </div>
+                <div className="min-w-0">
+                  <p className="text-xs font-medium text-gray-800 truncate">{p.full_name}</p>
+                  {p.role === 'admin' && (
+                    <p className="text-[10px] text-gray-400">Admin</p>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
