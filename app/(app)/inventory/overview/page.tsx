@@ -3,8 +3,9 @@
 import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
-import { RefreshCw, ChevronLeft, ChevronRight, Trash2, X } from 'lucide-react';
+import { RefreshCw, ChevronLeft, ChevronRight, Trash2, X, TrendingUp } from 'lucide-react';
 import { useT } from '@/lib/i18n';
+import Link from 'next/link';
 
 const LOCATIONS = ['Eschborn', 'Taunus', 'Westend'] as const;
 
@@ -1219,6 +1220,18 @@ export default function InventoryOverviewPage() {
             <RefreshCw size={14} className={isRefreshing ? 'animate-spin text-[#1B5E20]' : ''} />
             {isRefreshing ? 'Refreshing…' : 'Refresh'}
           </button>
+          <div className="flex items-center gap-1.5">
+            {LOCATIONS.map((loc) => (
+              <Link
+                key={loc}
+                href={`/inventory/movements/${encodeURIComponent(loc)}`}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-[#1B5E20]/30 bg-[#1B5E20]/5 text-xs font-medium text-[#1B5E20] hover:bg-[#1B5E20]/10 transition-colors shadow-sm whitespace-nowrap"
+              >
+                <TrendingUp size={12} />
+                {loc}
+              </Link>
+            ))}
+          </div>
         </div>
       </div>
 
