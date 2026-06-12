@@ -191,14 +191,23 @@ function EditModal({
   onClose:          () => void;
   onSaved:          () => void;
 }) {
-  const [qty, setQty]         = useState(String(existingOverride?.overridden_qty ?? target.originalQty));
-  const [comment, setComment] = useState(existingOverride?.comment ?? '');
-  const [saving, setSaving]   = useState(false);
+  const existingAdHoc = existingOverride
+    ? existingOverride.overridden_qty - (existingOverride.original_qty ?? target.originalQty)
+    : 0;
+
+  const [adHocStr, setAdHocStr] = useState(existingAdHoc === 0 ? '' : String(existingAdHoc));
+  const [comment, setComment]   = useState(existingOverride?.comment ?? '');
+  const [saving, setSaving]     = useState(false);
+
+  const adHoc      = adHocStr === '' || adHocStr === '-' ? 0 : parseFloat(adHocStr);
+  const totalQty   = target.originalQty + (isNaN(adHoc) ? 0 : adHoc);
+  const hasChange  = existingOverride !== undefined;
 
   const handleSave = useCallback(async () => {
-    const parsed = parseFloat(qty);
+    const parsed = parseFloat(adHocStr === '' ? '0' : adHocStr);
     if (isNaN(parsed)) return;
     setSaving(true);
+    const overridden = target.originalQty + parsed;
     await fetch('/api/inventory/movements/overrides', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -206,13 +215,13 @@ function EditModal({
         store:          storeName,
         delivery_date:  target.deliveryDate,
         item_name:      target.itemName,
-        overridden_qty: parsed,
+        overridden_qty: overridden,
         original_qty:   target.originalQty,
         comment:        comment.trim() || null,
       }),
     });
     onSaved();
-  }, [qty, comment, storeName, target, onSaved]);
+  }, [adHocStr, comment, storeName, target, onSaved]);
 
   const handleRevert = useCallback(async () => {
     setSaving(true);
@@ -229,7 +238,6 @@ function EditModal({
   }, [storeName, target, onSaved]);
 
   const dateLabel = fmtDateLabel(target.deliveryDate) ?? target.deliveryDate;
-  const hasChange = existingOverride !== undefined;
 
   return (
     <div
@@ -240,7 +248,7 @@ function EditModal({
         {/* Header */}
         <div className="flex items-start justify-between px-5 pt-5 pb-4 border-b border-gray-100">
           <div>
-            <p className="text-xs text-gray-400 uppercase tracking-wider mb-0.5">Edit Delivery</p>
+            <p className="text-xs text-gray-400 uppercase tracking-wider mb-0.5">Delivery Adjustment</p>
             <h2 className="text-sm font-semibold text-gray-900 leading-snug">{target.itemName}</h2>
             <p className="text-xs text-gray-500 mt-0.5">{dateLabel}</p>
           </div>
@@ -251,18 +259,33 @@ function EditModal({
 
         {/* Body */}
         <div className="px-5 py-4 space-y-4">
+
+          {/* Delivery report row (read-only) */}
+          <div className="flex items-center justify-between bg-gray-50 rounded-lg px-3 py-2.5">
+            <span className="text-xs text-gray-500">Delivery report</span>
+            <span className="text-sm font-semibold text-gray-700 tabular-nums">{target.originalQty}</span>
+          </div>
+
+          {/* Ad hoc input */}
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-1.5">
-              Delivery quantity
-              <span className="ml-2 text-gray-400 font-normal">(original: {target.originalQty})</span>
+              Ad hoc adjustment
+              <span className="ml-2 text-gray-400 font-normal">positive = extra delivery · negative = items removed</span>
             </label>
             <input
               type="number"
-              value={qty}
-              onChange={(e) => setQty(e.target.value)}
+              value={adHocStr}
+              onChange={(e) => setAdHocStr(e.target.value)}
+              placeholder="0"
               className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20]/50"
               autoFocus
             />
+          </div>
+
+          {/* Total preview */}
+          <div className="flex items-center justify-between border-t border-gray-100 pt-3">
+            <span className="text-xs text-gray-500">Total delivery</span>
+            <span className="text-sm font-bold tabular-nums text-gray-900">{totalQty}</span>
           </div>
 
           <div>
@@ -272,7 +295,7 @@ function EditModal({
             <textarea
               value={comment}
               onChange={(e) => setComment(e.target.value)}
-              rows={3}
+              rows={2}
               placeholder="e.g. Transfer from Eschborn…"
               className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20]/50"
             />
@@ -287,7 +310,7 @@ function EditModal({
               disabled={saving}
               className="px-4 py-2 rounded-lg border border-red-200 text-xs font-medium text-red-600 hover:bg-red-50 transition-colors disabled:opacity-50"
             >
-              Revert to original
+              Revert
             </button>
           )}
           <div className="flex-1" />
@@ -300,7 +323,7 @@ function EditModal({
           </button>
           <button
             onClick={handleSave}
-            disabled={saving || isNaN(parseFloat(qty))}
+            disabled={saving || isNaN(parseFloat(adHocStr === '' ? '0' : adHocStr))}
             className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[#1B5E20] text-xs font-medium text-white hover:bg-[#1B5E20]/90 transition-colors disabled:opacity-50"
           >
             {saving && <Loader2 size={12} className="animate-spin" />}
@@ -581,12 +604,12 @@ export default function InventoryMovementsPage({
                                   : rawVal;
                                 const isOverridden = override !== undefined;
 
-                                const displayVal = effectiveVal === null || effectiveVal === undefined || effectiveVal === 0
-                                  ? '—'
-                                  : String(effectiveVal);
+                                const adHoc = isOverridden
+                                  ? override!.overridden_qty - (override!.original_qty ?? rawVal ?? 0)
+                                  : 0;
 
                                 const tooltipText = isOverridden
-                                  ? [override!.comment, `Changed: ${override!.original_qty ?? '?'} → ${override!.overridden_qty}`]
+                                  ? [override!.comment, `Report: ${override!.original_qty ?? '?'} · Ad hoc: ${adHoc > 0 ? '+' : ''}${adHoc}`]
                                       .filter(Boolean).join('\n')
                                   : undefined;
 
@@ -613,11 +636,19 @@ export default function InventoryMovementsPage({
                                       type="button"
                                       title={tooltipText}
                                       onClick={() => openEdit(col, item.name)}
-                                      className={`w-full py-2 px-1 text-center tabular-nums cursor-pointer hover:brightness-95 transition-all ${
-                                        isOverridden ? 'text-orange-700 font-medium' : 'text-gray-800'
-                                      } ${displayVal === '—' ? 'text-gray-300' : ''}`}
+                                      className="w-full py-1.5 px-1 text-center tabular-nums cursor-pointer hover:brightness-95 transition-all"
                                     >
-                                      {displayVal}
+                                      {isOverridden ? (
+                                        <span className="flex items-baseline justify-center gap-0.5 leading-none">
+                                          <span className="text-orange-700 font-semibold">{adHoc > 0 ? '+' : ''}{adHoc}</span>
+                                          <span className="text-[9px] text-gray-400 mx-0.5">+</span>
+                                          <span className="text-orange-500/80 text-[10px]">{override!.original_qty ?? rawVal ?? 0}</span>
+                                        </span>
+                                      ) : (
+                                        <span className={effectiveVal === null || effectiveVal === 0 ? 'text-gray-300' : 'text-gray-800'}>
+                                          {effectiveVal === null || effectiveVal === 0 ? '—' : effectiveVal}
+                                        </span>
+                                      )}
                                     </button>
                                   </td>
                                 );
