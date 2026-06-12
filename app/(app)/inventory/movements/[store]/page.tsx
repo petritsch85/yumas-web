@@ -47,6 +47,18 @@ function fmtDeliveryHeader(isoDate: string): string {
   return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
 }
 
+// Short versions for compact two-row header (no weekday)
+function fmtInvDateLabel(iso: string | null): string | null {
+  const d = submissionDate(iso);
+  if (!d) return null;
+  return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+}
+
+function fmtDateLabel(isoDate: string): string | null {
+  const d = new Date(isoDate + 'T12:00:00');
+  return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+}
+
 /** Returns the Monday (YYYY-MM-DD) of the ISO week containing dateStr. */
 function getWeekStart(dateStr: string): string {
   const d = new Date(dateStr + 'T12:00:00');
@@ -81,18 +93,6 @@ const TYPE_LABELS: Record<ColType, string> = {
   del:  'DEL',
   cons: 'CONS',
 };
-
-function fmtDateLabel(iso: string | null): string | null {
-  if (!iso) return null;
-  const d = new Date(iso + 'T12:00:00');
-  return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
-}
-
-function fmtInvDateLabel(iso: string | null): string | null {
-  const d = submissionDate(iso);
-  if (!d) return null;
-  return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
-}
 
 function buildColumns(cycles: Cycle[]): Col[] {
   const cols: Col[] = [];
@@ -293,21 +293,21 @@ export default function InventoryMovementsPage({
               <p className="text-xs text-gray-300">Make sure inventory submissions are linked to delivery dates.</p>
             </div>
           ) : (
-            <div className="overflow-x-auto rounded-xl border border-gray-200 shadow-sm">
-              <table className="text-xs border-collapse min-w-full">
+            <div className="rounded-xl border border-gray-200 shadow-sm">
+              <table className="text-xs border-collapse w-full table-fixed">
                 <thead>
                   {/* Row 1 — type labels (INV / DEL / CONS) */}
                   <tr>
-                    <th rowSpan={2} className="sticky left-0 z-20 bg-gray-50 px-4 py-3 text-left font-semibold text-gray-600 uppercase tracking-wide whitespace-nowrap border-b border-r border-gray-200 min-w-[180px] align-middle">
+                    <th rowSpan={2} className="sticky left-0 z-20 w-[160px] bg-gray-50 px-3 py-3 text-left font-semibold text-gray-600 uppercase tracking-wide border-b border-r border-gray-200 align-middle">
                       Item
                     </th>
-                    <th rowSpan={2} className="bg-gray-50 px-3 py-3 text-left font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap border-b border-r border-gray-200 align-middle">
+                    <th rowSpan={2} className="w-[70px] bg-gray-50 px-2 py-3 text-left font-semibold text-gray-500 uppercase tracking-wide border-b border-r border-gray-200 align-middle">
                       Unit
                     </th>
                     {cols.map((col, ci) => (
                       <th
                         key={ci}
-                        className={`w-[88px] min-w-[88px] max-w-[88px] px-2 pt-2 pb-0.5 text-center font-bold text-[10px] uppercase tracking-widest border-r border-gray-200 ${HEADER_STYLES[col.type]}`}
+                        className={`px-1 pt-2 pb-0.5 text-center font-bold text-[10px] uppercase tracking-widest border-r border-gray-200 ${HEADER_STYLES[col.type]}`}
                       >
                         {col.typeLabel}
                       </th>
@@ -318,7 +318,7 @@ export default function InventoryMovementsPage({
                     {cols.map((col, ci) => (
                       <th
                         key={ci}
-                        className={`w-[88px] min-w-[88px] max-w-[88px] px-2 pb-2 pt-0.5 text-center font-normal text-[10px] border-b border-r border-gray-200 ${HEADER_STYLES[col.type]}`}
+                        className={`px-1 pb-2 pt-0.5 text-center font-normal text-[10px] border-b border-r border-gray-200 ${HEADER_STYLES[col.type]}`}
                       >
                         {col.dateLabel ?? ''}
                       </th>
@@ -347,10 +347,10 @@ export default function InventoryMovementsPage({
                             key={item.name}
                             className={`${rowBg} hover:bg-blue-50/20 transition-colors border-b border-gray-100`}
                           >
-                            <td className={`sticky left-0 z-10 px-4 py-2.5 font-medium text-gray-800 border-r border-gray-100 ${rowBg}`}>
+                            <td className={`sticky left-0 z-10 px-3 py-2 font-medium text-gray-800 border-r border-gray-100 truncate ${rowBg}`}>
                               {item.name}
                             </td>
-                            <td className="px-3 py-2.5 text-gray-400 whitespace-nowrap border-r border-gray-100">
+                            <td className="px-2 py-2 text-gray-400 truncate border-r border-gray-100">
                               {item.unit}
                             </td>
                             {cols.map((col, ci) => {
@@ -361,7 +361,7 @@ export default function InventoryMovementsPage({
                               return (
                                 <td
                                   key={ci}
-                                  className={`w-[88px] min-w-[88px] max-w-[88px] px-2 py-2 text-center tabular-nums border-r border-gray-100 ${COL_STYLES[col.type]} ${
+                                  className={`px-1 py-2 text-center tabular-nums border-r border-gray-100 ${COL_STYLES[col.type]} ${
                                     isNegative ? 'text-red-600 font-semibold' : 'text-gray-800'
                                   }`}
                                 >
