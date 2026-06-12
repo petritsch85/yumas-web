@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
-import { Send, Paperclip, MessageCircle, ChevronLeft, X, Users } from 'lucide-react';
+import { Send, Paperclip, MessageCircle, ChevronLeft, X } from 'lucide-react';
 import type { Profile } from '@/types';
 
 /* ─── Types ──────────────────────────────────────────────────────────────────── */
@@ -48,7 +48,7 @@ function fmtTime(iso: string) {
 
 /* ─── Room Sidebar ───────────────────────────────────────────────────────────── */
 function RoomSidebar({
-  activeRoom, myId, otherProfiles, unread, onSelect, onClose, visibleRooms,
+  activeRoom, myId, otherProfiles, unread, onSelect, onClose, visibleRooms, roomMembers,
 }: {
   activeRoom: string;
   myId: string;
@@ -57,6 +57,7 @@ function RoomSidebar({
   onSelect: (room: string) => void;
   onClose?: () => void;
   visibleRooms: typeof ROOMS;
+  roomMembers: MinProfile[];
 }) {
   return (
     <div className="flex flex-col h-full">
@@ -96,7 +97,7 @@ function RoomSidebar({
 
         {/* Direct Messages */}
         {otherProfiles.length > 0 && (
-          <div className="px-3">
+          <div className="px-3 mb-4">
             <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest px-2 mb-1.5">Direct Messages</p>
             {otherProfiles.map(p => {
               const roomId = dmRoom(myId, p.id);
@@ -122,6 +123,26 @@ function RoomSidebar({
                 </button>
               );
             })}
+          </div>
+        )}
+
+        {/* Room members — shown only when viewing a room channel */}
+        {!activeRoom.startsWith('dm::') && roomMembers.length > 0 && (
+          <div className="px-3">
+            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest px-2 mb-1.5">
+              Members · {roomMembers.length}
+            </p>
+            {roomMembers.map(p => (
+              <div key={p.id} className="flex items-center gap-2.5 px-2.5 py-1.5">
+                <div className="w-6 h-6 rounded-full bg-[#1B5E20]/15 flex items-center justify-center text-[10px] font-bold text-[#1B5E20] flex-shrink-0">
+                  {initials(p.full_name)}
+                </div>
+                <span className="flex-1 text-sm text-gray-600 truncate">{p.full_name}</span>
+                {p.role === 'admin' && (
+                  <span className="text-[9px] text-gray-400 flex-shrink-0">Admin</span>
+                )}
+              </div>
+            ))}
           </div>
         )}
       </div>
@@ -189,7 +210,6 @@ export default function ChatPage() {
   const [unread, setUnread] = useState<Set<string>>(new Set());
   const [uploading, setUploading] = useState(false);
   const [showMobileSidebar, setShowMobileSidebar] = useState(false);
-  const [showMembers, setShowMembers] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -233,10 +253,8 @@ export default function ChatPage() {
     ? ROOMS
     : ROOMS.filter(r => profile?.chat_rooms?.includes(r.id));
 
-  // Members of the active room (only for non-DM rooms)
-  const isActiveRoomDM = activeRoom.startsWith('dm::');
-  const activeRoomObj  = ROOMS.find(r => r.id === activeRoom);
-  const roomMembers = isActiveRoomDM ? [] : allProfiles.filter(p =>
+  // Members of the active room (only shown for room channels, not DMs)
+  const roomMembers = activeRoom.startsWith('dm::') ? [] : allProfiles.filter(p =>
     p.role === 'admin' || (p.chat_rooms ?? []).includes(activeRoom),
   );
 
@@ -414,6 +432,7 @@ export default function ChatPage() {
               onSelect={handleRoomSelect}
               onClose={() => setShowMobileSidebar(false)}
               visibleRooms={visibleRooms}
+              roomMembers={roomMembers}
             />
           </div>
         </div>
@@ -428,6 +447,7 @@ export default function ChatPage() {
           unread={unread}
           onSelect={handleRoomSelect}
           visibleRooms={visibleRooms}
+          roomMembers={roomMembers}
         />
         {/* Current user footer */}
         {profile && (
@@ -451,26 +471,12 @@ export default function ChatPage() {
           >
             <ChevronLeft size={20} />
           </button>
-          <div className="flex items-center gap-2 min-w-0 flex-1">
+          <div className="flex items-center gap-2 min-w-0">
             <span className="font-semibold text-gray-900 truncate">{activeLabel}</span>
-            {isActiveRoomDM && (
+            {activeRoom.startsWith('dm::') && (
               <span className="text-[11px] text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full flex-shrink-0">DM</span>
             )}
           </div>
-          {!isActiveRoomDM && (
-            <button
-              onClick={() => setShowMembers(v => !v)}
-              title="Room members"
-              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors flex-shrink-0 ${
-                showMembers
-                  ? 'bg-[#1B5E20]/10 text-[#1B5E20]'
-                  : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
-              }`}
-            >
-              <Users size={14} />
-              <span className="hidden sm:inline">{roomMembers.length}</span>
-            </button>
-          )}
         </div>
 
         {/* Messages */}
@@ -550,31 +556,6 @@ export default function ChatPage() {
         </div>
       </div>
 
-      {/* Members panel — sibling of main area, right column */}
-      {showMembers && !isActiveRoomDM && (
-        <div className="hidden md:flex flex-col w-52 border-l border-gray-100 flex-shrink-0 bg-gray-50/50">
-          <div className="px-3 py-3 border-b border-gray-100 flex-shrink-0">
-            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">
-              Members · {roomMembers.length}
-            </p>
-          </div>
-          <div className="flex-1 overflow-y-auto py-2">
-            {roomMembers.map(p => (
-              <div key={p.id} className="flex items-center gap-2.5 px-3 py-1.5">
-                <div className="w-7 h-7 rounded-full bg-[#1B5E20]/15 flex items-center justify-center text-[10px] font-bold text-[#1B5E20] flex-shrink-0">
-                  {initials(p.full_name)}
-                </div>
-                <div className="min-w-0">
-                  <p className="text-xs font-medium text-gray-800 truncate">{p.full_name}</p>
-                  {p.role === 'admin' && (
-                    <p className="text-[10px] text-gray-400">Admin</p>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
     </div>
   );
 }
