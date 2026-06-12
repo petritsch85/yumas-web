@@ -1,8 +1,8 @@
 'use client';
 
-import { use, useState, useMemo } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { Loader2, ChevronDown, LayoutGrid, TrendingUp } from 'lucide-react';
+import { use, useState, useMemo, useCallback } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { Loader2, ChevronDown, LayoutGrid, TrendingUp, X } from 'lucide-react';
 import Link from 'next/link';
 
 const STORES = ['Eschborn', 'Taunus', 'Westend'] as const;
@@ -25,6 +25,19 @@ type MovementsData = {
   cycles: Cycle[];
 };
 
+type Override = {
+  id:             string;
+  store:          string;
+  delivery_date:  string;
+  item_name:      string;
+  overridden_qty: number;
+  original_qty:   number | null;
+  comment:        string | null;
+  created_at:     string;
+};
+
+type OverridesMap = Record<string, Record<string, Override>>;
+
 // ── Date helpers ──────────────────────────────────────────────────────────────
 
 const EOD_CUTOFF = 4;
@@ -36,18 +49,6 @@ function submissionDate(iso: string | null): Date | null {
   return d;
 }
 
-function fmtInvHeader(iso: string | null): string {
-  const d = submissionDate(iso);
-  if (!d) return '—';
-  return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
-}
-
-function fmtDeliveryHeader(isoDate: string): string {
-  const d = new Date(isoDate + 'T12:00:00');
-  return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
-}
-
-// Short versions for compact two-row header
 function fmtInvDateLabel(iso: string | null): string | null {
   const d = submissionDate(iso);
   if (!d) return null;
@@ -59,10 +60,9 @@ function fmtDateLabel(isoDate: string): string | null {
   return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
 }
 
-/** Returns the Monday (YYYY-MM-DD) of the ISO week containing dateStr. */
 function getWeekStart(dateStr: string): string {
   const d = new Date(dateStr + 'T12:00:00');
-  const day = d.getDay(); // 0=Sun … 6=Sat
+  const day = d.getDay();
   const diff = day === 0 ? -6 : 1 - day;
   d.setDate(d.getDate() + diff);
   return d.toISOString().slice(0, 10);
@@ -82,10 +82,12 @@ function fmtWeekLabel(weekStart: string): string {
 type ColType = 'inv' | 'del' | 'cons';
 
 type Col = {
-  type:      ColType;
-  typeLabel: string;        // e.g. "INV" / "DEL" / "CONS"
-  dateLabel: string | null; // e.g. "Mon 8 Jun"  (null for Consumption)
-  getValue:  (item: string) => number | null;
+  type:         ColType;
+  typeLabel:    string;
+  dateLabel:    string | null;
+  deliveryDate: string | null; // DEL cols only
+  cycleIdx:     number;
+  getValue:     (item: string) => number | null;
 };
 
 const TYPE_LABELS: Record<ColType, string> = {
@@ -99,30 +101,36 @@ function buildColumns(cycles: Cycle[]): Col[] {
   if (!cycles.length) return cols;
 
   cols.push({
-    type:      'inv',
-    typeLabel: TYPE_LABELS.inv,
-    dateLabel: fmtInvDateLabel(cycles[0].preInvDate),
-    getValue:  (item) => cycles[0].preInv[item] ?? null,
+    type:         'inv',
+    typeLabel:    TYPE_LABELS.inv,
+    dateLabel:    fmtInvDateLabel(cycles[0].preInvDate),
+    deliveryDate: null,
+    cycleIdx:     0,
+    getValue:     (item) => cycles[0].preInv[item] ?? null,
   });
 
   for (let i = 0; i < cycles.length; i++) {
     const c = cycles[i];
 
     cols.push({
-      type:      'del',
-      typeLabel: TYPE_LABELS.del,
-      dateLabel: fmtDateLabel(c.deliveryDate),
-      getValue:  (item) => {
+      type:         'del',
+      typeLabel:    TYPE_LABELS.del,
+      dateLabel:    fmtDateLabel(c.deliveryDate),
+      deliveryDate: c.deliveryDate,
+      cycleIdx:     i,
+      getValue:     (item) => {
         const v = c.delivery[item];
         return v !== undefined ? v : 0;
       },
     });
 
     cols.push({
-      type:      'cons',
-      typeLabel: TYPE_LABELS.cons,
-      dateLabel: null,
-      getValue:  (item) => c.consumption?.[item] ?? null,
+      type:         'cons',
+      typeLabel:    TYPE_LABELS.cons,
+      dateLabel:    null,
+      deliveryDate: null,
+      cycleIdx:     i,
+      getValue:     (item) => c.consumption?.[item] ?? null,
     });
 
     const postDateLabel = c.postInvDate
@@ -132,10 +140,12 @@ function buildColumns(cycles: Cycle[]): Col[] {
       : null;
 
     cols.push({
-      type:      'inv',
-      typeLabel: TYPE_LABELS.inv,
-      dateLabel: postDateLabel,
-      getValue:  (item) => {
+      type:         'inv',
+      typeLabel:    TYPE_LABELS.inv,
+      dateLabel:    postDateLabel,
+      deliveryDate: null,
+      cycleIdx:     i,
+      getValue:     (item) => {
         if (c.postInv) return c.postInv[item] ?? null;
         if (i + 1 < cycles.length) return cycles[i + 1].preInv[item] ?? null;
         return null;
@@ -160,6 +170,148 @@ const HEADER_STYLES = {
   cons: 'bg-amber-100 text-amber-800',
 } as const;
 
+// ── Edit modal ─────────────────────────────────────────────────────────────────
+
+type EditTarget = {
+  deliveryDate: string;
+  itemName:     string;
+  originalQty:  number;
+};
+
+function EditModal({
+  target,
+  existingOverride,
+  storeName,
+  onClose,
+  onSaved,
+}: {
+  target:           EditTarget;
+  existingOverride: Override | undefined;
+  storeName:        string;
+  onClose:          () => void;
+  onSaved:          () => void;
+}) {
+  const [qty, setQty]         = useState(String(existingOverride?.overridden_qty ?? target.originalQty));
+  const [comment, setComment] = useState(existingOverride?.comment ?? '');
+  const [saving, setSaving]   = useState(false);
+
+  const handleSave = useCallback(async () => {
+    const parsed = parseFloat(qty);
+    if (isNaN(parsed)) return;
+    setSaving(true);
+    await fetch('/api/inventory/movements/overrides', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        store:          storeName,
+        delivery_date:  target.deliveryDate,
+        item_name:      target.itemName,
+        overridden_qty: parsed,
+        original_qty:   target.originalQty,
+        comment:        comment.trim() || null,
+      }),
+    });
+    onSaved();
+  }, [qty, comment, storeName, target, onSaved]);
+
+  const handleRevert = useCallback(async () => {
+    setSaving(true);
+    await fetch('/api/inventory/movements/overrides', {
+      method:  'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        store:         storeName,
+        delivery_date: target.deliveryDate,
+        item_name:     target.itemName,
+      }),
+    });
+    onSaved();
+  }, [storeName, target, onSaved]);
+
+  const dateLabel = fmtDateLabel(target.deliveryDate) ?? target.deliveryDate;
+  const hasChange = existingOverride !== undefined;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-[2px]"
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 overflow-hidden">
+        {/* Header */}
+        <div className="flex items-start justify-between px-5 pt-5 pb-4 border-b border-gray-100">
+          <div>
+            <p className="text-xs text-gray-400 uppercase tracking-wider mb-0.5">Edit Delivery</p>
+            <h2 className="text-sm font-semibold text-gray-900 leading-snug">{target.itemName}</h2>
+            <p className="text-xs text-gray-500 mt-0.5">{dateLabel}</p>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors">
+            <X size={16} />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="px-5 py-4 space-y-4">
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1.5">
+              Delivery quantity
+              <span className="ml-2 text-gray-400 font-normal">(original: {target.originalQty})</span>
+            </label>
+            <input
+              type="number"
+              value={qty}
+              onChange={(e) => setQty(e.target.value)}
+              className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20]/50"
+              autoFocus
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1.5">
+              Comment <span className="text-gray-400 font-normal">(optional)</span>
+            </label>
+            <textarea
+              value={comment}
+              onChange={(e) => setComment(e.target.value)}
+              rows={3}
+              placeholder="e.g. Transfer from Eschborn…"
+              className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 focus:border-[#1B5E20]/50"
+            />
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center gap-2 px-5 pb-5">
+          {hasChange && (
+            <button
+              onClick={handleRevert}
+              disabled={saving}
+              className="px-4 py-2 rounded-lg border border-red-200 text-xs font-medium text-red-600 hover:bg-red-50 transition-colors disabled:opacity-50"
+            >
+              Revert to original
+            </button>
+          )}
+          <div className="flex-1" />
+          <button
+            onClick={onClose}
+            disabled={saving}
+            className="px-4 py-2 rounded-lg border border-gray-200 text-xs font-medium text-gray-600 hover:bg-gray-50 transition-colors disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={saving || isNaN(parseFloat(qty))}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[#1B5E20] text-xs font-medium text-white hover:bg-[#1B5E20]/90 transition-colors disabled:opacity-50"
+          >
+            {saving && <Loader2 size={12} className="animate-spin" />}
+            Save
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Page ───────────────────────────────────────────────────────────────────────
 
 export default function InventoryMovementsPage({
@@ -169,6 +321,7 @@ export default function InventoryMovementsPage({
 }) {
   const { store } = use(params);
   const storeName = decodeURIComponent(store);
+  const qc = useQueryClient();
 
   const { data, isLoading, error } = useQuery<MovementsData>({
     queryKey: ['inventory-movements', storeName],
@@ -179,17 +332,35 @@ export default function InventoryMovementsPage({
     },
   });
 
+  const { data: overridesList = [] } = useQuery<Override[]>({
+    queryKey: ['inventory-movement-overrides', storeName],
+    queryFn: async () => {
+      const res = await fetch(
+        `/api/inventory/movements/overrides?store=${encodeURIComponent(storeName)}`,
+      );
+      if (!res.ok) throw new Error('Failed');
+      return res.json();
+    },
+  });
+
+  const overrides = useMemo<OverridesMap>(() => {
+    const map: OverridesMap = {};
+    for (const ov of overridesList) {
+      if (!map[ov.delivery_date]) map[ov.delivery_date] = {};
+      map[ov.delivery_date][ov.item_name] = ov;
+    }
+    return map;
+  }, [overridesList]);
+
   // ── Week picker ──────────────────────────────────────────────────────────────
 
   const weeks = useMemo(() => {
     const seen = new Set<string>();
     for (const c of data?.cycles ?? []) seen.add(getWeekStart(c.deliveryDate));
-    return Array.from(seen).sort((a, b) => b.localeCompare(a)); // newest first
+    return Array.from(seen).sort((a, b) => b.localeCompare(a));
   }, [data]);
 
   const [selectedWeek, setSelectedWeek] = useState<string | null>(null);
-
-  // Always track the effective week — default to most recent once data arrives
   const effectiveWeek = selectedWeek ?? weeks[0] ?? null;
 
   const filteredCycles = useMemo(
@@ -199,7 +370,49 @@ export default function InventoryMovementsPage({
 
   const cols = buildColumns(filteredCycles);
 
-  // Group items by section
+  // ── Override helpers ──────────────────────────────────────────────────────────
+
+  const getEffectiveDel = useCallback(
+    (deliveryDate: string, itemName: string, original: number | null): number | null => {
+      return overrides[deliveryDate]?.[itemName]?.overridden_qty ?? original;
+    },
+    [overrides],
+  );
+
+  const getEffectiveCons = useCallback(
+    (cycleIdx: number, itemName: string): number | null => {
+      const cycle = filteredCycles[cycleIdx];
+      if (!cycle?.postInv) return null;
+      const pre    = cycle.preInv[itemName] ?? 0;
+      const rawDel = cycle.delivery[itemName] ?? 0;
+      const del    = overrides[cycle.deliveryDate]?.[itemName]?.overridden_qty ?? rawDel;
+      const post   = cycle.postInv[itemName] ?? 0;
+      return pre + del - post;
+    },
+    [filteredCycles, overrides],
+  );
+
+  // ── Edit modal state ──────────────────────────────────────────────────────────
+
+  const [editTarget, setEditTarget] = useState<EditTarget | null>(null);
+
+  const openEdit = useCallback(
+    (col: Col, itemName: string) => {
+      if (col.type !== 'del' || !col.deliveryDate) return;
+      const cycle = filteredCycles[col.cycleIdx];
+      const originalQty = cycle?.delivery[itemName] ?? 0;
+      setEditTarget({ deliveryDate: col.deliveryDate, itemName, originalQty });
+    },
+    [filteredCycles],
+  );
+
+  const handleSaved = useCallback(async () => {
+    await qc.invalidateQueries({ queryKey: ['inventory-movement-overrides', storeName] });
+    setEditTarget(null);
+  }, [qc, storeName]);
+
+  // ── Section grouping ──────────────────────────────────────────────────────────
+
   const sections = useMemo(() => {
     const result: { title: string; items: { name: string; unit: string }[] }[] = [];
     for (const item of data?.items ?? []) {
@@ -212,8 +425,21 @@ export default function InventoryMovementsPage({
     return result;
   }, [data]);
 
+  // ── Render ────────────────────────────────────────────────────────────────────
+
   return (
     <div>
+      {/* Edit modal */}
+      {editTarget && (
+        <EditModal
+          target={editTarget}
+          existingOverride={overrides[editTarget.deliveryDate]?.[editTarget.itemName]}
+          storeName={storeName}
+          onClose={() => setEditTarget(null)}
+          onSaved={handleSaved}
+        />
+      )}
+
       {/* Header */}
       <div className="flex items-start justify-between gap-4 mb-6 flex-wrap">
         <div>
@@ -222,7 +448,6 @@ export default function InventoryMovementsPage({
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
-          {/* Week picker */}
           {weeks.length > 0 && (
             <div className="relative">
               <select
@@ -243,7 +468,6 @@ export default function InventoryMovementsPage({
             </div>
           )}
 
-          {/* Group button */}
           <Link
             href="/inventory/overview"
             className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-200 bg-white text-xs font-medium text-gray-600 hover:bg-gray-50 transition-colors shadow-sm whitespace-nowrap"
@@ -252,7 +476,6 @@ export default function InventoryMovementsPage({
             Group
           </Link>
 
-          {/* Store buttons */}
           {STORES.map((s) => {
             const isActive = s === storeName;
             return (
@@ -335,7 +558,7 @@ export default function InventoryMovementsPage({
 
                       {section.items.map((item, idx) => {
                         const isEven = idx % 2 === 0;
-                        const rowBg = isEven ? 'bg-white' : 'bg-gray-50/50';
+                        const rowBg  = isEven ? 'bg-white' : 'bg-gray-50/50';
 
                         return (
                           <tr
@@ -348,21 +571,90 @@ export default function InventoryMovementsPage({
                             <td className="px-2 py-2 text-gray-400 truncate border-r border-gray-100">
                               {item.unit}
                             </td>
-                            {cols.map((col, ci) => {
-                              const val = col.getValue(item.name);
-                              const isConsumption = col.type === 'cons';
-                              const isNegative    = isConsumption && val !== null && val < 0;
 
+                            {cols.map((col, ci) => {
+                              if (col.type === 'del') {
+                                const rawVal     = col.getValue(item.name);
+                                const override   = col.deliveryDate ? overrides[col.deliveryDate]?.[item.name] : undefined;
+                                const effectiveVal = col.deliveryDate
+                                  ? getEffectiveDel(col.deliveryDate, item.name, rawVal)
+                                  : rawVal;
+                                const isOverridden = override !== undefined;
+
+                                return (
+                                  <td
+                                    key={ci}
+                                    onClick={() => openEdit(col, item.name)}
+                                    className={`relative group px-1 py-2 text-center tabular-nums border-r border-gray-100 cursor-pointer transition-colors
+                                      ${isOverridden
+                                        ? 'bg-orange-50 ring-1 ring-inset ring-orange-300'
+                                        : 'bg-green-50/60 hover:bg-green-100/80'
+                                      }`}
+                                  >
+                                    {/* Orange corner triangle for overridden cells */}
+                                    {isOverridden && (
+                                      <span
+                                        className="absolute top-0 right-0 w-0 h-0 pointer-events-none"
+                                        style={{
+                                          borderTop:   '8px solid #f97316',
+                                          borderLeft:  '8px solid transparent',
+                                        }}
+                                      />
+                                    )}
+
+                                    {/* Tooltip */}
+                                    {isOverridden && (
+                                      <div className="hidden group-hover:block absolute bottom-full right-0 mb-1.5 z-50 bg-gray-900 text-white text-[10px] rounded-lg px-2.5 py-2 min-w-[140px] max-w-[200px] text-left shadow-xl pointer-events-none">
+                                        {override!.comment && (
+                                          <div className="font-medium mb-1 leading-snug">{override!.comment}</div>
+                                        )}
+                                        <div className="text-gray-400">
+                                          Changed from {override!.original_qty ?? '?'} → {override!.overridden_qty}
+                                        </div>
+                                      </div>
+                                    )}
+
+                                    <span className={isOverridden ? 'text-orange-700 font-medium' : 'text-gray-800'}>
+                                      {effectiveVal === null || effectiveVal === undefined ? (
+                                        <span className="text-gray-300">—</span>
+                                      ) : effectiveVal === 0 ? (
+                                        <span className="text-gray-300">—</span>
+                                      ) : (
+                                        effectiveVal
+                                      )}
+                                    </span>
+                                  </td>
+                                );
+                              }
+
+                              if (col.type === 'cons') {
+                                const effectiveVal = getEffectiveCons(col.cycleIdx, item.name);
+                                const isNegative   = effectiveVal !== null && effectiveVal < 0;
+
+                                return (
+                                  <td
+                                    key={ci}
+                                    className={`px-1 py-2 text-center tabular-nums border-r border-gray-100 text-gray-800 ${
+                                      isNegative ? 'bg-red-100' : COL_STYLES.cons
+                                    }`}
+                                  >
+                                    {effectiveVal === null ? (
+                                      <span className="text-gray-300">—</span>
+                                    ) : (
+                                      effectiveVal
+                                    )}
+                                  </td>
+                                );
+                              }
+
+                              // INV cell
+                              const val = col.getValue(item.name);
                               return (
                                 <td
                                   key={ci}
-                                  className={`px-1 py-2 text-center tabular-nums border-r border-gray-100 text-gray-800 ${
-                                    isNegative ? 'bg-red-100' : COL_STYLES[col.type]
-                                  }`}
+                                  className={`px-1 py-2 text-center tabular-nums border-r border-gray-100 text-gray-800 ${COL_STYLES.inv}`}
                                 >
                                   {val === null || val === undefined ? (
-                                    <span className="text-gray-300">—</span>
-                                  ) : col.type === 'del' && val === 0 ? (
                                     <span className="text-gray-300">—</span>
                                   ) : (
                                     val
@@ -386,13 +678,13 @@ export default function InventoryMovementsPage({
                 <span className="w-3 h-3 rounded bg-blue-100 inline-block" /> Inventory snapshot
               </div>
               <div className="flex items-center gap-1.5">
-                <span className="w-3 h-3 rounded bg-green-100 inline-block" /> Delivery (packed qty)
+                <span className="w-3 h-3 rounded bg-green-100 inline-block" /> Delivery — click to edit
               </div>
               <div className="flex items-center gap-1.5">
                 <span className="w-3 h-3 rounded bg-amber-100 inline-block" /> Consumption (Inv + Del − Next Inv)
               </div>
               <div className="flex items-center gap-1.5">
-                <span className="text-red-500 font-semibold">negative</span> = more in stock than expected
+                <span className="w-3 h-3 rounded bg-orange-100 border border-orange-300 inline-block" /> Override applied
               </div>
             </div>
           )}
