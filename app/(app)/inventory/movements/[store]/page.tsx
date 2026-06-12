@@ -307,7 +307,7 @@ export default function InventoryMovementsPage({
                     {cols.map((col, ci) => (
                       <th
                         key={ci}
-                        className={`px-2 pt-2 pb-0.5 text-center font-bold text-[10px] uppercase tracking-widest whitespace-nowrap border-r border-gray-200 ${HEADER_STYLES[col.type]}`}
+                        className={`w-[88px] min-w-[88px] max-w-[88px] px-2 pt-2 pb-0.5 text-center font-bold text-[10px] uppercase tracking-widest border-r border-gray-200 ${HEADER_STYLES[col.type]}`}
                       >
                         {col.typeLabel}
                       </th>
@@ -318,7 +318,7 @@ export default function InventoryMovementsPage({
                     {cols.map((col, ci) => (
                       <th
                         key={ci}
-                        className={`px-2 pb-2 pt-0.5 text-center font-normal text-[10px] whitespace-nowrap border-b border-r border-gray-200 ${HEADER_STYLES[col.type]}`}
+                        className={`w-[88px] min-w-[88px] max-w-[88px] px-2 pb-2 pt-0.5 text-center font-normal text-[10px] border-b border-r border-gray-200 ${HEADER_STYLES[col.type]}`}
                       >
                         {col.dateLabel ?? ''}
                       </th>
@@ -361,7 +361,7 @@ export default function InventoryMovementsPage({
                               return (
                                 <td
                                   key={ci}
-                                  className={`px-2 py-2 text-center tabular-nums border-r border-gray-100 ${COL_STYLES[col.type]} ${
+                                  className={`w-[88px] min-w-[88px] max-w-[88px] px-2 py-2 text-center tabular-nums border-r border-gray-100 ${COL_STYLES[col.type]} ${
                                     isNegative ? 'text-red-600 font-semibold' : 'text-gray-800'
                                   }`}
                                 >
