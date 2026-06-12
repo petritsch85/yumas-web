@@ -296,31 +296,24 @@ export default function InventoryMovementsPage({
             <div className="rounded-xl border border-gray-200 shadow-sm">
               <table className="text-xs border-collapse w-full table-fixed">
                 <thead>
-                  {/* Row 1 — type labels (INV / DEL / CONS) */}
                   <tr>
-                    <th rowSpan={2} className="sticky left-0 z-20 w-[160px] bg-gray-50 px-3 py-3 text-left font-semibold text-gray-600 uppercase tracking-wide border-b border-r border-gray-200 align-middle">
+                    <th className="sticky top-0 left-0 z-30 w-[160px] bg-gray-50 px-3 py-3 text-left font-semibold text-gray-600 uppercase tracking-wide border-b border-r border-gray-200">
                       Item
                     </th>
-                    <th rowSpan={2} className="w-[70px] bg-gray-50 px-2 py-3 text-left font-semibold text-gray-500 uppercase tracking-wide border-b border-r border-gray-200 align-middle">
+                    <th className="sticky top-0 z-20 w-[70px] bg-gray-50 px-2 py-3 text-left font-semibold text-gray-500 uppercase tracking-wide border-b border-r border-gray-200">
                       Unit
                     </th>
                     {cols.map((col, ci) => (
                       <th
                         key={ci}
-                        className={`px-1 pt-2 pb-0.5 text-center font-bold text-[10px] uppercase tracking-widest border-r border-gray-200 ${HEADER_STYLES[col.type]}`}
+                        className={`sticky top-0 z-10 px-1 py-2 text-center border-b border-r border-gray-200 ${HEADER_STYLES[col.type]}`}
                       >
-                        {col.typeLabel}
-                      </th>
-                    ))}
-                  </tr>
-                  {/* Row 2 — date labels */}
-                  <tr>
-                    {cols.map((col, ci) => (
-                      <th
-                        key={ci}
-                        className={`px-1 pb-2 pt-0.5 text-center font-normal text-[10px] border-b border-r border-gray-200 ${HEADER_STYLES[col.type]}`}
-                      >
-                        {col.dateLabel ?? ''}
+                        <div className="font-bold text-[10px] uppercase tracking-widest leading-tight">
+                          {col.typeLabel}
+                        </div>
+                        <div className="font-normal text-[10px] leading-tight mt-0.5 opacity-80">
+                          {col.dateLabel ?? ''}
+                        </div>
                       </th>
                     ))}
                   </tr>
