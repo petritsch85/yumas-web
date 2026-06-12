@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
-import { Send, Paperclip, MessageCircle, ChevronLeft, X } from 'lucide-react';
+import { Send, Paperclip, MessageCircle, ChevronLeft, X, Users } from 'lucide-react';
 import type { Profile } from '@/types';
 
 /* ─── Types ──────────────────────────────────────────────────────────────────── */
@@ -18,7 +18,7 @@ type ChatMessage = {
   created_at: string;
 };
 
-type MinProfile = { id: string; full_name: string; role: string };
+type MinProfile = { id: string; full_name: string; role: string; chat_rooms: string[] | null };
 
 /* ─── Constants ──────────────────────────────────────────────────────────────── */
 const ROOMS = [
@@ -189,6 +189,7 @@ export default function ChatPage() {
   const [unread, setUnread] = useState<Set<string>>(new Set());
   const [uploading, setUploading] = useState(false);
   const [showMobileSidebar, setShowMobileSidebar] = useState(false);
+  const [showMembers, setShowMembers] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -215,7 +216,7 @@ export default function ChatPage() {
     queryFn: async () => {
       const { data } = await supabase
         .from('profiles')
-        .select('id, full_name, role')
+        .select('id, full_name, role, chat_rooms')
         .eq('is_active', true)
         .order('full_name');
       return (data ?? []) as MinProfile[];
@@ -231,6 +232,13 @@ export default function ChatPage() {
   const visibleRooms = isAdmin
     ? ROOMS
     : ROOMS.filter(r => profile?.chat_rooms?.includes(r.id));
+
+  // Members of the active room (only for non-DM rooms)
+  const isActiveRoomDM = activeRoom.startsWith('dm::');
+  const activeRoomObj  = ROOMS.find(r => r.id === activeRoom);
+  const roomMembers = isActiveRoomDM ? [] : allProfiles.filter(p =>
+    p.role === 'admin' || (p.chat_rooms ?? []).includes(activeRoom),
+  );
 
   // When profile loads, if current room is not in visibleRooms, switch to first available
   useEffect(() => {
@@ -443,36 +451,79 @@ export default function ChatPage() {
           >
             <ChevronLeft size={20} />
           </button>
-          <div className="flex items-center gap-2 min-w-0">
+          <div className="flex items-center gap-2 min-w-0 flex-1">
             <span className="font-semibold text-gray-900 truncate">{activeLabel}</span>
-            {activeRoom.startsWith('dm::') && (
+            {isActiveRoomDM && (
               <span className="text-[11px] text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full flex-shrink-0">DM</span>
             )}
           </div>
+          {!isActiveRoomDM && (
+            <button
+              onClick={() => setShowMembers(v => !v)}
+              title="Room members"
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors flex-shrink-0 ${
+                showMembers
+                  ? 'bg-[#1B5E20]/10 text-[#1B5E20]'
+                  : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
+              }`}
+            >
+              <Users size={14} />
+              <span className="hidden sm:inline">{roomMembers.length}</span>
+            </button>
+          )}
         </div>
 
-        {/* Messages */}
-        <div className="flex-1 overflow-y-auto px-4 py-3">
-          {isLoading ? (
-            <div className="flex items-center justify-center h-full">
-              <span className="text-sm text-gray-400">Loading…</span>
+        {/* Messages + Members row */}
+        <div className="flex-1 flex min-h-0">
+          {/* Messages */}
+          <div className="flex-1 overflow-y-auto px-4 py-3">
+            {isLoading ? (
+              <div className="flex items-center justify-center h-full">
+                <span className="text-sm text-gray-400">Loading…</span>
+              </div>
+            ) : messages.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-full text-gray-400 select-none">
+                <MessageCircle size={36} className="mb-2 opacity-25" />
+                <p className="text-sm">No messages yet — say hello!</p>
+              </div>
+            ) : (
+              <>
+                {messages.map((msg, idx) => {
+                  const isOwn = msg.sender_id === myId;
+                  const prev = messages[idx - 1];
+                  const showMeta = !prev || prev.sender_id !== msg.sender_id;
+                  return <MessageBubble key={msg.id} msg={msg} isOwn={isOwn} showMeta={showMeta} />;
+                })}
+              </>
+            )}
+            <div ref={messagesEndRef} />
+          </div>
+
+          {/* Members panel */}
+          {showMembers && !isActiveRoomDM && (
+            <div className="w-52 border-l border-gray-100 flex-shrink-0 overflow-y-auto bg-gray-50/50">
+              <div className="px-3 py-3 border-b border-gray-100">
+                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">
+                  Members · {roomMembers.length}
+                </p>
+              </div>
+              <div className="py-2">
+                {roomMembers.map(p => (
+                  <div key={p.id} className="flex items-center gap-2.5 px-3 py-1.5">
+                    <div className="w-7 h-7 rounded-full bg-[#1B5E20]/15 flex items-center justify-center text-[10px] font-bold text-[#1B5E20] flex-shrink-0">
+                      {initials(p.full_name)}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-xs font-medium text-gray-800 truncate">{p.full_name}</p>
+                      {p.role === 'admin' && (
+                        <p className="text-[10px] text-gray-400">Admin</p>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
-          ) : messages.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full text-gray-400 select-none">
-              <MessageCircle size={36} className="mb-2 opacity-25" />
-              <p className="text-sm">No messages yet — say hello!</p>
-            </div>
-          ) : (
-            <>
-              {messages.map((msg, idx) => {
-                const isOwn = msg.sender_id === myId;
-                const prev = messages[idx - 1];
-                const showMeta = !prev || prev.sender_id !== msg.sender_id;
-                return <MessageBubble key={msg.id} msg={msg} isOwn={isOwn} showMeta={showMeta} />;
-              })}
-            </>
           )}
-          <div ref={messagesEndRef} />
         </div>
 
         {/* Input */}
