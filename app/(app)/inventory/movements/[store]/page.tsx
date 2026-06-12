@@ -574,55 +574,51 @@ export default function InventoryMovementsPage({
 
                             {cols.map((col, ci) => {
                               if (col.type === 'del') {
-                                const rawVal     = col.getValue(item.name);
-                                const override   = col.deliveryDate ? overrides[col.deliveryDate]?.[item.name] : undefined;
+                                const rawVal      = col.getValue(item.name);
+                                const override    = col.deliveryDate ? overrides[col.deliveryDate]?.[item.name] : undefined;
                                 const effectiveVal = col.deliveryDate
                                   ? getEffectiveDel(col.deliveryDate, item.name, rawVal)
                                   : rawVal;
                                 const isOverridden = override !== undefined;
 
+                                const displayVal = effectiveVal === null || effectiveVal === undefined || effectiveVal === 0
+                                  ? '—'
+                                  : String(effectiveVal);
+
+                                const tooltipText = isOverridden
+                                  ? [override!.comment, `Changed: ${override!.original_qty ?? '?'} → ${override!.overridden_qty}`]
+                                      .filter(Boolean).join('\n')
+                                  : undefined;
+
                                 return (
                                   <td
                                     key={ci}
-                                    onClick={() => openEdit(col, item.name)}
-                                    className={`relative group px-1 py-2 text-center tabular-nums border-r border-gray-100 cursor-pointer transition-colors
-                                      ${isOverridden
+                                    className={`relative p-0 border-r border-gray-100 ${
+                                      isOverridden
                                         ? 'bg-orange-50 ring-1 ring-inset ring-orange-300'
-                                        : 'bg-green-50/60 hover:bg-green-100/80'
-                                      }`}
+                                        : 'bg-green-50/60'
+                                    }`}
                                   >
-                                    {/* Orange corner triangle for overridden cells */}
+                                    {/* Orange corner triangle */}
                                     {isOverridden && (
                                       <span
-                                        className="absolute top-0 right-0 w-0 h-0 pointer-events-none"
+                                        className="absolute top-0 right-0 w-0 h-0 pointer-events-none z-10"
                                         style={{
-                                          borderTop:   '8px solid #f97316',
-                                          borderLeft:  '8px solid transparent',
+                                          borderTop:  '8px solid #f97316',
+                                          borderLeft: '8px solid transparent',
                                         }}
                                       />
                                     )}
-
-                                    {/* Tooltip */}
-                                    {isOverridden && (
-                                      <div className="hidden group-hover:block absolute bottom-full right-0 mb-1.5 z-50 bg-gray-900 text-white text-[10px] rounded-lg px-2.5 py-2 min-w-[140px] max-w-[200px] text-left shadow-xl pointer-events-none">
-                                        {override!.comment && (
-                                          <div className="font-medium mb-1 leading-snug">{override!.comment}</div>
-                                        )}
-                                        <div className="text-gray-400">
-                                          Changed from {override!.original_qty ?? '?'} → {override!.overridden_qty}
-                                        </div>
-                                      </div>
-                                    )}
-
-                                    <span className={isOverridden ? 'text-orange-700 font-medium' : 'text-gray-800'}>
-                                      {effectiveVal === null || effectiveVal === undefined ? (
-                                        <span className="text-gray-300">—</span>
-                                      ) : effectiveVal === 0 ? (
-                                        <span className="text-gray-300">—</span>
-                                      ) : (
-                                        effectiveVal
-                                      )}
-                                    </span>
+                                    <button
+                                      type="button"
+                                      title={tooltipText}
+                                      onClick={() => openEdit(col, item.name)}
+                                      className={`w-full py-2 px-1 text-center tabular-nums cursor-pointer hover:brightness-95 transition-all ${
+                                        isOverridden ? 'text-orange-700 font-medium' : 'text-gray-800'
+                                      } ${displayVal === '—' ? 'text-gray-300' : ''}`}
+                                    >
+                                      {displayVal}
+                                    </button>
                                   </td>
                                 );
                               }
