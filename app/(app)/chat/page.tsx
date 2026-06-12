@@ -440,8 +440,8 @@ export default function ChatPage() {
         )}
       </div>
 
-      {/* Main chat area */}
-      <div className="flex-1 flex flex-col min-w-0">
+      {/* Main chat area — grid: header / content / input */}
+      <div className="flex-1 min-w-0 grid grid-rows-[auto_1fr_auto]">
 
         {/* Header */}
         <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-3 flex-shrink-0">
@@ -474,7 +474,7 @@ export default function ChatPage() {
         </div>
 
         {/* Messages + Members row */}
-        <div className="flex-1 flex min-h-0">
+        <div className="flex overflow-hidden">
           {/* Messages */}
           <div className="flex-1 overflow-y-auto px-4 py-3">
             {isLoading ? (
