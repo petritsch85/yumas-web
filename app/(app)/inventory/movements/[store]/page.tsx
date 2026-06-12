@@ -294,7 +294,7 @@ export default function InventoryMovementsPage({
             </div>
           ) : (
             <div className="rounded-xl border border-gray-200 shadow-sm">
-              <table className="text-xs border-collapse w-full table-fixed">
+              <table className="text-xs border-separate border-spacing-0 w-full table-fixed">
                 <thead>
                   <tr className="[&>th]:shadow-[0_2px_4px_rgba(0,0,0,0.08)]">
                     <th className="sticky top-0 left-0 z-30 w-[160px] bg-white px-3 py-3 text-left font-semibold text-gray-600 uppercase tracking-wide border-b-2 border-r border-b-gray-300 border-r-gray-200">
