@@ -2,8 +2,10 @@
 
 import { use, useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeft, Loader2, ChevronDown } from 'lucide-react';
+import { Loader2, ChevronDown, LayoutGrid, TrendingUp } from 'lucide-react';
 import Link from 'next/link';
+
+const STORES = ['Eschborn', 'Taunus', 'Westend'] as const;
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -188,45 +190,61 @@ export default function InventoryMovementsPage({
     <div>
       {/* Header */}
       <div className="flex items-start justify-between gap-4 mb-6 flex-wrap">
-        <div className="flex items-center gap-3">
-          <Link
-            href="/inventory/overview"
-            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-800 transition-colors"
-          >
-            <ArrowLeft size={16} />
-            Current Inventory
-          </Link>
-          <span className="text-gray-300">/</span>
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">
-              Inventory Movements — {storeName}
-            </h1>
-            <p className="text-sm text-gray-500 mt-0.5">
-              Item-level movements per delivery cycle
-            </p>
-          </div>
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Inventory Movements</h1>
+          <p className="text-sm text-gray-500 mt-0.5">Item-level movements per delivery cycle</p>
         </div>
 
-        {/* Week picker */}
-        {weeks.length > 0 && (
-          <div className="relative">
-            <select
-              value={effectiveWeek ?? ''}
-              onChange={(e) => setSelectedWeek(e.target.value)}
-              className="appearance-none pl-3 pr-8 py-2 rounded-lg border border-gray-200 bg-white text-sm text-gray-700 shadow-sm hover:border-gray-300 focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/20 cursor-pointer"
-            >
-              {weeks.map((w) => (
-                <option key={w} value={w}>
-                  {fmtWeekLabel(w)}
-                </option>
-              ))}
-            </select>
-            <ChevronDown
-              size={14}
-              className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400"
-            />
-          </div>
-        )}
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Week picker */}
+          {weeks.length > 0 && (
+            <div className="relative">
+              <select
+                value={effectiveWeek ?? ''}
+                onChange={(e) => setSelectedWeek(e.target.value)}
+                className="appearance-none pl-3 pr-8 py-2 rounded-lg border border-gray-200 bg-white text-sm text-gray-700 shadow-sm hover:border-gray-300 focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/20 cursor-pointer"
+              >
+                {weeks.map((w) => (
+                  <option key={w} value={w}>
+                    {fmtWeekLabel(w)}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown
+                size={14}
+                className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400"
+              />
+            </div>
+          )}
+
+          {/* Group button */}
+          <Link
+            href="/inventory/overview"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-200 bg-white text-xs font-medium text-gray-600 hover:bg-gray-50 transition-colors shadow-sm whitespace-nowrap"
+          >
+            <LayoutGrid size={13} />
+            Group
+          </Link>
+
+          {/* Store buttons */}
+          {STORES.map((s) => {
+            const isActive = s === storeName;
+            return (
+              <Link
+                key={s}
+                href={`/inventory/movements/${encodeURIComponent(s)}`}
+                className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border text-xs font-medium transition-colors shadow-sm whitespace-nowrap ${
+                  isActive
+                    ? 'border-[#1B5E20] bg-[#1B5E20] text-white'
+                    : 'border-[#1B5E20]/30 bg-[#1B5E20]/5 text-[#1B5E20] hover:bg-[#1B5E20]/10'
+                }`}
+              >
+                <TrendingUp size={12} />
+                {s}
+              </Link>
+            );
+          })}
+        </div>
       </div>
 
       {isLoading && (
