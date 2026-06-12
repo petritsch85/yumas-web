@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
-import { Send, Paperclip, MessageCircle, ChevronLeft, X, Users } from 'lucide-react';
+import { Send, Paperclip, MessageCircle, ChevronLeft, X, Users, ClipboardList, CheckSquare, Square } from 'lucide-react';
 import type { Profile } from '@/types';
 
 /* ─── Types ──────────────────────────────────────────────────────────────────── */
@@ -19,6 +19,14 @@ type ChatMessage = {
 };
 
 type MinProfile = { id: string; full_name: string; role: string; chat_rooms: string[] | null };
+
+type RoomTask = {
+  id: string;
+  room: string;
+  title: string;
+  completed: boolean;
+  created_at: string;
+};
 
 /* ─── Constants ──────────────────────────────────────────────────────────────── */
 const ROOMS = [
@@ -393,6 +401,8 @@ export default function ChatPage() {
   const [uploading, setUploading] = useState(false);
   const [mobileView, setMobileView] = useState<'list' | 'chat'>('list');
   const [showMobileMembers, setShowMobileMembers] = useState(false);
+  const [showMobileTasks, setShowMobileTasks] = useState(false);
+  const [newTaskText, setNewTaskText] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -446,6 +456,53 @@ export default function ChatPage() {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile?.id]);
+
+  /* ── Room tasks ── */
+  const { data: tasks = [] } = useQuery<RoomTask[]>({
+    queryKey: ['room-tasks', activeRoom],
+    queryFn: async () => {
+      if (activeRoom.startsWith('dm::')) return [];
+      const { data } = await supabase
+        .from('room_tasks')
+        .select('*')
+        .eq('room', activeRoom)
+        .order('created_at', { ascending: true });
+      return (data ?? []) as RoomTask[];
+    },
+    staleTime: 0,
+  });
+
+  const addTaskMutation = useMutation({
+    mutationFn: async (title: string) => {
+      const { error } = await supabase.from('room_tasks').insert({ room: activeRoom, title });
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['room-tasks', activeRoom] }),
+  });
+
+  const toggleTaskMutation = useMutation({
+    mutationFn: async ({ id, completed }: { id: string; completed: boolean }) => {
+      const { error } = await supabase.from('room_tasks')
+        .update({ completed, updated_at: new Date().toISOString() }).eq('id', id);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['room-tasks', activeRoom] }),
+  });
+
+  const deleteTaskMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from('room_tasks').delete().eq('id', id);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['room-tasks', activeRoom] }),
+  });
+
+  const handleAddTask = () => {
+    const t = newTaskText.trim();
+    if (!t || addTaskMutation.isPending) return;
+    setNewTaskText('');
+    addTaskMutation.mutate(t);
+  };
 
   /* ── Messages ── */
   const { data: messages = [], isLoading } = useQuery<ChatMessage[]>({
@@ -616,18 +673,99 @@ export default function ChatPage() {
                 <span className="text-[11px] text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full flex-shrink-0">DM</span>
               )}
             </div>
-            {!activeRoom.startsWith('dm::') && roomMembers.length > 0 && (
-              <button
-                onClick={() => setShowMobileMembers(true)}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors flex-shrink-0"
-              >
-                <Users size={14} />
-                <span className="text-xs font-medium">{roomMembers.length}</span>
-              </button>
+            {!activeRoom.startsWith('dm::') && (
+              <div className="flex items-center gap-1.5 flex-shrink-0">
+                <button
+                  onClick={() => setShowMobileTasks(true)}
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors"
+                >
+                  <ClipboardList size={14} />
+                  {tasks.filter(t => !t.completed).length > 0 && (
+                    <span className="text-xs font-medium">{tasks.filter(t => !t.completed).length}</span>
+                  )}
+                </button>
+                {roomMembers.length > 0 && (
+                  <button
+                    onClick={() => setShowMobileMembers(true)}
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors"
+                  >
+                    <Users size={14} />
+                    <span className="text-xs font-medium">{roomMembers.length}</span>
+                  </button>
+                )}
+              </div>
             )}
           </div>
           <ChatMessages messages={messages} isLoading={isLoading} myId={myId} messagesEndRef={messagesEndRef} />
           <ChatInput {...sharedInputProps} />
+
+          {/* Tasks bottom sheet */}
+          {showMobileTasks && (
+            <div className="fixed inset-0 z-50 flex flex-col justify-end" onClick={() => setShowMobileTasks(false)}>
+              <div className="absolute inset-0 bg-black/40" />
+              <div className="relative bg-white rounded-t-2xl shadow-2xl max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
+                <div className="flex justify-center pt-3 pb-1 flex-shrink-0">
+                  <div className="w-10 h-1 rounded-full bg-gray-300" />
+                </div>
+                <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
+                  <span className="font-semibold text-gray-900">Tasks — {activeLabel}</span>
+                  <button onClick={() => setShowMobileTasks(false)} className="text-gray-400 hover:text-gray-600 p-1">
+                    <X size={18} />
+                  </button>
+                </div>
+                {/* Add task input */}
+                <div className="px-4 py-3 border-b border-gray-100 flex gap-2 flex-shrink-0">
+                  <input
+                    type="text"
+                    value={newTaskText}
+                    onChange={e => setNewTaskText(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') handleAddTask(); }}
+                    placeholder="Add a task…"
+                    className="flex-1 bg-gray-100 rounded-xl px-3.5 py-2 text-sm text-gray-900 outline-none placeholder-gray-400"
+                    style={{ fontSize: '16px' }}
+                  />
+                  <button
+                    onClick={handleAddTask}
+                    disabled={!newTaskText.trim() || addTaskMutation.isPending}
+                    className="px-4 py-2 rounded-xl bg-[#1B5E20] text-white text-sm font-medium disabled:opacity-40 flex-shrink-0"
+                  >
+                    Add
+                  </button>
+                </div>
+                {/* Task list */}
+                <div className="overflow-y-auto flex-1 py-2">
+                  {tasks.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-10 text-gray-400 select-none">
+                      <ClipboardList size={32} className="mb-2 opacity-25" />
+                      <p className="text-sm">No tasks yet</p>
+                    </div>
+                  ) : (
+                    tasks.map(task => (
+                      <div key={task.id} className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50">
+                        <button
+                          onClick={() => toggleTaskMutation.mutate({ id: task.id, completed: !task.completed })}
+                          className="flex-shrink-0 text-[#1B5E20]"
+                        >
+                          {task.completed
+                            ? <CheckSquare size={20} />
+                            : <Square size={20} className="text-gray-300" />}
+                        </button>
+                        <span className={`flex-1 text-sm ${task.completed ? 'line-through text-gray-400' : 'text-gray-800'}`}>
+                          {task.title}
+                        </span>
+                        <button
+                          onClick={() => deleteTaskMutation.mutate(task.id)}
+                          className="text-gray-300 hover:text-red-400 p-1 flex-shrink-0 transition-colors"
+                        >
+                          <X size={14} />
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Members bottom sheet */}
           {showMobileMembers && (
