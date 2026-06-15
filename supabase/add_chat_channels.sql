@@ -3,15 +3,16 @@ CREATE TABLE IF NOT EXISTS chat_channels (
   id         text PRIMARY KEY,          -- slug used as room key, e.g. 'marketing'
   label      text NOT NULL,
   emoji      text NOT NULL DEFAULT '💬',
+  member_ids uuid[] NOT NULL DEFAULT '{}',
   created_by uuid REFERENCES auth.users(id),
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
 ALTER TABLE chat_channels ENABLE ROW LEVEL SECURITY;
 
--- All authenticated users can see channels
+-- Users can see channels they are a member of
 CREATE POLICY "chat_channels_select" ON chat_channels
-  FOR SELECT TO authenticated USING (true);
+  FOR SELECT TO authenticated USING (auth.uid() = ANY(member_ids));
 
 -- Any authenticated user can insert (admin check enforced in the UI)
 CREATE POLICY "chat_channels_insert" ON chat_channels

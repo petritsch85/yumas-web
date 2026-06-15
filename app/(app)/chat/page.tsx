@@ -39,6 +39,7 @@ type ChatChannel = {
   id: string;
   label: string;
   emoji: string;
+  member_ids: string[];
   created_by: string;
   created_at: string;
 };
@@ -526,6 +527,7 @@ export default function ChatPage() {
   const [showChannelModal, setShowChannelModal] = useState(false);
   const [newChannelLabel, setNewChannelLabel] = useState('');
   const [newChannelEmoji, setNewChannelEmoji] = useState('💬');
+  const [selectedChannelMembers, setSelectedChannelMembers] = useState<string[]>([]);
   const [newTaskText, setNewTaskText] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -586,9 +588,9 @@ export default function ChatPage() {
   });
 
   const createChannelMutation = useMutation({
-    mutationFn: async ({ id, label, emoji }: { id: string; label: string; emoji: string }) => {
+    mutationFn: async ({ id, label, emoji, memberIds }: { id: string; label: string; emoji: string; memberIds: string[] }) => {
       const { error } = await supabase.from('chat_channels')
-        .insert({ id, label, emoji, created_by: myId });
+        .insert({ id, label, emoji, member_ids: memberIds, created_by: myId });
       if (error) throw error;
     },
     onSuccess: (_data, vars) => {
@@ -596,6 +598,7 @@ export default function ChatPage() {
       setShowChannelModal(false);
       setNewChannelLabel('');
       setNewChannelEmoji('💬');
+      setSelectedChannelMembers([]);
       setActiveRoom(vars.id);
       setMobileView('chat');
     },
@@ -1065,28 +1068,20 @@ export default function ChatPage() {
       {showChannelModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => setShowChannelModal(false)}>
           <div className="absolute inset-0 bg-black/40" />
-          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm flex flex-col" onClick={e => e.stopPropagation()}>
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm flex flex-col max-h-[85vh]" onClick={e => e.stopPropagation()}>
             <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
               <span className="font-semibold text-gray-900">New Channel</span>
               <button onClick={() => setShowChannelModal(false)} className="text-gray-400 hover:text-gray-600 p-1">
                 <X size={18} />
               </button>
             </div>
-            <div className="px-5 py-4 flex flex-col gap-4">
+            <div className="px-5 py-4 flex flex-col gap-4 flex-shrink-0">
               <div>
                 <label className="block text-xs font-medium text-gray-500 mb-1.5">Channel name</label>
                 <input
                   type="text"
                   value={newChannelLabel}
                   onChange={e => setNewChannelLabel(e.target.value)}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter') {
-                      const label = newChannelLabel.trim();
-                      if (!label) return;
-                      const id = label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
-                      createChannelMutation.mutate({ id, label, emoji: newChannelEmoji });
-                    }
-                  }}
                   placeholder="e.g. Marketing"
                   className="w-full bg-gray-100 rounded-xl px-3.5 py-2.5 text-sm text-gray-900 outline-none placeholder-gray-400"
                   style={{ fontSize: '16px' }}
@@ -1110,13 +1105,39 @@ export default function ChatPage() {
                 </div>
               </div>
             </div>
-            <div className="px-5 py-4 border-t border-gray-100 flex justify-end flex-shrink-0">
+            <div className="border-t border-gray-100 flex-shrink-0 px-5 pt-3 pb-1">
+              <p className="text-xs font-medium text-gray-500">Members</p>
+              <p className="text-[11px] text-gray-400 mt-0.5">Select who can see this channel. You are always included.</p>
+            </div>
+            <div className="overflow-y-auto flex-1 py-1">
+              {otherProfiles.map(p => {
+                const checked = selectedChannelMembers.includes(p.id);
+                return (
+                  <label key={p.id} className="flex items-center gap-3 px-5 py-3 hover:bg-gray-50 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => setSelectedChannelMembers(prev =>
+                        checked ? prev.filter(id => id !== p.id) : [...prev, p.id]
+                      )}
+                      className="w-4 h-4 accent-[#1B5E20] flex-shrink-0"
+                    />
+                    <div className="w-8 h-8 rounded-full bg-[#1B5E20]/15 flex items-center justify-center text-[11px] font-bold text-[#1B5E20] flex-shrink-0">
+                      {initials(p.full_name)}
+                    </div>
+                    <span className="text-sm text-gray-800">{p.full_name}</span>
+                  </label>
+                );
+              })}
+            </div>
+            <div className="px-5 py-4 border-t border-gray-100 flex items-center justify-between flex-shrink-0">
+              <span className="text-xs text-gray-400">{selectedChannelMembers.length + 1} member{selectedChannelMembers.length !== 0 ? 's' : ''}</span>
               <button
                 onClick={() => {
                   const label = newChannelLabel.trim();
                   if (!label) return;
                   const id = label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
-                  createChannelMutation.mutate({ id, label, emoji: newChannelEmoji });
+                  createChannelMutation.mutate({ id, label, emoji: newChannelEmoji, memberIds: [myId, ...selectedChannelMembers] });
                 }}
                 disabled={!newChannelLabel.trim() || createChannelMutation.isPending}
                 className="px-5 py-2 rounded-xl bg-[#1B5E20] text-white text-sm font-semibold disabled:opacity-40 hover:bg-[#2E7D32] transition-colors"
