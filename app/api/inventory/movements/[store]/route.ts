@@ -67,12 +67,31 @@ export async function GET(
     }
   }
 
-  // 5. Master item list for this store (canonical order)
-  const { data: masterItems } = await supabase
+  // 5. Canonical section order for this store
+  const { data: sectionRows } = await supabase
+    .from('inventory_sections')
+    .select('name, sort_order')
+    .contains('stores', [store])
+    .order('sort_order', { ascending: true });
+
+  const sectionOrder: Record<string, number> = {};
+  for (const s of sectionRows ?? []) sectionOrder[s.name] = s.sort_order;
+
+  // Master item list for this store, sorted by canonical section then store-specific item order
+  const { data: masterItemsRaw } = await supabase
     .from('inventory_items')
     .select('name, section, unit, sort_order, store_sort_orders')
     .contains('stores', [store])
     .order('sort_order', { ascending: true });
+
+  const masterItems = [...(masterItemsRaw ?? [])].sort((a, b) => {
+    const secA = sectionOrder[a.section] ?? 999;
+    const secB = sectionOrder[b.section] ?? 999;
+    if (secA !== secB) return secA - secB;
+    const ordA = (a.store_sort_orders as Record<string, number>)?.[store] ?? a.sort_order;
+    const ordB = (b.store_sort_orders as Record<string, number>)?.[store] ?? b.sort_order;
+    return ordA - ordB;
+  });
 
   // 6. Build cycles
   const cycles: {

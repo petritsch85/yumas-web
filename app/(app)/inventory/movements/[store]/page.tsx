@@ -478,15 +478,12 @@ export default function InventoryMovementsPage({
   // ── Section grouping ──────────────────────────────────────────────────────────
 
   const sections = useMemo(() => {
-    const result: { title: string; items: { name: string; unit: string }[] }[] = [];
+    const map = new Map<string, { name: string; unit: string }[]>();
     for (const item of data?.items ?? []) {
-      const last = result[result.length - 1];
-      if (!last || last.title !== item.section) {
-        result.push({ title: item.section, items: [] });
-      }
-      result[result.length - 1].items.push({ name: item.name, unit: item.unit });
+      if (!map.has(item.section)) map.set(item.section, []);
+      map.get(item.section)!.push({ name: item.name, unit: item.unit });
     }
-    return result;
+    return Array.from(map.entries()).map(([title, items]) => ({ title, items }));
   }, [data]);
 
   // ── Render ────────────────────────────────────────────────────────────────────
