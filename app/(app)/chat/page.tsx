@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
-import { Send, Paperclip, MessageCircle, ChevronLeft, X, Users, ClipboardList, CheckSquare, Square } from 'lucide-react';
+import { Send, Paperclip, MessageCircle, ChevronLeft, X, Users, ClipboardList, CheckSquare, Square, Plus } from 'lucide-react';
 import type { Profile } from '@/types';
 
 /* ─── Types ──────────────────────────────────────────────────────────────────── */
@@ -28,6 +28,13 @@ type RoomTask = {
   created_at: string;
 };
 
+type ChatGroup = {
+  id: string;
+  member_ids: string[];
+  created_by: string;
+  created_at: string;
+};
+
 /* ─── Constants ──────────────────────────────────────────────────────────────── */
 const ROOMS = [
   { id: 'general',  label: 'General',  emoji: '💬' },
@@ -44,6 +51,15 @@ function dmRoom(a: string, b: string) {
 
 function initials(name: string) {
   return name.split(' ').map(n => n[0] ?? '').slice(0, 2).join('').toUpperCase() || '?';
+}
+
+function groupRoomId(group: ChatGroup) { return `group::${group.id}`; }
+
+function groupLabel(group: ChatGroup, profiles: MinProfile[], myId: string): string {
+  return group.member_ids
+    .filter(id => id !== myId)
+    .map(id => profiles.find(p => p.id === id)?.full_name?.split(' ')[0] ?? '?')
+    .join(', ') || 'Group';
 }
 
 function fmtTime(iso: string) {
@@ -66,16 +82,19 @@ function UnreadBadge({ count }: { count: number }) {
 
 /* ─── Room Sidebar (desktop) ─────────────────────────────────────────────────── */
 function RoomSidebar({
-  activeRoom, myId, otherProfiles, unread, onSelect, onClose, visibleRooms, roomMembers,
+  activeRoom, myId, otherProfiles, allProfiles, unread, onSelect, onClose, visibleRooms, roomMembers, chatGroups, onCreateGroup,
 }: {
   activeRoom: string;
   myId: string;
   otherProfiles: MinProfile[];
+  allProfiles: MinProfile[];
   unread: Record<string, number>;
   onSelect: (room: string) => void;
   onClose?: () => void;
   visibleRooms: typeof ROOMS;
   roomMembers: MinProfile[];
+  chatGroups: ChatGroup[];
+  onCreateGroup: () => void;
 }) {
   return (
     <div className="flex flex-col h-full">
@@ -105,6 +124,46 @@ function RoomSidebar({
               >
                 <span className="text-base leading-none w-5 flex-shrink-0">{room.emoji}</span>
                 <span className="flex-1 truncate">{room.label}</span>
+                {!isActive && <UnreadBadge count={count} />}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Group Messages */}
+        <div className="px-3 mb-4">
+          <div className="flex items-center justify-between px-2 mb-1.5">
+            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Group Messages</p>
+            <button
+              onClick={onCreateGroup}
+              className="text-gray-400 hover:text-[#1B5E20] transition-colors"
+              title="New group"
+            >
+              <Plus size={13} />
+            </button>
+          </div>
+          {chatGroups.length === 0 && (
+            <p className="text-xs text-gray-400 px-2.5 py-1 italic">No groups yet</p>
+          )}
+          {chatGroups.map(group => {
+            const roomId = groupRoomId(group);
+            const isActive = activeRoom === roomId;
+            const count = unread[roomId] ?? 0;
+            const label = groupLabel(group, allProfiles, myId);
+            return (
+              <button
+                key={group.id}
+                onClick={() => onSelect(roomId)}
+                className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm font-medium transition-colors mb-0.5 text-left ${
+                  isActive ? 'bg-[#1B5E20] text-white' : 'text-gray-700 hover:bg-gray-100'
+                }`}
+              >
+                <div className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 ${
+                  isActive ? 'bg-white/20 text-white' : 'bg-[#1B5E20]/15 text-[#1B5E20]'
+                }`}>
+                  <Users size={11} />
+                </div>
+                <span className="flex-1 truncate">{label}</span>
                 {!isActive && <UnreadBadge count={count} />}
               </button>
             );
@@ -141,7 +200,7 @@ function RoomSidebar({
         )}
 
         {/* Room members */}
-        {!activeRoom.startsWith('dm::') && roomMembers.length > 0 && (
+        {!activeRoom.startsWith('dm::') && !activeRoom.startsWith('group::') && roomMembers.length > 0 && (
           <div className="px-3">
             <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest px-2 mb-1.5">
               Members · {roomMembers.length}
@@ -166,14 +225,17 @@ function RoomSidebar({
 
 /* ─── Mobile Channel List ────────────────────────────────────────────────────── */
 function MobileChannelList({
-  visibleRooms, otherProfiles, myId, unread, onSelect, profile,
+  visibleRooms, otherProfiles, allProfiles, myId, unread, onSelect, profile, chatGroups, onCreateGroup,
 }: {
   visibleRooms: typeof ROOMS;
   otherProfiles: MinProfile[];
+  allProfiles: MinProfile[];
   myId: string;
   unread: Record<string, number>;
   onSelect: (room: string) => void;
   profile: Profile | null;
+  chatGroups: ChatGroup[];
+  onCreateGroup: () => void;
 }) {
   return (
     <div className="flex flex-col h-full bg-white">
@@ -205,6 +267,39 @@ function MobileChannelList({
             })}
           </>
         )}
+
+        {/* Group Messages */}
+        <>
+          <div className="flex items-center justify-between px-4 pt-5 pb-2">
+            <p className="text-[11px] font-bold text-gray-400 uppercase tracking-widest">Group Messages</p>
+            <button onClick={onCreateGroup} className="text-gray-400 hover:text-[#1B5E20] transition-colors p-0.5">
+              <Plus size={16} />
+            </button>
+          </div>
+          {chatGroups.length === 0 && (
+            <p className="text-sm text-gray-400 px-4 pb-2 italic">No groups yet — tap + to create one</p>
+          )}
+          {chatGroups.map(group => {
+            const roomId = groupRoomId(group);
+            const count = unread[roomId] ?? 0;
+            const label = groupLabel(group, allProfiles, myId);
+            return (
+              <button
+                key={group.id}
+                onClick={() => onSelect(roomId)}
+                className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-gray-50 active:bg-gray-100 border-b border-gray-50"
+              >
+                <div className="w-8 h-8 rounded-full bg-[#1B5E20]/15 flex items-center justify-center text-[#1B5E20] flex-shrink-0">
+                  <Users size={14} />
+                </div>
+                <span className={`flex-1 text-[15px] truncate ${count > 0 ? 'font-semibold text-gray-900' : 'text-gray-600'}`}>
+                  {label}
+                </span>
+                <UnreadBadge count={count} />
+              </button>
+            );
+          })}
+        </>
 
         {otherProfiles.length > 0 && (
           <>
@@ -402,6 +497,8 @@ export default function ChatPage() {
   const [mobileView, setMobileView] = useState<'list' | 'chat'>('list');
   const [showMobileMembers, setShowMobileMembers] = useState(false);
   const [showMobileTasks, setShowMobileTasks] = useState(false);
+  const [showGroupModal, setShowGroupModal] = useState(false);
+  const [selectedGroupMembers, setSelectedGroupMembers] = useState<string[]>([]);
   const [newTaskText, setNewTaskText] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -453,9 +550,48 @@ export default function ChatPage() {
     ? ROOMS
     : ROOMS.filter(r => profile?.chat_rooms?.includes(r.id));
 
-  const roomMembers = activeRoom.startsWith('dm::') ? [] : allProfiles.filter(p =>
-    p.role === 'admin' || (p.chat_rooms ?? []).includes(activeRoom),
-  );
+  /* ── Chat groups ── */
+  const { data: chatGroups = [] } = useQuery<ChatGroup[]>({
+    queryKey: ['chat-groups', myId],
+    queryFn: async () => {
+      if (!myId) return [];
+      const { data } = await supabase
+        .from('chat_groups')
+        .select('*')
+        .contains('member_ids', [myId])
+        .order('created_at', { ascending: true });
+      return (data ?? []) as ChatGroup[];
+    },
+    enabled: !!myId,
+    staleTime: 0,
+  });
+
+  const createGroupMutation = useMutation({
+    mutationFn: async (memberIds: string[]) => {
+      const { data, error } = await supabase
+        .from('chat_groups')
+        .insert({ member_ids: memberIds, created_by: myId })
+        .select()
+        .single();
+      if (error) throw error;
+      return data as ChatGroup;
+    },
+    onSuccess: (group) => {
+      qc.invalidateQueries({ queryKey: ['chat-groups', myId] });
+      setShowGroupModal(false);
+      setSelectedGroupMembers([]);
+      setActiveRoom(groupRoomId(group));
+      setMobileView('chat');
+    },
+  });
+
+  const activeGroup = chatGroups.find(g => groupRoomId(g) === activeRoom) ?? null;
+
+  const roomMembers = activeRoom.startsWith('dm::')
+    ? []
+    : activeRoom.startsWith('group::')
+      ? allProfiles.filter(p => activeGroup?.member_ids.includes(p.id))
+      : allProfiles.filter(p => p.role === 'admin' || (p.chat_rooms ?? []).includes(activeRoom));
 
   useEffect(() => {
     if (!profile) return;
@@ -636,6 +772,7 @@ export default function ChatPage() {
   const activeLabel =
     visibleRooms.find(r => r.id === activeRoom)?.label ??
     otherProfiles.find(p => activeRoom === dmRoom(myId, p.id))?.full_name ??
+    (activeGroup ? groupLabel(activeGroup, allProfiles, myId) : null) ??
     'Chat';
 
   // Desktop sidebar room selection — does NOT change mobileView
@@ -659,10 +796,13 @@ export default function ChatPage() {
           <MobileChannelList
             visibleRooms={visibleRooms}
             otherProfiles={otherProfiles}
+            allProfiles={allProfiles}
             myId={myId}
             unread={unread}
             onSelect={handleMobileSelect}
             profile={profile ?? null}
+            chatGroups={chatGroups}
+            onCreateGroup={() => setShowGroupModal(true)}
           />
         </div>
       )}
@@ -815,16 +955,66 @@ export default function ChatPage() {
         </div>
       )}
 
+      {/* ── Group creation modal ── */}
+      {showGroupModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => setShowGroupModal(false)}>
+          <div className="absolute inset-0 bg-black/40" />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm flex flex-col max-h-[80vh]" onClick={e => e.stopPropagation()}>
+            <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
+              <span className="font-semibold text-gray-900">New Group Message</span>
+              <button onClick={() => setShowGroupModal(false)} className="text-gray-400 hover:text-gray-600 p-1">
+                <X size={18} />
+              </button>
+            </div>
+            <p className="px-5 pt-3 pb-1 text-xs text-gray-400">Select members to include in the group:</p>
+            <div className="overflow-y-auto flex-1 py-2">
+              {otherProfiles.map(p => {
+                const checked = selectedGroupMembers.includes(p.id);
+                return (
+                  <label key={p.id} className="flex items-center gap-3 px-5 py-3 hover:bg-gray-50 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => setSelectedGroupMembers(prev =>
+                        checked ? prev.filter(id => id !== p.id) : [...prev, p.id]
+                      )}
+                      className="w-4 h-4 accent-[#1B5E20] flex-shrink-0"
+                    />
+                    <div className="w-8 h-8 rounded-full bg-[#1B5E20]/15 flex items-center justify-center text-[11px] font-bold text-[#1B5E20] flex-shrink-0">
+                      {initials(p.full_name)}
+                    </div>
+                    <span className="text-sm text-gray-800">{p.full_name}</span>
+                  </label>
+                );
+              })}
+            </div>
+            <div className="px-5 py-4 border-t border-gray-100 flex items-center justify-between flex-shrink-0">
+              <span className="text-xs text-gray-400">{selectedGroupMembers.length} selected</span>
+              <button
+                onClick={() => createGroupMutation.mutate([myId, ...selectedGroupMembers])}
+                disabled={selectedGroupMembers.length < 1 || createGroupMutation.isPending}
+                className="px-5 py-2 rounded-xl bg-[#1B5E20] text-white text-sm font-semibold disabled:opacity-40 hover:bg-[#2E7D32] transition-colors"
+              >
+                {createGroupMutation.isPending ? 'Creating…' : 'Create Group'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── DESKTOP: Sidebar ── */}
       <div className="hidden md:flex flex-col w-60 border-r border-gray-100 flex-shrink-0 bg-gray-50/60">
         <RoomSidebar
           activeRoom={activeRoom}
           myId={myId}
           otherProfiles={otherProfiles}
+          allProfiles={allProfiles}
           unread={unread}
           onSelect={handleDesktopSelect}
           visibleRooms={visibleRooms}
           roomMembers={roomMembers}
+          chatGroups={chatGroups}
+          onCreateGroup={() => setShowGroupModal(true)}
         />
         {profile && (
           <div className="px-4 py-3 border-t border-gray-100 flex items-center gap-2 flex-shrink-0">
