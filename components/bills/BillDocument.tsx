@@ -42,6 +42,11 @@ export type BillData = {
   getraenkeNetto? : number;
   trinkgeld?           : number;
   receiptImageDataUrl? : string;  // base64 data URL — appended as page 2 when set
+  // Deductions
+  anzahlungBrutto? : number;   // deposit brutto — deducted from total payable
+  anzahlungNetto?  : number;   // deposit netto — shown for reference / MwSt visibility
+  anzahlungRef?    : string;   // invoice number of the deposit bill
+  ermaessigung?    : number;   // discount amount
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -170,6 +175,14 @@ export function BillDocument({ data }: { data: BillData }) {
     bruttoMonthly = gesamtNetto + mwst7monthly;
   }
 
+  // Deductions
+  const anzBrutto   = data.anzahlungBrutto ?? 0;
+  const anzNetto    = data.anzahlungNetto  ?? 0;
+  const ermaess     = data.ermaessigung    ?? 0;
+  const hasDeduct   = anzBrutto > 0 || ermaess > 0;
+  const basePayable = isMonthly ? bruttoMonthly : gesamtBetrag;
+  const restbetrag  = basePayable - anzBrutto - ermaess;
+
   return (
     <Document>
       <Page size="A4" style={s.page}>
@@ -271,9 +284,36 @@ export function BillDocument({ data }: { data: BillData }) {
               </View>
             )}
 
-            {/* Final: Gesamtbetrag */}
+            {/* Final: Gesamtbetrag — with optional deductions */}
             <View style={{ marginTop: 2 }}>
-              <AmtRowBold label="Gesamtbetrag (zu zahlen)" value={gesamtBetrag} />
+              {hasDeduct ? (
+                <>
+                  <AmtRowBold label="Gesamtbetrag" value={gesamtBetrag} />
+                  {anzBrutto > 0 && (
+                    <View style={{ marginTop: 6 }}>
+                      <Text>{`abzgl. Anzahlung${data.anzahlungRef ? ` (Rg.-Nr. ${data.anzahlungRef})` : ''}`}</Text>
+                      {anzNetto > 0 && (
+                        <View style={[s.amountRow, { paddingLeft: 14 }]}>
+                          <Text>Netto</Text><Text>{fmt(anzNetto)}</Text>
+                        </View>
+                      )}
+                      <View style={[s.amountRow, { paddingLeft: 14 }]}>
+                        <Text>Brutto</Text><Text>{fmt(anzBrutto)}</Text>
+                      </View>
+                    </View>
+                  )}
+                  {ermaess > 0 && (
+                    <View style={s.amountRow}>
+                      <Text>abzgl. Ermässigung</Text><Text>{fmt(ermaess)}</Text>
+                    </View>
+                  )}
+                  <View style={{ marginTop: 6 }}>
+                    <AmtRowBold label="Restbetrag (zu zahlen)" value={restbetrag} />
+                  </View>
+                </>
+              ) : (
+                <AmtRowBold label="Gesamtbetrag (zu zahlen)" value={gesamtBetrag} />
+              )}
             </View>
           </View>
         )}
@@ -287,7 +327,34 @@ export function BillDocument({ data }: { data: BillData }) {
             <View style={s.groupGap}>
               <AmtRow label="Mwst 7%" value={mwst7monthly} />
             </View>
-            <AmtRowBold label="Gesamtbetrag (zu zahlen)" value={bruttoMonthly} />
+            {hasDeduct ? (
+              <>
+                <AmtRowBold label="Gesamtbetrag" value={bruttoMonthly} />
+                {anzBrutto > 0 && (
+                  <View style={{ marginTop: 6 }}>
+                    <Text>{`abzgl. Anzahlung${data.anzahlungRef ? ` (Rg.-Nr. ${data.anzahlungRef})` : ''}`}</Text>
+                    {anzNetto > 0 && (
+                      <View style={[s.amountRow, { paddingLeft: 14 }]}>
+                        <Text>Netto</Text><Text>{fmt(anzNetto)}</Text>
+                      </View>
+                    )}
+                    <View style={[s.amountRow, { paddingLeft: 14 }]}>
+                      <Text>Brutto</Text><Text>{fmt(anzBrutto)}</Text>
+                    </View>
+                  </View>
+                )}
+                {ermaess > 0 && (
+                  <View style={s.amountRow}>
+                    <Text>abzgl. Ermässigung</Text><Text>{fmt(ermaess)}</Text>
+                  </View>
+                )}
+                <View style={{ marginTop: 6 }}>
+                  <AmtRowBold label="Restbetrag (zu zahlen)" value={restbetrag} />
+                </View>
+              </>
+            ) : (
+              <AmtRowBold label="Gesamtbetrag (zu zahlen)" value={bruttoMonthly} />
+            )}
           </View>
         )}
 

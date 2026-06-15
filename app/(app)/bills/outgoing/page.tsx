@@ -212,6 +212,16 @@ export default function OutgoingBillsPage() {
   const [showSuggestions,     setShowSuggestions]     = useState(false);
   const crmRef = useRef<HTMLDivElement>(null);
 
+  // Anzahlung (deposit) picker
+  const [anzahlungBillId,       setAnzahlungBillId]       = useState<string | null>(null);
+  const [anzahlungSearch,       setAnzahlungSearch]       = useState('');
+  const [showAnzahlungPicker,   setShowAnzahlungPicker]   = useState(false);
+  const anzahlungPickerRef = useRef<HTMLDivElement>(null);
+
+  // Ermässigung (discount)
+  const [ermaessigung,          setErmaessigung]          = useState('');
+  const [focusedErmaessigung,   setFocusedErmaessigung]   = useState(false);
+
   // Client Registry modal
   const [registryOpen,      setRegistryOpen]      = useState(false);
   const [registryCustomers, setRegistryCustomers] = useState<Customer[]>([]);
@@ -269,6 +279,17 @@ export default function OutgoingBillsPage() {
     const handler = (e: MouseEvent) => {
       if (crmRef.current && !crmRef.current.contains(e.target as Node)) {
         setShowSuggestions(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  // Close Anzahlung picker on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (anzahlungPickerRef.current && !anzahlungPickerRef.current.contains(e.target as Node)) {
+        setShowAnzahlungPicker(false);
       }
     };
     document.addEventListener('mousedown', handler);
@@ -364,6 +385,21 @@ export default function OutgoingBillsPage() {
   const brutto     = billType === 'monthly' ? netto + mwst7 : bruttoGesamt;
   const billTotal  = brutto + (billType === 'dinner' ? trinkgeldN : 0);
 
+  // Anzahlung / Ermässigung derived values
+  const anzahlungBill    = bills.find((b) => b.id === anzahlungBillId) ?? null;
+  const anzahlungBruttoN = anzahlungBill?.total_payable ?? 0;
+  const anzahlungNettoN  = anzahlungBill?.net_total     ?? 0;
+  const ermaessigungN    = parseFloat(ermaessigung) || 0;
+  const hasDeductions    = anzahlungBruttoN > 0 || ermaessigungN > 0;
+  const finalTotal       = billTotal - anzahlungBruttoN - ermaessigungN;
+
+  const anzahlungFilteredBills = bills.filter((b) =>
+    b.id !== anzahlungBillId &&
+    (anzahlungSearch.trim().length === 0 ||
+      (b.invoice_number ?? '').toLowerCase().includes(anzahlungSearch.toLowerCase()) ||
+      b.customer_name.toLowerCase().includes(anzahlungSearch.toLowerCase()))
+  );
+
   const fmtEur = (n: number) =>
     n.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €';
 
@@ -383,10 +419,15 @@ export default function OutgoingBillsPage() {
     essenNetto:       billType === 'dinner'  ? essenN           : undefined,
     getraenkeNetto:   billType === 'dinner'  ? getraenkeN       : undefined,
     trinkgeld:             billType === 'dinner'  ? trinkgeldN       : undefined,
+    anzahlungBrutto:       anzahlungBruttoN > 0  ? anzahlungBruttoN : undefined,
+    anzahlungNetto:        anzahlungNettoN  > 0  ? anzahlungNettoN  : undefined,
+    anzahlungRef:          anzahlungBill?.invoice_number ?? undefined,
+    ermaessigung:          ermaessigungN    > 0  ? ermaessigungN    : undefined,
     receiptImageDataUrl:   includeReceipt && receiptDataUrl ? receiptDataUrl : undefined,
   }), [invoiceNumber, billDate, billEventDate, billIssuingLoc, billType, company, extra,
        contactName, street, postcode, city, poNumber, att, introText, lineItems,
        essenBruttoN, getraenkeBruttoN, essenN, getraenkeN, mwstEssen, mwstGetraenke, trinkgeldN,
+       anzahlungBruttoN, anzahlungNettoN, anzahlungBill, ermaessigungN,
        includeReceipt, receiptDataUrl]);
 
   const handleReceiptImage = async (file: File) => {
@@ -508,7 +549,7 @@ export default function OutgoingBillsPage() {
       vat_19:           mwst19,
       gross_total:      brutto,
       tips:             trinkgeldN,
-      total_payable:    billTotal,
+      total_payable:    finalTotal,
       status:           'pending',
       file_path:        storagePath,
       uploaded_by:      user?.id ?? null,
@@ -1593,6 +1634,81 @@ export default function OutgoingBillsPage() {
             </div>
           )}
 
+          {/* Abzüge: Anzahlung + Ermässigung */}
+          <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
+            <p className="text-sm font-bold text-gray-800 mb-4 pb-3 border-b border-gray-100">Abzüge (optional)</p>
+            <div className="space-y-4">
+
+              {/* Anzahlung */}
+              <div>
+                <label className={labelCls}>Anzahlung (Deposit) — select a previous bill</label>
+                {anzahlungBill ? (
+                  <div className="flex items-center gap-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-gray-800 truncate">
+                        {anzahlungBill.invoice_number ? `#${anzahlungBill.invoice_number} — ` : ''}{anzahlungBill.customer_name}
+                      </p>
+                      <p className="text-xs text-gray-500 mt-0.5">
+                        Brutto (abziehen): <span className="font-semibold text-gray-800">{fmtEur(anzahlungBill.total_payable)}</span>
+                        &nbsp;·&nbsp;Netto (MwSt-Ref): <span className="font-semibold text-gray-800">{fmtEur(anzahlungBill.net_total)}</span>
+                      </p>
+                    </div>
+                    <button type="button" onClick={() => { setAnzahlungBillId(null); setAnzahlungSearch(''); }}
+                      className="text-gray-400 hover:text-red-500 transition-colors flex-shrink-0">
+                      <X size={16} />
+                    </button>
+                  </div>
+                ) : (
+                  <div ref={anzahlungPickerRef} className="relative">
+                    <input
+                      className={inputCls}
+                      placeholder="Search by invoice # or customer name…"
+                      value={anzahlungSearch}
+                      onChange={(e) => { setAnzahlungSearch(e.target.value); setShowAnzahlungPicker(true); }}
+                      onFocus={() => setShowAnzahlungPicker(true)}
+                    />
+                    {showAnzahlungPicker && (
+                      <div className="absolute z-50 top-full mt-1 left-0 right-0 bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden max-h-52 overflow-y-auto">
+                        {anzahlungFilteredBills.length === 0 ? (
+                          <p className="px-4 py-3 text-xs text-gray-400">No matching bills found</p>
+                        ) : (
+                          anzahlungFilteredBills.slice(0, 20).map((b) => (
+                            <button key={b.id} type="button"
+                              onMouseDown={() => { setAnzahlungBillId(b.id); setAnzahlungSearch(''); setShowAnzahlungPicker(false); }}
+                              className="w-full text-left px-4 py-2.5 hover:bg-gray-50 border-b border-gray-100 last:border-0 transition-colors">
+                              <p className="text-sm font-semibold text-gray-800">
+                                {b.invoice_number ? `#${b.invoice_number} — ` : ''}{b.customer_name}
+                              </p>
+                              <p className="text-xs text-gray-400 mt-0.5">
+                                {fmtDate(b.event_date ?? b.invoice_date)} · {fmtEur(b.total_payable)}
+                              </p>
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Ermässigung */}
+              <div>
+                <label className={labelCls}>Ermässigung (Discount) (€)</label>
+                <input
+                  type={focusedErmaessigung ? 'number' : 'text'}
+                  step="0.01" min="0"
+                  className={inputCls}
+                  placeholder="0,00 €"
+                  value={focusedErmaessigung ? ermaessigung : (ermaessigungN > 0 ? fmtEur(ermaessigungN) : '')}
+                  onFocus={() => setFocusedErmaessigung(true)}
+                  onBlur={() => setFocusedErmaessigung(false)}
+                  onChange={(e) => setErmaessigung(e.target.value)}
+                />
+              </div>
+
+            </div>
+          </div>
+
           {/* Live totals */}
           <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
             <p className="text-sm font-bold text-gray-800 mb-4 pb-3 border-b border-gray-100">Totals Preview</p>
@@ -1663,11 +1779,46 @@ export default function OutgoingBillsPage() {
                   </tr>
                 </>)}
 
-                {/* ── Grand total ── */}
-                <tr className="border-t-2 border-gray-400">
-                  <td className="py-2.5 px-3 font-bold text-gray-900 border border-gray-300 bg-gray-100">Gesamtbetrag (€, zu zahlen)</td>
-                  <td className="py-2.5 px-3 text-right tabular-nums font-bold text-gray-900 border border-gray-300 bg-gray-100">{fmtEur(billTotal)}</td>
-                </tr>
+                {/* ── Grand total / deductions ── */}
+                {hasDeductions ? (<>
+                  <tr className="border-t-2 border-gray-400">
+                    <td className="py-2.5 px-3 font-semibold text-gray-700 border border-gray-300 bg-gray-50">Gesamtbetrag (€)</td>
+                    <td className="py-2.5 px-3 text-right tabular-nums font-semibold text-gray-700 border border-gray-300 bg-gray-50">{fmtEur(billTotal)}</td>
+                  </tr>
+                  {anzahlungBruttoN > 0 && (<>
+                    <tr>
+                      <td className="py-2 px-3 text-gray-600 border border-gray-200 border-t-0" colSpan={2}>
+                        <span className="font-semibold">abzgl. Anzahlung</span>
+                        {anzahlungBill?.invoice_number && <span className="text-gray-400 ml-1">(Rg.-Nr. {anzahlungBill.invoice_number})</span>}
+                      </td>
+                    </tr>
+                    {anzahlungNettoN > 0 && (
+                      <tr>
+                        <td className="py-1 px-3 pl-8 text-gray-500 text-xs border border-gray-200 border-t-0">Netto (MwSt-Ref)</td>
+                        <td className="py-1 px-3 text-right tabular-nums text-xs text-gray-500 border border-gray-200 border-t-0">{fmtEur(anzahlungNettoN)}</td>
+                      </tr>
+                    )}
+                    <tr>
+                      <td className="py-1 px-3 pl-8 text-gray-600 text-xs border border-gray-200 border-t-0">Brutto (abziehen)</td>
+                      <td className="py-1 px-3 text-right tabular-nums text-xs text-red-600 border border-gray-200 border-t-0">− {fmtEur(anzahlungBruttoN)}</td>
+                    </tr>
+                  </>)}
+                  {ermaessigungN > 0 && (
+                    <tr>
+                      <td className="py-2 px-3 text-gray-600 border border-gray-200 border-t-0">abzgl. Ermässigung</td>
+                      <td className="py-2 px-3 text-right tabular-nums text-red-600 border border-gray-200 border-t-0">− {fmtEur(ermaessigungN)}</td>
+                    </tr>
+                  )}
+                  <tr>
+                    <td className="py-2.5 px-3 font-bold text-gray-900 border border-gray-300 bg-gray-100">Restbetrag (€, zu zahlen)</td>
+                    <td className="py-2.5 px-3 text-right tabular-nums font-bold text-gray-900 border border-gray-300 bg-gray-100">{fmtEur(finalTotal)}</td>
+                  </tr>
+                </>) : (
+                  <tr className="border-t-2 border-gray-400">
+                    <td className="py-2.5 px-3 font-bold text-gray-900 border border-gray-300 bg-gray-100">Gesamtbetrag (€, zu zahlen)</td>
+                    <td className="py-2.5 px-3 text-right tabular-nums font-bold text-gray-900 border border-gray-300 bg-gray-100">{fmtEur(billTotal)}</td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
