@@ -45,6 +45,8 @@ export type BillData = {
   // Deductions
   anzahlungBrutto? : number;   // deposit brutto — deducted from total payable
   anzahlungNetto?  : number;   // deposit netto — shown for reference / MwSt visibility
+  anzahlungVat7?   : number;   // deposit VAT 7%
+  anzahlungVat19?  : number;   // deposit VAT 19%
   anzahlungRef?    : string;   // invoice number of the deposit bill
   ermaessigung?    : number;   // discount amount
 };
@@ -178,6 +180,8 @@ export function BillDocument({ data }: { data: BillData }) {
   // Deductions
   const anzBrutto   = data.anzahlungBrutto ?? 0;
   const anzNetto    = data.anzahlungNetto  ?? 0;
+  const anzVat7     = data.anzahlungVat7   ?? 0;
+  const anzVat19    = data.anzahlungVat19  ?? 0;
   const ermaess     = data.ermaessigung    ?? 0;
   const hasDeduct   = anzBrutto > 0 || ermaess > 0;
   const basePayable = isMonthly ? bruttoMonthly : gesamtBetrag;
@@ -295,6 +299,16 @@ export function BillDocument({ data }: { data: BillData }) {
                       {anzNetto > 0 && (
                         <View style={[s.amountRow, { paddingLeft: 14 }]}>
                           <Text>Netto</Text><Text>{fmt(anzNetto)}</Text>
+                        </View>
+                      )}
+                      {anzVat7 > 0 && (
+                        <View style={[s.amountRow, { paddingLeft: 14 }]}>
+                          <Text>MwSt 7%</Text><Text>{fmt(anzVat7)}</Text>
+                        </View>
+                      )}
+                      {anzVat19 > 0 && (
+                        <View style={[s.amountRow, { paddingLeft: 14 }]}>
+                          <Text>MwSt 19%</Text><Text>{fmt(anzVat19)}</Text>
                         </View>
                       )}
                       <View style={[s.amountRow, { paddingLeft: 14 }]}>

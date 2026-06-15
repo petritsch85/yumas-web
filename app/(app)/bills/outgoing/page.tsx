@@ -617,8 +617,10 @@ export default function OutgoingBillsPage() {
     essenNetto:       billType === 'dinner'  ? essenN           : undefined,
     getraenkeNetto:   billType === 'dinner'  ? getraenkeN       : undefined,
     trinkgeld:             billType === 'dinner'  ? trinkgeldN       : undefined,
-    anzahlungBrutto:       anzahlungBruttoN > 0  ? anzahlungBruttoN : undefined,
-    anzahlungNetto:        anzahlungNettoN  > 0  ? anzahlungNettoN  : undefined,
+    anzahlungBrutto:       anzahlungBruttoN > 0          ? anzahlungBruttoN              : undefined,
+    anzahlungNetto:        anzahlungNettoN  > 0          ? anzahlungNettoN               : undefined,
+    anzahlungVat7:         (anzahlungBill?.vat_7  ?? 0) > 0 ? anzahlungBill!.vat_7      : undefined,
+    anzahlungVat19:        (anzahlungBill?.vat_19 ?? 0) > 0 ? anzahlungBill!.vat_19     : undefined,
     anzahlungRef:          anzahlungBill?.invoice_number ?? undefined,
     ermaessigung:          ermaessigungN    > 0  ? ermaessigungN    : undefined,
     receiptImageDataUrl:   includeReceipt && receiptDataUrl ? receiptDataUrl : undefined,
@@ -1794,8 +1796,20 @@ export default function OutgoingBillsPage() {
                     </tr>
                     {anzahlungNettoN > 0 && (
                       <tr>
-                        <td className="py-1 px-3 pl-8 text-gray-500 text-xs border border-gray-200 border-t-0">Netto (MwSt-Ref)</td>
+                        <td className="py-1 px-3 pl-8 text-gray-500 text-xs border border-gray-200 border-t-0">Netto</td>
                         <td className="py-1 px-3 text-right tabular-nums text-xs text-gray-500 border border-gray-200 border-t-0">{fmtEur(anzahlungNettoN)}</td>
+                      </tr>
+                    )}
+                    {(anzahlungBill?.vat_7 ?? 0) > 0 && (
+                      <tr>
+                        <td className="py-1 px-3 pl-8 text-gray-500 text-xs border border-gray-200 border-t-0">MwSt 7%</td>
+                        <td className="py-1 px-3 text-right tabular-nums text-xs text-gray-500 border border-gray-200 border-t-0">{fmtEur(anzahlungBill!.vat_7)}</td>
+                      </tr>
+                    )}
+                    {(anzahlungBill?.vat_19 ?? 0) > 0 && (
+                      <tr>
+                        <td className="py-1 px-3 pl-8 text-gray-500 text-xs border border-gray-200 border-t-0">MwSt 19%</td>
+                        <td className="py-1 px-3 text-right tabular-nums text-xs text-gray-500 border border-gray-200 border-t-0">{fmtEur(anzahlungBill!.vat_19)}</td>
                       </tr>
                     )}
                     <tr>
