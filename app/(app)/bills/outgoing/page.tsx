@@ -384,51 +384,10 @@ export default function OutgoingBillsPage() {
   const mwst19     = billType === 'dinner'  ? mwstVatGetraenke : 0;
   const brutto     = billType === 'monthly' ? netto + mwst7 : bruttoGesamt;
   const billTotal  = brutto + (billType === 'dinner' ? trinkgeldN : 0);
-
-  // Anzahlung / Ermässigung derived values
-  const anzahlungBill    = bills.find((b) => b.id === anzahlungBillId) ?? null;
-  const anzahlungBruttoN = anzahlungBill?.total_payable ?? 0;
-  const anzahlungNettoN  = anzahlungBill?.net_total     ?? 0;
-  const ermaessigungN    = parseFloat(ermaessigung) || 0;
-  const hasDeductions    = anzahlungBruttoN > 0 || ermaessigungN > 0;
-  const finalTotal       = billTotal - anzahlungBruttoN - ermaessigungN;
-
-  const anzahlungFilteredBills = bills.filter((b) =>
-    b.id !== anzahlungBillId &&
-    (anzahlungSearch.trim().length === 0 ||
-      (b.invoice_number ?? '').toLowerCase().includes(anzahlungSearch.toLowerCase()) ||
-      b.customer_name.toLowerCase().includes(anzahlungSearch.toLowerCase()))
-  );
+  const ermaessigungN = parseFloat(ermaessigung) || 0;
 
   const fmtEur = (n: number) =>
     n.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €';
-
-  const buildBillData = useCallback((): BillData => ({
-    invoiceNumber,
-    date:             billDate,
-    eventDate:        billEventDate || undefined,
-    issuingLocation:  billIssuingLoc || undefined,
-    type:             billType,
-    recipient: { company, extra, contact: contactName, street, postcode, city, poNumber, att },
-    introText,
-    lineItems:        billType === 'monthly' ? lineItems        : undefined,
-    essenBrutto:      billType === 'dinner'  ? essenBruttoN     : undefined,
-    getraenkeBrutto:  billType === 'dinner'  ? getraenkeBruttoN : undefined,
-    mwstEssenPct:     billType === 'dinner'  ? (parseFloat(mwstEssen)    || 7)  : undefined,
-    mwstGetraenkePct: billType === 'dinner'  ? (parseFloat(mwstGetraenke) || 19) : undefined,
-    essenNetto:       billType === 'dinner'  ? essenN           : undefined,
-    getraenkeNetto:   billType === 'dinner'  ? getraenkeN       : undefined,
-    trinkgeld:             billType === 'dinner'  ? trinkgeldN       : undefined,
-    anzahlungBrutto:       anzahlungBruttoN > 0  ? anzahlungBruttoN : undefined,
-    anzahlungNetto:        anzahlungNettoN  > 0  ? anzahlungNettoN  : undefined,
-    anzahlungRef:          anzahlungBill?.invoice_number ?? undefined,
-    ermaessigung:          ermaessigungN    > 0  ? ermaessigungN    : undefined,
-    receiptImageDataUrl:   includeReceipt && receiptDataUrl ? receiptDataUrl : undefined,
-  }), [invoiceNumber, billDate, billEventDate, billIssuingLoc, billType, company, extra,
-       contactName, street, postcode, city, poNumber, att, introText, lineItems,
-       essenBruttoN, getraenkeBruttoN, essenN, getraenkeN, mwstEssen, mwstGetraenke, trinkgeldN,
-       anzahlungBruttoN, anzahlungNettoN, anzahlungBill, ermaessigungN,
-       includeReceipt, receiptDataUrl]);
 
   const handleReceiptImage = async (file: File) => {
     setExtractingReceipt(true);
@@ -627,6 +586,47 @@ export default function OutgoingBillsPage() {
       return (data ?? []) as OutgoingBill[];
     },
   });
+
+  // Anzahlung / Ermässigung derived values (needs bills)
+  const anzahlungBill    = bills.find((b) => b.id === anzahlungBillId) ?? null;
+  const anzahlungBruttoN = anzahlungBill?.total_payable ?? 0;
+  const anzahlungNettoN  = anzahlungBill?.net_total     ?? 0;
+  const hasDeductions    = anzahlungBruttoN > 0 || ermaessigungN > 0;
+  const finalTotal       = billTotal - anzahlungBruttoN - ermaessigungN;
+
+  const anzahlungFilteredBills = bills.filter((b) =>
+    b.id !== anzahlungBillId &&
+    (anzahlungSearch.trim().length === 0 ||
+      (b.invoice_number ?? '').toLowerCase().includes(anzahlungSearch.toLowerCase()) ||
+      b.customer_name.toLowerCase().includes(anzahlungSearch.toLowerCase()))
+  );
+
+  const buildBillData = useCallback((): BillData => ({
+    invoiceNumber,
+    date:             billDate,
+    eventDate:        billEventDate || undefined,
+    issuingLocation:  billIssuingLoc || undefined,
+    type:             billType,
+    recipient: { company, extra, contact: contactName, street, postcode, city, poNumber, att },
+    introText,
+    lineItems:        billType === 'monthly' ? lineItems        : undefined,
+    essenBrutto:      billType === 'dinner'  ? essenBruttoN     : undefined,
+    getraenkeBrutto:  billType === 'dinner'  ? getraenkeBruttoN : undefined,
+    mwstEssenPct:     billType === 'dinner'  ? (parseFloat(mwstEssen)    || 7)  : undefined,
+    mwstGetraenkePct: billType === 'dinner'  ? (parseFloat(mwstGetraenke) || 19) : undefined,
+    essenNetto:       billType === 'dinner'  ? essenN           : undefined,
+    getraenkeNetto:   billType === 'dinner'  ? getraenkeN       : undefined,
+    trinkgeld:             billType === 'dinner'  ? trinkgeldN       : undefined,
+    anzahlungBrutto:       anzahlungBruttoN > 0  ? anzahlungBruttoN : undefined,
+    anzahlungNetto:        anzahlungNettoN  > 0  ? anzahlungNettoN  : undefined,
+    anzahlungRef:          anzahlungBill?.invoice_number ?? undefined,
+    ermaessigung:          ermaessigungN    > 0  ? ermaessigungN    : undefined,
+    receiptImageDataUrl:   includeReceipt && receiptDataUrl ? receiptDataUrl : undefined,
+  }), [invoiceNumber, billDate, billEventDate, billIssuingLoc, billType, company, extra,
+       contactName, street, postcode, city, poNumber, att, introText, lineItems,
+       essenBruttoN, getraenkeBruttoN, essenN, getraenkeN, mwstEssen, mwstGetraenke, trinkgeldN,
+       anzahlungBruttoN, anzahlungNettoN, anzahlungBill, ermaessigungN,
+       includeReceipt, receiptDataUrl]);
 
   // Auto-populate next invoice number when bills load
   useEffect(() => {
