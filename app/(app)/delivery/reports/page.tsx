@@ -1356,7 +1356,8 @@ export default function DeliveryReportsPage() {
                         <tbody>
                           {storeLines.map(line => {
                             const hasItemData = receipt.confirmed_item_ids != null && receipt.confirmed_item_ids.length > 0;
-                            const isConfirmed = hasItemData ? receipt.confirmed_item_ids!.includes(line.id) : null;
+                            // If no per-item data was saved, treat all items as confirmed (manager confirmed the whole delivery)
+                            const isConfirmed = hasItemData ? receipt.confirmed_item_ids!.includes(line.id) : true;
                             const scheduledQty = line.packed_qty ?? line.delivery_qty;
                             return (
                               <tr key={line.id} className={`border-t border-gray-50 ${isConfirmed === false ? 'bg-red-50/40' : 'hover:bg-gray-50/40'}`}>
