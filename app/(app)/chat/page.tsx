@@ -529,7 +529,9 @@ export default function ChatPage() {
   });
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    // Scroll the messages container directly to avoid scrollIntoView scrolling main
+    const container = messagesEndRef.current?.parentElement;
+    if (container) container.scrollTop = container.scrollHeight;
   }, [messages]);
 
   /* ── Mark room as read ── */
