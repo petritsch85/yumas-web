@@ -35,6 +35,14 @@ type ChatGroup = {
   created_at: string;
 };
 
+type ChatChannel = {
+  id: string;
+  label: string;
+  emoji: string;
+  created_by: string;
+  created_at: string;
+};
+
 /* ─── Constants ──────────────────────────────────────────────────────────────── */
 const ROOMS = [
   { id: 'general',  label: 'General',  emoji: '💬' },
@@ -82,7 +90,7 @@ function UnreadBadge({ count }: { count: number }) {
 
 /* ─── Room Sidebar (desktop) ─────────────────────────────────────────────────── */
 function RoomSidebar({
-  activeRoom, myId, otherProfiles, allProfiles, unread, onSelect, onClose, visibleRooms, roomMembers, chatGroups, onCreateGroup,
+  activeRoom, myId, otherProfiles, allProfiles, unread, onSelect, onClose, visibleRooms, roomMembers, chatGroups, onCreateGroup, isAdmin, onCreateChannel,
 }: {
   activeRoom: string;
   myId: string;
@@ -91,10 +99,12 @@ function RoomSidebar({
   unread: Record<string, number>;
   onSelect: (room: string) => void;
   onClose?: () => void;
-  visibleRooms: typeof ROOMS;
+  visibleRooms: { id: string; label: string; emoji: string }[];
   roomMembers: MinProfile[];
   chatGroups: ChatGroup[];
   onCreateGroup: () => void;
+  isAdmin: boolean;
+  onCreateChannel: () => void;
 }) {
   return (
     <div className="flex flex-col h-full">
@@ -110,7 +120,14 @@ function RoomSidebar({
       <div className="flex-1 overflow-y-auto py-3">
         {/* Rooms */}
         <div className="px-3 mb-4">
-          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest px-2 mb-1.5">Rooms</p>
+          <div className="flex items-center justify-between px-2 mb-1.5">
+            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Rooms</p>
+            {isAdmin && (
+              <button onClick={onCreateChannel} className="text-gray-400 hover:text-[#1B5E20] transition-colors" title="New channel">
+                <Plus size={13} />
+              </button>
+            )}
+          </div>
           {visibleRooms.map(room => {
             const isActive = activeRoom === room.id;
             const count = unread[room.id] ?? 0;
@@ -225,9 +242,9 @@ function RoomSidebar({
 
 /* ─── Mobile Channel List ────────────────────────────────────────────────────── */
 function MobileChannelList({
-  visibleRooms, otherProfiles, allProfiles, myId, unread, onSelect, profile, chatGroups, onCreateGroup,
+  visibleRooms, otherProfiles, allProfiles, myId, unread, onSelect, profile, chatGroups, onCreateGroup, isAdmin, onCreateChannel,
 }: {
-  visibleRooms: typeof ROOMS;
+  visibleRooms: { id: string; label: string; emoji: string }[];
   otherProfiles: MinProfile[];
   allProfiles: MinProfile[];
   myId: string;
@@ -236,6 +253,8 @@ function MobileChannelList({
   profile: Profile | null;
   chatGroups: ChatGroup[];
   onCreateGroup: () => void;
+  isAdmin: boolean;
+  onCreateChannel: () => void;
 }) {
   return (
     <div className="flex flex-col h-full bg-white">
@@ -246,9 +265,14 @@ function MobileChannelList({
       <div className="flex-1 overflow-y-auto">
         {visibleRooms.length > 0 && (
           <>
-            <p className="text-[11px] font-bold text-gray-400 uppercase tracking-widest px-4 pt-5 pb-2">
-              Channels
-            </p>
+            <div className="flex items-center justify-between px-4 pt-5 pb-2">
+              <p className="text-[11px] font-bold text-gray-400 uppercase tracking-widest">Channels</p>
+              {isAdmin && (
+                <button onClick={onCreateChannel} className="text-gray-400 hover:text-[#1B5E20] transition-colors p-0.5">
+                  <Plus size={16} />
+                </button>
+              )}
+            </div>
             {visibleRooms.map(room => {
               const count = unread[room.id] ?? 0;
               return (
@@ -499,6 +523,9 @@ export default function ChatPage() {
   const [showMobileTasks, setShowMobileTasks] = useState(false);
   const [showGroupModal, setShowGroupModal] = useState(false);
   const [selectedGroupMembers, setSelectedGroupMembers] = useState<string[]>([]);
+  const [showChannelModal, setShowChannelModal] = useState(false);
+  const [newChannelLabel, setNewChannelLabel] = useState('');
+  const [newChannelEmoji, setNewChannelEmoji] = useState('💬');
   const [newTaskText, setNewTaskText] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -545,10 +572,40 @@ export default function ChatPage() {
   const myId = profile?.id ?? '';
   const otherProfiles = allProfiles.filter(p => p.id !== myId);
 
+  /* ── Dynamic channels (admin-created) ── */
+  const { data: dynamicChannels = [] } = useQuery<ChatChannel[]>({
+    queryKey: ['chat-channels'],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('chat_channels')
+        .select('*')
+        .order('created_at', { ascending: true });
+      return (data ?? []) as ChatChannel[];
+    },
+    staleTime: 30_000,
+  });
+
+  const createChannelMutation = useMutation({
+    mutationFn: async ({ id, label, emoji }: { id: string; label: string; emoji: string }) => {
+      const { error } = await supabase.from('chat_channels')
+        .insert({ id, label, emoji, created_by: myId });
+      if (error) throw error;
+    },
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: ['chat-channels'] });
+      setShowChannelModal(false);
+      setNewChannelLabel('');
+      setNewChannelEmoji('💬');
+      setActiveRoom(vars.id);
+      setMobileView('chat');
+    },
+  });
+
   const isAdmin = profile?.role === 'admin';
-  const visibleRooms = isAdmin
+  const staticVisibleRooms = isAdmin
     ? ROOMS
     : ROOMS.filter(r => profile?.chat_rooms?.includes(r.id));
+  const visibleRooms = [...staticVisibleRooms, ...dynamicChannels];
 
   /* ── Chat groups ── */
   const { data: chatGroups = [] } = useQuery<ChatGroup[]>({
@@ -803,6 +860,8 @@ export default function ChatPage() {
             profile={profile ?? null}
             chatGroups={chatGroups}
             onCreateGroup={() => setShowGroupModal(true)}
+            isAdmin={isAdmin}
+            onCreateChannel={() => setShowChannelModal(true)}
           />
         </div>
       )}
@@ -1002,6 +1061,73 @@ export default function ChatPage() {
         </div>
       )}
 
+      {/* ── Channel creation modal (admin only) ── */}
+      {showChannelModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => setShowChannelModal(false)}>
+          <div className="absolute inset-0 bg-black/40" />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
+              <span className="font-semibold text-gray-900">New Channel</span>
+              <button onClick={() => setShowChannelModal(false)} className="text-gray-400 hover:text-gray-600 p-1">
+                <X size={18} />
+              </button>
+            </div>
+            <div className="px-5 py-4 flex flex-col gap-4">
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1.5">Channel name</label>
+                <input
+                  type="text"
+                  value={newChannelLabel}
+                  onChange={e => setNewChannelLabel(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') {
+                      const label = newChannelLabel.trim();
+                      if (!label) return;
+                      const id = label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+                      createChannelMutation.mutate({ id, label, emoji: newChannelEmoji });
+                    }
+                  }}
+                  placeholder="e.g. Marketing"
+                  className="w-full bg-gray-100 rounded-xl px-3.5 py-2.5 text-sm text-gray-900 outline-none placeholder-gray-400"
+                  style={{ fontSize: '16px' }}
+                  autoFocus
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1.5">Emoji</label>
+                <div className="flex gap-2 flex-wrap">
+                  {['💬','📢','🏪','🏭','📦','📋','🎯','💡'].map(em => (
+                    <button
+                      key={em}
+                      onClick={() => setNewChannelEmoji(em)}
+                      className={`w-9 h-9 rounded-lg text-xl flex items-center justify-center transition-colors ${
+                        newChannelEmoji === em ? 'bg-[#1B5E20]/15 ring-2 ring-[#1B5E20]' : 'bg-gray-100 hover:bg-gray-200'
+                      }`}
+                    >
+                      {em}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <div className="px-5 py-4 border-t border-gray-100 flex justify-end flex-shrink-0">
+              <button
+                onClick={() => {
+                  const label = newChannelLabel.trim();
+                  if (!label) return;
+                  const id = label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+                  createChannelMutation.mutate({ id, label, emoji: newChannelEmoji });
+                }}
+                disabled={!newChannelLabel.trim() || createChannelMutation.isPending}
+                className="px-5 py-2 rounded-xl bg-[#1B5E20] text-white text-sm font-semibold disabled:opacity-40 hover:bg-[#2E7D32] transition-colors"
+              >
+                {createChannelMutation.isPending ? 'Creating…' : 'Create Channel'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── DESKTOP: Sidebar ── */}
       <div className="hidden md:flex flex-col w-60 border-r border-gray-100 flex-shrink-0 bg-gray-50/60">
         <RoomSidebar
@@ -1015,6 +1141,8 @@ export default function ChatPage() {
           roomMembers={roomMembers}
           chatGroups={chatGroups}
           onCreateGroup={() => setShowGroupModal(true)}
+          isAdmin={isAdmin}
+          onCreateChannel={() => setShowChannelModal(true)}
         />
         {profile && (
           <div className="px-4 py-3 border-t border-gray-100 flex items-center gap-2 flex-shrink-0">
