@@ -299,7 +299,7 @@ function ChatMessages({
   messagesEndRef: React.RefObject<HTMLDivElement | null>;
 }) {
   return (
-    <div className="flex-1 overflow-y-auto px-4 py-3">
+    <div className="flex-1 min-h-0 overflow-y-auto px-4 py-3">
       {isLoading ? (
         <div className="flex items-center justify-center h-full">
           <span className="text-sm text-gray-400">Loading…</span>
@@ -658,7 +658,7 @@ export default function ChatPage() {
 
       {/* ── MOBILE: Chat view ── */}
       {mobileView === 'chat' && (
-        <div className="md:hidden flex flex-col w-full">
+        <div className="md:hidden flex flex-col w-full overflow-hidden">
           {/* Header */}
           <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-3 flex-shrink-0">
             <button
@@ -826,7 +826,7 @@ export default function ChatPage() {
       </div>
 
       {/* ── DESKTOP: Chat area ── */}
-      <div className="hidden md:flex flex-col flex-1 min-w-0">
+      <div className="hidden md:flex flex-col flex-1 min-w-0 overflow-hidden">
         {/* Header */}
         <div className="px-4 py-3 border-b border-gray-200 bg-white flex items-center gap-3 flex-shrink-0">
           <div className="flex items-center gap-2 min-w-0 flex-1">
