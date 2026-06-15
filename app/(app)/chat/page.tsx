@@ -410,6 +410,15 @@ export default function ChatPage() {
 
   useEffect(() => { activeRoomRef.current = activeRoom; }, [activeRoom]);
 
+  // Prevent the layout's main element from scrolling — chat handles its own internal scroll
+  useEffect(() => {
+    const main = document.querySelector('main');
+    if (!main) return;
+    const prev = main.style.overflow;
+    main.style.overflow = 'hidden';
+    return () => { main.style.overflow = prev; };
+  }, []);
+
   /* ── Current user ── */
   const { data: profile } = useQuery<Profile | null>({
     queryKey: ['my-profile'],
