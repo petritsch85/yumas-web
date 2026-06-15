@@ -828,7 +828,7 @@ export default function ChatPage() {
       {/* ── DESKTOP: Chat area ── */}
       <div className="hidden md:flex flex-col flex-1 min-w-0">
         {/* Header */}
-        <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-3 flex-shrink-0">
+        <div className="px-4 py-3 border-b border-gray-200 bg-white flex items-center gap-3 flex-shrink-0">
           <div className="flex items-center gap-2 min-w-0 flex-1">
             <span className="font-semibold text-gray-900 truncate">{activeLabel}</span>
             {activeRoom.startsWith('dm::') && (
