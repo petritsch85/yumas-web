@@ -17,6 +17,7 @@ type Cycle = {
   delivery:      Record<string, number>;
   postInv:       Record<string, number> | null;
   consumption:   Record<string, number> | null;
+  isPlaceholder?: boolean;
 };
 
 type MovementsData = {
@@ -119,6 +120,7 @@ function buildColumns(cycles: Cycle[]): Col[] {
       deliveryDate: c.deliveryDate,
       cycleIdx:     i,
       getValue:     (item) => {
+        if (c.isPlaceholder) return null;
         const v = c.delivery[item];
         return v !== undefined ? v : 0;
       },
@@ -147,6 +149,7 @@ function buildColumns(cycles: Cycle[]): Col[] {
       cycleIdx:     i,
       getValue:     (item) => {
         if (c.postInv) return c.postInv[item] ?? null;
+        if (c.isPlaceholder) return null;
         if (i + 1 < cycles.length) return cycles[i + 1].preInv[item] ?? null;
         return null;
       },
@@ -391,7 +394,44 @@ export default function InventoryMovementsPage({
     [data, effectiveWeek],
   );
 
-  const cols = buildColumns(filteredCycles);
+  // Which days-of-week (0=Sun…6=Sat) have deliveries, inferred from all historical cycles
+  const deliveryDaysOfWeek = useMemo(() => {
+    const days = new Set<number>();
+    for (const c of data?.cycles ?? []) {
+      days.add(new Date(c.deliveryDate + 'T12:00:00').getDay());
+    }
+    return days;
+  }, [data]);
+
+  // Full week: actual cycles + placeholder cycles for delivery days not yet recorded
+  const fullWeekCycles = useMemo(() => {
+    if (!effectiveWeek) return filteredCycles;
+    const existingDates = new Set(filteredCycles.map((c) => c.deliveryDate));
+    const weekStart = new Date(effectiveWeek + 'T12:00:00');
+    const placeholders: Cycle[] = [];
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(weekStart);
+      d.setDate(d.getDate() + i);
+      const iso = d.toISOString().slice(0, 10);
+      if (deliveryDaysOfWeek.has(d.getDay()) && !existingDates.has(iso)) {
+        placeholders.push({
+          deliveryDate: iso,
+          preInvDate:   null,
+          postInvDate:  null,
+          preInv:       {},
+          delivery:     {},
+          postInv:      null,
+          consumption:  null,
+          isPlaceholder: true,
+        });
+      }
+    }
+    return [...filteredCycles, ...placeholders].sort((a, b) =>
+      a.deliveryDate.localeCompare(b.deliveryDate),
+    );
+  }, [filteredCycles, deliveryDaysOfWeek, effectiveWeek]);
+
+  const cols = buildColumns(fullWeekCycles);
 
   // ── Override helpers ──────────────────────────────────────────────────────────
 
@@ -404,7 +444,7 @@ export default function InventoryMovementsPage({
 
   const getEffectiveCons = useCallback(
     (cycleIdx: number, itemName: string): number | null => {
-      const cycle = filteredCycles[cycleIdx];
+      const cycle = fullWeekCycles[cycleIdx];
       if (!cycle?.postInv) return null;
       const pre    = cycle.preInv[itemName] ?? 0;
       const rawDel = cycle.delivery[itemName] ?? 0;
@@ -412,7 +452,7 @@ export default function InventoryMovementsPage({
       const post   = cycle.postInv[itemName] ?? 0;
       return pre + del - post;
     },
-    [filteredCycles, overrides],
+    [fullWeekCycles, overrides],
   );
 
   // ── Edit modal state ──────────────────────────────────────────────────────────
@@ -422,11 +462,12 @@ export default function InventoryMovementsPage({
   const openEdit = useCallback(
     (col: Col, itemName: string) => {
       if (col.type !== 'del' || !col.deliveryDate) return;
-      const cycle = filteredCycles[col.cycleIdx];
+      const cycle = fullWeekCycles[col.cycleIdx];
+      if (cycle?.isPlaceholder) return;
       const originalQty = cycle?.delivery[itemName] ?? 0;
       setEditTarget({ deliveryDate: col.deliveryDate, itemName, originalQty });
     },
-    [filteredCycles],
+    [fullWeekCycles],
   );
 
   const handleSaved = useCallback(async () => {
