@@ -3264,11 +3264,14 @@ export default function SalesReportsPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-50">
-                      {shiftBatch.map((item, idx) => {
+                      {[...shiftBatch]
+                        .sort((a, b) => parseInt(a.result.zReportNumber || '0', 10) - parseInt(b.result.zReportNumber || '0', 10))
+                        .map((item) => {
+                        const origIdx      = shiftBatch.indexOf(item);
                         const effectiveType = item.manualOverride ?? item.detectedType;
                         const isLunch      = effectiveType === 'lunch';
                         const isOverridden = !!item.manualOverride;
-                        const warn = shiftWarnings[idx];
+                        const warn = shiftWarnings[origIdx];
                         const confDots =
                           item.confidence === 'high'   ? '●●●' :
                           item.confidence === 'medium' ? '●●○' : '●○○';
@@ -3284,7 +3287,7 @@ export default function SalesReportsPage() {
                           warn?.kind === 'batch'   ? 'text-red-500 font-bold'   :
                           warn?.kind === 'db'      ? 'text-amber-500 font-bold' : 'text-gray-400';
                         return (
-                          <tr key={idx} className="hover:bg-gray-50/60">
+                          <tr key={origIdx} className="hover:bg-gray-50/60">
                             <td className="px-3 py-2 text-center">
                               <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-xs font-bold ${
                                 isLunch ? 'bg-amber-50 text-amber-700' : 'bg-blue-50 text-blue-800'
