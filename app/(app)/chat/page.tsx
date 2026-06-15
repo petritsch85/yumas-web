@@ -524,6 +524,9 @@ export default function ChatPage() {
   const [showMobileTasks, setShowMobileTasks] = useState(false);
   const [showGroupModal, setShowGroupModal] = useState(false);
   const [selectedGroupMembers, setSelectedGroupMembers] = useState<string[]>([]);
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [pendingPreviewUrl, setPendingPreviewUrl] = useState<string | null>(null);
+  const [pendingCaption, setPendingCaption] = useState('');
   const [showChannelModal, setShowChannelModal] = useState(false);
   const [newChannelLabel, setNewChannelLabel] = useState('');
   const [newChannelEmoji, setNewChannelEmoji] = useState('💬');
@@ -804,7 +807,7 @@ export default function ChatPage() {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
   };
 
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file || !profile) return;
@@ -812,21 +815,39 @@ export default function ChatPage() {
     const isVideo = file.type.startsWith('video/');
     if (!isImage && !isVideo) { alert('Only images and videos are supported.'); return; }
     if (file.size > 20 * 1024 * 1024) { alert('File too large. Max 20 MB.'); return; }
+    setPendingFile(file);
+    setPendingPreviewUrl(URL.createObjectURL(file));
+    setPendingCaption('');
+  };
+
+  const handleSendMedia = async () => {
+    if (!pendingFile || !profile) return;
+    const isImage = pendingFile.type.startsWith('image/');
     setUploading(true);
     try {
-      const ext = file.name.split('.').pop() ?? 'bin';
+      const ext = pendingFile.name.split('.').pop() ?? 'bin';
       const path = `${activeRoom}/${Date.now()}-${profile.id}.${ext}`;
-      const { error: upErr } = await supabase.storage.from('chat-media').upload(path, file, { contentType: file.type });
+      const { error: upErr } = await supabase.storage.from('chat-media').upload(path, pendingFile, { contentType: pendingFile.type });
       if (upErr) throw upErr;
       const { data: { publicUrl } } = supabase.storage.from('chat-media').getPublicUrl(path);
-      await sendMutation.mutateAsync({ content: text.trim() || null, mediaUrl: publicUrl, mediaType: isImage ? 'image' : 'video' });
-      setText('');
+      await sendMutation.mutateAsync({ content: pendingCaption.trim() || null, mediaUrl: publicUrl, mediaType: isImage ? 'image' : 'video' });
+      if (pendingPreviewUrl) URL.revokeObjectURL(pendingPreviewUrl);
+      setPendingFile(null);
+      setPendingPreviewUrl(null);
+      setPendingCaption('');
     } catch (err) {
       console.error('Upload failed', err);
       alert('Upload failed. Please try again.');
     } finally {
       setUploading(false);
     }
+  };
+
+  const cancelPendingMedia = () => {
+    if (pendingPreviewUrl) URL.revokeObjectURL(pendingPreviewUrl);
+    setPendingFile(null);
+    setPendingPreviewUrl(null);
+    setPendingCaption('');
   };
 
   const activeLabel =
@@ -1012,6 +1033,62 @@ export default function ChatPage() {
                   )}
                 </div>
               ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Media preview + caption modal ── */}
+      {pendingFile && pendingPreviewUrl && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center" onClick={cancelPendingMedia}>
+          <div className="absolute inset-0 bg-black/70" />
+          <div
+            className="relative bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-sm flex flex-col overflow-hidden"
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Image / video preview */}
+            <div className="bg-black flex-shrink-0 flex items-center justify-center" style={{ maxHeight: '55vh' }}>
+              {pendingFile.type.startsWith('image/') ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={pendingPreviewUrl} alt="preview" className="w-full object-contain" style={{ maxHeight: '55vh' }} />
+              ) : (
+                <video src={pendingPreviewUrl} controls className="w-full object-contain" style={{ maxHeight: '55vh' }} />
+              )}
+            </div>
+            {/* Caption + actions */}
+            <div className="px-4 pt-3 pb-5 flex flex-col gap-3 bg-white">
+              <textarea
+                value={pendingCaption}
+                onChange={e => setPendingCaption(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMedia(); } }}
+                placeholder="Add a caption… (optional)"
+                rows={2}
+                autoFocus
+                className="w-full bg-gray-100 rounded-xl px-3.5 py-2.5 text-sm text-gray-900 outline-none placeholder-gray-400 resize-none leading-snug"
+                style={{ fontSize: '16px' }}
+              />
+              <div className="flex gap-2">
+                <button
+                  onClick={cancelPendingMedia}
+                  className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm text-gray-600 font-medium hover:bg-gray-50 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSendMedia}
+                  disabled={uploading || sendMutation.isPending}
+                  className="flex-1 py-2.5 rounded-xl bg-[#1B5E20] text-white text-sm font-semibold disabled:opacity-40 hover:bg-[#2E7D32] transition-colors flex items-center justify-center gap-2"
+                >
+                  {uploading ? (
+                    <>
+                      <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      Sending…
+                    </>
+                  ) : (
+                    'Send'
+                  )}
+                </button>
+              </div>
             </div>
           </div>
         </div>
