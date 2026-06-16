@@ -272,22 +272,22 @@ export function BillDocument({ data }: { data: BillData }) {
           <View>
             {/* Group 1: Netto split */}
             <View style={s.groupGap}>
-              <AmtRow label="Essen Netto"    value={essenNetto} />
-              <AmtRow label="Getränke Netto" value={getraenkeNetto} />
+              {essenNetto > 0      && <AmtRow label="Essen Netto"    value={essenNetto} />}
+              {getraenkeNetto > 0  && <AmtRow label="Getränke Netto" value={getraenkeNetto} />}
               <AmtRowBold label="Gesamt Netto" value={gesamtNettoD} />
             </View>
 
             {/* Group 2: MwSt */}
             <View style={s.groupGap}>
-              <AmtRow label={`MwSt Essen (${data.mwstEssenPct ?? 7}%)`}          value={mwstEssenAmt} />
-              <AmtRow label={`MwSt Getränke (${data.mwstGetraenkePct ?? 19}%)`}  value={mwstGetraenkeAmt} />
-              <AmtRow label="MwSt Gesamt"                                          value={mwstGesamtAmt} />
+              {mwstEssenAmt > 0     && <AmtRow label={`MwSt Essen (${data.mwstEssenPct ?? 7}%)`}         value={mwstEssenAmt} />}
+              {mwstGetraenkeAmt > 0 && <AmtRow label={`MwSt Getränke (${data.mwstGetraenkePct ?? 19}%)`} value={mwstGetraenkeAmt} />}
+              <AmtRow label="MwSt Gesamt" value={mwstGesamtAmt} />
             </View>
 
             {/* Group 3: Brutto split */}
             <View style={s.groupGap}>
-              <AmtRow label={`Essen Brutto (${data.mwstEssenPct ?? 7}% MwSt)`}         value={essenBrutto} />
-              <AmtRow label={`Getränke Brutto (${data.mwstGetraenkePct ?? 19}% MwSt)`} value={getraenkeBrutto} />
+              {essenBrutto > 0     && <AmtRow label={`Essen Brutto (${data.mwstEssenPct ?? 7}% MwSt)`}         value={essenBrutto} />}
+              {getraenkeBrutto > 0 && <AmtRow label={`Getränke Brutto (${data.mwstGetraenkePct ?? 19}% MwSt)`} value={getraenkeBrutto} />}
               <AmtRowBold label="Gesamt Brutto" value={gesamtBrutto} />
             </View>
 
