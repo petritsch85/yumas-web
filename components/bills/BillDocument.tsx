@@ -20,6 +20,7 @@ export type BillData = {
   eventDate?       : string;    // DD.MM.YYYY  — date of the event
   issuingLocation? : string;    // 'Westend' | 'Eschborn' | 'Taunus'
   type             : 'monthly' | 'dinner';
+  storno?          : { originalRef: string; originalDate: string };
   recipient        : {
     company  : string;
     extra?   : string;
@@ -215,6 +216,15 @@ export function BillDocument({ data }: { data: BillData }) {
           ))}
         </View>
 
+        {/* ── Stornorechnung title (only for cancellation invoices) ── */}
+        {data.storno && (
+          <View style={{ marginBottom: 10 }}>
+            <Text style={{ fontFamily: 'Courier-Bold', fontSize: 11 }}>
+              STORNORECHNUNG der Rechnungsnummer {data.storno.originalRef}
+            </Text>
+          </View>
+        )}
+
         {/* ── Date + invoice number ────────────────────────────────── */}
         <View style={s.metaWrap}>
           <Text>Frankfurt, den {data.date}</Text>
@@ -374,7 +384,9 @@ export function BillDocument({ data }: { data: BillData }) {
 
         {/* ── Payment terms + Vielen Dank! — centred in remaining space ── */}
         <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-          <Text style={{ textAlign: 'center', lineHeight: 1.55, marginBottom: 14 }}>{PAYMENT}</Text>
+          {!data.storno && (
+            <Text style={{ textAlign: 'center', lineHeight: 1.55, marginBottom: 14 }}>{PAYMENT}</Text>
+          )}
           <Text style={{ textAlign: 'center', fontFamily: 'Courier-Bold', fontSize: 11 }}>Vielen Dank!</Text>
         </View>
 

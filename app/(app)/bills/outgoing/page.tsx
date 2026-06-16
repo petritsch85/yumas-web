@@ -60,7 +60,7 @@ type OutgoingBill = {
   gross_total:      number;
   tips:             number;
   total_payable:    number;
-  status:           'pending' | 'paid';
+  status:           'pending' | 'paid' | 'cancelled';
   file_path:        string | null;
 };
 
@@ -86,11 +86,14 @@ const isItemReady = (item: { status: string; saved?: boolean; data?: Extracted }
   !!item.data?.issuing_location && !!item.data?.shift_type;
 
 const STATUS_STYLES: Record<string, string> = {
-  pending: 'bg-amber-50 text-amber-700 border-amber-200',
-  paid:    'bg-green-50 text-green-700 border-green-200',
+  pending:   'bg-amber-50 text-amber-700 border-amber-200',
+  paid:      'bg-green-50 text-green-700 border-green-200',
+  cancelled: 'bg-red-50 text-red-700 border-red-200',
 };
 
 const DEFAULT_INTRO_MONTHLY = 'Wir bedanken uns für Ihren Auftrag und stellen Ihnen für die Bestellungen wie folgt eine Rechnung:';
+const makeStornoIntro = (originalRef: string, originalDate: string) =>
+  `hiermit stornieren wir die Rechnung mit der Nummer ${originalRef} vom ${originalDate} mit folgenden Positionen:`;
 const makeIntroDinner = (eventDate: string, location?: string) => {
   const locPart = location ? ` im Yumas ${location}` : '';
   return eventDate
@@ -153,7 +156,7 @@ export default function OutgoingBillsPage() {
 
   // ── Create Bill state ─────────────────────────────────────────────────────
 
-  const [billType,          setBillType]          = useState<'monthly' | 'dinner'>('dinner');
+  const [billType,          setBillType]          = useState<'monthly' | 'dinner' | 'storno'>('dinner');
   const [invoiceNumber,     setInvoiceNumber]     = useState('');
   const [billDate,          setBillDate]          = useState(today());
   const [billEventDate,     setBillEventDate]     = useState('');
@@ -194,6 +197,11 @@ export default function OutgoingBillsPage() {
   const [includeReceipt,        setIncludeReceipt]        = useState(false);
   const [receiptLineItems,      setReceiptLineItems]      = useState<{ name: string; qty: number; total: number; taxCode: 'A' | 'B' }[]>([]);
   const [valueDetailsOpen,      setValueDetailsOpen]      = useState(false);
+
+  // Storno (cancellation) invoice state
+  const [stornoModal,      setStornoModal]      = useState(false);
+  const [stornoSearch,     setStornoSearch]     = useState('');
+  const [stornoSourceBill, setStornoSourceBill] = useState<OutgoingBill | null>(null);
 
   const moveReceiptItem = useCallback((idx: number, to: 'A' | 'B') => {
     setReceiptLineItems((prev) => {
@@ -257,9 +265,10 @@ export default function OutgoingBillsPage() {
   useEffect(() => {
     if (billType === 'dinner') {
       setIntroText(makeIntroDinner(billEventDate, billIssuingLoc || undefined));
-    } else {
+    } else if (billType === 'monthly') {
       setIntroText(DEFAULT_INTRO_MONTHLY);
     }
+    // storno: introText is set by applyStornoBill, not overridden here
   }, [billType, billEventDate, billIssuingLoc]);
 
   // Debounced CRM search
@@ -329,8 +338,37 @@ export default function OutgoingBillsPage() {
     } catch { /* silent */ }
   };
 
-  const handleBillTypeChange = (t: 'monthly' | 'dinner') => {
+  const handleBillTypeChange = (t: 'monthly' | 'dinner' | 'storno') => {
+    if (t !== 'storno') setStornoSourceBill(null);
     setBillType(t);
+  };
+
+  const applyStornoBill = (source: OutgoingBill) => {
+    setCompany(source.customer_name);
+    const addrParts = (source.customer_address ?? '').split(', ');
+    if (addrParts.length >= 3) {
+      setStreet(addrParts[0]);
+      setPostcode(addrParts[1]);
+      setCity(addrParts.slice(2).join(', '));
+    } else if (addrParts.length === 2) {
+      setStreet(addrParts[0]);
+      const sp = addrParts[1].split(' ');
+      setPostcode(sp[0] ?? '');
+      setCity(sp.slice(1).join(' '));
+    } else {
+      setStreet(source.customer_address ?? '');
+    }
+    setBillIssuingLoc(source.issuing_location ?? '');
+    setBillEventDate(source.event_date ? source.event_date.split('-').reverse().join('.') : '');
+    setInputMode('brutto');
+    setEssenBrutto(String(source.net_food + source.vat_7));
+    setGetraenkeBrutto(String(source.net_drinks + source.vat_19));
+    setTrinkgeld(source.tips > 0 ? String(source.tips) : '');
+    const origDate = source.invoice_date ? source.invoice_date.split('-').reverse().join('.') : '';
+    setIntroText(makeStornoIntro(source.invoice_number ?? '', origDate));
+    setStornoSourceBill(source);
+    setStornoModal(false);
+    setBillType('storno');
   };
 
   const addLineItem = () =>
@@ -381,9 +419,9 @@ export default function OutgoingBillsPage() {
   const linesTotal = lineItems.reduce((s, i) => s + i.qty * i.unitPrice, 0);
   const netto      = billType === 'monthly' ? linesTotal : essenN + getraenkeN;
   const mwst7      = billType === 'monthly' ? netto * 0.07 : mwstVatEssen;
-  const mwst19     = billType === 'dinner'  ? mwstVatGetraenke : 0;
+  const mwst19     = billType !== 'monthly' ? mwstVatGetraenke : 0;
   const brutto     = billType === 'monthly' ? netto + mwst7 : bruttoGesamt;
-  const billTotal  = brutto + (billType === 'dinner' ? trinkgeldN : 0);
+  const billTotal  = brutto + (billType !== 'monthly' ? trinkgeldN : 0);
   const ermaessigungN = parseFloat(ermaessigung) || 0;
 
   const fmtEur = (n: number) =>
@@ -500,9 +538,9 @@ export default function OutgoingBillsPage() {
       customer_name:    company,
       customer_address: [street, postcode, city].filter(Boolean).join(', ') || null,
       issuing_location: billIssuingLoc || null,
-      shift_type:       (billType === 'dinner' ? 'dinner' : null) as 'dinner' | 'lunch' | null,
-      net_food:         billType === 'dinner' ? essenN         : 0,
-      net_drinks:       billType === 'dinner' ? getraenkeN     : 0,
+      shift_type:       (billType !== 'monthly' ? (stornoSourceBill?.shift_type ?? 'dinner') : null) as 'dinner' | 'lunch' | null,
+      net_food:         billType !== 'monthly' ? essenN         : 0,
+      net_drinks:       billType !== 'monthly' ? getraenkeN     : 0,
       net_total:        netto,
       vat_7:            mwst7,
       vat_19:           mwst19,
@@ -532,6 +570,9 @@ export default function OutgoingBillsPage() {
     setSendError(null);
     try {
       await uploadAndSave();
+      if (billType === 'storno' && stornoSourceBill) {
+        await supabase.from('outgoing_bills').update({ status: 'cancelled' }).eq('id', stornoSourceBill.id);
+      }
       closeModal();
     } catch (err: any) {
       setSendError(err.message ?? 'Unexpected error');
@@ -566,6 +607,9 @@ export default function OutgoingBillsPage() {
 
       // Upload + save to DB
       await uploadAndSave();
+      if (billType === 'storno' && stornoSourceBill) {
+        await supabase.from('outgoing_bills').update({ status: 'cancelled' }).eq('id', stornoSourceBill.id);
+      }
       closeModal();
     } catch (err: any) {
       setSendError(err.message ?? 'Unexpected error');
@@ -601,34 +645,44 @@ export default function OutgoingBillsPage() {
       b.customer_name.toLowerCase().includes(anzahlungSearch.toLowerCase()))
   );
 
-  const buildBillData = useCallback((): BillData => ({
-    invoiceNumber,
-    date:             billDate,
-    eventDate:        billEventDate || undefined,
-    issuingLocation:  billIssuingLoc || undefined,
-    type:             billType,
-    recipient: { company, extra, contact: contactName, street, postcode, city, poNumber, att },
-    introText,
-    lineItems:        billType === 'monthly' ? lineItems        : undefined,
-    essenBrutto:      billType === 'dinner'  ? essenBruttoN     : undefined,
-    getraenkeBrutto:  billType === 'dinner'  ? getraenkeBruttoN : undefined,
-    mwstEssenPct:     billType === 'dinner'  ? (parseFloat(mwstEssen)    || 7)  : undefined,
-    mwstGetraenkePct: billType === 'dinner'  ? (parseFloat(mwstGetraenke) || 19) : undefined,
-    essenNetto:       billType === 'dinner'  ? essenN           : undefined,
-    getraenkeNetto:   billType === 'dinner'  ? getraenkeN       : undefined,
-    trinkgeld:             billType === 'dinner'  ? trinkgeldN       : undefined,
-    anzahlungBrutto:       anzahlungBruttoN > 0          ? anzahlungBruttoN              : undefined,
-    anzahlungNetto:        anzahlungNettoN  > 0          ? anzahlungNettoN               : undefined,
-    anzahlungVat7:         (anzahlungBill?.vat_7  ?? 0) > 0 ? anzahlungBill!.vat_7      : undefined,
-    anzahlungVat19:        (anzahlungBill?.vat_19 ?? 0) > 0 ? anzahlungBill!.vat_19     : undefined,
-    anzahlungRef:          anzahlungBill?.invoice_number ?? undefined,
-    ermaessigung:          ermaessigungN    > 0  ? ermaessigungN    : undefined,
-    receiptImageDataUrl:   includeReceipt && receiptDataUrl ? receiptDataUrl : undefined,
-  }), [invoiceNumber, billDate, billEventDate, billIssuingLoc, billType, company, extra,
+  const buildBillData = useCallback((): BillData => {
+    const isDinnerLike = billType === 'dinner' || billType === 'storno';
+    const stornoOrigDate = stornoSourceBill?.invoice_date
+      ? stornoSourceBill.invoice_date.split('-').reverse().join('.')
+      : '';
+    return {
+      invoiceNumber,
+      date:             billDate,
+      eventDate:        billEventDate || undefined,
+      issuingLocation:  billIssuingLoc || undefined,
+      type:             billType === 'monthly' ? 'monthly' : 'dinner',
+      recipient: { company, extra, contact: contactName, street, postcode, city, poNumber, att },
+      introText,
+      lineItems:        billType === 'monthly' ? lineItems        : undefined,
+      essenBrutto:      isDinnerLike  ? essenBruttoN     : undefined,
+      getraenkeBrutto:  isDinnerLike  ? getraenkeBruttoN : undefined,
+      mwstEssenPct:     isDinnerLike  ? (parseFloat(mwstEssen)    || 7)  : undefined,
+      mwstGetraenkePct: isDinnerLike  ? (parseFloat(mwstGetraenke) || 19) : undefined,
+      essenNetto:       isDinnerLike  ? essenN           : undefined,
+      getraenkeNetto:   isDinnerLike  ? getraenkeN       : undefined,
+      trinkgeld:        isDinnerLike  ? trinkgeldN       : undefined,
+      anzahlungBrutto:  anzahlungBruttoN > 0          ? anzahlungBruttoN              : undefined,
+      anzahlungNetto:   anzahlungNettoN  > 0          ? anzahlungNettoN               : undefined,
+      anzahlungVat7:    (anzahlungBill?.vat_7  ?? 0) > 0 ? anzahlungBill!.vat_7      : undefined,
+      anzahlungVat19:   (anzahlungBill?.vat_19 ?? 0) > 0 ? anzahlungBill!.vat_19     : undefined,
+      anzahlungRef:     anzahlungBill?.invoice_number ?? undefined,
+      ermaessigung:     ermaessigungN > 0 ? ermaessigungN : undefined,
+      receiptImageDataUrl: includeReceipt && receiptDataUrl ? receiptDataUrl : undefined,
+      storno: billType === 'storno' && stornoSourceBill ? {
+        originalRef:  stornoSourceBill.invoice_number ?? '',
+        originalDate: stornoOrigDate,
+      } : undefined,
+    };
+  }, [invoiceNumber, billDate, billEventDate, billIssuingLoc, billType, company, extra,
        contactName, street, postcode, city, poNumber, att, introText, lineItems,
        essenBruttoN, getraenkeBruttoN, essenN, getraenkeN, mwstEssen, mwstGetraenke, trinkgeldN,
        anzahlungBruttoN, anzahlungNettoN, anzahlungBill, ermaessigungN,
-       includeReceipt, receiptDataUrl]);
+       includeReceipt, receiptDataUrl, stornoSourceBill]);
 
   // Auto-populate next invoice number when bills load
   useEffect(() => {
@@ -1243,7 +1297,28 @@ export default function OutgoingBillsPage() {
                   {t === 'dinner' ? 'Dinner / Event' : 'Monthly Orders'}
                 </button>
               ))}
+              <button
+                onClick={() => setStornoModal(true)}
+                className={`flex-1 py-2.5 rounded-lg text-sm font-medium border transition-colors ${
+                  billType === 'storno'
+                    ? 'bg-red-600 text-white border-red-600'
+                    : 'bg-white text-gray-600 border-gray-200 hover:border-red-400'
+                }`}
+              >
+                Stornorechnung
+              </button>
             </div>
+            {billType === 'storno' && stornoSourceBill && (
+              <div className="mt-3 flex items-center justify-between bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                <div>
+                  <p className="text-xs font-semibold text-red-700">Cancelling invoice #{stornoSourceBill.invoice_number}</p>
+                  <p className="text-xs text-red-500">{stornoSourceBill.customer_name} · {fmtDate(stornoSourceBill.invoice_date)}</p>
+                </div>
+                <button onClick={() => setStornoModal(true)} className="text-xs text-red-600 hover:underline ml-3 flex-shrink-0">
+                  Change
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Invoice details */}
@@ -1442,8 +1517,8 @@ export default function OutgoingBillsPage() {
             </div>
           )}
 
-          {/* Dinner: amounts */}
-          {billType === 'dinner' && (
+          {/* Dinner / Storno: amounts */}
+          {(billType === 'dinner' || billType === 'storno') && (
             <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
               {/* Header + mode toggle */}
               <div className="flex items-center justify-between mb-4 pb-3 border-b border-gray-100">
@@ -1717,7 +1792,7 @@ export default function OutgoingBillsPage() {
             <table className="w-full text-sm border-collapse">
               <tbody>
                 {/* ── Brutto block ── */}
-                {billType === 'dinner' && (<>
+                {(billType === 'dinner' || billType === 'storno') && (<>
                   <tr className="border-b border-gray-100">
                     <td className="py-2 px-3 text-gray-600 bg-gray-50 border border-gray-200 rounded-tl">Essen Brutto (€)</td>
                     <td className="py-2 px-3 text-right tabular-nums text-gray-800 bg-gray-50 border border-gray-200 rounded-tr">{fmtEur(essenBruttoN)}</td>
@@ -1878,6 +1953,7 @@ export default function OutgoingBillsPage() {
               <option value="all">All statuses</option>
               <option value="pending">Pending</option>
               <option value="paid">Paid</option>
+              <option value="cancelled">Cancelled</option>
             </select>
             <select value={filterLocation} onChange={(e) => setFilterLocation(e.target.value)}
               className="flex-1 sm:flex-none border border-gray-200 rounded-lg px-3 py-1.5 text-xs font-semibold text-gray-600 focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30">
@@ -1928,9 +2004,10 @@ export default function OutgoingBillsPage() {
                           )}
                         </div>
                         <select value={bill.status} onChange={(e) => updateStatus(bill.id, e.target.value)}
-                          className={`flex-shrink-0 text-xs font-semibold px-2 py-1 rounded-full border cursor-pointer focus:outline-none ${STATUS_STYLES[bill.status]}`}>
+                          className={`flex-shrink-0 text-xs font-semibold px-2 py-1 rounded-full border cursor-pointer focus:outline-none ${STATUS_STYLES[bill.status] ?? ''}`}>
                           <option value="pending">Pending</option>
                           <option value="paid">Paid</option>
+                          <option value="cancelled">Cancelled</option>
                         </select>
                       </div>
 
@@ -2088,9 +2165,10 @@ export default function OutgoingBillsPage() {
                           <td className="px-2 py-2 text-right font-bold text-[#1B5E20] tabular-nums">{fmt(bill.total_payable)}</td>
                           <td className="px-2 py-2">
                             <select value={bill.status} onChange={(e) => updateStatus(bill.id, e.target.value)}
-                              className={`text-xs font-semibold px-2 py-1 rounded-full border cursor-pointer focus:outline-none ${STATUS_STYLES[bill.status]}`}>
+                              className={`text-xs font-semibold px-2 py-1 rounded-full border cursor-pointer focus:outline-none ${STATUS_STYLES[bill.status] ?? ''}`}>
                               <option value="pending">Pending</option>
                               <option value="paid">Paid</option>
+                              <option value="cancelled">Cancelled</option>
                             </select>
                           </td>
                           <td className="px-2 py-2">
@@ -2351,6 +2429,68 @@ export default function OutgoingBillsPage() {
           </div>
         );
       })()}
+
+      {/* ═══════ STORNO BILL PICKER MODAL ═══════ */}
+      {stornoModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg flex flex-col max-h-[80vh]">
+            <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-gray-100 flex-shrink-0">
+              <h2 className="text-base font-bold text-gray-900">Select Invoice to Cancel</h2>
+              <button type="button" onClick={() => setStornoModal(false)}
+                className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors">
+                <X size={16} className="text-gray-500" />
+              </button>
+            </div>
+            <div className="px-6 py-3 border-b border-gray-100 flex-shrink-0">
+              <input
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-400/40 focus:border-red-400"
+                placeholder="Search by invoice number or customer…"
+                value={stornoSearch}
+                onChange={(e) => setStornoSearch(e.target.value)}
+                autoFocus
+              />
+            </div>
+            <div className="overflow-y-auto flex-1 px-3 py-2">
+              {bills
+                .filter((b) => b.status !== 'cancelled' && (
+                  stornoSearch.trim().length === 0 ||
+                  (b.invoice_number ?? '').toLowerCase().includes(stornoSearch.toLowerCase()) ||
+                  b.customer_name.toLowerCase().includes(stornoSearch.toLowerCase())
+                ))
+                .sort((a, b) => {
+                  const parse = (inv: string | null) => {
+                    const m = inv?.match(/^(\d+)-(\d+)$/);
+                    return m ? parseInt(m[2], 10) * 100000 + parseInt(m[1], 10) : -1;
+                  };
+                  return parse(b.invoice_number) - parse(a.invoice_number);
+                })
+                .map((b) => (
+                  <button
+                    key={b.id}
+                    type="button"
+                    onClick={() => applyStornoBill(b)}
+                    className="w-full text-left px-4 py-3 rounded-xl hover:bg-red-50 border border-transparent hover:border-red-200 transition-colors mb-1"
+                  >
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-semibold text-gray-800">
+                        #{b.invoice_number} — {b.customer_name}
+                      </p>
+                      <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border ${STATUS_STYLES[b.status] ?? ''}`}>
+                        {b.status}
+                      </span>
+                    </div>
+                    <p className="text-xs text-gray-400 mt-0.5">
+                      {fmtDate(b.invoice_date)} · {b.issuing_location ?? '—'} · {fmt(b.total_payable)}
+                    </p>
+                  </button>
+                ))}
+              {bills.filter((b) => b.status !== 'cancelled').length === 0 && (
+                <p className="text-sm text-gray-400 text-center py-8">No invoices found</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ═══════ APPROVE & SEND MODAL ═══════ */}
       {sendModal && (
