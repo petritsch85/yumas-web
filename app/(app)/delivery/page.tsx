@@ -1279,28 +1279,30 @@ export default function DeliveryPage() {
     return () => { if (packingInterval.current) clearInterval(packingInterval.current); };
   }, []);
 
-  /* ─ Query: most recent store receipt notes (for previous-delivery reminders) ─ */
+  /* ─ Query: store receipt note from the single delivery immediately preceding this one ─ */
   const { data: prevReceiptNotes = {} } = useQuery<Partial<Record<string, { note: string; deliveryDate: string }>>>({
-    queryKey: ['prev-receipt-notes'],
+    queryKey: ['prev-receipt-notes', targetDate],
     staleTime: 60_000,
     queryFn: async () => {
       const { data, error } = await supabase
         .from('store_delivery_receipts')
         .select('location_name, notes, received_at')
-        .not('notes', 'is', null)
-        .neq('notes', '')
+        .lt('received_at', targetDate)
         .order('received_at', { ascending: false });
       if (error) return {};
+      // Take only the single most recent receipt per store before this delivery date —
+      // if THAT receipt has no note, show nothing (don't fall back to an older note).
+      const seen = new Set<string>();
       const map: Partial<Record<string, { note: string; deliveryDate: string }>> = {};
       for (const r of (data ?? [])) {
+        if (seen.has(r.location_name)) continue;
+        seen.add(r.location_name);
         const noteText = r.notes?.trim() ?? '';
         if (!noteText || noteText.startsWith('{') || noteText.startsWith('[')) continue;
-        if (!map[r.location_name]) {
-          map[r.location_name] = {
-            note: noteText,
-            deliveryDate: r.received_at.slice(0, 10),
-          };
-        }
+        map[r.location_name] = {
+          note: noteText,
+          deliveryDate: r.received_at.slice(0, 10),
+        };
       }
       return map;
     },
