@@ -382,6 +382,8 @@ export default function InventoryMovementsPage({
 
   const weeks = useMemo(() => {
     const seen = new Set<string>();
+    // Always include the current calendar week so it appears even before any cycles are recorded
+    seen.add(getWeekStart(new Date().toISOString().slice(0, 10)));
     for (const c of data?.cycles ?? []) seen.add(getWeekStart(c.deliveryDate));
     return Array.from(seen).sort((a, b) => b.localeCompare(a));
   }, [data]);
