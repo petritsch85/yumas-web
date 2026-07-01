@@ -2450,9 +2450,11 @@ export default function DeliveryPage() {
                   <div key={store} className={activeStore === store ? 'block' : 'hidden'}>
                     {/* ── Store note (inventory comment / manager override) ── */}
                     {(() => {
-                      const managerNote: string = run?.store_notes?.[store] ?? '';
+                      const rawNote: string = run?.store_notes?.[store] ?? '';
+                      const noteDeleted = rawNote === '__deleted__';
+                      const managerNote: string = noteDeleted ? '' : rawNote;
                       // Always use the live comment from the currently linked inventory report
-                      const inventoryComment: string = liveInventoryComments[store] ?? '';
+                      const inventoryComment: string = noteDeleted ? '' : (liveInventoryComments[store] ?? '');
                       const inventorySubmitter = liveInventorySubmitters[store];
                       const displayNote = managerNote || inventoryComment;
                       const isEditing = editingNoteStore === store;
@@ -2491,7 +2493,7 @@ export default function DeliveryPage() {
                               >
                                 Cancel
                               </button>
-                              {managerNote && (
+                              {(managerNote || noteDeleted) && (
                                 <button
                                   onClick={() => saveNote.mutate({ store, text: '' })}
                                   disabled={saveNote.isPending}
@@ -2521,12 +2523,25 @@ export default function DeliveryPage() {
                               )}
                             </div>
                             {canEdit && (
-                              <button
-                                onClick={() => { setEditingNoteStore(store); setNoteText(managerNote || inventoryComment); }}
-                                className="flex-shrink-0 text-xs text-amber-600 hover:text-amber-800 font-semibold underline whitespace-nowrap"
-                              >
-                                Edit
-                              </button>
+                              <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                                <button
+                                  onClick={() => { setEditingNoteStore(store); setNoteText(managerNote || inventoryComment); }}
+                                  className="text-xs text-amber-600 hover:text-amber-800 font-semibold underline whitespace-nowrap"
+                                >
+                                  Edit
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    if (window.confirm('Delete this note? This cannot be undone.')) {
+                                      saveNote.mutate({ store, text: '__deleted__' });
+                                    }
+                                  }}
+                                  disabled={saveNote.isPending}
+                                  className="text-xs text-red-400 hover:text-red-600 font-semibold underline whitespace-nowrap disabled:opacity-50"
+                                >
+                                  Delete
+                                </button>
+                              </div>
                             )}
                           </div>
                         );
