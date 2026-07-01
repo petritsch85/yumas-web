@@ -851,6 +851,31 @@ export default function OutgoingBillsPage() {
     queryClient.invalidateQueries({ queryKey: ['outgoing-bills'] });
   };
 
+  const handleExport = () => {
+    import('xlsx').then((XLSX) => {
+      const rows = sortedBills.map((b) => ({
+        Customer:        b.customer_name,
+        'Invoice #':     b.invoice_number ?? '',
+        'Issue Date':    b.invoice_date ? new Date(b.invoice_date + 'T00:00:00').toLocaleDateString('en-GB') : '',
+        'Event Date':    b.event_date    ? new Date(b.event_date    + 'T00:00:00').toLocaleDateString('en-GB') : '',
+        Location:        b.issuing_location ?? '',
+        Shift:           b.shift_type ? b.shift_type.charAt(0).toUpperCase() + b.shift_type.slice(1) : '',
+        'Net (€)':       b.net_total,
+        'Gross (€)':     b.gross_total,
+        'Tips (€)':      b.tips || 0,
+        'Total Payable (€)': b.total_payable,
+        Status:          b.status.charAt(0).toUpperCase() + b.status.slice(1),
+      }));
+      const ws = XLSX.utils.json_to_sheet(rows);
+      const colWidths = [40, 12, 14, 14, 12, 10, 14, 14, 12, 18, 12];
+      ws['!cols'] = colWidths.map(w => ({ wch: w }));
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Outgoing Bills');
+      const label = filterMonth !== 'all' ? `_${filterMonth}` : '';
+      XLSX.writeFile(wb, `Outgoing_Bills${label}.xlsx`);
+    });
+  };
+
   const deleteBill = async (id: string) => {
     if (!confirm('Delete this outgoing bill permanently?')) return;
     const bill = bills.find((b) => b.id === id);
@@ -914,6 +939,15 @@ export default function OutgoingBillsPage() {
           <p className="text-sm text-gray-500 mt-0.5">{t('bills.outgoingSubtitle')}</p>
         </div>
         <div className="flex items-center gap-2">
+          {canViewAll && sortedBills.length > 0 && (
+            <button
+              onClick={handleExport}
+              className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2 bg-white text-gray-600 border border-gray-300 text-sm font-semibold rounded-xl hover:bg-gray-50 transition-colors"
+            >
+              <FileDown size={15} />
+              Export
+            </button>
+          )}
           <button
             onClick={() => setTab('create')}
             className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2 bg-white text-[#1B5E20] border border-[#1B5E20] text-sm font-semibold rounded-xl hover:bg-green-50 transition-colors"
