@@ -1529,7 +1529,11 @@ export default function DeliveryPage() {
         .from('delivery_run_lines').update({ packed_qty: qty, is_packed: qty !== null && qty > 0 }).eq('id', id);
       if (error) throw error;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['delivery-run', targetDate] }),
+    onSuccess: (_data, vars) => {
+      // Only clear the local draft once the server confirms — keeps value visible while offline
+      setEditingPackedQty(prev => { const next = { ...prev }; delete next[vars.id]; return next; });
+      qc.invalidateQueries({ queryKey: ['delivery-run', targetDate] });
+    },
   });
 
   const handlePackedQtyChange = (id: string, value: string) => setEditingPackedQty(prev => ({ ...prev, [id]: value }));
@@ -1539,7 +1543,7 @@ export default function DeliveryPage() {
       const parsed = Math.max(0, Math.round(parseFloat(value)));
       if (!isNaN(parsed)) setPackedQty.mutate({ id, qty: parsed });
     }
-    setEditingPackedQty(prev => { const next = { ...prev }; delete next[id]; return next; });
+    // Do NOT clear editingPackedQty here — stays visible until onSuccess confirms server write
   };
 
   /* ─ Packing timer ─ */
