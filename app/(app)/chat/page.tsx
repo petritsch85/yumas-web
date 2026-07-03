@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
-import { Send, Paperclip, MessageCircle, ChevronLeft, X, Users, ClipboardList, CheckSquare, Square, Plus } from 'lucide-react';
+import { Send, Paperclip, MessageCircle, ChevronLeft, X, Users, ClipboardList, CheckSquare, Square, Plus, Pencil } from 'lucide-react';
 import type { Profile } from '@/types';
 
 /* ─── Types ──────────────────────────────────────────────────────────────────── */
@@ -16,6 +16,7 @@ type ChatMessage = {
   media_url: string | null;
   media_type: string | null;
   created_at: string;
+  edited_at?: string | null;
 };
 
 type MinProfile = { id: string; full_name: string; role: string; chat_rooms: string[] | null };
@@ -367,10 +368,22 @@ function MobileChannelList({
 }
 
 /* ─── Message Bubble ─────────────────────────────────────────────────────────── */
-function MessageBubble({ msg, isOwn, showMeta }: { msg: ChatMessage; isOwn: boolean; showMeta: boolean }) {
+function MessageBubble({
+  msg, isOwn, showMeta, isEditing, editText, onStartEdit, onTextChange, onSave, onCancel,
+}: {
+  msg: ChatMessage;
+  isOwn: boolean;
+  showMeta: boolean;
+  isEditing: boolean;
+  editText: string;
+  onStartEdit: () => void;
+  onTextChange: (v: string) => void;
+  onSave: () => void;
+  onCancel: () => void;
+}) {
   return (
-    <div className={`flex gap-2 ${isOwn ? 'flex-row-reverse' : 'flex-row'} ${showMeta ? 'mt-4' : 'mt-0.5'}`}>
-      <div className="w-7 flex-shrink-0 flex items-end">
+    <div className={`flex gap-2 ${isOwn ? 'flex-row-reverse' : 'flex-row'} ${showMeta ? 'mt-4' : 'mt-0.5'} group items-end`}>
+      <div className="w-7 flex-shrink-0">
         {showMeta && (
           <div className={`w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold ${
             isOwn ? 'bg-[#1B5E20] text-white' : 'bg-gray-200 text-gray-600'
@@ -386,37 +399,92 @@ function MessageBubble({ msg, isOwn, showMeta }: { msg: ChatMessage; isOwn: bool
             {isOwn ? 'You' : msg.sender_name} · {fmtTime(msg.created_at)}
           </p>
         )}
-        <div className={`rounded-2xl px-3 py-2 text-sm ${
-          isOwn
-            ? 'bg-[#1B5E20] text-white rounded-tr-sm'
-            : 'bg-gray-100 text-gray-900 rounded-tl-sm'
-        }`}>
-          {msg.media_url && msg.media_type === 'image' && (
-            <a href={msg.media_url} target="_blank" rel="noopener noreferrer" className="block mb-1">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={msg.media_url} alt="shared image" className="rounded-xl max-h-64 max-w-full object-cover" />
-            </a>
-          )}
-          {msg.media_url && msg.media_type === 'video' && (
-            <video src={msg.media_url} controls className="rounded-xl max-h-64 max-w-full mb-1" />
-          )}
-          {msg.content && (
-            <p className="whitespace-pre-wrap break-words leading-snug">{msg.content}</p>
-          )}
-        </div>
+
+        {isEditing ? (
+          <div className="flex flex-col gap-1.5 w-64">
+            <textarea
+              value={editText}
+              onChange={e => onTextChange(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onSave(); }
+                if (e.key === 'Escape') { e.preventDefault(); onCancel(); }
+              }}
+              autoFocus
+              rows={2}
+              className="w-full bg-gray-100 rounded-xl px-3 py-2 text-sm text-gray-900 outline-none resize-none leading-snug"
+              style={{ fontSize: '16px' }}
+            />
+            <div className="flex gap-1.5 justify-end">
+              <button
+                onClick={onCancel}
+                className="px-3 py-1 rounded-lg text-xs text-gray-500 hover:bg-gray-100 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={onSave}
+                disabled={!editText.trim()}
+                className="px-3 py-1 rounded-lg text-xs bg-[#1B5E20] text-white disabled:opacity-40 hover:bg-[#2E7D32] transition-colors"
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        ) : (
+          <>
+            <div className={`rounded-2xl px-3 py-2 text-sm ${
+              isOwn
+                ? 'bg-[#1B5E20] text-white rounded-tr-sm'
+                : 'bg-gray-100 text-gray-900 rounded-tl-sm'
+            }`}>
+              {msg.media_url && msg.media_type === 'image' && (
+                <a href={msg.media_url} target="_blank" rel="noopener noreferrer" className="block mb-1">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={msg.media_url} alt="shared image" className="rounded-xl max-h-64 max-w-full object-cover" />
+                </a>
+              )}
+              {msg.media_url && msg.media_type === 'video' && (
+                <video src={msg.media_url} controls className="rounded-xl max-h-64 max-w-full mb-1" />
+              )}
+              {msg.content && (
+                <p className="whitespace-pre-wrap break-words leading-snug">{msg.content}</p>
+              )}
+            </div>
+            {msg.edited_at && (
+              <p className={`text-[10px] text-gray-400 px-1 ${isOwn ? 'text-right' : ''}`}>edited</p>
+            )}
+          </>
+        )}
       </div>
+
+      {/* Pencil — own text-only messages, visible on hover */}
+      {isOwn && !msg.media_url && !isEditing && (
+        <button
+          onClick={onStartEdit}
+          className="opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 mb-1 p-1 rounded text-gray-400 hover:text-gray-600"
+          title="Edit message"
+        >
+          <Pencil size={12} />
+        </button>
+      )}
     </div>
   );
 }
 
 /* ─── Shared chat body components ────────────────────────────────────────────── */
 function ChatMessages({
-  messages, isLoading, myId, messagesEndRef,
+  messages, isLoading, myId, messagesEndRef, editingId, editingText, onStartEdit, onTextChange, onSave, onCancel,
 }: {
   messages: ChatMessage[];
   isLoading: boolean;
   myId: string;
   messagesEndRef: React.RefObject<HTMLDivElement | null>;
+  editingId: string | null;
+  editingText: string;
+  onStartEdit: (msg: ChatMessage) => void;
+  onTextChange: (v: string) => void;
+  onSave: () => void;
+  onCancel: () => void;
 }) {
   return (
     <div className="flex-1 min-h-0 overflow-y-auto px-4 py-3">
@@ -435,7 +503,20 @@ function ChatMessages({
             const isOwn = msg.sender_id === myId;
             const prev = messages[idx - 1];
             const showMeta = !prev || prev.sender_id !== msg.sender_id;
-            return <MessageBubble key={msg.id} msg={msg} isOwn={isOwn} showMeta={showMeta} />;
+            return (
+              <MessageBubble
+                key={msg.id}
+                msg={msg}
+                isOwn={isOwn}
+                showMeta={showMeta}
+                isEditing={editingId === msg.id}
+                editText={editingText}
+                onStartEdit={() => onStartEdit(msg)}
+                onTextChange={onTextChange}
+                onSave={onSave}
+                onCancel={onCancel}
+              />
+            );
           })}
         </>
       )}
@@ -532,6 +613,8 @@ export default function ChatPage() {
   const [newChannelEmoji, setNewChannelEmoji] = useState('💬');
   const [selectedChannelMembers, setSelectedChannelMembers] = useState<string[]>([]);
   const [newTaskText, setNewTaskText] = useState('');
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingText, setEditingText] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -757,6 +840,15 @@ export default function ChatPage() {
           prev.some(m => m.id === msg.id) ? prev : [...prev, msg],
         );
       })
+      .on('postgres_changes', {
+        event: 'UPDATE', schema: 'public', table: 'chat_messages',
+        filter: `room=eq.${activeRoom}`,
+      }, (payload) => {
+        const msg = payload.new as ChatMessage;
+        qc.setQueryData<ChatMessage[]>(['chat-messages', activeRoom], (prev = []) =>
+          prev.map(m => m.id === msg.id ? msg : m),
+        );
+      })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [activeRoom, qc]);
@@ -794,6 +886,40 @@ export default function ChatPage() {
       if (error) throw error;
     },
   });
+
+  /* ── Edit ── */
+  const editMutation = useMutation({
+    mutationFn: async ({ id, content }: { id: string; content: string }) => {
+      const { error } = await supabase
+        .from('chat_messages')
+        .update({ content, edited_at: new Date().toISOString() })
+        .eq('id', id)
+        .eq('sender_id', myId);
+      if (error) throw error;
+    },
+    onSuccess: (_data, vars) => {
+      qc.setQueryData<ChatMessage[]>(['chat-messages', activeRoom], (prev = []) =>
+        prev.map(m => m.id === vars.id ? { ...m, content: vars.content, edited_at: new Date().toISOString() } : m),
+      );
+      setEditingId(null);
+      setEditingText('');
+    },
+  });
+
+  const handleStartEdit = (msg: ChatMessage) => {
+    setEditingId(msg.id);
+    setEditingText(msg.content ?? '');
+  };
+
+  const handleSaveEdit = () => {
+    if (!editingId || !editingText.trim() || editMutation.isPending) return;
+    editMutation.mutate({ id: editingId, content: editingText.trim() });
+  };
+
+  const handleCancelEdit = () => {
+    setEditingId(null);
+    setEditingText('');
+  };
 
   const handleSend = useCallback(async () => {
     const trimmed = text.trim();
@@ -930,7 +1056,7 @@ export default function ChatPage() {
               </div>
             )}
           </div>
-          <ChatMessages messages={messages} isLoading={isLoading} myId={myId} messagesEndRef={messagesEndRef} />
+          <ChatMessages messages={messages} isLoading={isLoading} myId={myId} messagesEndRef={messagesEndRef} editingId={editingId} editingText={editingText} onStartEdit={handleStartEdit} onTextChange={setEditingText} onSave={handleSaveEdit} onCancel={handleCancelEdit} />
           <ChatInput {...sharedInputProps} />
 
         </div>
