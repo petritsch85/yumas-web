@@ -1,10 +1,13 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
+import dynamic from 'next/dynamic';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
-import { Send, Paperclip, MessageCircle, ChevronLeft, X, Users, ClipboardList, CheckSquare, Square, Plus, Pencil } from 'lucide-react';
+import { Send, Paperclip, MessageCircle, ChevronLeft, X, Users, ClipboardList, CheckSquare, Square, Plus, Pencil, Smile } from 'lucide-react';
 import type { Profile } from '@/types';
+
+const EmojiPicker = dynamic(() => import('emoji-picker-react'), { ssr: false });
 
 /* ─── Types ──────────────────────────────────────────────────────────────────── */
 type ChatMessage = {
@@ -539,8 +542,52 @@ function ChatInput({
   handleKeyDown: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
   handleFileChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
 }) {
+  const [showEmoji, setShowEmoji] = useState(false);
+  const emojiRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!showEmoji) return;
+    const handler = (e: MouseEvent) => {
+      if (emojiRef.current && !emojiRef.current.contains(e.target as Node)) {
+        setShowEmoji(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showEmoji]);
+
+  const insertEmoji = (emoji: string) => {
+    const ta = textareaRef.current;
+    if (!ta) { setText(text + emoji); return; }
+    const start = ta.selectionStart ?? text.length;
+    const end = ta.selectionEnd ?? text.length;
+    const newText = text.slice(0, start) + emoji + text.slice(end);
+    setText(newText);
+    // restore cursor after the inserted emoji
+    requestAnimationFrame(() => {
+      ta.focus();
+      ta.setSelectionRange(start + emoji.length, start + emoji.length);
+      ta.style.height = 'auto';
+      ta.style.height = `${Math.min(ta.scrollHeight, 128)}px`;
+    });
+  };
+
   return (
-    <div className="px-4 py-3 border-t border-gray-100 flex-shrink-0">
+    <div className="px-4 py-3 border-t border-gray-100 flex-shrink-0 relative">
+      {/* Emoji picker popover */}
+      {showEmoji && (
+        <div ref={emojiRef} className="absolute bottom-full left-4 mb-1 z-50 shadow-xl rounded-2xl overflow-hidden">
+          <EmojiPicker
+            onEmojiClick={(data) => { insertEmoji(data.emoji); setShowEmoji(false); }}
+            skinTonesDisabled
+            searchDisabled={false}
+            height={380}
+            width={320}
+            lazyLoadEmojis
+          />
+        </div>
+      )}
+
       <div className="flex items-end gap-2">
         <div className="flex-1 bg-gray-100 rounded-2xl px-3.5 py-2.5 flex items-end gap-2 min-w-0">
           <textarea
@@ -558,6 +605,13 @@ function ChatInput({
             className="flex-1 bg-transparent text-sm text-gray-900 placeholder-gray-400 resize-none outline-none leading-5 min-w-0"
             style={{ height: '20px', maxHeight: '128px', fontSize: '16px' }}
           />
+          <button
+            onClick={() => setShowEmoji(v => !v)}
+            title="Emoji"
+            className={`text-gray-400 hover:text-[#1B5E20] transition-colors flex-shrink-0 pb-px ${showEmoji ? 'text-[#1B5E20]' : ''}`}
+          >
+            <Smile size={16} />
+          </button>
           <button
             onClick={() => fileInputRef.current?.click()}
             disabled={uploading || sendMutation.isPending}
