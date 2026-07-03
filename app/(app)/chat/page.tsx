@@ -1411,7 +1411,7 @@ export default function ChatPage() {
             </div>
           )}
         </div>
-        <ChatMessages messages={messages} isLoading={isLoading} myId={myId} messagesEndRef={messagesEndRef} />
+        <ChatMessages messages={messages} isLoading={isLoading} myId={myId} messagesEndRef={messagesEndRef} editingId={editingId} editingText={editingText} onStartEdit={handleStartEdit} onTextChange={setEditingText} onSave={handleSaveEdit} onCancel={handleCancelEdit} />
         <ChatInput {...sharedInputProps} />
       </div>
 
