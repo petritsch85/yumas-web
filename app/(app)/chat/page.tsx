@@ -1541,56 +1541,84 @@ export default function ChatPage() {
                 </button>
               </div>
             </div>
-            {/* Task list */}
-            <div className="overflow-y-auto flex-1 py-2">
+            {/* Task table */}
+            <div className="overflow-auto flex-1">
               {tasks.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-10 text-gray-400 select-none">
                   <ClipboardList size={32} className="mb-2 opacity-25" />
                   <p className="text-sm">No tasks yet</p>
                 </div>
               ) : (
-                tasks.map(task => {
-                  const assignees = (task.assignee_ids ?? []).map(id => allProfiles.find(p => p.id === id)).filter(Boolean) as MinProfile[];
-                  return (
-                    <div key={task.id} className={`px-4 py-3 border-b border-gray-50 ${task.completed ? 'opacity-60' : ''}`}>
-                      <div className="flex items-start gap-3">
-                        <button
-                          onClick={() => task.completed ? toggleTaskMutation.mutate({ id: task.id, completed: false }) : setDoneModalTaskId(task.id)}
-                          className="flex-shrink-0 mt-0.5 text-[#1B5E20]"
-                        >
-                          {task.completed ? <CheckSquare size={20} /> : <Square size={20} className="text-gray-300" />}
-                        </button>
-                        <div className="flex-1 min-w-0">
-                          <p className={`text-sm font-medium ${task.completed ? 'line-through text-gray-400' : 'text-gray-800'}`}>{task.title}</p>
-                          {task.description && <p className="text-xs text-gray-500 mt-0.5 leading-snug">{task.description}</p>}
-                          <div className="flex flex-wrap gap-1.5 mt-1.5">
-                            {task.priority && (
+                <table className="w-full text-sm border-collapse">
+                  <thead>
+                    <tr className="border-b border-gray-100 bg-gray-50 text-left">
+                      <th className="px-3 py-2 text-xs font-semibold text-gray-500 w-8" />
+                      <th className="px-3 py-2 text-xs font-semibold text-gray-500">Task</th>
+                      <th className="px-3 py-2 text-xs font-semibold text-gray-500 whitespace-nowrap">Priority</th>
+                      <th className="px-3 py-2 text-xs font-semibold text-gray-500 whitespace-nowrap">Due</th>
+                      <th className="px-3 py-2 text-xs font-semibold text-gray-500">Assignee</th>
+                      <th className="px-3 py-2 text-xs font-semibold text-gray-500 w-20 text-center">Done</th>
+                      <th className="px-2 py-2 w-6" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {tasks.map(task => {
+                      const assignees = (task.assignee_ids ?? []).map(id => allProfiles.find(p => p.id === id)).filter(Boolean) as MinProfile[];
+                      return (
+                        <tr key={task.id} className={`border-b border-gray-50 hover:bg-gray-50/60 transition-colors ${task.completed ? 'opacity-50' : ''}`}>
+                          {/* Status dot */}
+                          <td className="px-3 py-2.5 align-middle">
+                            <div className={`w-2 h-2 rounded-full mx-auto ${task.completed ? 'bg-[#1B5E20]' : 'bg-gray-200'}`} />
+                          </td>
+                          {/* Task name + description */}
+                          <td className="px-3 py-2.5 align-middle max-w-[160px]">
+                            <p className={`text-sm font-medium leading-snug ${task.completed ? 'line-through text-gray-400' : 'text-gray-800'}`}>{task.title}</p>
+                            {task.description && <p className="text-xs text-gray-400 truncate">{task.description}</p>}
+                            {task.completed && task.done_comment && <p className="text-xs text-gray-400 italic truncate">"{task.done_comment}"</p>}
+                          </td>
+                          {/* Priority */}
+                          <td className="px-3 py-2.5 align-middle whitespace-nowrap">
+                            {task.priority ? (
                               <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${PRIORITY_COLORS[task.priority] ?? 'bg-gray-100 text-gray-500'}`}>
                                 {PRIORITY_LABELS[task.priority] ?? task.priority}
                               </span>
+                            ) : <span className="text-gray-300 text-xs">—</span>}
+                          </td>
+                          {/* Deadline */}
+                          <td className="px-3 py-2.5 align-middle whitespace-nowrap text-xs text-gray-500">
+                            {task.deadline ? task.deadline : <span className="text-gray-300">—</span>}
+                          </td>
+                          {/* Assignees */}
+                          <td className="px-3 py-2.5 align-middle">
+                            {assignees.length > 0 ? (
+                              <span className="text-xs text-gray-600">{assignees.map(a => a.full_name.split(' ')[0]).join(', ')}</span>
+                            ) : <span className="text-gray-300 text-xs">—</span>}
+                          </td>
+                          {/* Done button */}
+                          <td className="px-3 py-2.5 align-middle text-center">
+                            {task.completed ? (
+                              <button
+                                onClick={() => toggleTaskMutation.mutate({ id: task.id, completed: false })}
+                                className="text-[10px] font-semibold text-[#1B5E20] bg-[#1B5E20]/10 px-2 py-1 rounded-full whitespace-nowrap"
+                              >✓ Done</button>
+                            ) : (
+                              <button
+                                onClick={() => setDoneModalTaskId(task.id)}
+                                className="text-[10px] font-semibold text-gray-500 border border-gray-200 px-2 py-1 rounded-full hover:border-[#1B5E20] hover:text-[#1B5E20] transition-colors whitespace-nowrap"
+                              >Mark done</button>
                             )}
-                            {task.deadline && (
-                              <span className="text-[10px] text-gray-500 flex items-center gap-0.5">
-                                <Calendar size={10} /> {task.deadline}
-                              </span>
-                            )}
-                            {assignees.length > 0 && (
-                              <span className="text-[10px] text-gray-500 flex items-center gap-0.5">
-                                <UserCheck size={10} /> {assignees.map(a => a.full_name.split(' ')[0]).join(', ')}
-                              </span>
-                            )}
-                          </div>
-                          {task.completed && task.done_comment && (
-                            <p className="text-xs text-gray-400 italic mt-1">"{task.done_comment}"</p>
-                          )}
-                        </div>
-                        <button onClick={() => deleteTaskMutation.mutate(task.id)} className="text-gray-300 hover:text-red-400 p-1 flex-shrink-0">
-                          <X size={14} />
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })
+                          </td>
+                          {/* Delete */}
+                          <td className="px-2 py-2.5 align-middle">
+                            <button onClick={() => deleteTaskMutation.mutate(task.id)} className="text-gray-200 hover:text-red-400 transition-colors">
+                              <X size={13} />
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               )}
             </div>
           </div>
