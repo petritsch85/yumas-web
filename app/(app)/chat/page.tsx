@@ -459,7 +459,7 @@ function MessageBubble({
       {isOwn && actionBar}
 
       {/* Content column */}
-      <div className={`max-w-[65%] flex flex-col gap-0.5 ${isOwn ? 'items-end' : 'items-start'}`}>
+      <div className={`flex flex-col gap-0.5 ${isOwn ? 'items-end max-w-[72%]' : 'items-start max-w-[85%]'}`}>
         {showMeta && (
           <p className="text-[11px] text-gray-400 px-1">
             {isOwn ? 'You' : msg.sender_name} · {fmtTime(msg.created_at)}
@@ -957,11 +957,21 @@ export default function ChatPage() {
     queryFn: async () => {
       const { data } = await supabase
         .from('chat_messages')
-        .select('*, reply_to:chat_messages!reply_to_id(id, sender_name, content, media_type)')
+        .select('*')
         .eq('room', activeRoom)
         .order('created_at', { ascending: true })
         .limit(200);
-      return (data ?? []) as ChatMessage[];
+      const msgs = (data ?? []) as ChatMessage[];
+      const replyIds = [...new Set(msgs.filter(m => m.reply_to_id).map(m => m.reply_to_id!))];
+      if (replyIds.length > 0) {
+        const { data: replyData } = await supabase
+          .from('chat_messages')
+          .select('id, sender_name, content, media_type')
+          .in('id', replyIds);
+        const replyMap = Object.fromEntries((replyData ?? []).map(r => [r.id, r as ReplyPreview]));
+        return msgs.map(m => m.reply_to_id ? { ...m, reply_to: replyMap[m.reply_to_id] ?? null } : m);
+      }
+      return msgs;
     },
     staleTime: 0,
   });
