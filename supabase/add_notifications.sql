@@ -33,3 +33,7 @@ CREATE POLICY "notif_update" ON notifications
   FOR UPDATE TO authenticated USING (auth.uid() = user_id);
 
 ALTER PUBLICATION supabase_realtime ADD TABLE notifications;
+
+-- Grant table-level permissions (required when table is created via SQL, not Supabase UI)
+GRANT SELECT, INSERT, UPDATE ON notifications TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON room_tasks TO authenticated;
