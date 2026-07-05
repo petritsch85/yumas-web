@@ -872,7 +872,7 @@ export default function ChatPage() {
   const [text, setText] = useState('');
   const [unread, setUnread] = useState<Record<string, number>>({});
   const [uploading, setUploading] = useState(false);
-  const [mobileView, setMobileView] = useState<'list' | 'chat'>('list');
+  const [mobileView, setMobileView] = useState<'list' | 'chat' | 'notifications'>('list');
   const [showMobileMembers, setShowMobileMembers] = useState(false);
   const [showMobileTasks, setShowMobileTasks] = useState(false);
   const [showGroupModal, setShowGroupModal] = useState(false);
@@ -1355,6 +1355,12 @@ export default function ChatPage() {
     setEditingText('');
   };
 
+  const activeLabel =
+    visibleRooms.find(r => r.id === activeRoom)?.label ??
+    otherProfiles.find(p => activeRoom === dmRoom(myId, p.id))?.full_name ??
+    (activeGroup ? groupLabel(activeGroup, allProfiles, myId) : null) ??
+    'Chat';
+
   const handleSend = useCallback(async () => {
     const trimmed = text.trim();
     if (!trimmed || sendMutation.isPending) return;
@@ -1423,12 +1429,6 @@ export default function ChatPage() {
     setPendingPreviewUrl(null);
     setPendingCaption('');
   };
-
-  const activeLabel =
-    visibleRooms.find(r => r.id === activeRoom)?.label ??
-    otherProfiles.find(p => activeRoom === dmRoom(myId, p.id))?.full_name ??
-    (activeGroup ? groupLabel(activeGroup, allProfiles, myId) : null) ??
-    'Chat';
 
   // Desktop sidebar room selection — does NOT change mobileView
   const handleDesktopSelect = (room: string) => setActiveRoom(room);
