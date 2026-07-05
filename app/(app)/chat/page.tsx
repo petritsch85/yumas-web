@@ -1610,8 +1610,8 @@ export default function ChatPage() {
                           </td>
                           {/* Delete */}
                           <td className="px-2 py-2.5 align-middle">
-                            <button onClick={() => deleteTaskMutation.mutate(task.id)} className="text-gray-200 hover:text-red-400 transition-colors">
-                              <X size={13} />
+                            <button onClick={() => deleteTaskMutation.mutate(task.id)} className="text-gray-400 hover:text-red-500 transition-colors p-1 rounded hover:bg-red-50">
+                              <X size={15} />
                             </button>
                           </td>
                         </tr>
