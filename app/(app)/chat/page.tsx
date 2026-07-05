@@ -1043,6 +1043,11 @@ export default function ChatPage() {
     staleTime: 0,
   });
 
+  const createNotif = async (userId: string, type: string, title: string, body: string, metadata: Record<string, unknown> = {}) => {
+    const { error } = await supabase.from('notifications').insert({ user_id: userId, type, title, body, metadata });
+    if (error) console.error('createNotif failed:', error.message, { userId, type });
+  };
+
   const addTaskMutation = useMutation({
     mutationFn: async (draft: typeof taskDraft) => {
       const assigneeIds = draft.assignAll ? roomMembers.map(m => m.id) : draft.assigneeIds;
@@ -1194,11 +1199,6 @@ export default function ChatPage() {
       .subscribe();
     return () => { supabase.removeChannel(ch); };
   }, [myId, qc]);
-
-  const createNotif = async (userId: string, type: string, title: string, body: string, metadata: Record<string, unknown> = {}) => {
-    const { error } = await supabase.from('notifications').insert({ user_id: userId, type, title, body, metadata });
-    if (error) console.error('createNotif failed:', error.message, { userId, type });
-  };
 
   useEffect(() => {
     // Scroll the messages container directly to avoid scrollIntoView scrolling main
