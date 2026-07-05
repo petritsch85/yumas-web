@@ -1,15 +1,19 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import dynamic from 'next/dynamic';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
-import { Send, Paperclip, MessageCircle, ChevronLeft, X, Users, ClipboardList, CheckSquare, Square, Plus, Pencil, Smile } from 'lucide-react';
+import { Send, Paperclip, MessageCircle, ChevronLeft, X, Users, ClipboardList, CheckSquare, Square, Plus, Pencil, Smile, CornerUpLeft } from 'lucide-react';
 import type { Profile } from '@/types';
 
 const EmojiPicker = dynamic(() => import('emoji-picker-react'), { ssr: false });
 
 /* ─── Types ──────────────────────────────────────────────────────────────────── */
+type ReplyPreview = { id: string; sender_name: string; content: string | null; media_type: string | null };
+
+type ChatReaction = { id: string; message_id: string; user_id: string; emoji: string };
+
 type ChatMessage = {
   id: string;
   room: string;
@@ -20,6 +24,8 @@ type ChatMessage = {
   media_type: string | null;
   created_at: string;
   edited_at?: string | null;
+  reply_to_id?: string | null;
+  reply_to?: ReplyPreview | null;
 };
 
 type MinProfile = { id: string; full_name: string; role: string; chat_rooms: string[] | null };
@@ -370,22 +376,75 @@ function MobileChannelList({
   );
 }
 
+const QUICK_EMOJIS = ['👍', '❤️', '😂', '😮', '🔥'];
+
 /* ─── Message Bubble ─────────────────────────────────────────────────────────── */
 function MessageBubble({
-  msg, isOwn, showMeta, isEditing, editText, onStartEdit, onTextChange, onSave, onCancel,
+  msg, isOwn, showMeta, myId, reactions,
+  isEditing, editText, onStartEdit, onTextChange, onSave, onCancel,
+  onReply, onReact,
 }: {
   msg: ChatMessage;
   isOwn: boolean;
   showMeta: boolean;
+  myId: string;
+  reactions: ChatReaction[];
   isEditing: boolean;
   editText: string;
   onStartEdit: () => void;
   onTextChange: (v: string) => void;
   onSave: () => void;
   onCancel: () => void;
+  onReply: () => void;
+  onReact: (emoji: string) => void;
 }) {
+  const msgReactions = useMemo(() => {
+    const groups: Record<string, { count: number; reacted: boolean; ids: string[] }> = {};
+    for (const r of reactions) {
+      if (r.message_id !== msg.id) continue;
+      if (!groups[r.emoji]) groups[r.emoji] = { count: 0, reacted: false, ids: [] };
+      groups[r.emoji].count++;
+      groups[r.emoji].ids.push(r.id);
+      if (r.user_id === myId) groups[r.emoji].reacted = true;
+    }
+    return Object.entries(groups).map(([emoji, g]) => ({ emoji, ...g }));
+  }, [reactions, msg.id, myId]);
+
+  /* Action bar — shown for own messages between avatar+content, for others after content */
+  const actionBar = !isEditing && (
+    <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-0.5 self-center flex-shrink-0">
+      {QUICK_EMOJIS.map(e => (
+        <button
+          key={e}
+          onClick={() => onReact(e)}
+          className="w-6 h-6 rounded-full hover:bg-gray-100 flex items-center justify-center text-sm transition-colors leading-none"
+          title={e}
+        >
+          {e}
+        </button>
+      ))}
+      <button
+        onClick={onReply}
+        className="p-1 rounded-full text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
+        title="Reply"
+      >
+        <CornerUpLeft size={13} />
+      </button>
+      {isOwn && !msg.media_url && (
+        <button
+          onClick={onStartEdit}
+          className="p-1 rounded-full text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
+          title="Edit"
+        >
+          <Pencil size={12} />
+        </button>
+      )}
+    </div>
+  );
+
   return (
-    <div className={`flex gap-2 ${isOwn ? 'flex-row-reverse' : 'flex-row'} ${showMeta ? 'mt-4' : 'mt-0.5'} group items-end`}>
+    <div className={`flex gap-1 ${isOwn ? 'flex-row-reverse' : 'flex-row'} ${showMeta ? 'mt-4' : 'mt-0.5'} group items-end`}>
+      {/* Avatar */}
       <div className="w-7 flex-shrink-0">
         {showMeta && (
           <div className={`w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold ${
@@ -396,7 +455,11 @@ function MessageBubble({
         )}
       </div>
 
-      <div className={`max-w-[72%] flex flex-col gap-0.5 ${isOwn ? 'items-end' : 'items-start'}`}>
+      {/* Action bar: for own messages goes between avatar & content in DOM = left of content visually */}
+      {isOwn && actionBar}
+
+      {/* Content column */}
+      <div className={`max-w-[65%] flex flex-col gap-0.5 ${isOwn ? 'items-end' : 'items-start'}`}>
         {showMeta && (
           <p className="text-[11px] text-gray-400 px-1">
             {isOwn ? 'You' : msg.sender_name} · {fmtTime(msg.created_at)}
@@ -418,27 +481,29 @@ function MessageBubble({
               style={{ fontSize: '16px' }}
             />
             <div className="flex gap-1.5 justify-end">
-              <button
-                onClick={onCancel}
-                className="px-3 py-1 rounded-lg text-xs text-gray-500 hover:bg-gray-100 transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={onSave}
-                disabled={!editText.trim()}
-                className="px-3 py-1 rounded-lg text-xs bg-[#1B5E20] text-white disabled:opacity-40 hover:bg-[#2E7D32] transition-colors"
-              >
-                Save
-              </button>
+              <button onClick={onCancel} className="px-3 py-1 rounded-lg text-xs text-gray-500 hover:bg-gray-100 transition-colors">Cancel</button>
+              <button onClick={onSave} disabled={!editText.trim()} className="px-3 py-1 rounded-lg text-xs bg-[#1B5E20] text-white disabled:opacity-40 hover:bg-[#2E7D32] transition-colors">Save</button>
             </div>
           </div>
         ) : (
           <>
+            {/* Reply quote block */}
+            {msg.reply_to && (
+              <div className={`rounded-xl px-2.5 py-1.5 mb-0.5 max-w-full border-l-2 ${
+                isOwn ? 'bg-[#1B5E20]/10 border-[#1B5E20]/50' : 'bg-gray-200/70 border-gray-400'
+              }`}>
+                <p className={`text-[10px] font-semibold mb-0.5 ${isOwn ? 'text-[#1B5E20]' : 'text-gray-600'}`}>
+                  {msg.reply_to.sender_name}
+                </p>
+                <p className="text-xs text-gray-500 truncate max-w-[220px]">
+                  {msg.reply_to.content ?? (msg.reply_to.media_type ? '📷 Media' : '…')}
+                </p>
+              </div>
+            )}
+
+            {/* Main bubble */}
             <div className={`rounded-2xl px-3 py-2 text-sm ${
-              isOwn
-                ? 'bg-[#1B5E20] text-white rounded-tr-sm'
-                : 'bg-gray-100 text-gray-900 rounded-tl-sm'
+              isOwn ? 'bg-[#1B5E20] text-white rounded-tr-sm' : 'bg-gray-100 text-gray-900 rounded-tl-sm'
             }`}>
               {msg.media_url && msg.media_type === 'image' && (
                 <a href={msg.media_url} target="_blank" rel="noopener noreferrer" className="block mb-1">
@@ -449,45 +514,60 @@ function MessageBubble({
               {msg.media_url && msg.media_type === 'video' && (
                 <video src={msg.media_url} controls className="rounded-xl max-h-64 max-w-full mb-1" />
               )}
-              {msg.content && (
-                <p className="whitespace-pre-wrap break-words leading-snug">{msg.content}</p>
-              )}
+              {msg.content && <p className="whitespace-pre-wrap break-words leading-snug">{msg.content}</p>}
             </div>
+
             {msg.edited_at && (
               <p className={`text-[10px] text-gray-400 px-1 ${isOwn ? 'text-right' : ''}`}>edited</p>
+            )}
+
+            {/* Reaction pills */}
+            {msgReactions.length > 0 && (
+              <div className="flex flex-wrap gap-1 mt-1">
+                {msgReactions.map(({ emoji, count, reacted }) => (
+                  <button
+                    key={emoji}
+                    onClick={() => onReact(emoji)}
+                    className={`flex items-center gap-0.5 px-2 py-0.5 rounded-full text-xs border transition-colors ${
+                      reacted
+                        ? 'bg-[#1B5E20]/15 border-[#1B5E20]/30 text-[#1B5E20] font-medium'
+                        : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                    }`}
+                  >
+                    {emoji} {count}
+                  </button>
+                ))}
+              </div>
             )}
           </>
         )}
       </div>
 
-      {/* Pencil — own text-only messages, visible on hover */}
-      {isOwn && !msg.media_url && !isEditing && (
-        <button
-          onClick={onStartEdit}
-          className="opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 mb-1 p-1 rounded text-gray-400 hover:text-gray-600"
-          title="Edit message"
-        >
-          <Pencil size={12} />
-        </button>
-      )}
+      {/* Action bar: for others goes after content in DOM = right of content visually */}
+      {!isOwn && actionBar}
     </div>
   );
 }
 
 /* ─── Shared chat body components ────────────────────────────────────────────── */
 function ChatMessages({
-  messages, isLoading, myId, messagesEndRef, editingId, editingText, onStartEdit, onTextChange, onSave, onCancel,
+  messages, isLoading, myId, messagesEndRef, reactions,
+  editingId, editingText, onStartEdit, onTextChange, onSave, onCancel,
+  onReply, onReact,
 }: {
   messages: ChatMessage[];
   isLoading: boolean;
   myId: string;
   messagesEndRef: React.RefObject<HTMLDivElement | null>;
+  reactions: ChatReaction[];
   editingId: string | null;
   editingText: string;
   onStartEdit: (msg: ChatMessage) => void;
   onTextChange: (v: string) => void;
   onSave: () => void;
   onCancel: () => void;
+  onReply: (msg: ChatMessage) => void;
+  onReact: (messageId: string, emoji: string) => void;
 }) {
   return (
     <div className="flex-1 min-h-0 overflow-y-auto px-4 py-3">
@@ -512,12 +592,16 @@ function ChatMessages({
                 msg={msg}
                 isOwn={isOwn}
                 showMeta={showMeta}
+                myId={myId}
+                reactions={reactions}
                 isEditing={editingId === msg.id}
                 editText={editingText}
                 onStartEdit={() => onStartEdit(msg)}
                 onTextChange={onTextChange}
                 onSave={onSave}
                 onCancel={onCancel}
+                onReply={() => onReply(msg)}
+                onReact={(emoji) => onReact(msg.id, emoji)}
               />
             );
           })}
@@ -529,7 +613,7 @@ function ChatMessages({
 }
 
 function ChatInput({
-  text, setText, activeLabel, textareaRef, fileInputRef, uploading, sendMutation, handleSend, handleKeyDown, handleFileChange,
+  text, setText, activeLabel, textareaRef, fileInputRef, uploading, sendMutation, handleSend, handleKeyDown, handleFileChange, replyingTo, onCancelReply,
 }: {
   text: string;
   setText: (v: string) => void;
@@ -541,6 +625,8 @@ function ChatInput({
   handleSend: () => void;
   handleKeyDown: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
   handleFileChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  replyingTo: ChatMessage | null;
+  onCancelReply: () => void;
 }) {
   const [showEmoji, setShowEmoji] = useState(false);
   const emojiRef = useRef<HTMLDivElement>(null);
@@ -573,7 +659,21 @@ function ChatInput({
   };
 
   return (
-    <div className="px-4 py-3 border-t border-gray-100 flex-shrink-0 relative">
+    <div className="border-t border-gray-100 flex-shrink-0 relative">
+      {/* Reply preview bar */}
+      {replyingTo && (
+        <div className="flex items-center gap-2 px-4 py-2 bg-gray-50 border-b border-gray-100">
+          <div className="w-0.5 self-stretch bg-[#1B5E20] rounded-full flex-shrink-0" />
+          <div className="flex-1 min-w-0">
+            <p className="text-[11px] font-semibold text-[#1B5E20]">{replyingTo.sender_name}</p>
+            <p className="text-xs text-gray-500 truncate">{replyingTo.content ?? '📷 Media'}</p>
+          </div>
+          <button onClick={onCancelReply} className="text-gray-400 hover:text-gray-600 p-1 flex-shrink-0">
+            <X size={14} />
+          </button>
+        </div>
+      )}
+    <div className="px-4 py-3">
       {/* Emoji picker popover */}
       {showEmoji && (
         <div ref={emojiRef} className="absolute bottom-full left-4 mb-1 z-50 shadow-xl rounded-2xl overflow-hidden">
@@ -644,6 +744,7 @@ function ChatInput({
       />
       <p className="text-[10px] text-gray-400 mt-1.5 ml-1">Enter to send · Shift+Enter for new line</p>
     </div>
+    </div>
   );
 }
 
@@ -669,6 +770,7 @@ export default function ChatPage() {
   const [newTaskText, setNewTaskText] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState('');
+  const [replyingTo, setReplyingTo] = useState<ChatMessage | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -855,12 +957,25 @@ export default function ChatPage() {
     queryFn: async () => {
       const { data } = await supabase
         .from('chat_messages')
-        .select('*')
+        .select('*, reply_to:chat_messages!reply_to_id(id, sender_name, content, media_type)')
         .eq('room', activeRoom)
         .order('created_at', { ascending: true })
         .limit(200);
       return (data ?? []) as ChatMessage[];
     },
+    staleTime: 0,
+  });
+
+  /* ── Reactions ── */
+  const { data: reactions = [] } = useQuery<ChatReaction[]>({
+    queryKey: ['chat-reactions', activeRoom],
+    queryFn: async () => {
+      const ids = messages.map(m => m.id);
+      if (!ids.length) return [];
+      const { data } = await supabase.from('chat_reactions').select('*').in('message_id', ids);
+      return (data ?? []) as ChatReaction[];
+    },
+    enabled: messages.length > 0,
     staleTime: 0,
   });
 
@@ -888,8 +1003,16 @@ export default function ChatPage() {
       .on('postgres_changes', {
         event: 'INSERT', schema: 'public', table: 'chat_messages',
         filter: `room=eq.${activeRoom}`,
-      }, (payload) => {
-        const msg = payload.new as ChatMessage;
+      }, async (payload) => {
+        let msg = payload.new as ChatMessage;
+        if (msg.reply_to_id) {
+          const { data } = await supabase
+            .from('chat_messages')
+            .select('id, sender_name, content, media_type')
+            .eq('id', msg.reply_to_id)
+            .single();
+          if (data) msg = { ...msg, reply_to: data as ReplyPreview };
+        }
         qc.setQueryData<ChatMessage[]>(['chat-messages', activeRoom], (prev = []) =>
           prev.some(m => m.id === msg.id) ? prev : [...prev, msg],
         );
@@ -898,9 +1021,31 @@ export default function ChatPage() {
         event: 'UPDATE', schema: 'public', table: 'chat_messages',
         filter: `room=eq.${activeRoom}`,
       }, (payload) => {
-        const msg = payload.new as ChatMessage;
+        const updated = payload.new as ChatMessage;
         qc.setQueryData<ChatMessage[]>(['chat-messages', activeRoom], (prev = []) =>
-          prev.map(m => m.id === msg.id ? msg : m),
+          prev.map(m => m.id === updated.id ? { ...updated, reply_to: m.reply_to } : m),
+        );
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [activeRoom, qc]);
+
+  /* ── Realtime: reactions ── */
+  useEffect(() => {
+    const channel = supabase
+      .channel(`chat-reactions::${activeRoom}`)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_reactions' }, (payload) => {
+        const r = payload.new as ChatReaction;
+        qc.setQueryData<ChatReaction[]>(['chat-reactions', activeRoom], (prev = []) => {
+          const msgs = qc.getQueryData<ChatMessage[]>(['chat-messages', activeRoom]) ?? [];
+          if (!msgs.some(m => m.id === r.message_id)) return prev;
+          return prev.some(x => x.id === r.id) ? prev : [...prev, r];
+        });
+      })
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'chat_reactions' }, (payload) => {
+        const r = payload.old as { id: string };
+        qc.setQueryData<ChatReaction[]>(['chat-reactions', activeRoom], (prev = []) =>
+          prev.filter(x => x.id !== r.id),
         );
       })
       .subscribe();
@@ -926,18 +1071,37 @@ export default function ChatPage() {
   /* ── Send ── */
   const sendMutation = useMutation({
     mutationFn: async ({
-      content, mediaUrl, mediaType,
-    }: { content: string | null; mediaUrl?: string | null; mediaType?: string | null }) => {
+      content, mediaUrl, mediaType, replyToId,
+    }: { content: string | null; mediaUrl?: string | null; mediaType?: string | null; replyToId?: string | null }) => {
       if (!profile) throw new Error('Not logged in');
       const { error } = await supabase.from('chat_messages').insert({
-        room:        activeRoom,
-        sender_id:   profile.id,
-        sender_name: profile.full_name,
-        content:     content || null,
-        media_url:   mediaUrl ?? null,
-        media_type:  mediaType ?? null,
+        room:         activeRoom,
+        sender_id:    profile.id,
+        sender_name:  profile.full_name,
+        content:      content || null,
+        media_url:    mediaUrl ?? null,
+        media_type:   mediaType ?? null,
+        reply_to_id:  replyToId ?? null,
       });
       if (error) throw error;
+    },
+  });
+
+  /* ── React ── */
+  const reactMutation = useMutation({
+    mutationFn: async ({ messageId, emoji }: { messageId: string; emoji: string }) => {
+      const existing = reactions.find(r => r.message_id === messageId && r.user_id === myId && r.emoji === emoji);
+      if (existing) {
+        const { error } = await supabase.from('chat_reactions').delete().eq('id', existing.id);
+        if (error) throw error;
+        qc.setQueryData<ChatReaction[]>(['chat-reactions', activeRoom], (prev = []) => prev.filter(r => r.id !== existing.id));
+      } else {
+        const { data, error } = await supabase.from('chat_reactions')
+          .insert({ message_id: messageId, user_id: myId, emoji })
+          .select().single();
+        if (error) throw error;
+        qc.setQueryData<ChatReaction[]>(['chat-reactions', activeRoom], (prev = []) => [...prev, data as ChatReaction]);
+      }
     },
   });
 
@@ -978,10 +1142,12 @@ export default function ChatPage() {
   const handleSend = useCallback(async () => {
     const trimmed = text.trim();
     if (!trimmed || sendMutation.isPending) return;
+    const replyId = replyingTo?.id ?? null;
     setText('');
+    setReplyingTo(null);
     if (textareaRef.current) { textareaRef.current.style.height = 'auto'; }
-    await sendMutation.mutateAsync({ content: trimmed });
-  }, [text, sendMutation]);
+    await sendMutation.mutateAsync({ content: trimmed, replyToId: replyId });
+  }, [text, sendMutation, replyingTo]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
@@ -1045,7 +1211,9 @@ export default function ChatPage() {
     setMobileView('chat');
   };
 
-  const sharedInputProps = { text, setText, activeLabel, textareaRef, fileInputRef, uploading, sendMutation, handleSend, handleKeyDown, handleFileChange };
+  const handleReact = (messageId: string, emoji: string) => reactMutation.mutate({ messageId, emoji });
+
+  const sharedInputProps = { text, setText, activeLabel, textareaRef, fileInputRef, uploading, sendMutation, handleSend, handleKeyDown, handleFileChange, replyingTo, onCancelReply: () => setReplyingTo(null) };
 
   /* ─── Render ─────────────────────────────────────────────────────────────── */
   return (
@@ -1110,7 +1278,7 @@ export default function ChatPage() {
               </div>
             )}
           </div>
-          <ChatMessages messages={messages} isLoading={isLoading} myId={myId} messagesEndRef={messagesEndRef} editingId={editingId} editingText={editingText} onStartEdit={handleStartEdit} onTextChange={setEditingText} onSave={handleSaveEdit} onCancel={handleCancelEdit} />
+          <ChatMessages messages={messages} isLoading={isLoading} myId={myId} messagesEndRef={messagesEndRef} reactions={reactions} editingId={editingId} editingText={editingText} onStartEdit={handleStartEdit} onTextChange={setEditingText} onSave={handleSaveEdit} onCancel={handleCancelEdit} onReply={setReplyingTo} onReact={handleReact} />
           <ChatInput {...sharedInputProps} />
 
         </div>
@@ -1465,7 +1633,7 @@ export default function ChatPage() {
             </div>
           )}
         </div>
-        <ChatMessages messages={messages} isLoading={isLoading} myId={myId} messagesEndRef={messagesEndRef} editingId={editingId} editingText={editingText} onStartEdit={handleStartEdit} onTextChange={setEditingText} onSave={handleSaveEdit} onCancel={handleCancelEdit} />
+        <ChatMessages messages={messages} isLoading={isLoading} myId={myId} messagesEndRef={messagesEndRef} reactions={reactions} editingId={editingId} editingText={editingText} onStartEdit={handleStartEdit} onTextChange={setEditingText} onSave={handleSaveEdit} onCancel={handleCancelEdit} onReply={setReplyingTo} onReact={handleReact} />
         <ChatInput {...sharedInputProps} />
       </div>
 
