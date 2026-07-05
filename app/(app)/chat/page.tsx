@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import dynamic from 'next/dynamic';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
-import { Send, Paperclip, MessageCircle, ChevronLeft, X, Users, ClipboardList, CheckSquare, Square, Plus, Pencil, Smile, CornerUpLeft } from 'lucide-react';
+import { Send, Paperclip, MessageCircle, ChevronLeft, X, Users, ClipboardList, CheckSquare, Square, Plus, Pencil, Smile, CornerUpLeft, Bell, Calendar, Flag, UserCheck } from 'lucide-react';
 import type { Profile } from '@/types';
 
 const EmojiPicker = dynamic(() => import('emoji-picker-react'), { ssr: false });
@@ -34,8 +34,27 @@ type RoomTask = {
   id: string;
   room: string;
   title: string;
+  description: string | null;
+  priority: string | null;
+  deadline: string | null;
+  assignee_ids: string[] | null;
+  created_by: string | null;
   completed: boolean;
+  done_comment: string | null;
+  done_at: string | null;
+  done_by: string | null;
   created_at: string;
+};
+
+type Notif = {
+  id: string;
+  user_id: string;
+  type: string;
+  title: string;
+  body: string;
+  read: boolean;
+  created_at: string;
+  metadata: Record<string, unknown>;
 };
 
 type ChatGroup = {
@@ -102,6 +121,7 @@ function UnreadBadge({ count }: { count: number }) {
 /* ─── Room Sidebar (desktop) ─────────────────────────────────────────────────── */
 function RoomSidebar({
   activeRoom, myId, otherProfiles, allProfiles, unread, onSelect, onClose, visibleRooms, roomMembers, chatGroups, onCreateGroup, isAdmin, onCreateChannel,
+  activeView, onViewNotifications, unreadNotifCount,
 }: {
   activeRoom: string;
   myId: string;
@@ -116,6 +136,9 @@ function RoomSidebar({
   onCreateGroup: () => void;
   isAdmin: boolean;
   onCreateChannel: () => void;
+  activeView: 'chat' | 'notifications';
+  onViewNotifications: () => void;
+  unreadNotifCount: number;
 }) {
   return (
     <div className="flex flex-col h-full">
@@ -129,6 +152,20 @@ function RoomSidebar({
       </div>
 
       <div className="flex-1 overflow-y-auto py-3">
+        {/* Notifications button */}
+        <div className="px-3 mb-3">
+          <button
+            onClick={onViewNotifications}
+            className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm font-medium transition-colors text-left ${
+              activeView === 'notifications' ? 'bg-[#1B5E20] text-white' : 'text-gray-700 hover:bg-gray-100'
+            }`}
+          >
+            <Bell size={15} className="flex-shrink-0" />
+            <span className="flex-1">Notifications</span>
+            {unreadNotifCount > 0 && <UnreadBadge count={unreadNotifCount} />}
+          </button>
+        </div>
+
         {/* Rooms */}
         <div className="px-3 mb-4">
           <div className="flex items-center justify-between px-2 mb-1.5">
@@ -254,6 +291,7 @@ function RoomSidebar({
 /* ─── Mobile Channel List ────────────────────────────────────────────────────── */
 function MobileChannelList({
   visibleRooms, otherProfiles, allProfiles, myId, unread, onSelect, profile, chatGroups, onCreateGroup, isAdmin, onCreateChannel,
+  onViewNotifications, unreadNotifCount,
 }: {
   visibleRooms: { id: string; label: string; emoji: string }[];
   otherProfiles: MinProfile[];
@@ -266,6 +304,8 @@ function MobileChannelList({
   onCreateGroup: () => void;
   isAdmin: boolean;
   onCreateChannel: () => void;
+  onViewNotifications: () => void;
+  unreadNotifCount: number;
 }) {
   return (
     <div className="flex flex-col h-full bg-white">
@@ -274,6 +314,16 @@ function MobileChannelList({
       </div>
 
       <div className="flex-1 overflow-y-auto">
+        {/* Notifications */}
+        <button
+          onClick={onViewNotifications}
+          className="w-full flex items-center gap-3 px-4 py-3.5 text-left hover:bg-gray-50 active:bg-gray-100 border-b border-gray-100"
+        >
+          <Bell size={20} className="text-[#1B5E20] flex-shrink-0" />
+          <span className="flex-1 text-[15px] font-semibold text-gray-900">Notifications</span>
+          {unreadNotifCount > 0 && <UnreadBadge count={unreadNotifCount} />}
+        </button>
+
         {visibleRooms.length > 0 && (
           <>
             <div className="flex items-center justify-between px-4 pt-5 pb-2">
@@ -377,6 +427,60 @@ function MobileChannelList({
 }
 
 const QUICK_EMOJIS = ['👍', '❤️', '😂', '😮', '🔥'];
+
+const PRIORITY_LABELS: Record<string, string> = { low: 'Low', medium: 'Medium', high: 'High', urgent: 'Urgent' };
+const PRIORITY_COLORS: Record<string, string> = {
+  low:    'bg-gray-100 text-gray-500',
+  medium: 'bg-blue-50 text-blue-600',
+  high:   'bg-orange-50 text-orange-600',
+  urgent: 'bg-red-50 text-red-600',
+};
+
+/* ─── Notifications Panel ────────────────────────────────────────────────────── */
+function NotificationsPanel({ notifs, onMarkRead, onMarkAllRead }: {
+  notifs: Notif[];
+  onMarkRead: (id: string) => void;
+  onMarkAllRead: () => void;
+}) {
+  const unread = notifs.filter(n => !n.read).length;
+  return (
+    <div className="flex flex-col h-full">
+      <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
+        <div className="flex items-center gap-2">
+          <Bell size={16} className="text-[#1B5E20]" />
+          <span className="font-semibold text-gray-900">Notifications</span>
+          {unread > 0 && <UnreadBadge count={unread} />}
+        </div>
+        {unread > 0 && (
+          <button onClick={onMarkAllRead} className="text-xs text-[#1B5E20] hover:underline">Mark all read</button>
+        )}
+      </div>
+      <div className="flex-1 overflow-y-auto">
+        {notifs.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-full text-gray-400 select-none py-16">
+            <Bell size={36} className="mb-2 opacity-25" />
+            <p className="text-sm">No notifications yet</p>
+          </div>
+        ) : (
+          notifs.map(n => (
+            <button
+              key={n.id}
+              onClick={() => onMarkRead(n.id)}
+              className={`w-full text-left px-4 py-3.5 border-b border-gray-50 hover:bg-gray-50 transition-colors flex gap-3 items-start ${!n.read ? 'bg-[#1B5E20]/5' : ''}`}
+            >
+              <div className={`mt-0.5 w-2 h-2 rounded-full flex-shrink-0 ${!n.read ? 'bg-[#1B5E20]' : 'bg-transparent'}`} />
+              <div className="flex-1 min-w-0">
+                <p className={`text-sm ${!n.read ? 'font-semibold text-gray-900' : 'text-gray-700'}`}>{n.title}</p>
+                <p className="text-xs text-gray-500 mt-0.5 leading-snug">{n.body}</p>
+                <p className="text-[10px] text-gray-400 mt-1">{fmtTime(n.created_at)}</p>
+              </div>
+            </button>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
 
 /* ─── Message Bubble ─────────────────────────────────────────────────────────── */
 function MessageBubble({
@@ -780,11 +884,17 @@ export default function ChatPage() {
   const [newChannelLabel, setNewChannelLabel] = useState('');
   const [newChannelEmoji, setNewChannelEmoji] = useState('💬');
   const [selectedChannelMembers, setSelectedChannelMembers] = useState<string[]>([]);
-  const [newTaskText, setNewTaskText] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState('');
   const [replyingTo, setReplyingTo] = useState<ChatMessage | null>(null);
   const [longPressMsg, setLongPressMsg] = useState<ChatMessage | null>(null);
+  const [activeView, setActiveView] = useState<'chat' | 'notifications'>('chat');
+  // Enhanced task creation
+  const [showNewTaskModal, setShowNewTaskModal] = useState(false);
+  const [taskDraft, setTaskDraft] = useState({ title: '', description: '', priority: 'medium', deadline: '', assigneeIds: [] as string[], assignAll: false });
+  // Task done modal
+  const [doneModalTaskId, setDoneModalTaskId] = useState<string | null>(null);
+  const [doneComment, setDoneComment] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -934,20 +1044,63 @@ export default function ChatPage() {
   });
 
   const addTaskMutation = useMutation({
-    mutationFn: async (title: string) => {
-      const { error } = await supabase.from('room_tasks').insert({ room: activeRoom, title });
+    mutationFn: async (draft: typeof taskDraft) => {
+      const { data, error } = await supabase.from('room_tasks').insert({
+        room: activeRoom,
+        title: draft.title.trim(),
+        description: draft.description.trim() || null,
+        priority: draft.priority,
+        deadline: draft.deadline || null,
+        assignee_ids: draft.assignAll ? roomMembers.map(m => m.id) : draft.assigneeIds,
+        created_by: myId,
+      }).select().single();
       if (error) throw error;
+      return data as RoomTask;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['room-tasks', activeRoom] }),
+    onSuccess: async (task) => {
+      qc.invalidateQueries({ queryKey: ['room-tasks', activeRoom] });
+      setShowNewTaskModal(false);
+      setTaskDraft({ title: '', description: '', priority: 'medium', deadline: '', assigneeIds: [], assignAll: false });
+      const targets = task.assignee_ids ?? [];
+      for (const uid of targets) {
+        if (uid === myId) continue;
+        await createNotif(uid, 'task_assigned',
+          'New task assigned to you',
+          `"${task.title}" in ${activeLabel} — priority: ${task.priority ?? 'medium'}${task.deadline ? `, due ${task.deadline}` : ''}`,
+          { task_id: task.id, room: activeRoom });
+      }
+    },
   });
 
   const toggleTaskMutation = useMutation({
     mutationFn: async ({ id, completed }: { id: string; completed: boolean }) => {
       const { error } = await supabase.from('room_tasks')
-        .update({ completed, updated_at: new Date().toISOString() }).eq('id', id);
+        .update({ completed }).eq('id', id);
       if (error) throw error;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['room-tasks', activeRoom] }),
+  });
+
+  const markDoneMutation = useMutation({
+    mutationFn: async ({ id, comment }: { id: string; comment: string }) => {
+      const { data, error } = await supabase.from('room_tasks')
+        .update({ completed: true, done_comment: comment || null, done_at: new Date().toISOString(), done_by: myId })
+        .eq('id', id).select().single();
+      if (error) throw error;
+      return data as RoomTask;
+    },
+    onSuccess: async (task) => {
+      qc.invalidateQueries({ queryKey: ['room-tasks', activeRoom] });
+      setDoneModalTaskId(null);
+      setDoneComment('');
+      if (task.created_by && task.created_by !== myId) {
+        const doer = allProfiles.find(p => p.id === myId);
+        await createNotif(task.created_by, 'task_done',
+          'Task marked as done',
+          `"${task.title}" was completed by ${doer?.full_name ?? 'someone'}${task.done_comment ? `: "${task.done_comment}"` : ''}`,
+          { task_id: task.id, room: activeRoom });
+      }
+    },
   });
 
   const deleteTaskMutation = useMutation({
@@ -957,13 +1110,6 @@ export default function ChatPage() {
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['room-tasks', activeRoom] }),
   });
-
-  const handleAddTask = () => {
-    const t = newTaskText.trim();
-    if (!t || addTaskMutation.isPending) return;
-    setNewTaskText('');
-    addTaskMutation.mutate(t);
-  };
 
   /* ── Messages ── */
   const { data: messages = [], isLoading } = useQuery<ChatMessage[]>({
@@ -1002,6 +1148,52 @@ export default function ChatPage() {
     enabled: messages.length > 0,
     staleTime: 0,
   });
+
+  /* ── Notifications ── */
+  const { data: notifs = [] } = useQuery<Notif[]>({
+    queryKey: ['notifications', myId],
+    queryFn: async () => {
+      if (!myId) return [];
+      const { data } = await supabase
+        .from('notifications')
+        .select('*')
+        .eq('user_id', myId)
+        .order('created_at', { ascending: false })
+        .limit(100);
+      return (data ?? []) as Notif[];
+    },
+    enabled: !!myId,
+    staleTime: 0,
+  });
+
+  const unreadNotifCount = notifs.filter(n => !n.read).length;
+
+  const markNotifReadMutation = useMutation({
+    mutationFn: async (id: string | 'all') => {
+      if (id === 'all') {
+        await supabase.from('notifications').update({ read: true }).eq('user_id', myId).eq('read', false);
+      } else {
+        await supabase.from('notifications').update({ read: true }).eq('id', id);
+      }
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['notifications', myId] }),
+  });
+
+  /* ── Notifications realtime ── */
+  useEffect(() => {
+    if (!myId) return;
+    const ch = supabase
+      .channel(`notifications::${myId}`)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${myId}` }, () => {
+        qc.invalidateQueries({ queryKey: ['notifications', myId] });
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(ch); };
+  }, [myId, qc]);
+
+  const createNotif = async (userId: string, type: string, title: string, body: string, metadata: Record<string, unknown> = {}) => {
+    await supabase.from('notifications').insert({ user_id: userId, type, title, body, metadata });
+  };
 
   useEffect(() => {
     // Scroll the messages container directly to avoid scrollIntoView scrolling main
@@ -1171,7 +1363,19 @@ export default function ChatPage() {
     setReplyingTo(null);
     if (textareaRef.current) { textareaRef.current.style.height = 'auto'; }
     await sendMutation.mutateAsync({ content: trimmed, replyToId: replyId });
-  }, [text, sendMutation, replyingTo]);
+    // detect @mentions and notify
+    const mentionMatches = [...trimmed.matchAll(/@([\w][\w\s]*)/g)];
+    for (const m of mentionMatches) {
+      const query = m[1].trim().toLowerCase();
+      const mentioned = allProfiles.find(p => p.full_name.toLowerCase().startsWith(query) && p.id !== myId);
+      if (mentioned) {
+        await createNotif(mentioned.id, 'mention',
+          `${profile?.full_name ?? 'Someone'} mentioned you`,
+          `In ${activeLabel}: "${trimmed.slice(0, 120)}${trimmed.length > 120 ? '…' : ''}"`,
+          { room: activeRoom });
+      }
+    }
+  }, [text, sendMutation, replyingTo, allProfiles, myId, profile, activeLabel, activeRoom]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
@@ -1258,6 +1462,8 @@ export default function ChatPage() {
             onCreateGroup={() => setShowGroupModal(true)}
             isAdmin={isAdmin}
             onCreateChannel={() => setShowChannelModal(true)}
+            onViewNotifications={() => setMobileView('notifications')}
+            unreadNotifCount={unreadNotifCount}
           />
         </div>
       )}
@@ -1312,34 +1518,23 @@ export default function ChatPage() {
       {showMobileTasks && (
         <div className="fixed inset-0 z-50 flex flex-col justify-end" onClick={() => setShowMobileTasks(false)}>
           <div className="absolute inset-0 bg-black/40" />
-          <div className="relative bg-white rounded-t-2xl shadow-2xl max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
+          <div className="relative bg-white rounded-t-2xl shadow-2xl max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
             <div className="flex justify-center pt-3 pb-1 flex-shrink-0">
               <div className="w-10 h-1 rounded-full bg-gray-300" />
             </div>
             <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
               <span className="font-semibold text-gray-900">Tasks — {activeLabel}</span>
-              <button onClick={() => setShowMobileTasks(false)} className="text-gray-400 hover:text-gray-600 p-1">
-                <X size={18} />
-              </button>
-            </div>
-            {/* Add task input */}
-            <div className="px-4 py-3 border-b border-gray-100 flex gap-2 flex-shrink-0">
-              <input
-                type="text"
-                value={newTaskText}
-                onChange={e => setNewTaskText(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') handleAddTask(); }}
-                placeholder="Add a task…"
-                className="flex-1 bg-gray-100 rounded-xl px-3.5 py-2 text-sm text-gray-900 outline-none placeholder-gray-400"
-                style={{ fontSize: '16px' }}
-              />
-              <button
-                onClick={handleAddTask}
-                disabled={!newTaskText.trim() || addTaskMutation.isPending}
-                className="px-4 py-2 rounded-xl bg-[#1B5E20] text-white text-sm font-medium disabled:opacity-40 flex-shrink-0"
-              >
-                Add
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => { setShowMobileTasks(false); setShowNewTaskModal(true); }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#1B5E20] text-white text-xs font-medium"
+                >
+                  <Plus size={13} /> New Task
+                </button>
+                <button onClick={() => setShowMobileTasks(false)} className="text-gray-400 hover:text-gray-600 p-1">
+                  <X size={18} />
+                </button>
+              </div>
             </div>
             {/* Task list */}
             <div className="overflow-y-auto flex-1 py-2">
@@ -1349,27 +1544,48 @@ export default function ChatPage() {
                   <p className="text-sm">No tasks yet</p>
                 </div>
               ) : (
-                tasks.map(task => (
-                  <div key={task.id} className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50">
-                    <button
-                      onClick={() => toggleTaskMutation.mutate({ id: task.id, completed: !task.completed })}
-                      className="flex-shrink-0 text-[#1B5E20]"
-                    >
-                      {task.completed
-                        ? <CheckSquare size={20} />
-                        : <Square size={20} className="text-gray-300" />}
-                    </button>
-                    <span className={`flex-1 text-sm ${task.completed ? 'line-through text-gray-400' : 'text-gray-800'}`}>
-                      {task.title}
-                    </span>
-                    <button
-                      onClick={() => deleteTaskMutation.mutate(task.id)}
-                      className="text-gray-300 hover:text-red-400 p-1 flex-shrink-0 transition-colors"
-                    >
-                      <X size={14} />
-                    </button>
-                  </div>
-                ))
+                tasks.map(task => {
+                  const assignees = (task.assignee_ids ?? []).map(id => allProfiles.find(p => p.id === id)).filter(Boolean) as MinProfile[];
+                  return (
+                    <div key={task.id} className={`px-4 py-3 border-b border-gray-50 ${task.completed ? 'opacity-60' : ''}`}>
+                      <div className="flex items-start gap-3">
+                        <button
+                          onClick={() => task.completed ? toggleTaskMutation.mutate({ id: task.id, completed: false }) : setDoneModalTaskId(task.id)}
+                          className="flex-shrink-0 mt-0.5 text-[#1B5E20]"
+                        >
+                          {task.completed ? <CheckSquare size={20} /> : <Square size={20} className="text-gray-300" />}
+                        </button>
+                        <div className="flex-1 min-w-0">
+                          <p className={`text-sm font-medium ${task.completed ? 'line-through text-gray-400' : 'text-gray-800'}`}>{task.title}</p>
+                          {task.description && <p className="text-xs text-gray-500 mt-0.5 leading-snug">{task.description}</p>}
+                          <div className="flex flex-wrap gap-1.5 mt-1.5">
+                            {task.priority && (
+                              <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${PRIORITY_COLORS[task.priority] ?? 'bg-gray-100 text-gray-500'}`}>
+                                {PRIORITY_LABELS[task.priority] ?? task.priority}
+                              </span>
+                            )}
+                            {task.deadline && (
+                              <span className="text-[10px] text-gray-500 flex items-center gap-0.5">
+                                <Calendar size={10} /> {task.deadline}
+                              </span>
+                            )}
+                            {assignees.length > 0 && (
+                              <span className="text-[10px] text-gray-500 flex items-center gap-0.5">
+                                <UserCheck size={10} /> {assignees.map(a => a.full_name.split(' ')[0]).join(', ')}
+                              </span>
+                            )}
+                          </div>
+                          {task.completed && task.done_comment && (
+                            <p className="text-xs text-gray-400 italic mt-1">"{task.done_comment}"</p>
+                          )}
+                        </div>
+                        <button onClick={() => deleteTaskMutation.mutate(task.id)} className="text-gray-300 hover:text-red-400 p-1 flex-shrink-0">
+                          <X size={14} />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })
               )}
             </div>
           </div>
@@ -1647,6 +1863,150 @@ export default function ChatPage() {
         </div>
       )}
 
+      {/* ── New Task Modal ── */}
+      {showNewTaskModal && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={() => setShowNewTaskModal(false)}>
+          <div className="absolute inset-0 bg-black/40" />
+          <div className="relative bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-lg flex flex-col max-h-[90vh]" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-center pt-3 pb-1 sm:hidden"><div className="w-10 h-1 rounded-full bg-gray-300" /></div>
+            <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
+              <span className="font-semibold text-gray-900">New Task — {activeLabel}</span>
+              <button onClick={() => setShowNewTaskModal(false)} className="text-gray-400 hover:text-gray-600 p-1"><X size={18} /></button>
+            </div>
+            <div className="overflow-y-auto flex-1 px-5 py-4 flex flex-col gap-4">
+              {/* Title */}
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 mb-1">Title *</label>
+                <input
+                  type="text" value={taskDraft.title} onChange={e => setTaskDraft(d => ({ ...d, title: e.target.value }))}
+                  placeholder="What needs to be done?"
+                  className="w-full bg-gray-100 rounded-xl px-3.5 py-2.5 text-sm text-gray-900 outline-none placeholder-gray-400"
+                  style={{ fontSize: '16px' }} autoFocus
+                />
+              </div>
+              {/* Description */}
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 mb-1">Description (optional)</label>
+                <textarea
+                  value={taskDraft.description} onChange={e => setTaskDraft(d => ({ ...d, description: e.target.value }))}
+                  placeholder="Add more detail…" rows={3}
+                  className="w-full bg-gray-100 rounded-xl px-3.5 py-2.5 text-sm text-gray-900 outline-none placeholder-gray-400 resize-none leading-snug"
+                  style={{ fontSize: '16px' }}
+                />
+              </div>
+              {/* Priority + Deadline */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-gray-500 mb-1"><Flag size={10} className="inline mr-1" />Priority</label>
+                  <select
+                    value={taskDraft.priority} onChange={e => setTaskDraft(d => ({ ...d, priority: e.target.value }))}
+                    className="w-full bg-gray-100 rounded-xl px-3 py-2.5 text-sm text-gray-900 outline-none"
+                    style={{ fontSize: '16px' }}
+                  >
+                    <option value="low">Low</option>
+                    <option value="medium">Medium</option>
+                    <option value="high">High</option>
+                    <option value="urgent">Urgent</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-500 mb-1"><Calendar size={10} className="inline mr-1" />Deadline (optional)</label>
+                  <input
+                    type="date" value={taskDraft.deadline} onChange={e => setTaskDraft(d => ({ ...d, deadline: e.target.value }))}
+                    className="w-full bg-gray-100 rounded-xl px-3 py-2.5 text-sm text-gray-900 outline-none"
+                    style={{ fontSize: '16px' }}
+                  />
+                </div>
+              </div>
+              {/* Assignees */}
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 mb-2"><UserCheck size={10} className="inline mr-1" />Assign to</label>
+                <label className="flex items-center gap-3 py-2 cursor-pointer">
+                  <input type="checkbox" checked={taskDraft.assignAll}
+                    onChange={e => setTaskDraft(d => ({ ...d, assignAll: e.target.checked, assigneeIds: [] }))}
+                    className="w-4 h-4 accent-[#1B5E20]" />
+                  <span className="text-sm font-medium text-[#1B5E20]">Whole Team (everyone in this channel)</span>
+                </label>
+                {!taskDraft.assignAll && roomMembers.filter(m => m.id !== myId).map(m => (
+                  <label key={m.id} className="flex items-center gap-3 py-2 cursor-pointer">
+                    <input type="checkbox"
+                      checked={taskDraft.assigneeIds.includes(m.id)}
+                      onChange={e => setTaskDraft(d => ({
+                        ...d,
+                        assigneeIds: e.target.checked ? [...d.assigneeIds, m.id] : d.assigneeIds.filter(id => id !== m.id)
+                      }))}
+                      className="w-4 h-4 accent-[#1B5E20]" />
+                    <div className="w-7 h-7 rounded-full bg-[#1B5E20]/15 flex items-center justify-center text-[10px] font-bold text-[#1B5E20] flex-shrink-0">{initials(m.full_name)}</div>
+                    <span className="text-sm text-gray-800">{m.full_name}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+            <div className="px-5 py-4 border-t border-gray-100 flex gap-3 flex-shrink-0">
+              <button onClick={() => setShowNewTaskModal(false)} className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm text-gray-600 font-medium">Cancel</button>
+              <button
+                onClick={() => { if (taskDraft.title.trim()) addTaskMutation.mutate(taskDraft); }}
+                disabled={!taskDraft.title.trim() || addTaskMutation.isPending}
+                className="flex-1 py-2.5 rounded-xl bg-[#1B5E20] text-white text-sm font-semibold disabled:opacity-40"
+              >
+                {addTaskMutation.isPending ? 'Adding…' : 'Add Task'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Done modal ── */}
+      {doneModalTaskId && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center" onClick={() => { setDoneModalTaskId(null); setDoneComment(''); }}>
+          <div className="absolute inset-0 bg-black/40" />
+          <div className="relative bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-sm flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-center pt-3 pb-1 sm:hidden"><div className="w-10 h-1 rounded-full bg-gray-300" /></div>
+            <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
+              <span className="font-semibold text-gray-900">Mark as Done</span>
+              <button onClick={() => { setDoneModalTaskId(null); setDoneComment(''); }} className="text-gray-400 hover:text-gray-600 p-1"><X size={18} /></button>
+            </div>
+            <div className="px-5 py-4 flex flex-col gap-3">
+              <p className="text-sm text-gray-600">Add an optional comment for the task creator:</p>
+              <textarea
+                value={doneComment} onChange={e => setDoneComment(e.target.value)}
+                placeholder="e.g. Completed at 14:00, all done!"
+                rows={3} autoFocus
+                className="w-full bg-gray-100 rounded-xl px-3.5 py-2.5 text-sm text-gray-900 outline-none placeholder-gray-400 resize-none leading-snug"
+                style={{ fontSize: '16px' }}
+              />
+            </div>
+            <div className="px-5 py-4 border-t border-gray-100 flex gap-3 flex-shrink-0">
+              <button onClick={() => { setDoneModalTaskId(null); setDoneComment(''); }} className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm text-gray-600 font-medium">Cancel</button>
+              <button
+                onClick={() => markDoneMutation.mutate({ id: doneModalTaskId!, comment: doneComment })}
+                disabled={markDoneMutation.isPending}
+                className="flex-1 py-2.5 rounded-xl bg-[#1B5E20] text-white text-sm font-semibold disabled:opacity-40"
+              >
+                {markDoneMutation.isPending ? 'Saving…' : 'Mark Done'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── MOBILE: Notifications view ── */}
+      {mobileView === 'notifications' && (
+        <div className="md:hidden flex flex-col w-full overflow-hidden">
+          <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-3 flex-shrink-0">
+            <button onClick={() => setMobileView('list')} className="p-1 -ml-1 text-gray-400 hover:text-gray-600"><ChevronLeft size={20} /></button>
+            <span className="font-semibold text-gray-900 flex-1">Notifications</span>
+          </div>
+          <div className="flex-1 min-h-0 overflow-y-auto">
+            <NotificationsPanel
+              notifs={notifs}
+              onMarkRead={id => markNotifReadMutation.mutate(id)}
+              onMarkAllRead={() => markNotifReadMutation.mutate('all')}
+            />
+          </div>
+        </div>
+      )}
+
       {/* ── DESKTOP: Sidebar ── */}
       <div className="hidden md:flex flex-col w-60 border-r border-gray-100 flex-shrink-0 bg-gray-50/60">
         <RoomSidebar
@@ -1655,13 +2015,16 @@ export default function ChatPage() {
           otherProfiles={otherProfiles}
           allProfiles={allProfiles}
           unread={unread}
-          onSelect={handleDesktopSelect}
+          onSelect={(room) => { handleDesktopSelect(room); setActiveView('chat'); }}
           visibleRooms={visibleRooms}
           roomMembers={roomMembers}
           chatGroups={chatGroups}
           onCreateGroup={() => setShowGroupModal(true)}
           isAdmin={isAdmin}
           onCreateChannel={() => setShowChannelModal(true)}
+          activeView={activeView}
+          onViewNotifications={() => setActiveView('notifications')}
+          unreadNotifCount={unreadNotifCount}
         />
         {profile && (
           <div className="px-4 py-3 border-t border-gray-100 flex items-center gap-2 flex-shrink-0">
@@ -1675,39 +2038,55 @@ export default function ChatPage() {
 
       {/* ── DESKTOP: Chat area ── */}
       <div className="hidden md:flex flex-col flex-1 min-w-0 overflow-hidden">
-        {/* Header */}
-        <div className="px-4 py-3 border-b border-gray-200 bg-white flex items-center gap-3 flex-shrink-0">
-          <div className="flex items-center gap-2 min-w-0 flex-1">
-            <span className="font-semibold text-gray-900 truncate">{activeLabel}</span>
-            {activeRoom.startsWith('dm::') && (
-              <span className="text-[11px] text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full flex-shrink-0">DM</span>
-            )}
-          </div>
-          {!activeRoom.startsWith('dm::') && (
-            <div className="flex items-center gap-1.5 flex-shrink-0">
-              <button
-                onClick={() => setShowMobileTasks(true)}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors"
-              >
-                <ClipboardList size={14} />
-                {tasks.filter(t => !t.completed).length > 0 && (
-                  <span className="text-xs font-medium">{tasks.filter(t => !t.completed).length}</span>
+        {activeView === 'notifications' ? (
+          <NotificationsPanel
+            notifs={notifs}
+            onMarkRead={id => markNotifReadMutation.mutate(id)}
+            onMarkAllRead={() => markNotifReadMutation.mutate('all')}
+          />
+        ) : (
+          <>
+            {/* Header */}
+            <div className="px-4 py-3 border-b border-gray-200 bg-white flex items-center gap-3 flex-shrink-0">
+              <div className="flex items-center gap-2 min-w-0 flex-1">
+                <span className="font-semibold text-gray-900 truncate">{activeLabel}</span>
+                {activeRoom.startsWith('dm::') && (
+                  <span className="text-[11px] text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full flex-shrink-0">DM</span>
                 )}
-              </button>
-              {roomMembers.length > 0 && (
-                <button
-                  onClick={() => setShowMobileMembers(true)}
-                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors"
-                >
-                  <Users size={14} />
-                  <span className="text-xs font-medium">{roomMembers.length}</span>
-                </button>
+              </div>
+              {!activeRoom.startsWith('dm::') && (
+                <div className="flex items-center gap-1.5 flex-shrink-0">
+                  <button
+                    onClick={() => setShowNewTaskModal(true)}
+                    className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-[#1B5E20] text-white hover:bg-[#2E7D32] transition-colors text-xs font-medium"
+                  >
+                    <Plus size={13} /> Task
+                  </button>
+                  <button
+                    onClick={() => setShowMobileTasks(true)}
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors"
+                  >
+                    <ClipboardList size={14} />
+                    {tasks.filter(t => !t.completed).length > 0 && (
+                      <span className="text-xs font-medium">{tasks.filter(t => !t.completed).length}</span>
+                    )}
+                  </button>
+                  {roomMembers.length > 0 && (
+                    <button
+                      onClick={() => setShowMobileMembers(true)}
+                      className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors"
+                    >
+                      <Users size={14} />
+                      <span className="text-xs font-medium">{roomMembers.length}</span>
+                    </button>
+                  )}
+                </div>
               )}
             </div>
-          )}
-        </div>
-        <ChatMessages messages={messages} isLoading={isLoading} myId={myId} messagesEndRef={messagesEndRef} reactions={reactions} editingId={editingId} editingText={editingText} onStartEdit={handleStartEdit} onTextChange={setEditingText} onSave={handleSaveEdit} onCancel={handleCancelEdit} onReply={setReplyingTo} onReact={handleReact} onLongPress={setLongPressMsg} />
-        <ChatInput {...sharedInputProps} />
+            <ChatMessages messages={messages} isLoading={isLoading} myId={myId} messagesEndRef={messagesEndRef} reactions={reactions} editingId={editingId} editingText={editingText} onStartEdit={handleStartEdit} onTextChange={setEditingText} onSave={handleSaveEdit} onCancel={handleCancelEdit} onReply={setReplyingTo} onReact={handleReact} onLongPress={setLongPressMsg} />
+            <ChatInput {...sharedInputProps} />
+          </>
+        )}
       </div>
 
     </div>
