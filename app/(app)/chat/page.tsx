@@ -410,38 +410,6 @@ function MessageBubble({
     return Object.entries(groups).map(([emoji, g]) => ({ emoji, ...g }));
   }, [reactions, msg.id, myId]);
 
-  /* Action bar — shown for own messages between avatar+content, for others after content */
-  const actionBar = !isEditing && (
-    <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-0.5 self-center flex-shrink-0">
-      {QUICK_EMOJIS.map(e => (
-        <button
-          key={e}
-          onClick={() => onReact(e)}
-          className="w-6 h-6 rounded-full hover:bg-gray-100 flex items-center justify-center text-sm transition-colors leading-none"
-          title={e}
-        >
-          {e}
-        </button>
-      ))}
-      <button
-        onClick={onReply}
-        className="p-1 rounded-full text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
-        title="Reply"
-      >
-        <CornerUpLeft size={13} />
-      </button>
-      {isOwn && !msg.media_url && (
-        <button
-          onClick={onStartEdit}
-          className="p-1 rounded-full text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
-          title="Edit"
-        >
-          <Pencil size={12} />
-        </button>
-      )}
-    </div>
-  );
-
   return (
     <div className={`flex gap-1 ${isOwn ? 'flex-row-reverse' : 'flex-row'} ${showMeta ? 'mt-4' : 'mt-0.5'} group items-end`}>
       {/* Avatar */}
@@ -455,11 +423,40 @@ function MessageBubble({
         )}
       </div>
 
-      {/* Action bar: for own messages goes between avatar & content in DOM = left of content visually */}
-      {isOwn && actionBar}
+      {/* Content column — relative so action bar can be positioned beside it without affecting flex layout */}
+      <div className={`relative flex flex-col gap-0.5 ${isOwn ? 'items-end max-w-[72%]' : 'items-start max-w-[85%]'}`}>
 
-      {/* Content column */}
-      <div className={`flex flex-col gap-0.5 ${isOwn ? 'items-end max-w-[72%]' : 'items-start max-w-[85%]'}`}>
+        {/* Action bar: absolutely positioned beside the bubble, zero flex footprint */}
+        {!isEditing && (
+          <div className={`absolute bottom-0 ${isOwn ? 'right-full mr-1' : 'left-full ml-1'} opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-0.5 bg-white shadow-md rounded-full px-1.5 py-1 z-20`}>
+            {QUICK_EMOJIS.map(e => (
+              <button
+                key={e}
+                onClick={() => onReact(e)}
+                className="w-6 h-6 rounded-full hover:bg-gray-100 flex items-center justify-center text-sm transition-colors leading-none"
+                title={e}
+              >
+                {e}
+              </button>
+            ))}
+            <button
+              onClick={onReply}
+              className="p-1 rounded-full text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
+              title="Reply"
+            >
+              <CornerUpLeft size={13} />
+            </button>
+            {isOwn && !msg.media_url && (
+              <button
+                onClick={onStartEdit}
+                className="p-1 rounded-full text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
+                title="Edit"
+              >
+                <Pencil size={12} />
+              </button>
+            )}
+          </div>
+        )}
         {showMeta && (
           <p className="text-[11px] text-gray-400 px-1">
             {isOwn ? 'You' : msg.sender_name} · {fmtTime(msg.created_at)}
@@ -543,8 +540,6 @@ function MessageBubble({
         )}
       </div>
 
-      {/* Action bar: for others goes after content in DOM = right of content visually */}
-      {!isOwn && actionBar}
     </div>
   );
 }
