@@ -1192,7 +1192,8 @@ export default function ChatPage() {
   }, [myId, qc]);
 
   const createNotif = async (userId: string, type: string, title: string, body: string, metadata: Record<string, unknown> = {}) => {
-    await supabase.from('notifications').insert({ user_id: userId, type, title, body, metadata });
+    const { error } = await supabase.from('notifications').insert({ user_id: userId, type, title, body, metadata });
+    if (error) console.error('createNotif failed:', error.message, { userId, type });
   };
 
   useEffect(() => {
