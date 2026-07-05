@@ -1045,23 +1045,27 @@ export default function ChatPage() {
 
   const addTaskMutation = useMutation({
     mutationFn: async (draft: typeof taskDraft) => {
+      const assigneeIds = draft.assignAll ? roomMembers.map(m => m.id) : draft.assigneeIds;
       const { data, error } = await supabase.from('room_tasks').insert({
         room: activeRoom,
         title: draft.title.trim(),
         description: draft.description.trim() || null,
         priority: draft.priority,
         deadline: draft.deadline || null,
-        assignee_ids: draft.assignAll ? roomMembers.map(m => m.id) : draft.assigneeIds,
+        assignee_ids: assigneeIds,
         created_by: myId,
       }).select().single();
       if (error) throw error;
-      return data as RoomTask;
+      // If RLS blocks the SELECT after INSERT, fall back to a plain object so onSuccess still fires
+      return (data ?? { title: draft.title.trim(), priority: draft.priority, deadline: draft.deadline || null, assignee_ids: assigneeIds }) as RoomTask;
     },
     onSuccess: async (task) => {
       qc.invalidateQueries({ queryKey: ['room-tasks', activeRoom] });
       setShowNewTaskModal(false);
       setTaskDraft({ title: '', description: '', priority: 'medium', deadline: '', assigneeIds: [], assignAll: false });
+      if (!task) { console.error('addTaskMutation: task is null, cannot send notifications'); return; }
       const targets = task.assignee_ids ?? [];
+      console.log('addTaskMutation onSuccess: targets=', targets);
       for (const uid of targets) {
         if (uid === myId) continue;
         await createNotif(uid, 'task_assigned',
