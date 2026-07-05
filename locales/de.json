@@ -209,6 +209,7 @@
     "noRecentPOs": "Keine Bestellungen gefunden",
     "allStocked": "Alle Artikel sind ausreichend bevorratet",
     "quickLinks": {
+      "chat": "Chat",
       "inventory": "Inventur",
       "addInventory": "Inventur hinzufügen",
       "suppliers": "Lieferanten",

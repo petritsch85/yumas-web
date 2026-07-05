@@ -209,6 +209,7 @@
     "noRecentPOs": "No purchase orders found",
     "allStocked": "All items are adequately stocked",
     "quickLinks": {
+      "chat": "Chat",
       "inventory": "Inventory",
       "addInventory": "Add Inventory",
       "suppliers": "Suppliers",

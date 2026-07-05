@@ -6,7 +6,7 @@ import {
   Package, Truck, ShoppingCart, AlertTriangle,
   ClipboardList, Factory, Trash2, BarChart3,
   TrendingUp, PartyPopper, Users, LineChart,
-  FilePlus, Store, UtensilsCrossed,
+  FilePlus, Store, UtensilsCrossed, MessageCircle,
 } from 'lucide-react';
 import { StatusBadge } from '@/components/ui/StatusBadge';
 import { formatDate } from '@/lib/utils';
@@ -139,6 +139,7 @@ export default function DashboardPage() {
   };
 
   const QUICK_LINKS: QuickLink[] = [
+    { labelKey: 'dashboard.quickLinks.chat',         href: '/chat',                     icon: MessageCircle,   color: '#1B5E20' },
     { labelKey: 'dashboard.quickLinks.inventory',    href: '/inventory/overview',       icon: ClipboardList,   color: '#1B5E20', permKey: 'inventory', managerOnly: true },
     { labelKey: 'dashboard.quickLinks.addInventory', href: '/inventory/add',            icon: FilePlus,        color: '#2E7D32', permKey: 'inventory' },
     { labelKey: 'dashboard.quickLinks.suppliers',    href: '/suppliers',                icon: Store,           color: '#FF8F00', permKey: 'suppliers' },
