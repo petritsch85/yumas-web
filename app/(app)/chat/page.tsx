@@ -488,7 +488,7 @@ function MessageBubble({
         ) : (
           <>
             {/* Reply quote block */}
-            {msg.reply_to && (
+            {msg.reply_to?.id && (
               <div className={`rounded-xl px-2.5 py-1.5 mb-0.5 max-w-full border-l-2 ${
                 isOwn ? 'bg-[#1B5E20]/10 border-[#1B5E20]/50' : 'bg-gray-200/70 border-gray-400'
               }`}>
