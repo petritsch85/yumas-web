@@ -382,7 +382,7 @@ const QUICK_EMOJIS = ['👍', '❤️', '😂', '😮', '🔥'];
 function MessageBubble({
   msg, isOwn, showMeta, myId, reactions,
   isEditing, editText, onStartEdit, onTextChange, onSave, onCancel,
-  onReply, onReact,
+  onReply, onReact, onLongPress,
 }: {
   msg: ChatMessage;
   isOwn: boolean;
@@ -397,7 +397,16 @@ function MessageBubble({
   onCancel: () => void;
   onReply: () => void;
   onReact: (emoji: string) => void;
+  onLongPress: () => void;
 }) {
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const handleTouchStart = () => {
+    longPressTimer.current = setTimeout(() => { onLongPress(); }, 500);
+  };
+  const cancelLongPress = () => {
+    if (longPressTimer.current) { clearTimeout(longPressTimer.current); longPressTimer.current = null; }
+  };
+
   const msgReactions = useMemo(() => {
     const groups: Record<string, { count: number; reacted: boolean; ids: string[] }> = {};
     for (const r of reactions) {
@@ -411,7 +420,13 @@ function MessageBubble({
   }, [reactions, msg.id, myId]);
 
   return (
-    <div className={`flex gap-1 ${isOwn ? 'flex-row-reverse' : 'flex-row'} ${showMeta ? 'mt-4' : 'mt-0.5'} group items-end`}>
+    <div
+      className={`flex gap-1 ${isOwn ? 'flex-row-reverse' : 'flex-row'} ${showMeta ? 'mt-4' : 'mt-0.5'} group items-end select-none`}
+      onTouchStart={handleTouchStart}
+      onTouchEnd={cancelLongPress}
+      onTouchMove={cancelLongPress}
+      onContextMenu={e => e.preventDefault()}
+    >
       {/* Avatar */}
       <div className="w-7 flex-shrink-0">
         {showMeta && (
@@ -548,7 +563,7 @@ function MessageBubble({
 function ChatMessages({
   messages, isLoading, myId, messagesEndRef, reactions,
   editingId, editingText, onStartEdit, onTextChange, onSave, onCancel,
-  onReply, onReact,
+  onReply, onReact, onLongPress,
 }: {
   messages: ChatMessage[];
   isLoading: boolean;
@@ -563,6 +578,7 @@ function ChatMessages({
   onCancel: () => void;
   onReply: (msg: ChatMessage) => void;
   onReact: (messageId: string, emoji: string) => void;
+  onLongPress: (msg: ChatMessage) => void;
 }) {
   return (
     <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-4 py-3">
@@ -597,6 +613,7 @@ function ChatMessages({
                 onCancel={onCancel}
                 onReply={() => onReply(msg)}
                 onReact={(emoji) => onReact(msg.id, emoji)}
+                onLongPress={() => onLongPress(msg)}
               />
             );
           })}
@@ -766,6 +783,7 @@ export default function ChatPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState('');
   const [replyingTo, setReplyingTo] = useState<ChatMessage | null>(null);
+  const [longPressMsg, setLongPressMsg] = useState<ChatMessage | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -1283,7 +1301,7 @@ export default function ChatPage() {
               </div>
             )}
           </div>
-          <ChatMessages messages={messages} isLoading={isLoading} myId={myId} messagesEndRef={messagesEndRef} reactions={reactions} editingId={editingId} editingText={editingText} onStartEdit={handleStartEdit} onTextChange={setEditingText} onSave={handleSaveEdit} onCancel={handleCancelEdit} onReply={setReplyingTo} onReact={handleReact} />
+          <ChatMessages messages={messages} isLoading={isLoading} myId={myId} messagesEndRef={messagesEndRef} reactions={reactions} editingId={editingId} editingText={editingText} onStartEdit={handleStartEdit} onTextChange={setEditingText} onSave={handleSaveEdit} onCancel={handleCancelEdit} onReply={setReplyingTo} onReact={handleReact} onLongPress={setLongPressMsg} />
           <ChatInput {...sharedInputProps} />
 
         </div>
@@ -1579,6 +1597,55 @@ export default function ChatPage() {
         </div>
       )}
 
+      {/* ── Long-press bottom sheet (mobile only) ── */}
+      {longPressMsg && (
+        <div className="md:hidden fixed inset-0 z-50 flex flex-col justify-end" onClick={() => setLongPressMsg(null)}>
+          <div className="absolute inset-0 bg-black/40" />
+          <div className="relative bg-white rounded-t-2xl shadow-2xl" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-center pt-3 pb-2 flex-shrink-0">
+              <div className="w-10 h-1 rounded-full bg-gray-300" />
+            </div>
+            {/* Message preview */}
+            <div className="px-5 pb-3 border-b border-gray-100">
+              <p className="text-[11px] font-semibold text-gray-400 mb-0.5">{longPressMsg.sender_name}</p>
+              <p className="text-sm text-gray-700 line-clamp-2">{longPressMsg.content ?? '📷 Media'}</p>
+            </div>
+            {/* Quick reactions */}
+            <div className="flex justify-around px-4 py-4 border-b border-gray-100">
+              {QUICK_EMOJIS.map(e => (
+                <button
+                  key={e}
+                  onClick={() => { handleReact(longPressMsg.id, e); setLongPressMsg(null); }}
+                  className="text-2xl w-11 h-11 flex items-center justify-center rounded-full active:bg-gray-100 transition-colors"
+                >
+                  {e}
+                </button>
+              ))}
+            </div>
+            {/* Actions */}
+            <div className="py-1">
+              <button
+                onClick={() => { setReplyingTo(longPressMsg); setLongPressMsg(null); }}
+                className="w-full flex items-center gap-4 px-5 py-4 text-left active:bg-gray-50"
+              >
+                <CornerUpLeft size={20} className="text-gray-500 flex-shrink-0" />
+                <span className="text-[15px] text-gray-800">Reply</span>
+              </button>
+              {longPressMsg.sender_id === myId && !longPressMsg.media_url && (
+                <button
+                  onClick={() => { handleStartEdit(longPressMsg); setLongPressMsg(null); }}
+                  className="w-full flex items-center gap-4 px-5 py-4 text-left active:bg-gray-50"
+                >
+                  <Pencil size={20} className="text-gray-500 flex-shrink-0" />
+                  <span className="text-[15px] text-gray-800">Edit</span>
+                </button>
+              )}
+            </div>
+            <div className="pb-8" />
+          </div>
+        </div>
+      )}
+
       {/* ── DESKTOP: Sidebar ── */}
       <div className="hidden md:flex flex-col w-60 border-r border-gray-100 flex-shrink-0 bg-gray-50/60">
         <RoomSidebar
@@ -1638,7 +1705,7 @@ export default function ChatPage() {
             </div>
           )}
         </div>
-        <ChatMessages messages={messages} isLoading={isLoading} myId={myId} messagesEndRef={messagesEndRef} reactions={reactions} editingId={editingId} editingText={editingText} onStartEdit={handleStartEdit} onTextChange={setEditingText} onSave={handleSaveEdit} onCancel={handleCancelEdit} onReply={setReplyingTo} onReact={handleReact} />
+        <ChatMessages messages={messages} isLoading={isLoading} myId={myId} messagesEndRef={messagesEndRef} reactions={reactions} editingId={editingId} editingText={editingText} onStartEdit={handleStartEdit} onTextChange={setEditingText} onSave={handleSaveEdit} onCancel={handleCancelEdit} onReply={setReplyingTo} onReact={handleReact} onLongPress={setLongPressMsg} />
         <ChatInput {...sharedInputProps} />
       </div>
 
