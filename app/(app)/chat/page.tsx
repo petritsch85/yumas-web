@@ -565,7 +565,7 @@ function ChatMessages({
   onReact: (messageId: string, emoji: string) => void;
 }) {
   return (
-    <div className="flex-1 min-h-0 overflow-y-auto px-4 py-3">
+    <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-4 py-3">
       {isLoading ? (
         <div className="flex items-center justify-center h-full">
           <span className="text-sm text-gray-400">Loading…</span>
