@@ -816,14 +816,19 @@ function ChatInput({
     : [];
 
   const insertMention = (profile: MinProfile) => {
-    const start = mentionStartRef.current;
-    const query = mentionQueryRef.current;
-    if (start < 0 || query === null) return;
-    // Read directly from DOM — avoids React state batching lag
-    const currentValue = textareaRef.current?.value ?? text;
-    const mentionEnd = start + 1 + query.length;
-    const before = currentValue.slice(0, start);
-    const after = currentValue.slice(mentionEnd);
+    // Read value directly from DOM — never stale
+    const ta = textareaRef.current;
+    const val = ta?.value ?? text;
+    // Find where the @mention started (use ref, fallback to last @ in text)
+    const atIdx = mentionStartRef.current >= 0
+      ? mentionStartRef.current
+      : val.lastIndexOf('@');
+    if (atIdx < 0) return;
+    // Slice past the partial query the user typed after @
+    const afterAt = val.slice(atIdx + 1);
+    const queryLen = afterAt.match(/^[\w ]*/)?.[0].length ?? 0;
+    const before = val.slice(0, atIdx);
+    const after = val.slice(atIdx + 1 + queryLen);
     const inserted = `@${profile.full_name} `;
     const newText = before + inserted + after;
     mentionStartRef.current = -1;
@@ -831,7 +836,6 @@ function ChatInput({
     setMentionQuery(null);
     setMentionIndex(0);
     setText(newText);
-    const ta = textareaRef.current;
     requestAnimationFrame(() => {
       if (ta) {
         ta.focus();
@@ -888,7 +892,9 @@ function ChatInput({
           {filteredMentions.map((p, i) => (
             <button
               key={p.id}
-              onMouseDown={e => { e.preventDefault(); insertMention(p); }}
+              type="button"
+              onMouseDown={e => e.preventDefault()}
+              onClick={() => insertMention(p)}
               className={`w-full flex items-center gap-2.5 px-3 py-2 text-left transition-colors ${i === mentionIndex ? 'bg-[#1B5E20]/10 text-[#1B5E20]' : 'hover:bg-gray-50 text-gray-900'}`}
             >
               <div className="w-6 h-6 rounded-full bg-[#1B5E20]/15 flex items-center justify-center text-[10px] font-bold text-[#1B5E20] flex-shrink-0">
