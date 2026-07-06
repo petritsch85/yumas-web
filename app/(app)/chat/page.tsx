@@ -875,26 +875,27 @@ function ChatInput({
     : [];
 
   const insertMention = (profile: MinProfile) => {
-    // Read value directly from DOM — never stale
-    const ta = textareaRef.current;
-    const val = ta?.value ?? text;
-    // Find where the @mention started (use ref, fallback to last @ in text)
-    const atIdx = mentionStartRef.current >= 0
-      ? mentionStartRef.current
-      : val.lastIndexOf('@');
-    if (atIdx < 0) return;
-    // Slice past the partial query the user typed after @
+    // Use the React text state — always accurate for a controlled textarea
+    const val = text;
+    const atIdx = val.lastIndexOf('@');
+    console.log('[mention] insertMention called', { profile: profile.full_name, val, atIdx });
+    if (atIdx < 0) {
+      console.warn('[mention] no @ found in text, aborting');
+      return;
+    }
     const afterAt = val.slice(atIdx + 1);
     const queryLen = afterAt.match(/^[\w ]*/)?.[0].length ?? 0;
     const before = val.slice(0, atIdx);
     const after = val.slice(atIdx + 1 + queryLen);
     const inserted = `@${profile.full_name} `;
     const newText = before + inserted + after;
+    console.log('[mention] inserting:', { before, inserted, after, newText });
     mentionStartRef.current = -1;
     mentionQueryRef.current = null;
     setMentionQuery(null);
     setMentionIndex(0);
     setText(newText);
+    const ta = textareaRef.current;
     requestAnimationFrame(() => {
       if (ta) {
         ta.focus();
@@ -938,7 +939,6 @@ function ChatInput({
             <button
               key={p.id}
               type="button"
-              onMouseDown={e => e.preventDefault()}
               onClick={() => insertMention(p)}
               className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 bg-white border border-[#1B5E20]/30 text-[#1B5E20] rounded-full text-sm font-medium hover:bg-[#1B5E20]/10 transition-colors"
             >
