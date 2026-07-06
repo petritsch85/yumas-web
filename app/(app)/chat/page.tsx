@@ -2094,12 +2094,6 @@ export default function ChatPage() {
               {!activeRoom.startsWith('dm::') && (
                 <div className="flex items-center gap-1.5 flex-shrink-0">
                   <button
-                    onClick={() => setShowNewTaskModal(true)}
-                    className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-[#1B5E20] text-white hover:bg-[#2E7D32] transition-colors text-xs font-medium"
-                  >
-                    <Plus size={13} /> Task
-                  </button>
-                  <button
                     onClick={() => setShowMobileTasks(true)}
                     className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors"
                   >
