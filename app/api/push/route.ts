@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import webpush from 'web-push';
 import { createClient } from '@supabase/supabase-js';
+
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -8,20 +10,14 @@ const supabaseAdmin = createClient(
 );
 
 export async function POST(req: NextRequest) {
-  webpush.setVapidDetails(
-    'mailto:benpeters2000@googlemail.com',
-    process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!,
-    process.env.VAPID_PRIVATE_KEY!,
-  );
   const secret = req.headers.get('x-webhook-secret');
   if (secret !== process.env.PUSH_WEBHOOK_SECRET) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   const body = await req.json();
-  // Supabase webhook sends: { type, table, record, old_record, schema }
   const record = body.record ?? body;
-  const { user_id, title, body: notifBody, type, metadata } = record;
+  const { user_id, title, body: notifBody, type } = record;
 
   if (!user_id) return NextResponse.json({ ok: true });
 
@@ -32,26 +28,24 @@ export async function POST(req: NextRequest) {
 
   if (!subs?.length) return NextResponse.json({ ok: true });
 
-  const url = metadata?.room
-    ? `/chat`
-    : type === 'task_assigned' || type === 'task_done'
-    ? '/chat'
-    : '/chat';
+  // Dynamic import avoids module-level crash if web-push has load issues
+  const webpush = (await import('web-push')).default;
+  webpush.setVapidDetails(
+    'mailto:benpeters2000@googlemail.com',
+    process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!,
+    process.env.VAPID_PRIVATE_KEY!,
+  );
 
-  const payload = JSON.stringify({ title, body: notifBody, url, tag: type });
+  const payload = JSON.stringify({ title, body: notifBody, url: '/chat', tag: type });
 
   const results = await Promise.allSettled(
     subs.map((sub) =>
       webpush.sendNotification(
         { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
         payload,
-      ).catch(async (err) => {
-        // Subscription expired/invalid — remove it
+      ).catch(async (err: { statusCode?: number }) => {
         if (err.statusCode === 404 || err.statusCode === 410) {
-          await supabaseAdmin
-            .from('push_subscriptions')
-            .delete()
-            .eq('endpoint', sub.endpoint);
+          await supabaseAdmin.from('push_subscriptions').delete().eq('endpoint', sub.endpoint);
         }
         throw err;
       })
