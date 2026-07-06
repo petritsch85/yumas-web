@@ -43,6 +43,7 @@ import {
   ShoppingBag,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase-browser';
+import { Bell, BellOff } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import type { Profile } from '@/types';
@@ -273,6 +274,46 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
     router.push('/login');
   };
 
+  const [notifPermission, setNotifPermission] = useState<NotificationPermission | 'unsupported'>('unsupported');
+  useEffect(() => {
+    if ('Notification' in window) setNotifPermission(Notification.permission);
+  }, []);
+
+  const handleEnableNotifications = async () => {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+    const permission = await Notification.requestPermission();
+    setNotifPermission(permission);
+    if (permission !== 'granted') return;
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!),
+      });
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+      const key = sub.getKey('p256dh');
+      const auth = sub.getKey('auth');
+      if (!key || !auth) return;
+      await fetch('/api/push/subscribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({
+          endpoint: sub.endpoint,
+          p256dh: btoa(String.fromCharCode(...new Uint8Array(key))),
+          auth: btoa(String.fromCharCode(...new Uint8Array(auth))),
+        }),
+      });
+    } catch (err) { console.warn('Push subscribe failed:', err); }
+  };
+
+  function urlBase64ToUint8Array(base64String: string) {
+    const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+    const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+    const raw = atob(base64);
+    return Uint8Array.from([...raw].map((c) => c.charCodeAt(0)));
+  }
+
   const isActive = (href: string) => {
     if (href === '/') return pathname === '/';
     if (href.includes('?')) {
@@ -443,6 +484,27 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
           <KeyRound size={15} />
           Change Password
         </Link>
+        {notifPermission !== 'unsupported' && (
+          notifPermission === 'granted' ? (
+            <div className="flex items-center gap-2 text-white/40 text-sm w-full mb-2 px-0.5">
+              <Bell size={15} />
+              <span>Notifications on</span>
+            </div>
+          ) : notifPermission === 'denied' ? (
+            <div className="flex items-center gap-2 text-white/30 text-sm w-full mb-2 px-0.5">
+              <BellOff size={15} />
+              <span>Notifications blocked</span>
+            </div>
+          ) : (
+            <button
+              onClick={handleEnableNotifications}
+              className="flex items-center gap-2 text-white/70 hover:text-white text-sm transition-colors w-full mb-2"
+            >
+              <Bell size={15} />
+              Enable notifications
+            </button>
+          )
+        )}
         <button
           onClick={handleSignOut}
           className="flex items-center gap-2 text-white/70 hover:text-white text-sm transition-colors w-full"
