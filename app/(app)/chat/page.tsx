@@ -1092,21 +1092,25 @@ export default function ChatPage() {
 
   const markDoneMutation = useMutation({
     mutationFn: async ({ id, comment }: { id: string; comment: string }) => {
+      // Capture task from local cache before mutation so we have created_by even if SELECT returns null
+      const localTask = tasks.find(t => t.id === id);
       const { data, error } = await supabase.from('room_tasks')
         .update({ completed: true, done_comment: comment || null, done_at: new Date().toISOString(), done_by: myId })
         .eq('id', id).select().single();
       if (error) throw error;
-      return data as RoomTask;
+      return { task: (data ?? localTask) as RoomTask, comment };
     },
-    onSuccess: async (task) => {
+    onSuccess: async ({ task, comment }) => {
       qc.invalidateQueries({ queryKey: ['room-tasks', activeRoom] });
       setDoneModalTaskId(null);
       setDoneComment('');
-      if (task.created_by && task.created_by !== myId) {
+      if (!task) return;
+      const creatorId = task.created_by;
+      if (creatorId && creatorId !== myId) {
         const doer = allProfiles.find(p => p.id === myId);
-        await createNotif(task.created_by, 'task_done',
+        await createNotif(creatorId, 'task_done',
           'Task marked as done',
-          `"${task.title}" was completed by ${doer?.full_name ?? 'someone'}${task.done_comment ? `: "${task.done_comment}"` : ''}`,
+          `"${task.title}" was completed by ${doer?.full_name ?? 'someone'}${comment ? `: "${comment}"` : ''}`,
           { task_id: task.id, room: activeRoom });
       }
     },
