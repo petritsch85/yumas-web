@@ -497,7 +497,7 @@ function NotificationsPanel({ notifs, onMarkRead, onMarkAllRead }: {
 function MessageBubble({
   msg, isOwn, showMeta, myId, reactions,
   isEditing, editText, onStartEdit, onTextChange, onSave, onCancel,
-  onReply, onReact, onLongPress,
+  onReply, onReact, onLongPress, allProfiles = [],
 }: {
   msg: ChatMessage;
   isOwn: boolean;
@@ -513,6 +513,7 @@ function MessageBubble({
   onReply: () => void;
   onReact: (emoji: string) => void;
   onLongPress: () => void;
+  allProfiles?: MinProfile[];
 }) {
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const handleTouchStart = () => {
@@ -749,6 +750,7 @@ function ChatMessages({
                 onReply={() => onReply(msg)}
                 onReact={(emoji) => onReact(msg.id, emoji)}
                 onLongPress={() => onLongPress(msg)}
+                allProfiles={allProfiles}
               />
             );
           })}
@@ -1613,6 +1615,7 @@ export default function ChatPage() {
 
   /* ─── Render ─────────────────────────────────────────────────────────────── */
   return (
+    <>
     <div className="flex h-full bg-white rounded-xl border border-gray-100 overflow-hidden shadow-sm">
 
       {/* ── MOBILE: Channel list ── */}
@@ -2432,5 +2435,6 @@ export default function ChatPage() {
         </button>
       </div>
     )}
+    </>
   );
 }
