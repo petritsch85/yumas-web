@@ -1,4 +1,4 @@
-const CACHE = 'yumas-v1';
+const CACHE = 'yumas-v2';
 const STATIC_RE = /\/_next\/static\//;
 
 self.addEventListener('install', () => self.skipWaiting());
