@@ -29,8 +29,8 @@ type AgentSettings = {
 
 export default function BookingSettingsPage() {
   const searchParams   = useSearchParams();
-  const urlError       = searchParams.get('error');
-  const urlConnected   = searchParams.get('connected');
+  const urlError       = searchParams?.get('error');
+  const urlConnected   = searchParams?.get('connected');
   const qc             = useQueryClient();
 
   const [reconnecting, setReconnecting] = useState(false);

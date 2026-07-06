@@ -47,7 +47,7 @@ const fmt = (n: number) =>
 
 export default function PODetailPage() {
   const { t } = useT();
-  const { id }      = useParams<{ id: string }>();
+  const { id }      = useParams<{ id: string }>() ?? {};
   const router      = useRouter();
   const queryClient = useQueryClient();
 

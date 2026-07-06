@@ -70,7 +70,7 @@ function getEmbedUrl(raw: string): string | null {
 /* ─── Component ──────────────────────────────────────────────────────────── */
 export default function RecipeDetailPage() {
   const { t, lang } = useT();
-  const { id: itemId } = useParams<{ id: string }>();
+  const { id: itemId } = useParams<{ id: string }>() ?? {};
   const router = useRouter();
   const qc = useQueryClient();
   const uid = useId();

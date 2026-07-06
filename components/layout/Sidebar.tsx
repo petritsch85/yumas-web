@@ -241,7 +241,7 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
       for (const item of group.items) {
         if (item.children) {
           const childActive = item.children.some((c) =>
-            pathname === c.href || pathname.startsWith(c.href + '/')
+            pathname === c.href || (pathname ?? '').startsWith(c.href + '/')
           );
           if (childActive) toExpand.push(item.href);
         }
@@ -333,7 +333,7 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
       }
       return true;
     }
-    return pathname === href || pathname.startsWith(href + '/');
+    return pathname === href || (pathname ?? '').startsWith(href + '/');
   };
 
   const isAdmin   = profile?.role === 'admin';
@@ -398,7 +398,7 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
                 const hasChildren = !!item.children?.length;
                 // For items with children, active only when a child route is active (not by prefix)
                 const active = hasChildren
-                  ? item.children!.some(c => pathname === c.href || pathname.startsWith(c.href + '/'))
+                  ? item.children!.some(c => pathname === c.href || (pathname ?? '').startsWith(c.href + '/'))
                   : isActive(item.href);
                 const isComingSoon = item.href.startsWith('/coming-soon');
                 const isExpanded = expanded.has(item.href);

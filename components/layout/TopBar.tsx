@@ -120,7 +120,7 @@ export default function TopBar({ onMenuToggle }: { onMenuToggle: () => void }) {
         <Menu size={22} />
       </button>
       <div className="flex-1 min-w-0">
-        <h2 className="text-base font-semibold text-gray-900 truncate">{t(getTitleKey(pathname))}</h2>
+        <h2 className="text-base font-semibold text-gray-900 truncate">{t(getTitleKey(pathname ?? ''))}</h2>
       </div>
       <div className="flex items-center gap-4">
         <button className="text-gray-400 hover:text-gray-600 transition-colors">

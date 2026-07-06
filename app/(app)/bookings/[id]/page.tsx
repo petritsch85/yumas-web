@@ -53,7 +53,7 @@ function fmtRequestedDate(d: string | null) {
 /* ─── Page ───────────────────────────────────────────────────────────────── */
 export default function BookingDetailPage() {
   const router      = useRouter();
-  const { id }      = useParams<{ id: string }>();
+  const { id }      = useParams<{ id: string }>() ?? {};
   const qc          = useQueryClient();
 
   const [replyText, setReplyText] = useState('');

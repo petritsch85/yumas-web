@@ -9,7 +9,7 @@ import { useT } from '@/lib/i18n';
 
 export default function SupplierDetailPage() {
   const { t } = useT();
-  const { id } = useParams<{ id: string }>();
+  const { id } = useParams<{ id: string }>() ?? {};
   const router = useRouter();
 
   const { data: supplier, isLoading } = useQuery({

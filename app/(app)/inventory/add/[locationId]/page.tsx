@@ -71,7 +71,7 @@ export default function LocationInventoryFormPage({
   const router       = useRouter();
   const searchParams = useSearchParams();
   const { t } = useT();
-  const locationName = searchParams.get('name') ?? 'Location';
+  const locationName = searchParams?.get('name') ?? 'Location';
 
   // useParams() reliably reads the URL segment on the client regardless of
   // whether Next.js has made the params prop async (Next.js 15 behaviour).
