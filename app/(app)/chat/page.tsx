@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import dynamic from 'next/dynamic';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
@@ -761,6 +762,64 @@ function ChatMessages({
   );
 }
 
+/* ─── Mention dropdown portal ────────────────────────────────────────────────── */
+function MentionDropdown({
+  profiles, mentionIndex, anchorRef, onSelect,
+}: {
+  profiles: MinProfile[];
+  mentionIndex: number;
+  anchorRef: React.RefObject<HTMLTextAreaElement | null>;
+  onSelect: (p: MinProfile) => void;
+}) {
+  const [rect, setRect] = useState<DOMRect | null>(null);
+
+  useEffect(() => {
+    if (!profiles.length) { setRect(null); return; }
+    const update = () => {
+      if (anchorRef.current) setRect(anchorRef.current.getBoundingClientRect());
+    };
+    update();
+    window.addEventListener('resize', update);
+    window.addEventListener('scroll', update, true);
+    return () => {
+      window.removeEventListener('resize', update);
+      window.removeEventListener('scroll', update, true);
+    };
+  }, [profiles.length, anchorRef]);
+
+  if (!profiles.length || !rect) return null;
+
+  return createPortal(
+    <div
+      style={{
+        position: 'fixed',
+        bottom: window.innerHeight - rect.top + 8,
+        left: rect.left,
+        width: rect.width,
+        zIndex: 9999,
+      }}
+      className="bg-white border border-gray-200 rounded-xl shadow-xl overflow-hidden"
+    >
+      {profiles.map((p, i) => (
+        <button
+          key={p.id}
+          type="button"
+          onMouseDown={e => e.preventDefault()}
+          onClick={() => onSelect(p)}
+          className={`w-full flex items-center gap-2.5 px-3 py-2.5 text-left transition-colors ${i === mentionIndex ? 'bg-[#1B5E20]/10 text-[#1B5E20]' : 'hover:bg-gray-50 text-gray-900'}`}
+        >
+          <div className="w-7 h-7 rounded-full bg-[#1B5E20]/15 flex items-center justify-center text-[10px] font-bold text-[#1B5E20] flex-shrink-0">
+            {p.full_name.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase()}
+          </div>
+          <span className="text-sm font-medium">{p.full_name}</span>
+          <span className="text-xs text-gray-400 ml-auto capitalize">{p.role}</span>
+        </button>
+      ))}
+    </div>,
+    document.body
+  );
+}
+
 function ChatInput({
   text, setText, activeLabel, textareaRef, fileInputRef, uploading, sendMutation, handleSend, handleKeyDown, handleFileChange, replyingTo, onCancelReply, mentionMembers,
 }: {
@@ -887,25 +946,12 @@ function ChatInput({
       )}
     <div className="px-4 py-3">
       {/* @mention autocomplete dropdown */}
-      {mentionQuery !== null && filteredMentions.length > 0 && (
-        <div className="absolute bottom-full left-4 right-4 mb-1 z-50 bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden">
-          {filteredMentions.map((p, i) => (
-            <button
-              key={p.id}
-              type="button"
-              onMouseDown={e => e.preventDefault()}
-              onClick={() => insertMention(p)}
-              className={`w-full flex items-center gap-2.5 px-3 py-2 text-left transition-colors ${i === mentionIndex ? 'bg-[#1B5E20]/10 text-[#1B5E20]' : 'hover:bg-gray-50 text-gray-900'}`}
-            >
-              <div className="w-6 h-6 rounded-full bg-[#1B5E20]/15 flex items-center justify-center text-[10px] font-bold text-[#1B5E20] flex-shrink-0">
-                {p.full_name.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase()}
-              </div>
-              <span className="text-sm font-medium">{p.full_name}</span>
-              <span className="text-xs text-gray-400 ml-auto capitalize">{p.role}</span>
-            </button>
-          ))}
-        </div>
-      )}
+      <MentionDropdown
+        profiles={filteredMentions}
+        mentionIndex={mentionIndex}
+        anchorRef={textareaRef}
+        onSelect={insertMention}
+      />
 
       {/* Emoji picker popover */}
       {showEmoji && (
