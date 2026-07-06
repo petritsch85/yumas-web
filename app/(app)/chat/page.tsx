@@ -843,6 +843,8 @@ function ChatInput({
   const mentionStartRef = useRef<number>(-1);
   const mentionQueryRef = useRef<string | null>(null);
   const emojiRef = useRef<HTMLDivElement>(null);
+  const textRef = useRef(text);
+  useEffect(() => { textRef.current = text; }, [text]);
 
   useEffect(() => {
     if (!showEmoji) return;
@@ -875,8 +877,7 @@ function ChatInput({
     : [];
 
   const insertMention = (profile: MinProfile) => {
-    // Use the React text state — always accurate for a controlled textarea
-    const val = text;
+    const val = textRef.current; // always current, no stale-closure risk
     const atIdx = val.lastIndexOf('@');
     console.log('[mention] insertMention called', { profile: profile.full_name, val, atIdx });
     if (atIdx < 0) {
@@ -939,7 +940,10 @@ function ChatInput({
             <button
               key={p.id}
               type="button"
-              onClick={() => insertMention(p)}
+              onPointerDown={e => {
+                e.preventDefault(); // keeps textarea focused, fires before blur
+                insertMention(p);
+              }}
               className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 bg-white border border-[#1B5E20]/30 text-[#1B5E20] rounded-full text-sm font-medium hover:bg-[#1B5E20]/10 transition-colors"
             >
               <span className="w-5 h-5 rounded-full bg-[#1B5E20]/15 flex items-center justify-center text-[9px] font-bold flex-shrink-0">
