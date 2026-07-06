@@ -642,7 +642,11 @@ function MessageBubble({
               {msg.media_url && msg.media_type === 'video' && (
                 <video src={msg.media_url} controls className="rounded-xl max-h-64 max-w-full mb-1" />
               )}
-              {msg.content && <p className="whitespace-pre-wrap break-words leading-snug">{msg.content}</p>}
+              {msg.content && (
+                <p className="whitespace-pre-wrap break-words leading-snug">
+                  {highlightMentions(msg.content, allProfiles)}
+                </p>
+              )}
             </div>
 
             {msg.edited_at && (
@@ -676,10 +680,24 @@ function MessageBubble({
 }
 
 /* ─── Shared chat body components ────────────────────────────────────────────── */
+function highlightMentions(content: string, profiles: MinProfile[]): React.ReactNode {
+  if (!profiles.length) return content;
+  const names = [...profiles].sort((a, b) => b.full_name.length - a.full_name.length);
+  const escaped = names.map(p => '@' + p.full_name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  const re = new RegExp(`(${escaped.join('|')})`, 'g');
+  const parts = content.split(re);
+  // Every odd index in split result is a captured group (the mention)
+  return parts.map((part, i) =>
+    i % 2 === 1
+      ? <span key={i} className="font-semibold text-[#1B5E20]">{part}</span>
+      : part
+  );
+}
+
 function ChatMessages({
   messages, isLoading, myId, messagesEndRef, reactions,
   editingId, editingText, onStartEdit, onTextChange, onSave, onCancel,
-  onReply, onReact, onLongPress,
+  onReply, onReact, onLongPress, allProfiles = [],
 }: {
   messages: ChatMessage[];
   isLoading: boolean;
@@ -695,6 +713,7 @@ function ChatMessages({
   onReply: (msg: ChatMessage) => void;
   onReact: (messageId: string, emoji: string) => void;
   onLongPress: (msg: ChatMessage) => void;
+  allProfiles?: MinProfile[];
 }) {
   return (
     <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-4 py-3">
@@ -741,7 +760,7 @@ function ChatMessages({
 }
 
 function ChatInput({
-  text, setText, activeLabel, textareaRef, fileInputRef, uploading, sendMutation, handleSend, handleKeyDown, handleFileChange, replyingTo, onCancelReply,
+  text, setText, activeLabel, textareaRef, fileInputRef, uploading, sendMutation, handleSend, handleKeyDown, handleFileChange, replyingTo, onCancelReply, mentionMembers,
 }: {
   text: string;
   setText: (v: string) => void;
@@ -755,8 +774,12 @@ function ChatInput({
   handleFileChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
   replyingTo: ChatMessage | null;
   onCancelReply: () => void;
+  mentionMembers: MinProfile[];
 }) {
   const [showEmoji, setShowEmoji] = useState(false);
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+  const [mentionStart, setMentionStart] = useState<number>(-1);
+  const [mentionIndex, setMentionIndex] = useState(0);
   const emojiRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -777,13 +800,56 @@ function ChatInput({
     const end = ta.selectionEnd ?? text.length;
     const newText = text.slice(0, start) + emoji + text.slice(end);
     setText(newText);
-    // restore cursor after the inserted emoji
     requestAnimationFrame(() => {
       ta.focus();
       ta.setSelectionRange(start + emoji.length, start + emoji.length);
       ta.style.height = 'auto';
       ta.style.height = `${Math.min(ta.scrollHeight, 128)}px`;
     });
+  };
+
+  const filteredMentions = mentionQuery !== null
+    ? mentionMembers.filter(p => p.full_name.toLowerCase().includes(mentionQuery.toLowerCase())).slice(0, 6)
+    : [];
+
+  const insertMention = (profile: MinProfile) => {
+    const ta = textareaRef.current;
+    if (!ta) return;
+    const before = text.slice(0, mentionStart);
+    const after = text.slice(ta.selectionStart ?? text.length);
+    const inserted = `@${profile.full_name} `;
+    const newText = before + inserted + after;
+    setText(newText);
+    setMentionQuery(null);
+    setMentionStart(-1);
+    setMentionIndex(0);
+    requestAnimationFrame(() => {
+      ta.focus();
+      const pos = before.length + inserted.length;
+      ta.setSelectionRange(pos, pos);
+    });
+  };
+
+  const handleMentionKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (mentionQuery === null || filteredMentions.length === 0) {
+      handleKeyDown(e);
+      return;
+    }
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setMentionIndex(i => (i + 1) % filteredMentions.length);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setMentionIndex(i => (i - 1 + filteredMentions.length) % filteredMentions.length);
+    } else if (e.key === 'Enter' || e.key === 'Tab') {
+      e.preventDefault();
+      insertMention(filteredMentions[mentionIndex]);
+    } else if (e.key === 'Escape') {
+      setMentionQuery(null);
+      setMentionStart(-1);
+    } else {
+      handleKeyDown(e);
+    }
   };
 
   return (
@@ -802,6 +868,25 @@ function ChatInput({
         </div>
       )}
     <div className="px-4 py-3">
+      {/* @mention autocomplete dropdown */}
+      {mentionQuery !== null && filteredMentions.length > 0 && (
+        <div className="absolute bottom-full left-4 right-4 mb-1 z-50 bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden">
+          {filteredMentions.map((p, i) => (
+            <button
+              key={p.id}
+              onMouseDown={e => { e.preventDefault(); insertMention(p); }}
+              className={`w-full flex items-center gap-2.5 px-3 py-2 text-left transition-colors ${i === mentionIndex ? 'bg-[#1B5E20]/10 text-[#1B5E20]' : 'hover:bg-gray-50 text-gray-900'}`}
+            >
+              <div className="w-6 h-6 rounded-full bg-[#1B5E20]/15 flex items-center justify-center text-[10px] font-bold text-[#1B5E20] flex-shrink-0">
+                {p.full_name.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase()}
+              </div>
+              <span className="text-sm font-medium">{p.full_name}</span>
+              <span className="text-xs text-gray-400 ml-auto capitalize">{p.role}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* Emoji picker popover */}
       {showEmoji && (
         <div ref={emojiRef} className="absolute bottom-full left-4 mb-1 z-50 shadow-xl rounded-2xl overflow-hidden">
@@ -822,11 +907,24 @@ function ChatInput({
             ref={textareaRef}
             value={text}
             onChange={e => {
-              setText(e.target.value);
+              const val = e.target.value;
+              setText(val);
               e.target.style.height = 'auto';
               e.target.style.height = `${Math.min(e.target.scrollHeight, 128)}px`;
+              // Detect @mention: find last @ before cursor
+              const cursor = e.target.selectionStart ?? val.length;
+              const textBeforeCursor = val.slice(0, cursor);
+              const atMatch = textBeforeCursor.match(/@([\w ]*)$/);
+              if (atMatch) {
+                setMentionQuery(atMatch[1]);
+                setMentionStart(cursor - atMatch[0].length);
+                setMentionIndex(0);
+              } else {
+                setMentionQuery(null);
+                setMentionStart(-1);
+              }
             }}
-            onKeyDown={handleKeyDown}
+            onKeyDown={handleMentionKeyDown}
             placeholder={`Message ${activeLabel}…`}
             rows={1}
             disabled={sendMutation.isPending || uploading}
@@ -1511,7 +1609,7 @@ export default function ChatPage() {
 
   const handleReact = (messageId: string, emoji: string) => reactMutation.mutate({ messageId, emoji });
 
-  const sharedInputProps = { text, setText, activeLabel, textareaRef, fileInputRef, uploading, sendMutation, handleSend, handleKeyDown, handleFileChange, replyingTo, onCancelReply: () => setReplyingTo(null) };
+  const sharedInputProps = { text, setText, activeLabel, textareaRef, fileInputRef, uploading, sendMutation, handleSend, handleKeyDown, handleFileChange, replyingTo, onCancelReply: () => setReplyingTo(null), mentionMembers: roomMembers };
 
   /* ─── Render ─────────────────────────────────────────────────────────────── */
   return (
@@ -1578,7 +1676,7 @@ export default function ChatPage() {
               </div>
             )}
           </div>
-          <ChatMessages messages={messages} isLoading={isLoading} myId={myId} messagesEndRef={messagesEndRef} reactions={reactions} editingId={editingId} editingText={editingText} onStartEdit={handleStartEdit} onTextChange={setEditingText} onSave={handleSaveEdit} onCancel={handleCancelEdit} onReply={setReplyingTo} onReact={handleReact} onLongPress={setLongPressMsg} />
+          <ChatMessages messages={messages} isLoading={isLoading} myId={myId} messagesEndRef={messagesEndRef} reactions={reactions} editingId={editingId} editingText={editingText} onStartEdit={handleStartEdit} onTextChange={setEditingText} onSave={handleSaveEdit} onCancel={handleCancelEdit} onReply={setReplyingTo} onReact={handleReact} onLongPress={setLongPressMsg} allProfiles={allProfiles} />
           <ChatInput {...sharedInputProps} />
 
         </div>
@@ -2313,7 +2411,7 @@ export default function ChatPage() {
                 </div>
               )}
             </div>
-            <ChatMessages messages={messages} isLoading={isLoading} myId={myId} messagesEndRef={messagesEndRef} reactions={reactions} editingId={editingId} editingText={editingText} onStartEdit={handleStartEdit} onTextChange={setEditingText} onSave={handleSaveEdit} onCancel={handleCancelEdit} onReply={setReplyingTo} onReact={handleReact} onLongPress={setLongPressMsg} />
+            <ChatMessages messages={messages} isLoading={isLoading} myId={myId} messagesEndRef={messagesEndRef} reactions={reactions} editingId={editingId} editingText={editingText} onStartEdit={handleStartEdit} onTextChange={setEditingText} onSave={handleSaveEdit} onCancel={handleCancelEdit} onReply={setReplyingTo} onReact={handleReact} onLongPress={setLongPressMsg} allProfiles={allProfiles} />
             <ChatInput {...sharedInputProps} />
           </>
         )}
