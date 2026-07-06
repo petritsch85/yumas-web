@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import dynamic from 'next/dynamic';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
-import { Send, Paperclip, MessageCircle, ChevronLeft, X, Users, ClipboardList, CheckSquare, Square, Plus, Pencil, Smile, CornerUpLeft, Bell, Calendar, Flag, UserCheck } from 'lucide-react';
+import { Send, Paperclip, MessageCircle, ChevronLeft, X, Users, ClipboardList, CheckSquare, Square, Plus, Pencil, Smile, CornerUpLeft, Bell, Calendar, Flag, UserCheck, KeyRound, Eye, EyeOff, Copy, Check } from 'lucide-react';
 import type { Profile } from '@/types';
 
 const EmojiPicker = dynamic(() => import('emoji-picker-react'), { ssr: false });
@@ -43,6 +43,17 @@ type RoomTask = {
   done_comment: string | null;
   done_at: string | null;
   done_by: string | null;
+  created_at: string;
+};
+
+type RoomPassword = {
+  id: string;
+  room: string;
+  label: string;
+  username: string | null;
+  password: string;
+  url: string | null;
+  created_by: string | null;
   created_at: string;
 };
 
@@ -875,6 +886,11 @@ export default function ChatPage() {
   const [mobileView, setMobileView] = useState<'list' | 'chat' | 'notifications'>('list');
   const [showMobileMembers, setShowMobileMembers] = useState(false);
   const [showMobileTasks, setShowMobileTasks] = useState(false);
+  const [showPasswordsPanel, setShowPasswordsPanel] = useState(false);
+  const [showAddPassword, setShowAddPassword] = useState(false);
+  const [visiblePasswords, setVisiblePasswords] = useState<Set<string>>(new Set());
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [passwordDraft, setPasswordDraft] = useState({ label: '', username: '', password: '', url: '' });
   const [showGroupModal, setShowGroupModal] = useState(false);
   const [selectedGroupMembers, setSelectedGroupMembers] = useState<string[]>([]);
   const [pendingFile, setPendingFile] = useState<File | null>(null);
@@ -1042,6 +1058,49 @@ export default function ChatPage() {
     },
     staleTime: 0,
   });
+
+  /* ── Room passwords ── */
+  const { data: roomPasswords = [] } = useQuery<RoomPassword[]>({
+    queryKey: ['room-passwords', activeRoom],
+    queryFn: async () => {
+      if (activeRoom.startsWith('dm::')) return [];
+      const { data } = await supabase.from('room_passwords').select('*').eq('room', activeRoom).order('created_at', { ascending: true });
+      return (data ?? []) as RoomPassword[];
+    },
+    staleTime: 0,
+  });
+
+  const addPasswordMutation = useMutation({
+    mutationFn: async (draft: typeof passwordDraft) => {
+      const { error } = await supabase.from('room_passwords').insert({
+        room: activeRoom, label: draft.label.trim(),
+        username: draft.username.trim() || null,
+        password: draft.password,
+        url: draft.url.trim() || null,
+        created_by: myId,
+      });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['room-passwords', activeRoom] });
+      setPasswordDraft({ label: '', username: '', password: '', url: '' });
+      setShowAddPassword(false);
+    },
+  });
+
+  const deletePasswordMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from('room_passwords').delete().eq('id', id);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['room-passwords', activeRoom] }),
+  });
+
+  const copyToClipboard = (text: string, id: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedId(id);
+    setTimeout(() => setCopiedId(null), 2000);
+  };
 
   const createNotif = async (userId: string, type: string, title: string, body: string, metadata: Record<string, unknown> = {}) => {
     const { error } = await supabase.from('notifications').insert({ user_id: userId, type, title, body, metadata });
@@ -1629,6 +1688,138 @@ export default function ChatPage() {
         </div>
       )}
 
+      {/* ── Passwords panel ── */}
+      {showPasswordsPanel && (
+        <div className="fixed inset-0 z-50 flex flex-col justify-end" onClick={() => setShowPasswordsPanel(false)}>
+          <div className="absolute inset-0 bg-black/40" />
+          <div className="relative bg-white rounded-t-2xl shadow-2xl max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-center pt-3 pb-1 flex-shrink-0"><div className="w-10 h-1 rounded-full bg-gray-300" /></div>
+            <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
+              <div className="flex items-center gap-2">
+                <KeyRound size={16} className="text-gray-500" />
+                <span className="font-semibold text-gray-900">Passwords — {activeLabel}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setShowAddPassword(v => !v)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#1B5E20] text-white text-xs font-medium"
+                >
+                  <Plus size={13} /> Add
+                </button>
+                <button onClick={() => setShowPasswordsPanel(false)} className="text-gray-400 hover:text-gray-600 p-1"><X size={18} /></button>
+              </div>
+            </div>
+
+            {/* Add form */}
+            {showAddPassword && (
+              <div className="px-4 py-4 border-b border-gray-100 bg-gray-50 flex flex-col gap-3 flex-shrink-0">
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-[10px] font-semibold text-gray-500 mb-1">Label *</label>
+                    <input value={passwordDraft.label} onChange={e => setPasswordDraft(d => ({ ...d, label: e.target.value }))}
+                      placeholder="e.g. WiFi, Instagram" style={{ fontSize: '16px' }}
+                      className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#1B5E20]" />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-semibold text-gray-500 mb-1">Username / Email</label>
+                    <input value={passwordDraft.username} onChange={e => setPasswordDraft(d => ({ ...d, username: e.target.value }))}
+                      placeholder="optional" style={{ fontSize: '16px' }}
+                      className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#1B5E20]" />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-[10px] font-semibold text-gray-500 mb-1">Password *</label>
+                    <input value={passwordDraft.password} onChange={e => setPasswordDraft(d => ({ ...d, password: e.target.value }))}
+                      placeholder="Enter password" style={{ fontSize: '16px' }}
+                      className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#1B5E20]" />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-semibold text-gray-500 mb-1">URL</label>
+                    <input value={passwordDraft.url} onChange={e => setPasswordDraft(d => ({ ...d, url: e.target.value }))}
+                      placeholder="optional" style={{ fontSize: '16px' }}
+                      className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#1B5E20]" />
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={() => { setShowAddPassword(false); setPasswordDraft({ label: '', username: '', password: '', url: '' }); }}
+                    className="flex-1 py-2 rounded-xl border border-gray-200 text-sm text-gray-600">Cancel</button>
+                  <button
+                    onClick={() => { if (passwordDraft.label.trim() && passwordDraft.password) addPasswordMutation.mutate(passwordDraft); }}
+                    disabled={!passwordDraft.label.trim() || !passwordDraft.password || addPasswordMutation.isPending}
+                    className="flex-1 py-2 rounded-xl bg-[#1B5E20] text-white text-sm font-semibold disabled:opacity-40">
+                    {addPasswordMutation.isPending ? 'Saving…' : 'Save'}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Password list */}
+            <div className="overflow-auto flex-1">
+              {roomPasswords.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-10 text-gray-400 select-none">
+                  <KeyRound size={32} className="mb-2 opacity-25" />
+                  <p className="text-sm">No passwords yet</p>
+                </div>
+              ) : (
+                <table className="w-full text-sm border-collapse">
+                  <thead>
+                    <tr className="border-b border-gray-100 bg-gray-50 text-left">
+                      <th className="px-3 py-2 text-xs font-semibold text-gray-500">Label</th>
+                      <th className="px-3 py-2 text-xs font-semibold text-gray-500">Username</th>
+                      <th className="px-3 py-2 text-xs font-semibold text-gray-500">Password</th>
+                      <th className="px-3 py-2 text-xs font-semibold text-gray-500">URL</th>
+                      <th className="px-2 py-2 w-6" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {roomPasswords.map(pw => {
+                      const isVisible = visiblePasswords.has(pw.id);
+                      const wasCopied = copiedId === pw.id;
+                      return (
+                        <tr key={pw.id} className="border-b border-gray-50 hover:bg-gray-50/60 transition-colors">
+                          <td className="px-3 py-2.5 align-middle">
+                            <span className="font-medium text-gray-800 text-sm">{pw.label}</span>
+                          </td>
+                          <td className="px-3 py-2.5 align-middle text-sm text-gray-600">
+                            {pw.username ?? <span className="text-gray-300">—</span>}
+                          </td>
+                          <td className="px-3 py-2.5 align-middle">
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-sm text-gray-800 font-mono tracking-wide">
+                                {isVisible ? pw.password : '••••••••'}
+                              </span>
+                              <button onClick={() => setVisiblePasswords(s => { const n = new Set(s); isVisible ? n.delete(pw.id) : n.add(pw.id); return n; })}
+                                className="text-gray-400 hover:text-gray-600 p-0.5">
+                                {isVisible ? <EyeOff size={13} /> : <Eye size={13} />}
+                              </button>
+                              <button onClick={() => copyToClipboard(pw.password, pw.id)}
+                                className={`p-0.5 transition-colors ${wasCopied ? 'text-[#1B5E20]' : 'text-gray-400 hover:text-gray-600'}`}>
+                                {wasCopied ? <Check size={13} /> : <Copy size={13} />}
+                              </button>
+                            </div>
+                          </td>
+                          <td className="px-3 py-2.5 align-middle text-sm">
+                            {pw.url
+                              ? <a href={pw.url} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline truncate max-w-[120px] block">{pw.url.replace(/^https?:\/\//, '')}</a>
+                              : <span className="text-gray-300">—</span>}
+                          </td>
+                          <td className="px-2 py-2.5 align-middle">
+                            <button onClick={() => deletePasswordMutation.mutate(pw.id)} className="text-gray-400 hover:text-red-500 transition-colors p-1 rounded hover:bg-red-50">
+                              <X size={15} />
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Members panel (shared mobile + desktop) ── */}
       {showMobileMembers && (
         <div className="fixed inset-0 z-50 flex flex-col justify-end" onClick={() => setShowMobileMembers(false)}>
@@ -2101,6 +2292,12 @@ export default function ChatPage() {
                     {tasks.filter(t => !t.completed).length > 0 && (
                       <span className="text-xs font-medium">{tasks.filter(t => !t.completed).length}</span>
                     )}
+                  </button>
+                  <button
+                    onClick={() => setShowPasswordsPanel(true)}
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors"
+                  >
+                    <KeyRound size={14} />
                   </button>
                   {roomMembers.length > 0 && (
                     <button
