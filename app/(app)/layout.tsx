@@ -21,11 +21,10 @@ async function subscribeToPush() {
       return;
     }
 
+    const VAPID_PUBLIC_KEY = 'BHIatRmyZ5TbxlYrhey9wPW1BCz8zktL2mZ_hgIYafnitRTvKb-p5vdbdWj0Idym1a7xSrzbM2JzRq-OzOHEJRg';
     const sub = await reg.pushManager.subscribe({
       userVisibleOnly: true,
-      applicationServerKey: urlBase64ToUint8Array(
-        process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!,
-      ),
+      applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
     });
     await sendSubscriptionToServer(sub);
   } catch (err) {

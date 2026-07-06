@@ -279,8 +279,13 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
     if ('Notification' in window) setNotifPermission(Notification.permission);
   }, []);
 
+  const VAPID_PUBLIC_KEY = 'BHIatRmyZ5TbxlYrhey9wPW1BCz8zktL2mZ_hgIYafnitRTvKb-p5vdbdWj0Idym1a7xSrzbM2JzRq-OzOHEJRg';
+
   const handleEnableNotifications = async () => {
-    if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+      alert('Push notifications are not supported on this browser.');
+      return;
+    }
     const permission = await Notification.requestPermission();
     setNotifPermission(permission);
     if (permission !== 'granted') return;
@@ -288,14 +293,14 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
       const reg = await navigator.serviceWorker.ready;
       const sub = await reg.pushManager.subscribe({
         userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!),
+        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
       });
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
       const key = sub.getKey('p256dh');
       const auth = sub.getKey('auth');
       if (!key || !auth) return;
-      await fetch('/api/push/subscribe', {
+      const res = await fetch('/api/push/subscribe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
         body: JSON.stringify({
@@ -304,7 +309,10 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
           auth: btoa(String.fromCharCode(...new Uint8Array(auth))),
         }),
       });
-    } catch (err) { console.warn('Push subscribe failed:', err); }
+      if (!res.ok) alert('Failed to save subscription: ' + res.status);
+    } catch (err) {
+      alert('Push setup failed: ' + String(err));
+    }
   };
 
   function urlBase64ToUint8Array(base64String: string) {
@@ -486,10 +494,13 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
         </Link>
         {notifPermission !== 'unsupported' && (
           notifPermission === 'granted' ? (
-            <div className="flex items-center gap-2 text-white/40 text-sm w-full mb-2 px-0.5">
+            <button
+              onClick={handleEnableNotifications}
+              className="flex items-center gap-2 text-white/40 hover:text-white/70 text-sm w-full mb-2 transition-colors"
+            >
               <Bell size={15} />
               <span>Notifications on</span>
-            </div>
+            </button>
           ) : notifPermission === 'denied' ? (
             <div className="flex items-center gap-2 text-white/30 text-sm w-full mb-2 px-0.5">
               <BellOff size={15} />
