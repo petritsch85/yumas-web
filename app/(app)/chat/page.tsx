@@ -930,7 +930,26 @@ function ChatInput({
   };
 
   return (
-    <div className="border-t border-gray-100 flex-shrink-0 relative">
+    <div className="border-t border-gray-100 flex-shrink-0">
+      {/* @mention chip bar — in normal flow, no positioning issues */}
+      {filteredMentions.length > 0 && (
+        <div className="flex gap-2 px-4 py-2 overflow-x-auto border-b border-gray-100 bg-gray-50">
+          {filteredMentions.map(p => (
+            <button
+              key={p.id}
+              type="button"
+              onMouseDown={e => e.preventDefault()}
+              onClick={() => insertMention(p)}
+              className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 bg-white border border-[#1B5E20]/30 text-[#1B5E20] rounded-full text-sm font-medium hover:bg-[#1B5E20]/10 transition-colors"
+            >
+              <span className="w-5 h-5 rounded-full bg-[#1B5E20]/15 flex items-center justify-center text-[9px] font-bold flex-shrink-0">
+                {p.full_name.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase()}
+              </span>
+              {p.full_name}
+            </button>
+          ))}
+        </div>
+      )}
       {/* Reply preview bar */}
       {replyingTo && (
         <div className="flex items-center gap-2 px-4 py-2 bg-gray-50 border-b border-gray-100">
@@ -945,13 +964,6 @@ function ChatInput({
         </div>
       )}
     <div className="px-4 py-3">
-      {/* @mention autocomplete dropdown */}
-      <MentionDropdown
-        profiles={filteredMentions}
-        mentionIndex={mentionIndex}
-        anchorRef={textareaRef}
-        onSelect={insertMention}
-      />
 
       {/* Emoji picker popover */}
       {showEmoji && (
