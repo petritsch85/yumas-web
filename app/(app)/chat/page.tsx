@@ -780,8 +780,9 @@ function ChatInput({
 }) {
   const [showEmoji, setShowEmoji] = useState(false);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
-  const [mentionStart, setMentionStart] = useState<number>(-1);
   const [mentionIndex, setMentionIndex] = useState(0);
+  const mentionStartRef = useRef<number>(-1);
+  const mentionQueryRef = useRef<string | null>(null);
   const emojiRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -815,17 +816,21 @@ function ChatInput({
     : [];
 
   const insertMention = (profile: MinProfile) => {
-    if (mentionStart < 0) return;
-    // Use mentionStart + "@query".length so we don't depend on cursor position at click time
-    const mentionEnd = mentionStart + 1 + (mentionQuery?.length ?? 0);
-    const before = text.slice(0, mentionStart);
-    const after = text.slice(mentionEnd);
+    const start = mentionStartRef.current;
+    const query = mentionQueryRef.current;
+    if (start < 0 || query === null) return;
+    // Read directly from DOM — avoids React state batching lag
+    const currentValue = textareaRef.current?.value ?? text;
+    const mentionEnd = start + 1 + query.length;
+    const before = currentValue.slice(0, start);
+    const after = currentValue.slice(mentionEnd);
     const inserted = `@${profile.full_name} `;
     const newText = before + inserted + after;
-    setText(newText);
+    mentionStartRef.current = -1;
+    mentionQueryRef.current = null;
     setMentionQuery(null);
-    setMentionStart(-1);
     setMentionIndex(0);
+    setText(newText);
     const ta = textareaRef.current;
     requestAnimationFrame(() => {
       if (ta) {
@@ -839,7 +844,7 @@ function ChatInput({
   };
 
   const handleMentionKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (mentionQuery === null || filteredMentions.length === 0) {
+    if (mentionQueryRef.current === null || filteredMentions.length === 0) {
       handleKeyDown(e);
       return;
     }
@@ -853,8 +858,9 @@ function ChatInput({
       e.preventDefault();
       insertMention(filteredMentions[mentionIndex]);
     } else if (e.key === 'Escape') {
+      mentionQueryRef.current = null;
+      mentionStartRef.current = -1;
       setMentionQuery(null);
-      setMentionStart(-1);
     } else {
       handleKeyDown(e);
     }
@@ -924,12 +930,15 @@ function ChatInput({
               const textBeforeCursor = val.slice(0, cursor);
               const atMatch = textBeforeCursor.match(/@([\w ]*)$/);
               if (atMatch) {
+                const start = cursor - atMatch[0].length;
+                mentionStartRef.current = start;
+                mentionQueryRef.current = atMatch[1];
                 setMentionQuery(atMatch[1]);
-                setMentionStart(cursor - atMatch[0].length);
                 setMentionIndex(0);
               } else {
+                mentionStartRef.current = -1;
+                mentionQueryRef.current = null;
                 setMentionQuery(null);
-                setMentionStart(-1);
               }
             }}
             onKeyDown={handleMentionKeyDown}
