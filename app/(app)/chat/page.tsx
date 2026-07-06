@@ -1127,16 +1127,7 @@ export default function ChatPage() {
       qc.invalidateQueries({ queryKey: ['room-tasks', activeRoom] });
       setShowNewTaskModal(false);
       setTaskDraft({ title: '', description: '', priority: 'medium', deadline: '', assigneeIds: [], assignAll: false });
-      if (!task) { console.error('addTaskMutation: task is null, cannot send notifications'); return; }
-      const targets = task.assignee_ids ?? [];
-      console.log('addTaskMutation onSuccess: targets=', targets);
-      for (const uid of targets) {
-        if (uid === myId) continue;
-        await createNotif(uid, 'task_assigned',
-          'New task assigned to you',
-          `"${task.title}" in ${activeLabel} — priority: ${task.priority ?? 'medium'}${task.deadline ? `, due ${task.deadline}` : ''}`,
-          { task_id: task.id, room: activeRoom });
-      }
+      // Notifications are handled by the DB trigger notify_task_assignees()
     },
   });
 
@@ -1163,15 +1154,7 @@ export default function ChatPage() {
       qc.invalidateQueries({ queryKey: ['room-tasks', activeRoom] });
       setDoneModalTaskId(null);
       setDoneComment('');
-      if (!task) return;
-      const creatorId = task.created_by;
-      if (creatorId && creatorId !== myId) {
-        const doer = allProfiles.find(p => p.id === myId);
-        await createNotif(creatorId, 'task_done',
-          'Task marked as done',
-          `"${task.title}" was completed by ${doer?.full_name ?? 'someone'}${comment ? `: "${comment}"` : ''}`,
-          { task_id: task.id, room: activeRoom });
-      }
+      // Notifications are handled by the DB trigger notify_task_done()
     },
   });
 
