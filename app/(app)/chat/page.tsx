@@ -886,6 +886,7 @@ export default function ChatPage() {
   const [mobileView, setMobileView] = useState<'list' | 'chat' | 'notifications'>('list');
   const [showMobileMembers, setShowMobileMembers] = useState(false);
   const [showMobileTasks, setShowMobileTasks] = useState(false);
+  const [toast, setToast] = useState<{ title: string; body: string } | null>(null);
   const [showPasswordsPanel, setShowPasswordsPanel] = useState(false);
   const [showAddPassword, setShowAddPassword] = useState(false);
   const [visiblePasswords, setVisiblePasswords] = useState<Set<string>>(new Set());
@@ -1096,6 +1097,11 @@ export default function ChatPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['room-passwords', activeRoom] }),
   });
 
+  const showToast = (title: string, body: string) => {
+    setToast({ title, body });
+    setTimeout(() => setToast(null), 4000);
+  };
+
   const copyToClipboard = (text: string, id: string) => {
     navigator.clipboard.writeText(text);
     setCopiedId(id);
@@ -1122,10 +1128,21 @@ export default function ChatPage() {
       if (error) throw error;
       return (data ?? { title: draft.title.trim(), priority: draft.priority, deadline: draft.deadline || null, assignee_ids: assigneeIds }) as RoomTask;
     },
-    onSuccess: async () => {
+    onSuccess: async (task) => {
       qc.invalidateQueries({ queryKey: ['room-tasks', activeRoom] });
       setShowNewTaskModal(false);
+      const draft = taskDraft;
       setTaskDraft({ title: '', description: '', priority: 'medium', deadline: '', assigneeIds: [], assignAll: false });
+      const assigneeNames = (task.assignee_ids ?? [])
+        .map(id => allProfiles.find(p => p.id === id)?.full_name.split(' ')[0])
+        .filter(Boolean).join(', ');
+      const lines = [
+        PRIORITY_LABELS[task.priority ?? 'medium'] ?? task.priority,
+        task.deadline ? `Due ${task.deadline}` : null,
+        assigneeNames ? `Assigned to ${assigneeNames}` : null,
+        draft.description.trim() ? draft.description.trim() : null,
+      ].filter(Boolean).join(' · ');
+      showToast('Task created', lines || 'No additional details');
     },
     onError: (err: unknown) => {
       const msg = err instanceof Error ? err.message : String(err);
@@ -2303,5 +2320,19 @@ export default function ChatPage() {
       </div>
 
     </div>
+
+    {/* ── Toast notification ── */}
+    {toast && (
+      <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[100] flex items-start gap-3 bg-gray-900 text-white px-4 py-3 rounded-2xl shadow-xl max-w-sm w-[90vw]">
+        <div className="w-2 h-2 rounded-full bg-[#4CAF50] mt-1.5 flex-shrink-0" />
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold leading-snug">{toast.title}</p>
+          <p className="text-xs text-gray-400 mt-0.5 leading-snug">{toast.body}</p>
+        </div>
+        <button onClick={() => setToast(null)} className="text-gray-500 hover:text-gray-300 flex-shrink-0 mt-0.5">
+          <X size={14} />
+        </button>
+      </div>
+    )}
   );
 }
