@@ -1120,14 +1120,16 @@ export default function ChatPage() {
         created_by: myId,
       }).select().single();
       if (error) throw error;
-      // If RLS blocks the SELECT after INSERT, fall back to a plain object so onSuccess still fires
       return (data ?? { title: draft.title.trim(), priority: draft.priority, deadline: draft.deadline || null, assignee_ids: assigneeIds }) as RoomTask;
     },
-    onSuccess: async (task) => {
+    onSuccess: async () => {
       qc.invalidateQueries({ queryKey: ['room-tasks', activeRoom] });
       setShowNewTaskModal(false);
       setTaskDraft({ title: '', description: '', priority: 'medium', deadline: '', assigneeIds: [], assignAll: false });
-      // Notifications are handled by the DB trigger notify_task_assignees()
+    },
+    onError: (err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      alert(`Failed to add task: ${msg}`);
     },
   });
 
