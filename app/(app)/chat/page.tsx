@@ -815,20 +815,26 @@ function ChatInput({
     : [];
 
   const insertMention = (profile: MinProfile) => {
-    const ta = textareaRef.current;
-    if (!ta) return;
+    if (mentionStart < 0) return;
+    // Use mentionStart + "@query".length so we don't depend on cursor position at click time
+    const mentionEnd = mentionStart + 1 + (mentionQuery?.length ?? 0);
     const before = text.slice(0, mentionStart);
-    const after = text.slice(ta.selectionStart ?? text.length);
+    const after = text.slice(mentionEnd);
     const inserted = `@${profile.full_name} `;
     const newText = before + inserted + after;
     setText(newText);
     setMentionQuery(null);
     setMentionStart(-1);
     setMentionIndex(0);
+    const ta = textareaRef.current;
     requestAnimationFrame(() => {
-      ta.focus();
-      const pos = before.length + inserted.length;
-      ta.setSelectionRange(pos, pos);
+      if (ta) {
+        ta.focus();
+        const pos = before.length + inserted.length;
+        ta.setSelectionRange(pos, pos);
+        ta.style.height = 'auto';
+        ta.style.height = `${Math.min(ta.scrollHeight, 128)}px`;
+      }
     });
   };
 
