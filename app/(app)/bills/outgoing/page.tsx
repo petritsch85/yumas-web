@@ -530,12 +530,17 @@ export default function OutgoingBillsPage() {
       if (!res.ok) throw new Error(json.error ?? 'Extraction failed');
 
       const d = json.data as unknown as {
-        essenBrutto:      number;
-        getraenkeBrutto:  number;
-        trinkgeld:        number;
-        eventDate:        string | null;
-        issuingLocation:  string | null;
-        lineItems?:       { name: string; qty: number; total: number; taxCode: 'A' | 'B' }[];
+        essenBrutto:       number;
+        getraenkeBrutto:   number;
+        trinkgeld:         number;
+        eventDate:         string | null;
+        issuingLocation:   string | null;
+        recipientCompany:  string | null;
+        recipientExtra:    string | null;
+        recipientStreet:   string | null;
+        recipientPostcode: string | null;
+        recipientCity:     string | null;
+        lineItems?:        { name: string; qty: number; total: number; taxCode: 'A' | 'B' }[];
       };
 
       if (d.lineItems?.length) setReceiptLineItems(d.lineItems);
@@ -554,6 +559,11 @@ export default function OutgoingBillsPage() {
         const [y, m, day] = d.eventDate.split('-');
         setBillEventDate(`${day}.${m}.${y}`);
       }
+      if (d.recipientCompany)  setCompany(d.recipientCompany);
+      if (d.recipientExtra)    setExtra(d.recipientExtra);
+      if (d.recipientStreet)   setStreet(d.recipientStreet);
+      if (d.recipientPostcode) setPostcode(d.recipientPostcode);
+      if (d.recipientCity)     setCity(d.recipientCity);
       setReceiptSuccess(true);
       setTimeout(() => setReceiptSuccess(false), 4000);
     } catch (err: any) {

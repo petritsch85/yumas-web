@@ -25,6 +25,16 @@ You will receive an Orderbird POS receipt (Rechnung) as a PDF. These are corpora
 - If a field cannot be determined, use null for strings and 0 for numbers.
 - Return ONLY valid JSON — no markdown, no explanation.
 
+## Recipient extraction
+The bill header contains a recipient address block (the company the bill is addressed to). Extract:
+- recipientCompany: the company name (first line, e.g. "Cheil Germany GmbH")
+- recipientExtra: a second address line if present, e.g. a department/branch name like "RPM" (null if absent)
+- recipientStreet: street and house number (e.g. "Frankfurter Straße 4")
+- recipientPostcode: postcode (e.g. "65760")
+- recipientCity: city (e.g. "Eschborn")
+
+If the recipient block is not present or cannot be determined, use null for all recipient fields.
+
 ## Output JSON schema
 {
   "essenBrutto": number,
@@ -32,6 +42,11 @@ You will receive an Orderbird POS receipt (Rechnung) as a PDF. These are corpora
   "trinkgeld": number,
   "eventDate": "YYYY-MM-DD or null",
   "issuingLocation": "Westend | Eschborn | Taunus | null",
+  "recipientCompany": "string or null",
+  "recipientExtra": "string or null",
+  "recipientStreet": "string or null",
+  "recipientPostcode": "string or null",
+  "recipientCity": "string or null",
   "lineItems": [
     {
       "name": "string",
