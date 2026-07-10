@@ -427,31 +427,45 @@ export default function OutgoingBillsPage() {
   const fmtEur = (n: number) =>
     n.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €';
 
+  const compressImage = (file: File, maxPx = 1600, quality = 0.82): Promise<{ base64: string; dataUrl: string }> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(new Error('Failed to read file'));
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onerror = () => reject(new Error('Failed to decode image'));
+        img.onload = () => {
+          const scale = Math.min(1, maxPx / Math.max(img.width, img.height));
+          const canvas = document.createElement('canvas');
+          canvas.width  = Math.round(img.width  * scale);
+          canvas.height = Math.round(img.height * scale);
+          canvas.getContext('2d')!.drawImage(img, 0, 0, canvas.width, canvas.height);
+          const dataUrl = canvas.toDataURL('image/jpeg', quality);
+          resolve({ base64: dataUrl.split(',')[1], dataUrl });
+        };
+        img.src = e.target?.result as string;
+      };
+      reader.readAsDataURL(file);
+    });
+
   const handleReceiptImage = async (file: File) => {
     setExtractingReceipt(true);
     setReceiptSuccess(false);
     try {
-      const { base64, dataUrl: fullDataUrl } = await new Promise<{ base64: string; dataUrl: string }>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = (e) => {
-          const dataUrl = e.target?.result as string;
-          resolve({ base64: dataUrl.split(',')[1], dataUrl });
-        };
-        reader.onerror = () => reject(new Error('Failed to read file'));
-        reader.readAsDataURL(file);
-      });
+      const { base64, dataUrl: fullDataUrl } = await compressImage(file);
       setReceiptDataUrl(fullDataUrl);
 
-      const mediaType = file.type || 'image/jpeg';
       const res  = await fetch('/api/extract-receipt-image', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ imageBase64: base64, mediaType }),
+        body:    JSON.stringify({ imageBase64: base64, mediaType: 'image/jpeg' }),
       });
-      const json = await res.json();
+      const text = await res.text();
+      let json: { data?: unknown; error?: string };
+      try { json = JSON.parse(text); } catch { throw new Error(text.slice(0, 120)); }
       if (!res.ok) throw new Error(json.error ?? 'Extraction failed');
 
-      const d = json.data as {
+      const d = json.data as unknown as {
         essenBrutto:      number;
         getraenkeBrutto:  number;
         trinkgeld:        number;
