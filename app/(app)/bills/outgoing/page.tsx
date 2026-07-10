@@ -7,7 +7,7 @@ import {
   Upload, FileCheck, AlertCircle, Loader2,
   CheckCircle2, Clock, Banknote, Trash2,
   ChevronDown, Eye, X, Save, Pencil, Download, BookOpen, Send,
-  FilePlus, Plus, FileDown, Camera,
+  FilePlus, Plus, FileDown, Camera, FileUp,
 } from 'lucide-react';
 import type { BillData, LineItem } from '@/components/bills/BillDocument';
 import { useT } from '@/lib/i18n';
@@ -120,8 +120,9 @@ function uid() { return Math.random().toString(36).slice(2); }
 
 export default function OutgoingBillsPage() {
   const queryClient      = useQueryClient();
-  const fileInputRef     = useRef<HTMLInputElement>(null);
-  const receiptInputRef  = useRef<HTMLInputElement>(null);
+  const fileInputRef       = useRef<HTMLInputElement>(null);
+  const receiptInputRef    = useRef<HTMLInputElement>(null);
+  const orderbirdInputRef  = useRef<HTMLInputElement>(null);
   const { t } = useT();
 
   // ── Permission check ─────────────────────────────────────────────────────
@@ -192,6 +193,7 @@ export default function OutgoingBillsPage() {
   const [approving,        setApproving]        = useState(false);
   const [sendError,        setSendError]        = useState<string | null>(null);
   const [extractingReceipt,     setExtractingReceipt]     = useState(false);
+  const [extractingOrderbird,   setExtractingOrderbird]   = useState(false);
   const [receiptSuccess,        setReceiptSuccess]        = useState(false);
   const [receiptDataUrl,        setReceiptDataUrl]        = useState<string | null>(null);
   const [includeReceipt,        setIncludeReceipt]        = useState(false);
@@ -503,6 +505,65 @@ export default function OutgoingBillsPage() {
       alert(`Could not read receipt: ${msg}`);
     } finally {
       setExtractingReceipt(false);
+    }
+  };
+
+  const handleOrderbirdPdf = async (file: File) => {
+    setExtractingOrderbird(true);
+    setReceiptSuccess(false);
+    try {
+      const pdfBase64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onerror = () => reject(new Error('Failed to read file'));
+        reader.onload = (e) => resolve((e.target?.result as string).split(',')[1]);
+        reader.readAsDataURL(file);
+      });
+
+      const res  = await fetch('/api/extract-orderbird-pdf', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ pdfBase64 }),
+      });
+      const text = await res.text();
+      let json: { data?: unknown; error?: string };
+      try { json = JSON.parse(text); } catch { throw new Error(text.slice(0, 120)); }
+      if (!res.ok) throw new Error(json.error ?? 'Extraction failed');
+
+      const d = json.data as unknown as {
+        essenBrutto:      number;
+        getraenkeBrutto:  number;
+        trinkgeld:        number;
+        eventDate:        string | null;
+        issuingLocation:  string | null;
+        lineItems?:       { name: string; qty: number; total: number; taxCode: 'A' | 'B' }[];
+      };
+
+      if (d.lineItems?.length) setReceiptLineItems(d.lineItems);
+
+      const computedEssen     = d.lineItems?.reduce((s, i) => i.taxCode === 'B' ? s + i.total : s, 0) ?? 0;
+      const computedGetraenke = d.lineItems?.reduce((s, i) => i.taxCode === 'A' ? s + i.total : s, 0) ?? 0;
+      const essenVal     = computedEssen     > 0 ? computedEssen     : d.essenBrutto;
+      const getraenkeVal = computedGetraenke > 0 ? computedGetraenke : d.getraenkeBrutto;
+
+      setInputMode('brutto');
+      if (essenVal     > 0) setEssenBrutto(String(essenVal));
+      if (getraenkeVal > 0) setGetraenkeBrutto(String(getraenkeVal));
+      if (d.trinkgeld       > 0) setTrinkgeld(String(d.trinkgeld));
+      if (d.issuingLocation)     setBillIssuingLoc(d.issuingLocation);
+      if (d.eventDate) {
+        const [y, m, day] = d.eventDate.split('-');
+        setBillEventDate(`${day}.${m}.${y}`);
+      }
+      setReceiptSuccess(true);
+      setTimeout(() => setReceiptSuccess(false), 4000);
+    } catch (err: any) {
+      const msg = typeof err === 'string' ? err
+        : err?.message ? String(err.message)
+        : err?.error   ? String(err.error)
+        : 'Unknown error';
+      alert(`Could not read Orderbird PDF: ${msg}`);
+    } finally {
+      setExtractingOrderbird(false);
     }
   };
 
@@ -1305,7 +1366,7 @@ export default function OutgoingBillsPage() {
               <button
                 type="button"
                 onClick={() => receiptInputRef.current?.click()}
-                disabled={extractingReceipt}
+                disabled={extractingReceipt || extractingOrderbird}
                 className="flex items-center gap-2 px-4 py-2 bg-[#1B5E20] text-white text-sm font-semibold rounded-lg hover:bg-[#2E7D32] disabled:opacity-60 transition-colors"
               >
                 {extractingReceipt
@@ -1322,6 +1383,28 @@ export default function OutgoingBillsPage() {
                 onChange={(e) => {
                   const file = e.target.files?.[0];
                   if (file) handleReceiptImage(file);
+                  e.target.value = '';
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => orderbirdInputRef.current?.click()}
+                disabled={extractingReceipt || extractingOrderbird}
+                className="flex items-center gap-2 px-4 py-2 bg-white text-[#1B5E20] text-sm font-semibold rounded-lg border-2 border-[#1B5E20] hover:bg-green-50 disabled:opacity-60 transition-colors"
+              >
+                {extractingOrderbird
+                  ? <><Loader2 size={14} className="animate-spin" /> Reading…</>
+                  : <><FileUp size={14} /> Import Orderbird</>
+                }
+              </button>
+              <input
+                ref={orderbirdInputRef}
+                type="file"
+                accept="application/pdf,.pdf"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) handleOrderbirdPdf(file);
                   e.target.value = '';
                 }}
               />
