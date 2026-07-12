@@ -6,7 +6,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
 import { saveDraft, loadDraft, clearDraft } from '@/lib/draft-store';
 import { enqueue, dequeueAll, removeFromQueue, pendingCount } from '@/lib/offline-queue';
-import { ChevronLeft, Send, WifiOff, Wifi, RefreshCw, CheckCircle2, Timer, Play, Pause, X, AlertCircle, RotateCcw, Pencil, ArrowUp, ArrowDown, ListOrdered, Check } from 'lucide-react';
+import { ChevronLeft, ChevronDown, Send, WifiOff, Wifi, RefreshCw, CheckCircle2, Timer, Play, Pause, X, AlertCircle, RotateCcw, Pencil, ArrowUp, ArrowDown, ListOrdered, Check } from 'lucide-react';
 import { useT } from '@/lib/i18n';
 
 function formatTimer(seconds: number): string {
@@ -165,6 +165,15 @@ export default function LocationInventoryFormPage({
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['inventory-items', locationName] }),
   });
+
+  /* ── Collapsible sections ── */
+  const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
+  const toggleSection = (title: string) =>
+    setCollapsedSections(prev => {
+      const next = new Set(prev);
+      next.has(title) ? next.delete(title) : next.add(title);
+      return next;
+    });
 
   /* ── Local form state ── */
   const [counts, setCounts]         = useState<Record<string, string>>({});
@@ -834,13 +843,35 @@ export default function LocationInventoryFormPage({
       {/* Sections */}
       {!itemsLoading && (
         <div className="flex-1 space-y-4">
-          {sections.map(section => (
+          {sections.map(section => {
+            const isCollapsed = collapsedSections.has(section.title);
+            const filledCount = section.data.filter(item => counts[item.name] && counts[item.name] !== '0').length;
+            return (
             <div key={section.title} className="bg-white rounded-lg shadow-sm border border-gray-100 overflow-hidden">
-              <div className="flex items-center justify-between px-4 py-2.5" style={{ backgroundColor: '#1B5E20' }}>
-                <span className="text-white text-xs font-bold tracking-widest uppercase">{section.title}</span>
-                <span className="text-green-300 text-xs font-medium">{section.data.length} items</span>
-              </div>
-              <div>
+              <button
+                type="button"
+                onClick={() => toggleSection(section.title)}
+                className="w-full flex items-center justify-between px-4 py-2.5 text-left"
+                style={{ backgroundColor: '#1B5E20' }}
+              >
+                <div className="flex items-center gap-2">
+                  <ChevronDown
+                    size={14}
+                    className="text-green-300 flex-shrink-0 transition-transform duration-200"
+                    style={{ transform: isCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }}
+                  />
+                  <span className="text-white text-xs font-bold tracking-widest uppercase">{section.title}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  {timerStarted && filledCount > 0 && (
+                    <span className="text-green-200 text-xs font-semibold">{filledCount}/{section.data.length}</span>
+                  )}
+                  {(!timerStarted || filledCount === 0) && (
+                    <span className="text-green-300 text-xs font-medium">{section.data.length} items</span>
+                  )}
+                </div>
+              </button>
+              {!isCollapsed && <div>
                 {section.data.map((item, idx) => (
                   <div
                     key={item.name}
@@ -909,9 +940,9 @@ export default function LocationInventoryFormPage({
                     )}
                   </div>
                 ))}
-              </div>
+              </div>}
             </div>
-          ))}
+          );})}
 
           {/* Comment box */}
           <div className="bg-white rounded-lg shadow-sm border border-gray-100 overflow-hidden mb-28">
