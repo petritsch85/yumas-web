@@ -701,23 +701,25 @@ export default function LocationInventoryFormPage({
                 ) : (
                   <>
                     <button onClick={startTimer} disabled={itemsLoading}
-                      className="flex items-center gap-2 bg-[#1B5E20] text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-[#2E7D32] transition-colors disabled:opacity-50">
-                      <Play size={14} />Start Inventory
+                      className="flex items-center gap-2 bg-[#1B5E20] text-white px-5 py-3 rounded-xl text-base font-bold shadow-md hover:bg-[#2E7D32] active:scale-95 transition-all disabled:opacity-50">
+                      <Play size={16} />Start Inventory
                     </button>
-                    <button
-                      onClick={handleLoadPrevious}
-                      disabled={itemsLoading || loadingPrevious}
-                      className="flex items-center gap-2 bg-orange-500 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-orange-600 transition-colors disabled:opacity-50">
-                      <Pencil size={14} />{loadingPrevious ? 'Loading…' : 'Edit Inventory'}
-                    </button>
-                    {isRankEditor && (
+                    <div className="flex items-center gap-2 justify-end">
                       <button
-                        onClick={() => setRankEditMode(true)}
-                        disabled={itemsLoading}
-                        className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50">
-                        <ListOrdered size={14} />Edit Rankings
+                        onClick={handleLoadPrevious}
+                        disabled={itemsLoading || loadingPrevious}
+                        className="flex items-center gap-1.5 border border-gray-300 text-gray-500 px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-gray-50 transition-colors disabled:opacity-40">
+                        <Pencil size={12} />{loadingPrevious ? 'Loading…' : 'Edit Inventory'}
                       </button>
-                    )}
+                      {isRankEditor && (
+                        <button
+                          onClick={() => setRankEditMode(true)}
+                          disabled={itemsLoading}
+                          className="flex items-center gap-1.5 border border-gray-300 text-gray-500 px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-gray-50 transition-colors disabled:opacity-40">
+                          <ListOrdered size={12} />Edit Rankings
+                        </button>
+                      )}
+                    </div>
                   </>
                 )}
               </div>
