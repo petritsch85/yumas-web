@@ -2,11 +2,11 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useRouter, useSearchParams, useParams } from 'next/navigation';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
 import { saveDraft, loadDraft, clearDraft } from '@/lib/draft-store';
 import { enqueue, dequeueAll, removeFromQueue, pendingCount } from '@/lib/offline-queue';
-import { ChevronLeft, Send, WifiOff, Wifi, RefreshCw, CheckCircle2, Timer, Play, Pause, X, AlertCircle, RotateCcw, Pencil } from 'lucide-react';
+import { ChevronLeft, Send, WifiOff, Wifi, RefreshCw, CheckCircle2, Timer, Play, Pause, X, AlertCircle, RotateCcw, Pencil, ArrowUp, ArrowDown, ListOrdered, Check } from 'lucide-react';
 import { useT } from '@/lib/i18n';
 
 function formatTimer(seconds: number): string {
@@ -15,7 +15,7 @@ function formatTimer(seconds: number): string {
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 }
 
-type Item    = { name: string; unit: string };
+type Item    = { id: string; name: string; unit: string };
 type Section = { title: string; data: Item[] };
 
 type DbItem = {
@@ -126,13 +126,45 @@ export default function LocationInventoryFormPage({
             const bOrd = b.store_sort_orders?.[locationName] ?? b.sort_order;
             return aOrd - bOrd;
           })
-          .map(i => ({ name: i.name, unit: i.unit }));
+          .map(i => ({ id: i.id, name: i.name, unit: i.unit }));
         return { title, data: sectionItems };
       })
       .filter(s => s.data.length > 0);
   }, [dbItems, dbSections, locationName]);
 
   const totalItems = sections.reduce((sum, s) => sum + s.data.length, 0);
+
+  /* ── Ranking edit mutations ── */
+  const qc = useQueryClient();
+
+  const reorderMutation = useMutation({
+    mutationFn: async ({ sectionTitle, fromIdx, toIdx }: { sectionTitle: string; fromIdx: number; toIdx: number }) => {
+      const sec = sections.find(s => s.title === sectionTitle);
+      if (!sec) return;
+      const newOrder = [...sec.data];
+      [newOrder[fromIdx], newOrder[toIdx]] = [newOrder[toIdx], newOrder[fromIdx]];
+      const results = await Promise.all(
+        newOrder.map((item, i) =>
+          supabase.rpc('set_item_store_sort_order', {
+            p_item_id:       item.id,
+            p_location_name: locationName,
+            p_sort_order:    (i + 1) * 10,
+          })
+        )
+      );
+      const failed = results.find(r => r.error);
+      if (failed?.error) throw failed.error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['inventory-items', locationName] }),
+  });
+
+  const moveSectionMutation = useMutation({
+    mutationFn: async ({ id, section }: { id: string; section: string }) => {
+      const { error } = await supabase.from('inventory_items').update({ section }).eq('id', id);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['inventory-items', locationName] }),
+  });
 
   /* ── Local form state ── */
   const [counts, setCounts]         = useState<Record<string, string>>({});
@@ -147,7 +179,9 @@ export default function LocationInventoryFormPage({
   const [subAlreadyEdited, setSubAlreadyEdited]       = useState(false);
   const [lastSubmittedCounts, setLastSubmittedCounts] = useState<Record<string, string>>({});
   const [lastSubmittedComment, setLastSubmittedComment] = useState('');
-  const [isStaff, setIsStaff]       = useState(false);
+  const [isStaff, setIsStaff]         = useState(false);
+  const [isRankEditor, setIsRankEditor] = useState(false);
+  const [rankEditMode, setRankEditMode] = useState(false);
   const [isOnline, setIsOnline]     = useState(true);
   const [queueCount, setQueueCount] = useState(0);
   const [syncing, setSyncing]       = useState(false);
@@ -187,7 +221,11 @@ export default function LocationInventoryFormPage({
     supabase.auth.getUser().then(({ data: { user } }) => {
       if (!user) return;
       supabase.from('profiles').select('role').eq('id', user.id).single()
-        .then(({ data }) => { if (data?.role?.startsWith('staff')) setIsStaff(true); });
+        .then(({ data }) => {
+          const role = data?.role ?? '';
+          if (role.startsWith('staff')) setIsStaff(true);
+          if (['admin', 'manager', 'store_manager', 'shift_manager'].includes(role)) setIsRankEditor(true);
+        });
     });
   }, []);
 
@@ -654,16 +692,34 @@ export default function LocationInventoryFormPage({
 
             {!timerStarted ? (
               <div className="flex flex-col items-end gap-2">
-                <button onClick={startTimer} disabled={itemsLoading}
-                  className="flex items-center gap-2 bg-[#1B5E20] text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-[#2E7D32] transition-colors disabled:opacity-50">
-                  <Play size={14} />Start Inventory
-                </button>
-                <button
-                  onClick={handleLoadPrevious}
-                  disabled={itemsLoading || loadingPrevious}
-                  className="flex items-center gap-2 bg-orange-500 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-orange-600 transition-colors disabled:opacity-50">
-                  <Pencil size={14} />{loadingPrevious ? 'Loading…' : 'Edit Inventory'}
-                </button>
+                {rankEditMode ? (
+                  <button
+                    onClick={() => setRankEditMode(false)}
+                    className="flex items-center gap-2 bg-[#1B5E20] text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-[#2E7D32] transition-colors">
+                    <Check size={14} />Done
+                  </button>
+                ) : (
+                  <>
+                    <button onClick={startTimer} disabled={itemsLoading}
+                      className="flex items-center gap-2 bg-[#1B5E20] text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-[#2E7D32] transition-colors disabled:opacity-50">
+                      <Play size={14} />Start Inventory
+                    </button>
+                    <button
+                      onClick={handleLoadPrevious}
+                      disabled={itemsLoading || loadingPrevious}
+                      className="flex items-center gap-2 bg-orange-500 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-orange-600 transition-colors disabled:opacity-50">
+                      <Pencil size={14} />{loadingPrevious ? 'Loading…' : 'Edit Inventory'}
+                    </button>
+                    {isRankEditor && (
+                      <button
+                        onClick={() => setRankEditMode(true)}
+                        disabled={itemsLoading}
+                        className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50">
+                        <ListOrdered size={14} />Edit Rankings
+                      </button>
+                    )}
+                  </>
+                )}
               </div>
             ) : (
               <div className="flex-shrink-0 flex items-center gap-2 bg-gray-100 rounded-lg px-3 py-2">
@@ -765,6 +821,14 @@ export default function LocationInventoryFormPage({
         </div>
       )}
 
+      {/* Rank edit mode banner */}
+      {rankEditMode && (
+        <div className="flex items-center gap-2 px-4 py-2.5 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-700">
+          <ListOrdered size={15} className="flex-shrink-0" />
+          <span><strong>Edit mode:</strong> Use ↑↓ to reorder items. Change the dropdown to move an item to a different section. Tap <strong>Done</strong> when finished.</span>
+        </div>
+      )}
+
       {/* Sections */}
       {!itemsLoading && (
         <div className="flex-1 space-y-4">
@@ -778,30 +842,69 @@ export default function LocationInventoryFormPage({
                 {section.data.map((item, idx) => (
                   <div
                     key={item.name}
-                    className={`flex items-center gap-4 px-4 py-3 ${idx < section.data.length - 1 ? 'border-b border-gray-100' : ''}`}
+                    className={`flex items-center gap-3 px-4 py-3 ${idx < section.data.length - 1 ? 'border-b border-gray-100' : ''}`}
                   >
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm font-medium text-gray-900 truncate">{item.name}</div>
-                      <div className="text-xs text-gray-400 mt-0.5">{item.unit}</div>
-                    </div>
-                    <select
-                      value={counts[item.name] ?? '0'}
-                      onChange={e => handleChange(item.name, e.target.value)}
-                      disabled={!timerStarted || !timerRunning}
-                      className={`w-20 text-right border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20] transition-colors ${
-                        !timerStarted
-                          ? 'border-gray-100 bg-gray-100 text-gray-300 cursor-not-allowed'
-                          : !timerRunning
-                          ? 'border-amber-200 bg-amber-50 text-amber-400 cursor-not-allowed'
-                          : counts[item.name] && counts[item.name] !== '0'
-                          ? 'border-[#1B5E20] bg-green-50 text-[#1B5E20] font-semibold'
-                          : 'border-gray-200 bg-gray-50'
-                      }`}
-                    >
-                      {Array.from({ length: 51 }, (_, i) => (
-                        <option key={i} value={String(i)}>{i}</option>
-                      ))}
-                    </select>
+                    {rankEditMode ? (
+                      <>
+                        {/* ↑↓ reorder buttons */}
+                        <div className="flex flex-col gap-0.5">
+                          <button
+                            onClick={() => reorderMutation.mutate({ sectionTitle: section.title, fromIdx: idx, toIdx: idx - 1 })}
+                            disabled={idx === 0 || reorderMutation.isPending}
+                            className="p-0.5 rounded text-gray-400 hover:text-blue-600 hover:bg-blue-50 disabled:opacity-20 disabled:cursor-not-allowed transition-colors"
+                          >
+                            <ArrowUp size={14} />
+                          </button>
+                          <button
+                            onClick={() => reorderMutation.mutate({ sectionTitle: section.title, fromIdx: idx, toIdx: idx + 1 })}
+                            disabled={idx === section.data.length - 1 || reorderMutation.isPending}
+                            className="p-0.5 rounded text-gray-400 hover:text-blue-600 hover:bg-blue-50 disabled:opacity-20 disabled:cursor-not-allowed transition-colors"
+                          >
+                            <ArrowDown size={14} />
+                          </button>
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm font-medium text-gray-900 truncate">{item.name}</div>
+                          <div className="text-xs text-gray-400 mt-0.5">{item.unit}</div>
+                        </div>
+                        {/* Section move dropdown */}
+                        <select
+                          value={section.title}
+                          onChange={e => moveSectionMutation.mutate({ id: item.id, section: e.target.value })}
+                          disabled={moveSectionMutation.isPending}
+                          className="text-xs border border-blue-200 bg-blue-50 text-blue-700 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-400 disabled:opacity-50"
+                        >
+                          {sections.map(s => (
+                            <option key={s.title} value={s.title}>{s.title}</option>
+                          ))}
+                        </select>
+                      </>
+                    ) : (
+                      <>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm font-medium text-gray-900 truncate">{item.name}</div>
+                          <div className="text-xs text-gray-400 mt-0.5">{item.unit}</div>
+                        </div>
+                        <select
+                          value={counts[item.name] ?? '0'}
+                          onChange={e => handleChange(item.name, e.target.value)}
+                          disabled={!timerStarted || !timerRunning}
+                          className={`w-20 text-right border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20] transition-colors ${
+                            !timerStarted
+                              ? 'border-gray-100 bg-gray-100 text-gray-300 cursor-not-allowed'
+                              : !timerRunning
+                              ? 'border-amber-200 bg-amber-50 text-amber-400 cursor-not-allowed'
+                              : counts[item.name] && counts[item.name] !== '0'
+                              ? 'border-[#1B5E20] bg-green-50 text-[#1B5E20] font-semibold'
+                              : 'border-gray-200 bg-gray-50'
+                          }`}
+                        >
+                          {Array.from({ length: 51 }, (_, i) => (
+                            <option key={i} value={String(i)}>{i}</option>
+                          ))}
+                        </select>
+                      </>
+                    )}
                   </div>
                 ))}
               </div>
