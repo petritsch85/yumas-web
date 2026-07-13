@@ -335,12 +335,20 @@ export default function LocationInventoryFormPage({
     return () => { if (draftTimer.current) clearTimeout(draftTimer.current); };
   }, [counts, comment, locationId, elapsedSeconds, timerStarted]);
 
-  const filledCount = Object.values(counts).filter(v => v !== '' && v !== '0').length;
-  const handleChange = (name: string, value: string) => setCounts(prev => ({ ...prev, [name]: value }));
+  // An item is "touched" when the user has explicitly set any value (including 0)
+  const touchedCount = Object.keys(counts).filter(k => counts[k] !== undefined).length;
+  const filledCount  = Object.values(counts).filter(v => v !== '' && v !== '0').length;
+  const handleChange = (name: string, value: string) => {
+    if (value === '') {
+      setCounts(prev => { const next = { ...prev }; delete next[name]; return next; });
+    } else {
+      setCounts(prev => ({ ...prev, [name]: value }));
+    }
+  };
 
   /* ── Submit ── */
   const handleSubmit = async () => {
-    if (!window.confirm(`Submit inventory for ${locationName}? (${filledCount} / ${totalItems} items filled)`)) return;
+    if (!window.confirm(`Submit inventory for ${locationName}? (${touchedCount} / ${totalItems} items entered)`)) return;
 
     if (timerInterval.current) clearInterval(timerInterval.current);
     setTimerRunning(false);
@@ -845,7 +853,7 @@ export default function LocationInventoryFormPage({
         <div className="flex-1 space-y-4">
           {sections.map(section => {
             const isCollapsed = collapsedSections.has(section.title);
-            const filledCount = section.data.filter(item => counts[item.name] && counts[item.name] !== '0').length;
+            const sectionTouched = section.data.filter(item => counts[item.name] !== undefined).length;
             return (
             <div key={section.title} className="bg-white rounded-lg shadow-sm border border-gray-100 overflow-hidden">
               <button
@@ -863,10 +871,12 @@ export default function LocationInventoryFormPage({
                   <span className="text-white text-xs font-bold tracking-widest uppercase">{section.title}</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  {timerStarted && filledCount > 0 && (
-                    <span className="text-green-200 text-xs font-semibold">{filledCount}/{section.data.length}</span>
+                  {timerStarted && sectionTouched > 0 && (
+                    <span className={`text-xs font-semibold ${sectionTouched === section.data.length ? 'text-green-200' : 'text-amber-300'}`}>
+                      {sectionTouched}/{section.data.length}
+                    </span>
                   )}
-                  {(!timerStarted || filledCount === 0) && (
+                  {(!timerStarted || sectionTouched === 0) && (
                     <span className="text-green-300 text-xs font-medium">{section.data.length} items</span>
                   )}
                 </div>
@@ -919,7 +929,7 @@ export default function LocationInventoryFormPage({
                           <div className="text-xs text-gray-400 mt-0.5">{item.unit}</div>
                         </div>
                         <select
-                          value={counts[item.name] ?? '0'}
+                          value={counts[item.name] ?? ''}
                           onChange={e => handleChange(item.name, e.target.value)}
                           disabled={!timerStarted || !timerRunning}
                           className={`w-20 text-right border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20] transition-colors ${
@@ -927,11 +937,14 @@ export default function LocationInventoryFormPage({
                               ? 'border-gray-100 bg-gray-100 text-gray-300 cursor-not-allowed'
                               : !timerRunning
                               ? 'border-amber-200 bg-amber-50 text-amber-400 cursor-not-allowed'
-                              : counts[item.name] && counts[item.name] !== '0'
-                              ? 'border-[#1B5E20] bg-green-50 text-[#1B5E20] font-semibold'
-                              : 'border-gray-200 bg-gray-50'
+                              : counts[item.name] === undefined
+                              ? 'border-gray-200 bg-gray-50 text-gray-400'
+                              : counts[item.name] === '0'
+                              ? 'border-amber-400 bg-amber-50 text-amber-600 font-semibold'
+                              : 'border-[#1B5E20] bg-green-50 text-[#1B5E20] font-semibold'
                           }`}
                         >
+                          <option value="">—</option>
                           {Array.from({ length: 51 }, (_, i) => (
                             <option key={i} value={String(i)}>{i}</option>
                           ))}
@@ -973,7 +986,7 @@ export default function LocationInventoryFormPage({
       <div className="fixed bottom-0 left-0 md:left-60 right-0 bg-white border-t border-gray-200 px-4 md:px-6 py-3 flex items-center justify-between shadow-lg z-10">
         <div className="flex items-center gap-3">
           <span className="text-sm text-gray-500 font-medium">
-            {filledCount} / {totalItems} items filled
+            {touchedCount} / {totalItems} items entered
           </span>
           {isOnline
             ? <span className="flex items-center gap-1 text-xs text-green-600"><Wifi size={12} /> Online</span>
