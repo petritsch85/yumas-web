@@ -1434,16 +1434,28 @@ export default function ChatPage() {
 
   const unreadNotifCount = notifs.filter(n => !n.read).length;
 
-  const mentionsByRoom = useMemo(() => {
-    const result: Record<string, number> = {};
-    for (const n of notifs) {
-      if (n.type === 'mention' && !n.read) {
-        const room = n.metadata?.room as string | undefined;
-        if (room) result[room] = (result[room] ?? 0) + 1;
+  /* ── Mention counts per room (dedicated query so it stays fresh) ── */
+  const { data: mentionsByRoom = {} } = useQuery<Record<string, number>>({
+    queryKey: ['mention-counts', myId],
+    queryFn: async () => {
+      if (!myId) return {};
+      const { data } = await supabase
+        .from('notifications')
+        .select('metadata')
+        .eq('user_id', myId)
+        .eq('type', 'mention')
+        .eq('read', false);
+      const counts: Record<string, number> = {};
+      for (const n of data ?? []) {
+        const room = (n.metadata as Record<string, string>)?.room;
+        if (room) counts[room] = (counts[room] ?? 0) + 1;
       }
-    }
-    return result;
-  }, [notifs]);
+      return counts;
+    },
+    enabled: !!myId,
+    staleTime: 0,
+    refetchInterval: 20_000,
+  });
 
   const markNotifReadMutation = useMutation({
     mutationFn: async (id: string | 'all') => {
@@ -1463,6 +1475,7 @@ export default function ChatPage() {
       .channel(`notifications::${myId}`)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${myId}` }, () => {
         qc.invalidateQueries({ queryKey: ['notifications', myId] });
+        qc.invalidateQueries({ queryKey: ['mention-counts', myId] });
       })
       .subscribe();
     return () => { supabase.removeChannel(ch); };
@@ -1705,14 +1718,16 @@ export default function ChatPage() {
 
   // Clear unread @mention notifications when the user actively enters a room
   const clearRoomMentions = (room: string) => {
-    const ids = notifs
-      .filter(n => n.type === 'mention' && !n.read && (n.metadata?.room as string) === room)
-      .map(n => n.id);
-    if (ids.length > 0) {
-      supabase.from('notifications').update({ read: true }).in('id', ids).then(() => {
+    supabase.from('notifications')
+      .update({ read: true })
+      .eq('user_id', myId)
+      .eq('type', 'mention')
+      .eq('read', false)
+      .filter('metadata->>room', 'eq', room)
+      .then(() => {
         qc.invalidateQueries({ queryKey: ['notifications', myId] });
+        qc.invalidateQueries({ queryKey: ['mention-counts', myId] });
       });
-    }
   };
 
   // Desktop sidebar room selection — does NOT change mobileView
