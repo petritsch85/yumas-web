@@ -1655,13 +1655,11 @@ export default function ChatPage() {
     setReplyingTo(null);
     if (textareaRef.current) { textareaRef.current.style.height = 'auto'; }
     await sendMutation.mutateAsync({ content: trimmed, replyToId: replyId });
-    // detect @mentions and notify
-    const mentionMatches = [...trimmed.matchAll(/@([\w][\w\s]*)/g)];
-    for (const m of mentionMatches) {
-      const query = m[1].trim().toLowerCase();
-      const mentioned = allProfiles.find(p => p.full_name.toLowerCase().startsWith(query) && p.id !== myId);
-      if (mentioned) {
-        await createNotif(mentioned.id, 'mention',
+    // detect @mentions and notify — check each known profile name directly
+    for (const p of allProfiles) {
+      if (p.id === myId) continue;
+      if (trimmed.includes('@' + p.full_name)) {
+        await createNotif(p.id, 'mention',
           `${profile?.full_name ?? 'Someone'} mentioned you`,
           `In ${activeLabel}: "${trimmed.slice(0, 120)}${trimmed.length > 120 ? '…' : ''}"`,
           { room: activeRoom });
