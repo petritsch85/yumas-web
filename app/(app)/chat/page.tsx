@@ -1482,17 +1482,8 @@ export default function ChatPage() {
         { user_id: myId, room: activeRoom, last_read_at: new Date().toISOString() },
         { onConflict: 'user_id,room' },
       ).then(() => {});
-      // Clear any unread @mention notifications for this room
-      const mentionIds = notifs
-        .filter(n => n.type === 'mention' && !n.read && n.metadata?.room === activeRoom)
-        .map(n => n.id);
-      if (mentionIds.length > 0) {
-        supabase.from('notifications').update({ read: true }).in('id', mentionIds).then(() => {
-          qc.invalidateQueries({ queryKey: ['notifications', myId] });
-        });
-      }
     }
-  }, [activeRoom, myId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeRoom, myId]);
 
   /* ── Realtime: active room ── */
   useEffect(() => {
@@ -1712,13 +1703,29 @@ export default function ChatPage() {
     setPendingCaption('');
   };
 
+  // Clear unread @mention notifications when the user actively enters a room
+  const clearRoomMentions = (room: string) => {
+    const ids = notifs
+      .filter(n => n.type === 'mention' && !n.read && (n.metadata?.room as string) === room)
+      .map(n => n.id);
+    if (ids.length > 0) {
+      supabase.from('notifications').update({ read: true }).in('id', ids).then(() => {
+        qc.invalidateQueries({ queryKey: ['notifications', myId] });
+      });
+    }
+  };
+
   // Desktop sidebar room selection — does NOT change mobileView
-  const handleDesktopSelect = (room: string) => setActiveRoom(room);
+  const handleDesktopSelect = (room: string) => {
+    setActiveRoom(room);
+    clearRoomMentions(room);
+  };
 
   // Mobile channel list selection — switches to chat view
   const handleMobileSelect = (room: string) => {
     setActiveRoom(room);
     setMobileView('chat');
+    clearRoomMentions(room);
   };
 
   const handleReact = (messageId: string, emoji: string) => reactMutation.mutate({ messageId, emoji });
