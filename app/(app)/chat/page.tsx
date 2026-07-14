@@ -1702,19 +1702,20 @@ export default function ChatPage() {
     setPendingCaption('');
   };
 
-  // Clear unread @mention notifications when the user actively enters a room
-  const clearRoomMentions = async (room: string) => {
-    const ids = notifs
-      .filter(n => n.type === 'mention' && !n.read && (n.metadata as Record<string, string>)?.room === room)
-      .map(n => n.id);
-    if (ids.length === 0) return;
-    // Optimistically mark as read in cache so badge vanishes immediately
+  // Clear all unread @mention notifications when the user enters any channel
+  const clearRoomMentions = async (_room: string) => {
+    if (!myId) return;
+    // Optimistically wipe all mention badges from cache immediately
     qc.setQueryData<Notif[]>(['notifications', myId], old =>
-      (old ?? []).map(n => ids.includes(n.id) ? { ...n, read: true } : n)
+      (old ?? []).map(n => n.type === 'mention' ? { ...n, read: true } : n)
     );
-    // Await DB write so any subsequent realtime refetch sees the updated rows
-    await supabase.from('notifications').update({ read: true }).in('id', ids);
-    qc.invalidateQueries({ queryKey: ['notifications', myId] });
+    // Persist to DB, then refetch to get true state
+    await supabase.from('notifications')
+      .update({ read: true })
+      .eq('user_id', myId)
+      .eq('type', 'mention')
+      .eq('read', false);
+    qc.refetchQueries({ queryKey: ['notifications', myId] });
   };
 
   // Desktop sidebar room selection — does NOT change mobileView
