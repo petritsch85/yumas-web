@@ -1703,15 +1703,14 @@ export default function ChatPage() {
 
   // Clear unread @mention notifications when the user actively enters a room
   const clearRoomMentions = (room: string) => {
+    const ids = notifs
+      .filter(n => n.type === 'mention' && !n.read && (n.metadata as Record<string, string>)?.room === room)
+      .map(n => n.id);
+    if (ids.length === 0) return;
     supabase.from('notifications')
       .update({ read: true })
-      .eq('user_id', myId)
-      .eq('type', 'mention')
-      .eq('read', false)
-      .filter('metadata->>room', 'eq', room)
-      .then(() => {
-        qc.invalidateQueries({ queryKey: ['notifications', myId] });
-      });
+      .in('id', ids)
+      .then(() => qc.invalidateQueries({ queryKey: ['notifications', myId] }));
   };
 
   // Desktop sidebar room selection — does NOT change mobileView
