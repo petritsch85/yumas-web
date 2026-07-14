@@ -1707,10 +1707,12 @@ export default function ChatPage() {
       .filter(n => n.type === 'mention' && !n.read && (n.metadata as Record<string, string>)?.room === room)
       .map(n => n.id);
     if (ids.length === 0) return;
-    supabase.from('notifications')
-      .update({ read: true })
-      .in('id', ids)
-      .then(() => qc.invalidateQueries({ queryKey: ['notifications', myId] }));
+    // Optimistically mark as read in cache immediately so badge vanishes on tap
+    qc.setQueryData<Notif[]>(['notifications', myId], old =>
+      (old ?? []).map(n => ids.includes(n.id) ? { ...n, read: true } : n)
+    );
+    // Persist to DB (fire and forget)
+    supabase.from('notifications').update({ read: true }).in('id', ids);
   };
 
   // Desktop sidebar room selection — does NOT change mobileView
