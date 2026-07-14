@@ -1432,7 +1432,8 @@ export default function ChatPage() {
     staleTime: 0,
   });
 
-  const unreadNotifCount = notifs.filter(n => !n.read).length;
+  const taskNotifs = useMemo(() => notifs.filter(n => n.type !== 'mention'), [notifs]);
+  const unreadNotifCount = taskNotifs.filter(n => !n.read).length;
 
   const mentionsByRoom = useMemo(() => {
     const result: Record<string, number> = {};
@@ -1702,17 +1703,18 @@ export default function ChatPage() {
   };
 
   // Clear unread @mention notifications when the user actively enters a room
-  const clearRoomMentions = (room: string) => {
+  const clearRoomMentions = async (room: string) => {
     const ids = notifs
       .filter(n => n.type === 'mention' && !n.read && (n.metadata as Record<string, string>)?.room === room)
       .map(n => n.id);
     if (ids.length === 0) return;
-    // Optimistically mark as read in cache immediately so badge vanishes on tap
+    // Optimistically mark as read in cache so badge vanishes immediately
     qc.setQueryData<Notif[]>(['notifications', myId], old =>
       (old ?? []).map(n => ids.includes(n.id) ? { ...n, read: true } : n)
     );
-    // Persist to DB (fire and forget)
-    supabase.from('notifications').update({ read: true }).in('id', ids);
+    // Await DB write so any subsequent realtime refetch sees the updated rows
+    await supabase.from('notifications').update({ read: true }).in('id', ids);
+    qc.invalidateQueries({ queryKey: ['notifications', myId] });
   };
 
   // Desktop sidebar room selection — does NOT change mobileView
@@ -2450,7 +2452,7 @@ export default function ChatPage() {
           </div>
           <div className="flex-1 min-h-0 overflow-y-auto">
             <NotificationsPanel
-              notifs={notifs}
+              notifs={taskNotifs}
               onMarkRead={id => markNotifReadMutation.mutate(id)}
               onMarkAllRead={() => markNotifReadMutation.mutate('all')}
             />
