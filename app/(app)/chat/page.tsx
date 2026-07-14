@@ -1228,7 +1228,7 @@ export default function ChatPage() {
     ? []
     : activeRoom.startsWith('group::')
       ? allProfiles.filter(p => activeGroup?.member_ids.includes(p.id))
-      : allProfiles.filter(p => p.role === 'admin' || (p.chat_rooms ?? []).includes(activeRoom));
+      : allProfiles; // all active staff are mentionable in any channel
 
   useEffect(() => {
     if (!profile) return;
