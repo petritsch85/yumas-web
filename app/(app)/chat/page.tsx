@@ -1072,6 +1072,8 @@ function ChatInput({
 export default function ChatPage() {
   const qc = useQueryClient();
   const [activeRoom, setActiveRoom] = useState<string>('general');
+  // locallyCleared[roomId] = ms timestamp when user entered that room; hides badges instantly
+  const [locallyCleared, setLocallyCleared] = useState<Record<string, number>>({});
   const [text, setText] = useState('');
   const [unread, setUnread] = useState<Record<string, number>>({});
   const [uploading, setUploading] = useState(false);
@@ -1440,11 +1442,15 @@ export default function ChatPage() {
     for (const n of notifs) {
       if (n.type === 'mention' && !n.read) {
         const room = (n.metadata as Record<string, string>)?.room;
-        if (room) result[room] = (result[room] ?? 0) + 1;
+        if (!room) continue;
+        const clearedAt = locallyCleared[room];
+        // Skip notifications that predate when the user entered this room
+        if (clearedAt && new Date(n.created_at).getTime() <= clearedAt) continue;
+        result[room] = (result[room] ?? 0) + 1;
       }
     }
     return result;
-  }, [notifs]);
+  }, [notifs, locallyCleared]);
 
   const markNotifReadMutation = useMutation({
     mutationFn: async (id: string | 'all') => {
@@ -1702,19 +1708,20 @@ export default function ChatPage() {
     setPendingCaption('');
   };
 
-  // Clear all unread @mention notifications when the user enters any channel
-  const clearRoomMentions = async (_room: string) => {
+  // Clear @mention badge for a room: record clear timestamp in local state (instant),
+  // then mark as read in DB, then refetch to confirm.
+  const clearRoomMentions = async (room: string) => {
     if (!myId) return;
-    // Optimistically wipe all mention badges from cache immediately
-    qc.setQueryData<Notif[]>(['notifications', myId], old =>
-      (old ?? []).map(n => n.type === 'mention' ? { ...n, read: true } : n)
-    );
-    // Persist to DB, then refetch to get true state
+    // Record the clear time — mentionsByRoom will ignore all pre-existing mentions for this room
+    const clearTime = Date.now();
+    setLocallyCleared(prev => ({ ...prev, [room]: clearTime }));
+    // Persist to DB
     await supabase.from('notifications')
       .update({ read: true })
       .eq('user_id', myId)
       .eq('type', 'mention')
       .eq('read', false);
+    // Sync cache — after this, notifs have read:true so badge stays gone even if locallyCleared resets
     qc.refetchQueries({ queryKey: ['notifications', myId] });
   };
 
