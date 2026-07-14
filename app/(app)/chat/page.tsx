@@ -646,7 +646,7 @@ function MessageBubble({
               )}
               {msg.content && (
                 <p className="whitespace-pre-wrap break-words leading-snug">
-                  {highlightMentions(msg.content, allProfiles)}
+                  {highlightMentions(msg.content, allProfiles, isOwn)}
                 </p>
               )}
             </div>
@@ -682,16 +682,19 @@ function MessageBubble({
 }
 
 /* ─── Shared chat body components ────────────────────────────────────────────── */
-function highlightMentions(content: string, profiles: MinProfile[]): React.ReactNode {
+function highlightMentions(content: string, profiles: MinProfile[], isOwn = false): React.ReactNode {
   if (!profiles.length) return content;
   const names = [...profiles].sort((a, b) => b.full_name.length - a.full_name.length);
   const escaped = names.map(p => '@' + p.full_name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
   const re = new RegExp(`(${escaped.join('|')})`, 'g');
   const parts = content.split(re);
   // Every odd index in split result is a captured group (the mention)
+  const mentionClass = isOwn
+    ? 'font-semibold underline decoration-white/60'
+    : 'font-semibold text-[#1B5E20]';
   return parts.map((part, i) =>
     i % 2 === 1
-      ? <span key={i} className="font-semibold text-[#1B5E20]">{part}</span>
+      ? <span key={i} className={mentionClass}>{part}</span>
       : part
   );
 }
