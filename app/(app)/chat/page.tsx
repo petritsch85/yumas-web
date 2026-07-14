@@ -132,7 +132,7 @@ function UnreadBadge({ count }: { count: number }) {
 
 /* ─── Room Sidebar (desktop) ─────────────────────────────────────────────────── */
 function RoomSidebar({
-  activeRoom, myId, otherProfiles, allProfiles, unread, onSelect, onClose, visibleRooms, roomMembers, chatGroups, onCreateGroup, isAdmin, onCreateChannel,
+  activeRoom, myId, otherProfiles, allProfiles, unread, mentionsByRoom, onSelect, onClose, visibleRooms, roomMembers, chatGroups, onCreateGroup, isAdmin, onCreateChannel,
   activeView, onViewNotifications, unreadNotifCount,
 }: {
   activeRoom: string;
@@ -140,6 +140,7 @@ function RoomSidebar({
   otherProfiles: MinProfile[];
   allProfiles: MinProfile[];
   unread: Record<string, number>;
+  mentionsByRoom: Record<string, number>;
   onSelect: (room: string) => void;
   onClose?: () => void;
   visibleRooms: { id: string; label: string; emoji: string }[];
@@ -191,6 +192,7 @@ function RoomSidebar({
           {visibleRooms.map(room => {
             const isActive = activeRoom === room.id;
             const count = unread[room.id] ?? 0;
+            const mentions = mentionsByRoom[room.id] ?? 0;
             return (
               <button
                 key={room.id}
@@ -201,7 +203,8 @@ function RoomSidebar({
               >
                 <span className="text-base leading-none w-5 flex-shrink-0">{room.emoji}</span>
                 <span className="flex-1 truncate">{room.label}</span>
-                {!isActive && <UnreadBadge count={count} />}
+                {!isActive && mentions > 0 && <UnreadBadge count={mentions} />}
+                {!isActive && count > 0 && mentions === 0 && <UnreadBadge count={count} />}
               </button>
             );
           })}
@@ -302,7 +305,7 @@ function RoomSidebar({
 
 /* ─── Mobile Channel List ────────────────────────────────────────────────────── */
 function MobileChannelList({
-  visibleRooms, otherProfiles, allProfiles, myId, unread, onSelect, profile, chatGroups, onCreateGroup, isAdmin, onCreateChannel,
+  visibleRooms, otherProfiles, allProfiles, myId, unread, mentionsByRoom, onSelect, profile, chatGroups, onCreateGroup, isAdmin, onCreateChannel,
   onViewNotifications, unreadNotifCount,
 }: {
   visibleRooms: { id: string; label: string; emoji: string }[];
@@ -310,6 +313,7 @@ function MobileChannelList({
   allProfiles: MinProfile[];
   myId: string;
   unread: Record<string, number>;
+  mentionsByRoom: Record<string, number>;
   onSelect: (room: string) => void;
   profile: Profile | null;
   chatGroups: ChatGroup[];
@@ -348,6 +352,7 @@ function MobileChannelList({
             </div>
             {visibleRooms.map(room => {
               const count = unread[room.id] ?? 0;
+              const mentions = mentionsByRoom[room.id] ?? 0;
               return (
                 <button
                   key={room.id}
@@ -355,10 +360,11 @@ function MobileChannelList({
                   className="w-full flex items-center gap-3 px-4 py-3.5 text-left hover:bg-gray-50 active:bg-gray-100 border-b border-gray-50"
                 >
                   <span className="text-gray-400 font-semibold text-base w-5 text-center flex-shrink-0">#</span>
-                  <span className={`flex-1 text-[15px] truncate ${count > 0 ? 'font-semibold text-gray-900' : 'text-gray-600'}`}>
+                  <span className={`flex-1 text-[15px] truncate ${count > 0 || mentions > 0 ? 'font-semibold text-gray-900' : 'text-gray-600'}`}>
                     {room.label}
                   </span>
-                  <UnreadBadge count={count} />
+                  {mentions > 0 && <UnreadBadge count={mentions} />}
+                  {count > 0 && mentions === 0 && <UnreadBadge count={count} />}
                 </button>
               );
             })}
@@ -1428,6 +1434,17 @@ export default function ChatPage() {
 
   const unreadNotifCount = notifs.filter(n => !n.read).length;
 
+  const mentionsByRoom = useMemo(() => {
+    const result: Record<string, number> = {};
+    for (const n of notifs) {
+      if (n.type === 'mention' && !n.read) {
+        const room = n.metadata?.room as string | undefined;
+        if (room) result[room] = (result[room] ?? 0) + 1;
+      }
+    }
+    return result;
+  }, [notifs]);
+
   const markNotifReadMutation = useMutation({
     mutationFn: async (id: string | 'all') => {
       if (id === 'all') {
@@ -1465,8 +1482,17 @@ export default function ChatPage() {
         { user_id: myId, room: activeRoom, last_read_at: new Date().toISOString() },
         { onConflict: 'user_id,room' },
       ).then(() => {});
+      // Clear any unread @mention notifications for this room
+      const mentionIds = notifs
+        .filter(n => n.type === 'mention' && !n.read && n.metadata?.room === activeRoom)
+        .map(n => n.id);
+      if (mentionIds.length > 0) {
+        supabase.from('notifications').update({ read: true }).in('id', mentionIds).then(() => {
+          qc.invalidateQueries({ queryKey: ['notifications', myId] });
+        });
+      }
     }
-  }, [activeRoom, myId]);
+  }, [activeRoom, myId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ── Realtime: active room ── */
   useEffect(() => {
@@ -1713,6 +1739,7 @@ export default function ChatPage() {
             allProfiles={allProfiles}
             myId={myId}
             unread={unread}
+            mentionsByRoom={mentionsByRoom}
             onSelect={handleMobileSelect}
             profile={profile ?? null}
             chatGroups={chatGroups}
@@ -2432,6 +2459,7 @@ export default function ChatPage() {
           otherProfiles={otherProfiles}
           allProfiles={allProfiles}
           unread={unread}
+          mentionsByRoom={mentionsByRoom}
           onSelect={(room) => { handleDesktopSelect(room); setActiveView('chat'); }}
           visibleRooms={visibleRooms}
           roomMembers={roomMembers}
