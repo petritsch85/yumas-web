@@ -79,7 +79,7 @@ type Customer = {
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const LOCATIONS = ['Westend', 'Eschborn', 'Taunus', 'Other'];
+const LOCATIONS = ['Westend', 'Eschborn', 'Taunus', 'Other', 'Catering'];
 
 const isItemReady = (item: { status: string; saved?: boolean; data?: Extracted }) =>
   item.status === 'done' && !item.saved &&
@@ -95,11 +95,15 @@ const DEFAULT_INTRO_MONTHLY = 'Wir bedanken uns für Ihren Auftrag und stellen I
 const makeStornoIntro = (originalRef: string, originalDate: string) =>
   `hiermit stornieren wir die Rechnung mit der Nummer ${originalRef} vom ${originalDate} mit folgenden Positionen:`;
 const makeIntroDinner = (eventDate: string, location?: string) => {
-  const locPart = location ? ` im Yumas ${location}` : '';
+  const locPart = location && location !== 'Catering' ? ` im Yumas ${location}` : '';
   return eventDate
     ? `Wir bedanken uns für Ihren Auftrag und stellen Ihnen für Ihren Besuch am ${eventDate}${locPart} wie folgt eine Rechnung:`
     : `Wir bedanken uns für Ihren Auftrag und stellen Ihnen für Ihren Besuch${locPart} wie folgt eine Rechnung:`;
 };
+const makeIntroCatering = (eventDate: string) =>
+  eventDate
+    ? `Wir bedanken uns für Ihren Auftrag und stellen Ihnen für das Event am ${eventDate} wie folgt eine Rechnung:`
+    : `Wir bedanken uns für Ihren Auftrag und stellen Ihnen für das Event wie folgt eine Rechnung:`;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -171,7 +175,7 @@ export default function OutgoingBillsPage() {
   const [poNumber,          setPoNumber]          = useState('');
   const [att,               setAtt]               = useState('');
   const [introText,         setIntroText]         = useState(makeIntroDinner(''));
-  const [inputMode,         setInputMode]         = useState<'brutto' | 'netto' | 'pauschale'>('brutto');
+  const [inputMode,         setInputMode]         = useState<'brutto' | 'netto' | 'pauschale' | 'catering'>('brutto');
   const [pauschaleTotal,    setPauschaleTotal]    = useState('');
   const [pauschaleIsNetto,  setPauschaleIsNetto]  = useState(false);
   const [essenBrutto,       setEssenBrutto]       = useState('');
@@ -181,6 +185,8 @@ export default function OutgoingBillsPage() {
   const [mwstEssen,         setMwstEssen]         = useState('7');
   const [mwstGetraenke,     setMwstGetraenke]     = useState('19');
   const [trinkgeld,         setTrinkgeld]         = useState('');
+  const [cateringNetto,     setCateringNetto]     = useState('');
+  const [cateringDesc,      setCateringDesc]      = useState('');
   const [lineItems,             setLineItems]             = useState<LineItem[]>([{ qty: 1, item: '', unitPrice: 0 }]);
   const [generating,            setGenerating]            = useState(false);
   const [invoiceNumberLocked,   setInvoiceNumberLocked]   = useState(true);
@@ -266,7 +272,11 @@ export default function OutgoingBillsPage() {
   // Auto-update intro text when event date, location or bill type changes
   useEffect(() => {
     if (billType === 'dinner') {
-      setIntroText(makeIntroDinner(billEventDate, billIssuingLoc || undefined));
+      if (billIssuingLoc === 'Catering') {
+        setIntroText(makeIntroCatering(billEventDate));
+      } else {
+        setIntroText(makeIntroDinner(billEventDate, billIssuingLoc || undefined));
+      }
     } else if (billType === 'monthly') {
       setIntroText(DEFAULT_INTRO_MONTHLY);
     }
@@ -387,6 +397,11 @@ export default function OutgoingBillsPage() {
   const removeLineItem = (i: number) =>
     setLineItems((prev) => prev.filter((_, idx) => idx !== i));
 
+  // Catering totals (always 7% VAT on netto input)
+  const cateringNettoN  = parseFloat(cateringNetto) || 0;
+  const cateringBruttoN = cateringNettoN * 1.07;
+  const cateringMwstN   = cateringBruttoN - cateringNettoN;
+
   // Live totals (dinner: driven by brutto or netto inputs + mwst rates)
   const mwstEssenRate     = (parseFloat(mwstEssen)    || 7)  / 100;
   const mwstGetraenkeRate = (parseFloat(mwstGetraenke) || 19) / 100;
@@ -419,11 +434,18 @@ export default function OutgoingBillsPage() {
   const mwstGesamtPct   = bruttoGesamt > 0 ? ((mwstVatEssen + mwstVatGetraenke) / bruttoGesamt) * 100 : 0;
   const trinkgeldN = parseFloat(trinkgeld) || 0;
   const linesTotal = lineItems.reduce((s, i) => s + i.qty * i.unitPrice, 0);
-  const netto      = billType === 'monthly' ? linesTotal : essenN + getraenkeN;
-  const mwst7      = billType === 'monthly' ? netto * 0.07 : mwstVatEssen;
-  const mwst19     = billType !== 'monthly' ? mwstVatGetraenke : 0;
-  const brutto     = billType === 'monthly' ? netto + mwst7 : bruttoGesamt;
-  const billTotal  = brutto + (billType !== 'monthly' ? trinkgeldN : 0);
+  const netto      = billType === 'monthly' ? linesTotal :
+                     inputMode === 'catering' ? cateringNettoN :
+                     essenN + getraenkeN;
+  const mwst7      = billType === 'monthly' ? netto * 0.07 :
+                     inputMode === 'catering' ? cateringMwstN :
+                     mwstVatEssen;
+  const mwst19     = billType !== 'monthly' && inputMode !== 'catering' ? mwstVatGetraenke : 0;
+  const brutto     = billType === 'monthly' ? netto + mwst7 :
+                     inputMode === 'catering' ? cateringBruttoN :
+                     bruttoGesamt;
+  const billTotal  = inputMode === 'catering' ? cateringBruttoN :
+                     brutto + (billType !== 'monthly' ? trinkgeldN : 0);
   const ermaessigungN = parseFloat(ermaessigung) || 0;
 
   const fmtEur = (n: number) =>
@@ -624,8 +646,8 @@ export default function OutgoingBillsPage() {
       customer_address: [street, postcode, city].filter(Boolean).join(', ') || null,
       issuing_location: billIssuingLoc || null,
       shift_type:       (billType !== 'monthly' ? (stornoSourceBill?.shift_type ?? 'dinner') : null) as 'dinner' | 'lunch' | null,
-      net_food:         billType !== 'monthly' ? essenN         : 0,
-      net_drinks:       billType !== 'monthly' ? getraenkeN     : 0,
+      net_food:         billType !== 'monthly' ? (inputMode === 'catering' ? cateringNettoN : essenN) : 0,
+      net_drinks:       billType !== 'monthly' && inputMode !== 'catering' ? getraenkeN : 0,
       net_total:        netto,
       vat_7:            mwst7,
       vat_19:           mwst19,
@@ -744,13 +766,16 @@ export default function OutgoingBillsPage() {
       recipient: { company, extra, contact: contactName, street, postcode, city, poNumber, att },
       introText,
       lineItems:        billType === 'monthly' ? lineItems        : undefined,
-      essenBrutto:      isDinnerLike  ? essenBruttoN     : undefined,
-      getraenkeBrutto:  isDinnerLike  ? getraenkeBruttoN : undefined,
-      mwstEssenPct:     isDinnerLike  ? (parseFloat(mwstEssen)    || 7)  : undefined,
-      mwstGetraenkePct: isDinnerLike  ? (parseFloat(mwstGetraenke) || 19) : undefined,
-      essenNetto:       isDinnerLike  ? essenN           : undefined,
-      getraenkeNetto:   isDinnerLike  ? getraenkeN       : undefined,
-      trinkgeld:        isDinnerLike  ? trinkgeldN       : undefined,
+      essenBrutto:         isDinnerLike && inputMode !== 'catering' ? essenBruttoN     : undefined,
+      getraenkeBrutto:     isDinnerLike && inputMode !== 'catering' ? getraenkeBruttoN : undefined,
+      mwstEssenPct:        isDinnerLike && inputMode !== 'catering' ? (parseFloat(mwstEssen) || 7)   : undefined,
+      mwstGetraenkePct:    isDinnerLike && inputMode !== 'catering' ? (parseFloat(mwstGetraenke) || 19) : undefined,
+      essenNetto:          isDinnerLike && inputMode !== 'catering' ? essenN           : undefined,
+      getraenkeNetto:      isDinnerLike && inputMode !== 'catering' ? getraenkeN       : undefined,
+      trinkgeld:           isDinnerLike && inputMode !== 'catering' ? trinkgeldN       : undefined,
+      cateringNetto:       inputMode === 'catering' ? cateringNettoN  : undefined,
+      cateringBrutto:      inputMode === 'catering' ? cateringBruttoN : undefined,
+      cateringDescription: inputMode === 'catering' && cateringDesc ? cateringDesc : undefined,
       anzahlungBrutto:  anzahlungBruttoN > 0          ? anzahlungBruttoN              : undefined,
       anzahlungNetto:   anzahlungNettoN  > 0          ? anzahlungNettoN               : undefined,
       anzahlungVat7:    (anzahlungBill?.vat_7  ?? 0) > 0 ? anzahlungBill!.vat_7      : undefined,
@@ -767,7 +792,8 @@ export default function OutgoingBillsPage() {
        contactName, street, postcode, city, poNumber, att, introText, lineItems,
        essenBruttoN, getraenkeBruttoN, essenN, getraenkeN, mwstEssen, mwstGetraenke, trinkgeldN,
        anzahlungBruttoN, anzahlungNettoN, anzahlungBill, ermaessigungN,
-       includeReceipt, receiptDataUrl, stornoSourceBill]);
+       includeReceipt, receiptDataUrl, stornoSourceBill,
+       inputMode, cateringNettoN, cateringBruttoN, cateringDesc]);
 
   // Auto-populate next invoice number when bills load
   useEffect(() => {
@@ -1697,6 +1723,13 @@ export default function OutgoingBillsPage() {
                   >
                     Pauschale
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => setInputMode('catering')}
+                    className={`px-3 py-1.5 transition-colors border-l border-gray-200 ${inputMode === 'catering' ? 'bg-[#1B5E20] text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}
+                  >
+                    Catering
+                  </button>
                 </div>
               </div>
 
@@ -1730,8 +1763,44 @@ export default function OutgoingBillsPage() {
                 </div>
               )}
 
-              {/* Row 1: Brutto */}
-              <div className="grid grid-cols-3 gap-4 mb-4">
+              {/* Catering: Netto input + description text + calculated Brutto */}
+              {inputMode === 'catering' && (
+                <div className="mb-4 p-3 bg-blue-50 rounded-lg border border-blue-200 space-y-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className={labelCls}>Catering Netto (€)</label>
+                      <input
+                        type={focusedField === 'cateringNetto' ? 'number' : 'text'}
+                        step="0.01" min="0" className={inputCls} placeholder="0,00 €"
+                        value={focusedField === 'cateringNetto' ? cateringNetto : (cateringNettoN > 0 ? fmtEur(cateringNettoN) : '')}
+                        onFocus={() => setFocusedField('cateringNetto')}
+                        onBlur={() => setFocusedField(null)}
+                        onChange={(e) => setCateringNetto(e.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <label className={labelCls}>Catering Brutto (7% MwSt) — berechnet</label>
+                      <div className={`${inputCls} !bg-gray-200 !border-gray-300 !shadow-none text-gray-500 cursor-not-allowed select-none`}>
+                        {fmtEur(cateringBruttoN)}
+                      </div>
+                    </div>
+                  </div>
+                  <div>
+                    <label className={labelCls}>Event Beschreibung (erscheint auf der Rechnung)</label>
+                    <textarea
+                      rows={3}
+                      className={`${inputCls} resize-none`}
+                      placeholder="z.B. Catering für Firmenfeier am 15.07.2026, inkl. Auf- und Abbau…"
+                      value={cateringDesc}
+                      onChange={(e) => setCateringDesc(e.target.value)}
+                    />
+                  </div>
+                  <p className="text-xs text-blue-700">Catering: immer 7% MwSt · Brutto wird automatisch berechnet</p>
+                </div>
+              )}
+
+              {/* Row 1: Brutto — hidden in catering mode */}
+              {inputMode !== 'catering' && <div className="grid grid-cols-3 gap-4 mb-4">
                 <div>
                   <label className={labelCls}>Essen Brutto (€)</label>
                   {inputMode === 'brutto' ? (
@@ -1772,8 +1841,8 @@ export default function OutgoingBillsPage() {
                 </div>
               </div>
 
-              {/* Row 2: MwSt rate inputs */}
-              <div className="grid grid-cols-3 gap-4 mb-4">
+              {/* Row 2: MwSt rate inputs — hidden in catering mode */}
+              {inputMode !== 'catering' && <div className="grid grid-cols-3 gap-4 mb-4">
                 <div>
                   <label className={labelCls}>MwSt Essen (%)</label>
                   {inputMode === 'pauschale' ? (
@@ -1798,10 +1867,10 @@ export default function OutgoingBillsPage() {
                     {mwstGesamtPct > 0 ? mwstGesamtPct.toFixed(2) + ' %' : '—'}
                   </div>
                 </div>
-              </div>
+              </div>}
 
-              {/* Row 3: Netto (editable in netto mode, calculated in brutto mode) + Trinkgeld */}
-              <div className="grid grid-cols-3 gap-4">
+              {/* Row 3: Netto (editable in netto mode, calculated in brutto mode) + Trinkgeld — hidden in catering mode */}
+              {inputMode !== 'catering' && <div className="grid grid-cols-3 gap-4">
                 <div>
                   <label className={labelCls}>Essen Netto (€)</label>
                   {inputMode === 'netto' ? (
@@ -1848,7 +1917,7 @@ export default function OutgoingBillsPage() {
                     onBlur={() => setFocusedField(null)}
                     onChange={(e) => setTrinkgeld(e.target.value)} />
                 </div>
-              </div>
+              </div>}
             </div>
           )}
 

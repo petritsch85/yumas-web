@@ -50,6 +50,10 @@ export type BillData = {
   anzahlungVat19?  : number;   // deposit VAT 19%
   anzahlungRef?    : string;   // invoice number of the deposit bill
   ermaessigung?    : number;   // discount amount
+  // Catering mode (mutually exclusive with essenBrutto/getraenkeBrutto)
+  cateringNetto?        : number;
+  cateringBrutto?       : number;
+  cateringDescription?  : string;
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -158,6 +162,12 @@ export function BillDocument({ data }: { data: BillData }) {
   let mwst7monthly = 0;
   let bruttoMonthly = 0;
 
+  // Catering mode
+  const isCatering        = data.cateringNetto != null;
+  const cateringNettoVal  = data.cateringNetto  ?? 0;
+  const cateringBruttoVal = data.cateringBrutto ?? cateringNettoVal * 1.07;
+  const cateringMwstAmt   = cateringBruttoVal - cateringNettoVal;
+
   // Dinner – use passed-in values; fall back to deriving from netto if brutto not provided
   const mwstEssenRate     = (data.mwstEssenPct    ?? 7)  / 100;
   const mwstGetraenkeRate = (data.mwstGetraenkePct ?? 19) / 100;
@@ -170,7 +180,7 @@ export function BillDocument({ data }: { data: BillData }) {
   const mwstEssenAmt      = essenBrutto     - essenNetto;
   const mwstGetraenkeAmt  = getraenkeBrutto - getraenkeNetto;
   const mwstGesamtAmt     = mwstEssenAmt + mwstGetraenkeAmt;
-  const gesamtBetrag      = isMonthly ? 0 : gesamtBrutto + tip;
+  const gesamtBetrag      = isMonthly ? 0 : isCatering ? cateringBruttoVal : gesamtBrutto + tip;
 
   if (isMonthly && data.lineItems) {
     gesamtNetto   = data.lineItems.reduce((s, i) => s + i.qty * i.unitPrice, 0);
@@ -267,8 +277,41 @@ export function BillDocument({ data }: { data: BillData }) {
           </View>
         )}
 
+        {/* ── TYPE B-catering: catering amounts ───────────────────── */}
+        {!isMonthly && isCatering && (
+          <View>
+            {/* Event description (if provided) */}
+            {data.cateringDescription && (
+              <View style={[s.groupGap, { marginBottom: 14 }]}>
+                <Text style={{ fontFamily: 'Courier-Bold' }}>Event Beschreibung</Text>
+                <Text style={{ lineHeight: 1.4, marginTop: 3 }}>{data.cateringDescription}</Text>
+              </View>
+            )}
+
+            {/* Catering Netto */}
+            <View style={s.groupGap}>
+              <AmtRow label="Catering Netto" value={cateringNettoVal} />
+            </View>
+
+            {/* MwSt */}
+            <View style={s.groupGap}>
+              <AmtRow label="MwSt Catering (7%)" value={cateringMwstAmt} />
+            </View>
+
+            {/* Brutto */}
+            <View style={s.groupGap}>
+              <AmtRowBold label="Gesamt Brutto" value={cateringBruttoVal} />
+            </View>
+
+            {/* Final total */}
+            <View style={{ marginTop: 2 }}>
+              <AmtRowBold label="Gesamtbetrag (zu zahlen)" value={cateringBruttoVal} />
+            </View>
+          </View>
+        )}
+
         {/* ── TYPE B: dinner amounts ───────────────────────────────── */}
-        {!isMonthly && (
+        {!isMonthly && !isCatering && (
           <View>
             {/* Group 1: Netto split */}
             <View style={s.groupGap}>
