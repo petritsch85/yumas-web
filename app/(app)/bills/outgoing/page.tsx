@@ -1839,7 +1839,7 @@ export default function OutgoingBillsPage() {
                     {fmtEur(bruttoGesamt)}
                   </div>
                 </div>
-              </div>
+              </div>}
 
               {/* Row 2: MwSt rate inputs — hidden in catering mode */}
               {inputMode !== 'catering' && <div className="grid grid-cols-3 gap-4 mb-4">
