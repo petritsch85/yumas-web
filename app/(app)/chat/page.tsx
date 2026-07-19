@@ -1228,7 +1228,12 @@ export default function ChatPage() {
     ? []
     : activeRoom.startsWith('group::')
       ? allProfiles.filter(p => activeGroup?.member_ids.includes(p.id))
-      : allProfiles; // all active staff are mentionable in any channel
+      : allProfiles.filter(p => p.role === 'admin' || p.role === 'manager' || (p.chat_rooms ?? []).includes(activeRoom));
+
+  // For @mention dropdown: all active profiles regardless of channel assignment
+  const mentionableProfiles = activeRoom.startsWith('dm::') || activeRoom.startsWith('group::')
+    ? roomMembers
+    : allProfiles;
 
   useEffect(() => {
     if (!profile) return;
@@ -1740,7 +1745,7 @@ export default function ChatPage() {
 
   const handleReact = (messageId: string, emoji: string) => reactMutation.mutate({ messageId, emoji });
 
-  const sharedInputProps = { text, setText, activeLabel, textareaRef, fileInputRef, uploading, sendMutation, handleSend, handleKeyDown, handleFileChange, replyingTo, onCancelReply: () => setReplyingTo(null), mentionMembers: roomMembers };
+  const sharedInputProps = { text, setText, activeLabel, textareaRef, fileInputRef, uploading, sendMutation, handleSend, handleKeyDown, handleFileChange, replyingTo, onCancelReply: () => setReplyingTo(null), mentionMembers: mentionableProfiles };
 
   /* ─── Render ─────────────────────────────────────────────────────────────── */
   return (
