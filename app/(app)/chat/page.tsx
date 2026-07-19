@@ -1699,7 +1699,8 @@ export default function ChatPage() {
     const isImage = file.type.startsWith('image/');
     const isVideo = file.type.startsWith('video/');
     if (!isImage && !isVideo) { alert('Only images and videos are supported.'); return; }
-    if (file.size > 20 * 1024 * 1024) { alert('File too large. Max 20 MB.'); return; }
+    if (isImage && file.size > 20 * 1024 * 1024) { alert('Image too large. Max 20 MB.'); return; }
+    if (isVideo && file.size > 500 * 1024 * 1024) { alert('Video too large. Max 500 MB.'); return; }
     setPendingFile(file);
     setPendingPreviewUrl(URL.createObjectURL(file));
     setPendingCaption('');
@@ -1708,13 +1709,26 @@ export default function ChatPage() {
   const handleSendMedia = async () => {
     if (!pendingFile || !profile) return;
     const isImage = pendingFile.type.startsWith('image/');
+    const isVideo = pendingFile.type.startsWith('video/');
     setUploading(true);
     try {
-      const ext = pendingFile.name.split('.').pop() ?? 'bin';
-      const path = `${activeRoom}/${Date.now()}-${profile.id}.${ext}`;
-      const { error: upErr } = await supabase.storage.from('chat-media').upload(path, pendingFile, { contentType: pendingFile.type });
-      if (upErr) throw upErr;
-      const { data: { publicUrl } } = supabase.storage.from('chat-media').getPublicUrl(path);
+      let publicUrl: string;
+      if (isVideo) {
+        // Upload video to Cloudflare R2 via presigned URL
+        const res = await fetch(`/api/r2/presign?filename=${encodeURIComponent(pendingFile.name)}&type=${encodeURIComponent(pendingFile.type)}`);
+        if (!res.ok) throw new Error('Failed to get upload URL');
+        const { uploadUrl, publicUrl: r2Url } = await res.json();
+        const putRes = await fetch(uploadUrl, { method: 'PUT', body: pendingFile, headers: { 'Content-Type': pendingFile.type } });
+        if (!putRes.ok) throw new Error('Video upload to R2 failed');
+        publicUrl = r2Url;
+      } else {
+        // Upload image to Supabase Storage
+        const ext = pendingFile.name.split('.').pop() ?? 'bin';
+        const path = `${activeRoom}/${Date.now()}-${profile.id}.${ext}`;
+        const { error: upErr } = await supabase.storage.from('chat-media').upload(path, pendingFile, { contentType: pendingFile.type });
+        if (upErr) throw upErr;
+        ({ data: { publicUrl } } = supabase.storage.from('chat-media').getPublicUrl(path));
+      }
       await sendMutation.mutateAsync({ content: pendingCaption.trim() || null, mediaUrl: publicUrl, mediaType: isImage ? 'image' : 'video' });
       if (pendingPreviewUrl) URL.revokeObjectURL(pendingPreviewUrl);
       setPendingFile(null);
