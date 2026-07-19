@@ -1486,6 +1486,15 @@ export default function ChatPage() {
     if (container) container.scrollTop = container.scrollHeight;
   }, [messages]);
 
+  useEffect(() => {
+    // Also scroll to bottom when switching rooms (cache may already have messages, so [messages] won't fire)
+    const timer = setTimeout(() => {
+      const container = messagesEndRef.current?.parentElement;
+      if (container) container.scrollTop = container.scrollHeight;
+    }, 50);
+    return () => clearTimeout(timer);
+  }, [activeRoom]);
+
   /* ── Mark room as read ── */
   useEffect(() => {
     setUnread(prev => { const n = { ...prev }; delete n[activeRoom]; return n; });
