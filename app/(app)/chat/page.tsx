@@ -1148,7 +1148,7 @@ export default function ChatPage() {
       const { data } = await supabase
         .from('profiles')
         .select('id, full_name, role, chat_rooms')
-        .eq('is_active', true)
+        .neq('is_active', false)
         .order('full_name');
       return (data ?? []) as MinProfile[];
     },
@@ -1501,11 +1501,16 @@ export default function ChatPage() {
 
   useEffect(() => {
     // Also scroll to bottom when switching rooms (cache may already have messages, so [messages] won't fire)
-    const timer = setTimeout(() => {
+    const raf = requestAnimationFrame(() => {
       const container = messagesEndRef.current?.parentElement;
       if (container) container.scrollTop = container.scrollHeight;
-    }, 50);
-    return () => clearTimeout(timer);
+      // Second pass for slow network — messages may still be loading
+      setTimeout(() => {
+        const c = messagesEndRef.current?.parentElement;
+        if (c) c.scrollTop = c.scrollHeight;
+      }, 300);
+    });
+    return () => cancelAnimationFrame(raf);
   }, [activeRoom]);
 
   /* ── Mark room as read ── */
@@ -1837,6 +1842,12 @@ export default function ChatPage() {
                   {tasks.filter(t => !t.completed).length > 0 && (
                     <span className="text-xs font-medium">{tasks.filter(t => !t.completed).length}</span>
                   )}
+                </button>
+                <button
+                  onClick={() => setShowPasswordsPanel(true)}
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors"
+                >
+                  <KeyRound size={14} />
                 </button>
                 {roomMembers.length > 0 && (
                   <button
