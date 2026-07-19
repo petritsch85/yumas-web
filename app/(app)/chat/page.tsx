@@ -5,7 +5,7 @@ import { createPortal } from 'react-dom';
 import dynamic from 'next/dynamic';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
-import { Send, Paperclip, MessageCircle, ChevronLeft, X, Users, ClipboardList, CheckSquare, Square, Plus, Pencil, Smile, CornerUpLeft, Bell, Calendar, Flag, UserCheck, KeyRound, Eye, EyeOff, Copy, Check, BookOpen, Lock, Unlock } from 'lucide-react';
+import { Send, Paperclip, MessageCircle, ChevronLeft, X, Users, ClipboardList, CheckSquare, Square, Plus, Pencil, Smile, CornerUpLeft, Bell, Calendar, Flag, UserCheck, KeyRound, Eye, EyeOff, Copy, Check, BookOpen, Lock, Unlock, Loader2 } from 'lucide-react';
 import type { Profile } from '@/types';
 
 const EmojiPicker = dynamic(() => import('emoji-picker-react'), { ssr: false });
@@ -53,6 +53,15 @@ type RoomCanvas = {
   is_editable: boolean;
   updated_at: string | null;
   updated_by: string | null;
+};
+
+type RoomCanvasMedia = {
+  id: string;
+  room: string;
+  url: string;
+  media_type: 'image' | 'video';
+  created_at: string;
+  created_by: string | null;
 };
 
 type Notif = {
@@ -1088,6 +1097,8 @@ export default function ChatPage() {
   const [showCanvasPanel, setShowCanvasPanel] = useState(false);
   const [canvasEditing, setCanvasEditing] = useState(false);
   const [canvasDraft, setCanvasDraft] = useState('');
+  const [canvasMediaUploading, setCanvasMediaUploading] = useState(false);
+  const canvasFileInputRef = useRef<HTMLInputElement>(null);
   const [showGroupModal, setShowGroupModal] = useState(false);
   const [selectedGroupMembers, setSelectedGroupMembers] = useState<string[]>([]);
   const [pendingFile, setPendingFile] = useState<File | null>(null);
@@ -1285,6 +1296,62 @@ export default function ChatPage() {
       setCanvasEditing(false);
     },
   });
+
+  const { data: canvasMedia = [] } = useQuery<RoomCanvasMedia[]>({
+    queryKey: ['room-canvas-media', activeRoom],
+    queryFn: async () => {
+      if (activeRoom.startsWith('dm::') || activeRoom.startsWith('group::')) return [];
+      const { data } = await supabase.from('room_canvas_media').select('*').eq('room', activeRoom).order('created_at', { ascending: true });
+      return (data ?? []) as RoomCanvasMedia[];
+    },
+    staleTime: 0,
+  });
+
+  const addCanvasMediaMutation = useMutation({
+    mutationFn: async (file: File) => {
+      const isVideo = file.type.startsWith('video/');
+      let url: string;
+      if (isVideo) {
+        const res = await fetch(`/api/r2/presign?filename=${encodeURIComponent(file.name)}&type=${encodeURIComponent(file.type)}`);
+        if (!res.ok) throw new Error('Failed to get upload URL');
+        const { uploadUrl, publicUrl } = await res.json();
+        const putRes = await fetch(uploadUrl, { method: 'PUT', body: file, headers: { 'Content-Type': file.type } });
+        if (!putRes.ok) throw new Error('Upload failed');
+        url = publicUrl;
+      } else {
+        const ext = file.name.split('.').pop() ?? 'jpg';
+        const path = `canvas/${activeRoom}/${Date.now()}.${ext}`;
+        const { error: upErr } = await supabase.storage.from('chat-media').upload(path, file, { contentType: file.type });
+        if (upErr) throw upErr;
+        ({ data: { publicUrl: url } } = supabase.storage.from('chat-media').getPublicUrl(path));
+      }
+      const { error } = await supabase.from('room_canvas_media').insert({ room: activeRoom, url, media_type: isVideo ? 'video' : 'image', created_by: myId });
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['room-canvas-media', activeRoom] }),
+  });
+
+  const deleteCanvasMediaMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from('room_canvas_media').delete().eq('id', id);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['room-canvas-media', activeRoom] }),
+  });
+
+  const handleCanvasMedia = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    const isImage = file.type.startsWith('image/');
+    const isVideo = file.type.startsWith('video/');
+    if (!isImage && !isVideo) { alert('Only images and videos are supported.'); return; }
+    if (isImage && file.size > 20 * 1024 * 1024) { alert('Image too large. Max 20 MB.'); return; }
+    if (isVideo && file.size > 500 * 1024 * 1024) { alert('Video too large. Max 500 MB.'); return; }
+    setCanvasMediaUploading(true);
+    try { await addCanvasMediaMutation.mutateAsync(file); }
+    finally { setCanvasMediaUploading(false); }
+  };
 
   const showToast = (title: string, body: string) => {
     setToast({ title, body });
@@ -2013,25 +2080,68 @@ export default function ChatPage() {
               </div>
 
               {/* Content */}
-              <div className="flex-1 overflow-y-auto px-5 py-4">
+              <div className="flex-1 overflow-y-auto px-5 py-4 flex flex-col gap-4">
+
+                {/* Media grid */}
+                {(canvasMedia.length > 0 || (canvasEditing && canEdit)) && (
+                  <div>
+                    {canvasMedia.length > 0 && (
+                      <div className="grid grid-cols-3 gap-2 mb-3">
+                        {canvasMedia.map(m => (
+                          <div key={m.id} className="relative group rounded-xl overflow-hidden bg-black">
+                            {m.media_type === 'image' ? (
+                              <a href={m.url} target="_blank" rel="noopener noreferrer">
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img src={m.url} alt="" className="w-full h-28 object-cover" />
+                              </a>
+                            ) : (
+                              <video src={m.url} controls preload="metadata" className="w-full h-28 object-cover bg-black" />
+                            )}
+                            {canvasEditing && (
+                              <button
+                                onClick={() => deleteCanvasMediaMutation.mutate(m.id)}
+                                className="absolute top-1 right-1 bg-black/60 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
+                              >
+                                <X size={12} />
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {canvasEditing && canEdit && (
+                      <button
+                        onClick={() => canvasFileInputRef.current?.click()}
+                        disabled={canvasMediaUploading}
+                        className="flex items-center gap-2 px-3 py-2.5 rounded-xl border border-dashed border-gray-300 text-gray-500 text-sm hover:border-[#1B5E20] hover:text-[#1B5E20] transition-colors w-full justify-center disabled:opacity-40"
+                      >
+                        {canvasMediaUploading ? <Loader2 size={14} className="animate-spin" /> : <Paperclip size={14} />}
+                        {canvasMediaUploading ? 'Uploading…' : 'Add photo or video'}
+                      </button>
+                    )}
+                    <input ref={canvasFileInputRef} type="file" accept="image/*,video/mp4,video/quicktime,video/webm" className="hidden" onChange={handleCanvasMedia} />
+                  </div>
+                )}
+
+                {/* Text */}
                 {canvasEditing ? (
                   <textarea
                     value={canvasDraft}
                     onChange={e => setCanvasDraft(e.target.value)}
-                    className="w-full h-full min-h-[40vh] text-sm text-gray-800 leading-relaxed outline-none resize-none"
+                    className="w-full min-h-[30vh] text-sm text-gray-800 leading-relaxed outline-none resize-none"
                     placeholder="Write anything here — passwords, links, notes, instructions…"
                     style={{ fontSize: '16px' }}
                     autoFocus
                   />
                 ) : roomCanvas?.content ? (
                   <p className="text-sm text-gray-800 leading-relaxed whitespace-pre-wrap">{roomCanvas.content}</p>
-                ) : (
+                ) : canvasMedia.length === 0 ? (
                   <div className="flex flex-col items-center justify-center py-16 text-gray-400 select-none">
                     <BookOpen size={36} className="mb-2 opacity-25" />
                     <p className="text-sm">Canvas is empty</p>
                     {canEdit && <p className="text-xs mt-1">Tap Edit to add content</p>}
                   </div>
-                )}
+                ) : null}
               </div>
 
               {/* Footer */}
