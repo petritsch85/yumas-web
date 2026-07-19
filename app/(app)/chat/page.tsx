@@ -481,18 +481,25 @@ function NotificationsPanel({ notifs, onMarkRead, onMarkAllRead }: {
           </div>
         ) : (
           notifs.map(n => (
-            <button
+            <div
               key={n.id}
-              onClick={() => onMarkRead(n.id)}
-              className={`w-full text-left px-4 py-3.5 border-b border-gray-50 hover:bg-gray-50 transition-colors flex gap-3 items-start ${!n.read ? 'bg-[#1B5E20]/5' : ''}`}
+              className={`w-full px-4 py-3.5 border-b border-gray-50 flex gap-3 items-start ${!n.read ? 'bg-[#1B5E20]/5' : ''}`}
             >
-              <div className={`mt-0.5 w-2 h-2 rounded-full flex-shrink-0 ${!n.read ? 'bg-[#1B5E20]' : 'bg-transparent'}`} />
+              <div className={`mt-1.5 w-2 h-2 rounded-full flex-shrink-0 ${!n.read ? 'bg-[#1B5E20]' : 'bg-transparent'}`} />
               <div className="flex-1 min-w-0">
                 <p className={`text-sm ${!n.read ? 'font-semibold text-gray-900' : 'text-gray-700'}`}>{n.title}</p>
                 <p className="text-xs text-gray-500 mt-0.5 leading-snug">{n.body}</p>
                 <p className="text-[10px] text-gray-400 mt-1">{fmtTime(n.created_at)}</p>
               </div>
-            </button>
+              {!n.read && (
+                <button
+                  onClick={() => onMarkRead(n.id)}
+                  className="flex-shrink-0 text-xs text-white bg-[#1B5E20] hover:bg-[#145214] px-2.5 py-1 rounded-full mt-0.5"
+                >
+                  Read
+                </button>
+              )}
+            </div>
           ))
         )}
       </div>
@@ -1464,6 +1471,12 @@ export default function ChatPage() {
       } else {
         await supabase.from('notifications').update({ read: true }).eq('id', id);
       }
+    },
+    onMutate: (id: string | 'all') => {
+      qc.setQueryData(['notifications', myId], (old: Notif[] | undefined) => {
+        if (!old) return old;
+        return old.map(n => id === 'all' ? { ...n, read: true } : n.id === id ? { ...n, read: true } : n);
+      });
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['notifications', myId] }),
   });
