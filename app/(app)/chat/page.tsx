@@ -661,7 +661,7 @@ function MessageBubble({
                 </a>
               )}
               {msg.media_url && msg.media_type === 'video' && (
-                <video src={msg.media_url} controls preload="metadata" className="rounded-xl max-h-64 max-w-full mb-1 bg-black" />
+                <video src={msg.media_url} controls preload="metadata" playsInline className="rounded-xl max-h-64 max-w-full mb-1 bg-black" onLoadedMetadata={e => { (e.target as HTMLVideoElement).currentTime = 0.001; }} />
               )}
               {msg.content && (
                 <p className="whitespace-pre-wrap break-words leading-snug">
@@ -2095,7 +2095,7 @@ export default function ChatPage() {
                                 <img src={m.url} alt="" className="w-full h-28 object-cover" />
                               </a>
                             ) : (
-                              <video src={m.url} controls preload="metadata" className="w-full h-28 object-cover bg-black" />
+                              <video src={m.url} controls preload="metadata" playsInline className="w-full h-28 object-cover bg-black" onLoadedMetadata={e => { (e.target as HTMLVideoElement).currentTime = 0.001; }} />
                             )}
                             {canvasEditing && (
                               <button
