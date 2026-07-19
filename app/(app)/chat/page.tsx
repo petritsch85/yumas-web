@@ -655,7 +655,7 @@ function MessageBubble({
                 </a>
               )}
               {msg.media_url && msg.media_type === 'video' && (
-                <video src={msg.media_url} controls className="rounded-xl max-h-64 max-w-full mb-1" />
+                <video src={msg.media_url} controls preload="metadata" className="rounded-xl max-h-64 max-w-full mb-1 bg-black" />
               )}
               {msg.content && (
                 <p className="whitespace-pre-wrap break-words leading-snug">
