@@ -1530,7 +1530,10 @@ export default function ChatPage() {
       // Rollback on failure
       if (context?.previous) qc.setQueryData(['notifications', myId], context.previous);
     },
-    // No onSuccess invalidate — the optimistic update is the source of truth
+    onSuccess: () => {
+      // Confirm DB state — admin API update succeeds synchronously so no race condition
+      qc.invalidateQueries({ queryKey: ['notifications', myId] });
+    },
   });
 
   /* ── Notifications realtime ── */
@@ -1539,6 +1542,9 @@ export default function ChatPage() {
     const ch = supabase
       .channel(`notifications::${myId}`)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${myId}` }, () => {
+        qc.invalidateQueries({ queryKey: ['notifications', myId] });
+      })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'notifications', filter: `user_id=eq.${myId}` }, () => {
         qc.invalidateQueries({ queryKey: ['notifications', myId] });
       })
       .subscribe();
@@ -1771,10 +1777,14 @@ export default function ChatPage() {
     setReplyingTo(null);
     if (textareaRef.current) { textareaRef.current.style.height = 'auto'; }
     await sendMutation.mutateAsync({ content: trimmed, replyToId: replyId });
-    // detect @mentions and notify — check each known profile name directly
+    // detect @mentions and notify — match full name or first name, case-insensitive
+    const lowerTrimmed = trimmed.toLowerCase();
     for (const p of allProfiles) {
       if (p.id === myId) continue;
-      if (trimmed.includes('@' + p.full_name)) {
+      const fullMention = ('@' + p.full_name).toLowerCase();
+      const firstName = p.full_name.split(' ')[0];
+      const firstMention = ('@' + firstName).toLowerCase();
+      if (lowerTrimmed.includes(fullMention) || lowerTrimmed.includes(firstMention + ' ') || lowerTrimmed.endsWith(firstMention)) {
         await createNotif(p.id, 'mention',
           `${profile?.full_name ?? 'Someone'} mentioned you`,
           `In ${activeLabel}: "${trimmed.slice(0, 120)}${trimmed.length > 120 ? '…' : ''}"`,
