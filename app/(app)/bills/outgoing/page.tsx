@@ -185,7 +185,7 @@ export default function OutgoingBillsPage() {
   const [mwstEssen,         setMwstEssen]         = useState('7');
   const [mwstGetraenke,     setMwstGetraenke]     = useState('19');
   const [trinkgeld,         setTrinkgeld]         = useState('');
-  const [cateringNetto,     setCateringNetto]     = useState('');
+  const [cateringLines,     setCateringLines]     = useState<{ id: string; description: string; amount: string }[]>([{ id: uid(), description: '', amount: '' }]);
   const [cateringDesc,      setCateringDesc]      = useState('');
   const [lineItems,             setLineItems]             = useState<LineItem[]>([{ qty: 1, item: '', unitPrice: 0 }]);
   const [generating,            setGenerating]            = useState(false);
@@ -397,8 +397,8 @@ export default function OutgoingBillsPage() {
   const removeLineItem = (i: number) =>
     setLineItems((prev) => prev.filter((_, idx) => idx !== i));
 
-  // Catering totals (always 7% VAT on netto input)
-  const cateringNettoN  = parseFloat(cateringNetto) || 0;
+  // Catering totals (always 7% VAT on sum of lines)
+  const cateringNettoN  = cateringLines.reduce((sum, l) => sum + (parseFloat(l.amount) || 0), 0);
   const cateringBruttoN = cateringNettoN * 1.07;
   const cateringMwstN   = cateringBruttoN - cateringNettoN;
 
@@ -776,6 +776,9 @@ export default function OutgoingBillsPage() {
       cateringNetto:       inputMode === 'catering' ? cateringNettoN  : undefined,
       cateringBrutto:      inputMode === 'catering' ? cateringBruttoN : undefined,
       cateringDescription: inputMode === 'catering' && cateringDesc ? cateringDesc : undefined,
+      cateringLines:       inputMode === 'catering'
+        ? cateringLines.filter(l => l.description.trim() || parseFloat(l.amount)).map(l => ({ description: l.description.trim(), amount: parseFloat(l.amount) || 0 }))
+        : undefined,
       anzahlungBrutto:  anzahlungBruttoN > 0          ? anzahlungBruttoN              : undefined,
       anzahlungNetto:   anzahlungNettoN  > 0          ? anzahlungNettoN               : undefined,
       anzahlungVat7:    (anzahlungBill?.vat_7  ?? 0) > 0 ? anzahlungBill!.vat_7      : undefined,
@@ -793,7 +796,7 @@ export default function OutgoingBillsPage() {
        essenBruttoN, getraenkeBruttoN, essenN, getraenkeN, mwstEssen, mwstGetraenke, trinkgeldN,
        anzahlungBruttoN, anzahlungNettoN, anzahlungBill, ermaessigungN,
        includeReceipt, receiptDataUrl, stornoSourceBill,
-       inputMode, cateringNettoN, cateringBruttoN, cateringDesc]);
+       inputMode, cateringNettoN, cateringBruttoN, cateringDesc, cateringLines]);
 
   // Auto-populate next invoice number when bills load
   useEffect(() => {
@@ -1763,20 +1766,57 @@ export default function OutgoingBillsPage() {
                 </div>
               )}
 
-              {/* Catering: Netto input + description text + calculated Brutto */}
+              {/* Catering: line items + description + calculated totals */}
               {inputMode === 'catering' && (
                 <div className="mb-4 p-3 bg-blue-50 rounded-lg border border-blue-200 space-y-4">
+
+                  {/* Line items */}
+                  <div>
+                    <label className={labelCls}>Positionen (erscheinen auf der Rechnung)</label>
+                    <div className="space-y-2 mt-1">
+                      {cateringLines.map((line, idx) => (
+                        <div key={line.id} className="flex gap-2 items-center">
+                          <input
+                            type="text"
+                            className={`${inputCls} flex-1`}
+                            placeholder="Beschreibung…"
+                            value={line.description}
+                            onChange={e => setCateringLines(ls => ls.map(l => l.id === line.id ? { ...l, description: e.target.value } : l))}
+                          />
+                          <input
+                            type="number"
+                            step="0.01"
+                            className={`${inputCls} w-36 text-right`}
+                            placeholder="0,00"
+                            value={line.amount}
+                            onChange={e => setCateringLines(ls => ls.map(l => l.id === line.id ? { ...l, amount: e.target.value } : l))}
+                          />
+                          {cateringLines.length > 1 && (
+                            <button
+                              onClick={() => setCateringLines(ls => ls.filter(l => l.id !== line.id))}
+                              className="text-gray-400 hover:text-red-500 flex-shrink-0 p-1"
+                            >
+                              <X size={15} />
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                    <button
+                      onClick={() => setCateringLines(ls => [...ls, { id: uid(), description: '', amount: '' }])}
+                      className="mt-2 flex items-center gap-1.5 text-xs text-blue-700 hover:text-blue-900"
+                    >
+                      <Plus size={13} /> Zeile hinzufügen
+                    </button>
+                  </div>
+
+                  {/* Totals row */}
                   <div className="grid grid-cols-2 gap-4">
                     <div>
-                      <label className={labelCls}>Catering Netto (€)</label>
-                      <input
-                        type={focusedField === 'cateringNetto' ? 'number' : 'text'}
-                        step="0.01" min="0" className={inputCls} placeholder="0,00 €"
-                        value={focusedField === 'cateringNetto' ? cateringNetto : (cateringNettoN > 0 ? fmtEur(cateringNettoN) : '')}
-                        onFocus={() => setFocusedField('cateringNetto')}
-                        onBlur={() => setFocusedField(null)}
-                        onChange={(e) => setCateringNetto(e.target.value)}
-                      />
+                      <label className={labelCls}>Catering Netto (€) — berechnet</label>
+                      <div className={`${inputCls} !bg-gray-200 !border-gray-300 !shadow-none text-gray-500 cursor-not-allowed select-none`}>
+                        {fmtEur(cateringNettoN)}
+                      </div>
                     </div>
                     <div>
                       <label className={labelCls}>Catering Brutto (7% MwSt) — berechnet</label>
@@ -1785,6 +1825,8 @@ export default function OutgoingBillsPage() {
                       </div>
                     </div>
                   </div>
+
+                  {/* Event description */}
                   <div>
                     <label className={labelCls}>Event Beschreibung (erscheint auf der Rechnung)</label>
                     <textarea
@@ -1795,7 +1837,7 @@ export default function OutgoingBillsPage() {
                       onChange={(e) => setCateringDesc(e.target.value)}
                     />
                   </div>
-                  <p className="text-xs text-blue-700">Catering: immer 7% MwSt · Brutto wird automatisch berechnet</p>
+                  <p className="text-xs text-blue-700">Catering: immer 7% MwSt · Brutto wird automatisch berechnet · Negative Beträge = Rabatte</p>
                 </div>
               )}
 

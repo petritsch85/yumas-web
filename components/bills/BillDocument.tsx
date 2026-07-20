@@ -54,6 +54,7 @@ export type BillData = {
   cateringNetto?        : number;
   cateringBrutto?       : number;
   cateringDescription?  : string;
+  cateringLines?        : { description: string; amount: number }[];
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -288,9 +289,18 @@ export function BillDocument({ data }: { data: BillData }) {
               </View>
             )}
 
+            {/* Individual line items (if provided) */}
+            {data.cateringLines && data.cateringLines.length > 0 && (
+              <View style={s.groupGap}>
+                {data.cateringLines.map((line, i) => (
+                  <AmtRow key={i} label={line.description || `Position ${i + 1}`} value={line.amount} />
+                ))}
+              </View>
+            )}
+
             {/* Catering Netto */}
             <View style={s.groupGap}>
-              <AmtRow label="Catering Netto" value={cateringNettoVal} />
+              <AmtRowBold label="Catering Netto" value={cateringNettoVal} />
             </View>
 
             {/* MwSt */}
