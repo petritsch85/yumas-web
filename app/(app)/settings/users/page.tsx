@@ -35,7 +35,8 @@ type PermKey = keyof AppPermissions;
 type ModuleItem = { key: PermKey; label: string; description?: string };
 type ModuleGroup = { group: string; items: ModuleItem[] };
 
-const CHAT_ROOMS: { id: string; label: string; description?: string }[] = [
+// Static built-in rooms — always shown
+const STATIC_ROOMS: { id: string; label: string; description?: string }[] = [
   { id: 'general',  label: 'General',  description: 'Company-wide announcements and conversation' },
   { id: 'eschborn', label: 'Eschborn', description: 'Eschborn store team channel' },
   { id: 'taunus',   label: 'Taunus',   description: 'Taunus store team channel' },
@@ -193,6 +194,7 @@ function PermissionsEditor({
   onChatRoomsChange,
   isAdmin,
   role,
+  allRooms,
 }: {
   perms: AppPermissions;
   onChange: (p: AppPermissions) => void;
@@ -200,6 +202,7 @@ function PermissionsEditor({
   onChatRoomsChange: (rooms: string[]) => void;
   isAdmin?: boolean;
   role?: string;
+  allRooms: { id: string; label: string; description?: string }[];
 }) {
   const { t } = useT();
 
@@ -313,7 +316,7 @@ function PermissionsEditor({
           <div className="flex gap-3">
             <button
               type="button"
-              onClick={() => onChatRoomsChange(CHAT_ROOMS.map(r => r.id))}
+              onClick={() => onChatRoomsChange(allRooms.map(r => r.id))}
               className="text-xs text-indigo-600 hover:underline font-medium"
             >
               {t('team.permissions.selectAll')}
@@ -328,7 +331,7 @@ function PermissionsEditor({
           </div>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-          {CHAT_ROOMS.map(({ id, label, description }) => {
+          {allRooms.map(({ id, label, description }) => {
             const checked = chatRooms.includes(id);
             return (
               <div key={id}>
@@ -419,6 +422,25 @@ export default function TeamPage() {
       return (data ?? []) as Location[];
     },
   });
+
+  const { data: dynamicChannels = [] } = useQuery<{ id: string; label: string }[]>({
+    queryKey: ['chat-channels'],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('chat_channels')
+        .select('id, label')
+        .order('created_at', { ascending: true });
+      return (data ?? []) as { id: string; label: string }[];
+    },
+  });
+
+  // Combined room list: static built-ins + admin-created channels
+  const allRooms = [
+    ...STATIC_ROOMS,
+    ...dynamicChannels
+      .filter(c => !STATIC_ROOMS.some(r => r.id === c.id))
+      .map(c => ({ id: c.id, label: c.label })),
+  ];
 
   const createUser = useMutation({
     mutationFn: async ({ draft, perms, chatRooms }: { draft: AddDraft; perms: AppPermissions; chatRooms: string[] }) => {
@@ -662,6 +684,7 @@ export default function TeamPage() {
             onChatRoomsChange={setAddChatRooms}
             isAdmin={addDraft.role === 'admin'}
             role={addDraft.role}
+            allRooms={allRooms}
           />
 
           {addError && <p className="text-red-500 text-xs mt-3 font-medium">{addError}</p>}
@@ -889,6 +912,7 @@ export default function TeamPage() {
                             onChatRoomsChange={rooms => setEditDraft(d => ({ ...d, chatRooms: rooms }))}
                             isAdmin={editDraft.role === 'admin'}
                             role={editDraft.role}
+                            allRooms={allRooms}
                           />
 
                           {updateError && (
