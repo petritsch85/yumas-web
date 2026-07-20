@@ -1508,12 +1508,19 @@ export default function ChatPage() {
       }
     },
     onMutate: (id: string | 'all') => {
+      // Snapshot for rollback on error
+      const previous = qc.getQueryData(['notifications', myId]);
       qc.setQueryData(['notifications', myId], (old: Notif[] | undefined) => {
         if (!old) return old;
         return old.map(n => id === 'all' ? { ...n, read: true } : n.id === id ? { ...n, read: true } : n);
       });
+      return { previous };
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['notifications', myId] }),
+    onError: (_err, _id, context) => {
+      // Rollback on failure
+      if (context?.previous) qc.setQueryData(['notifications', myId], context.previous);
+    },
+    // No onSuccess invalidate — the optimistic update is the source of truth
   });
 
   /* ── Notifications realtime ── */
