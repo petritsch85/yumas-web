@@ -2851,7 +2851,7 @@ export default function ChatPage() {
                     onClick={() => setShowCanvasPanel(true)}
                     className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors"
                   >
-                    <FileText size={14} />
+                    <span className="text-xs font-medium">Docs</span>
                   </button>
                   {roomMembers.length > 0 && (
                     <button
