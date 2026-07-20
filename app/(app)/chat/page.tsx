@@ -1576,6 +1576,22 @@ export default function ChatPage() {
     return () => cancelAnimationFrame(raf);
   }, [activeRoom]);
 
+  useEffect(() => {
+    // On mobile, ChatMessages unmounts when on the list screen and remounts when
+    // entering a room. The activeRoom/messages effects fire before the container
+    // exists, so scroll again once the chat view becomes visible.
+    if (mobileView !== 'chat') return;
+    const raf = requestAnimationFrame(() => {
+      const container = messagesEndRef.current?.parentElement;
+      if (container) container.scrollTop = container.scrollHeight;
+      setTimeout(() => {
+        const c = messagesEndRef.current?.parentElement;
+        if (c) c.scrollTop = c.scrollHeight;
+      }, 150);
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [mobileView]);
+
   /* ── Mark room as read ── */
   useEffect(() => {
     setUnread(prev => { const n = { ...prev }; delete n[activeRoom]; return n; });
