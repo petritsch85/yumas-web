@@ -1301,6 +1301,17 @@ export default function ChatPage() {
     },
   });
 
+  // Keep legacy media query so old uploads remain visible until re-saved as blocks
+  const { data: canvasMedia = [] } = useQuery<RoomCanvasMedia[]>({
+    queryKey: ['room-canvas-media', activeRoom],
+    queryFn: async () => {
+      if (activeRoom.startsWith('dm::') || activeRoom.startsWith('group::')) return [];
+      const { data } = await supabase.from('room_canvas_media').select('*').eq('room', activeRoom).order('created_at', { ascending: true });
+      return (data ?? []) as RoomCanvasMedia[];
+    },
+    staleTime: 0,
+  });
+
   const handleCanvasMedia = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = '';
@@ -2008,17 +2019,26 @@ export default function ChatPage() {
           ? (allProfiles.find(p => p.id === roomCanvas.updated_by)?.full_name ?? 'Unknown')
           : null;
 
-        // Parse stored blocks from DB for view mode
+        // Parse stored blocks from DB for view mode, merging any legacy room_canvas_media entries
         const viewBlocks: CanvasBlock[] = (() => {
           const raw = roomCanvas?.content;
-          if (!raw) return [];
-          try {
-            const parsed = JSON.parse(raw);
-            if (Array.isArray(parsed)) return parsed as CanvasBlock[];
-            return [{ id: '0', type: 'text', content: raw }];
-          } catch {
-            return [{ id: '0', type: 'text', content: raw }];
+          let blocks: CanvasBlock[] = [];
+          if (raw) {
+            try {
+              const parsed = JSON.parse(raw);
+              blocks = Array.isArray(parsed) ? (parsed as CanvasBlock[]) : [{ id: '0', type: 'text', content: raw }];
+            } catch {
+              blocks = [{ id: '0', type: 'text', content: raw }];
+            }
           }
+          // Append legacy media entries not already present as blocks
+          const existingUrls = new Set(blocks.filter(b => b.type === 'media').map(b => (b as { url: string }).url));
+          for (const m of canvasMedia) {
+            if (!existingUrls.has(m.url)) {
+              blocks = [...blocks, { id: m.id, type: 'media', url: m.url, mediaType: m.media_type }];
+            }
+          }
+          return blocks;
         })();
 
         const moveBlock = (idx: number, dir: -1 | 1) => {
@@ -2069,6 +2089,13 @@ export default function ChatPage() {
                             blocks = Array.isArray(parsed) ? parsed : [{ id: Math.random().toString(36).slice(2), type: 'text', content: raw }];
                           } catch {
                             blocks = [{ id: Math.random().toString(36).slice(2), type: 'text', content: raw }];
+                          }
+                        }
+                        // Merge legacy media not already in blocks
+                        const existingUrls = new Set(blocks.filter(b => b.type === 'media').map(b => (b as { url: string }).url));
+                        for (const m of canvasMedia) {
+                          if (!existingUrls.has(m.url)) {
+                            blocks = [...blocks, { id: m.id, type: 'media', url: m.url, mediaType: m.media_type }];
                           }
                         }
                         if (blocks.length === 0) blocks = [{ id: Math.random().toString(36).slice(2), type: 'text', content: '' }];
