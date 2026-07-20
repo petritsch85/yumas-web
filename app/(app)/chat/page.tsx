@@ -1244,10 +1244,8 @@ export default function ChatPage() {
       ? allProfiles.filter(p => activeGroup?.member_ids.includes(p.id))
       : allProfiles.filter(p => p.role === 'admin' || p.role === 'manager' || (p.chat_rooms ?? []).includes(activeRoom));
 
-  // For @mention dropdown: all active profiles regardless of channel assignment
-  const mentionableProfiles = activeRoom.startsWith('dm::') || activeRoom.startsWith('group::')
-    ? roomMembers
-    : allProfiles;
+  // For @mention dropdown: only people in the current room
+  const mentionableProfiles = roomMembers;
 
   useEffect(() => {
     if (!profile) return;
