@@ -202,7 +202,6 @@ function RoomSidebar({
           {visibleRooms.map(room => {
             const isActive = activeRoom === room.id;
             const count = unread[room.id] ?? 0;
-            const mentions = mentionsByRoom[room.id] ?? 0;
             return (
               <button
                 key={room.id}
@@ -212,9 +211,8 @@ function RoomSidebar({
                 }`}
               >
                 <span className="text-base leading-none w-5 flex-shrink-0">{room.emoji}</span>
-                <span className="flex-1 truncate">{room.label}</span>
-                {!isActive && mentions > 0 && <UnreadBadge count={mentions} />}
-                {!isActive && count > 0 && mentions === 0 && <UnreadBadge count={count} />}
+                <span className={`flex-1 truncate ${!isActive && count > 0 ? 'font-bold' : ''}`}>{room.label}</span>
+                {!isActive && count > 0 && <UnreadBadge count={count} />}
               </button>
             );
           })}
@@ -362,7 +360,6 @@ function MobileChannelList({
             </div>
             {visibleRooms.map(room => {
               const count = unread[room.id] ?? 0;
-              const mentions = mentionsByRoom[room.id] ?? 0;
               return (
                 <button
                   key={room.id}
@@ -370,11 +367,10 @@ function MobileChannelList({
                   className="w-full flex items-center gap-3 px-4 py-3.5 text-left hover:bg-gray-50 active:bg-gray-100 border-b border-gray-50"
                 >
                   <span className="text-gray-400 font-semibold text-base w-5 text-center flex-shrink-0">#</span>
-                  <span className={`flex-1 text-[15px] truncate ${count > 0 || mentions > 0 ? 'font-semibold text-gray-900' : 'text-gray-600'}`}>
+                  <span className={`flex-1 text-[15px] truncate ${count > 0 ? 'font-semibold text-gray-900' : 'text-gray-600'}`}>
                     {room.label}
                   </span>
-                  {mentions > 0 && <UnreadBadge count={mentions} />}
-                  {count > 0 && mentions === 0 && <UnreadBadge count={count} />}
+                  {count > 0 && <UnreadBadge count={count} />}
                 </button>
               );
             })}
@@ -1093,6 +1089,7 @@ export default function ChatPage() {
   const [locallyCleared, setLocallyCleared] = useState<Record<string, number>>({});
   const [text, setText] = useState('');
   const [unread, setUnread] = useState<Record<string, number>>({});
+  const unreadInitializedRef = useRef(false);
   const [uploading, setUploading] = useState(false);
   const [mobileView, setMobileView] = useState<'list' | 'chat' | 'notifications'>('list');
   const [showMobileMembers, setShowMobileMembers] = useState(false);
@@ -1554,13 +1551,58 @@ export default function ChatPage() {
   /* ── Mark room as read ── */
   useEffect(() => {
     setUnread(prev => { const n = { ...prev }; delete n[activeRoom]; return n; });
+    // Instantly hide mention badges for this room
+    setLocallyCleared(prev => ({ ...prev, [activeRoom]: Date.now() }));
     if (myId) {
       supabase.from('chat_read_markers').upsert(
         { user_id: myId, room: activeRoom, last_read_at: new Date().toISOString() },
         { onConflict: 'user_id,room' },
       ).then(() => {});
+      // Mark all unread mention notifications for this room as read
+      supabase
+        .from('notifications')
+        .update({ read: true })
+        .eq('user_id', myId)
+        .eq('read', false)
+        .eq('type', 'mention')
+        .contains('metadata', { room: activeRoom })
+        .then(() => {
+          qc.invalidateQueries({ queryKey: ['notifications', myId] });
+        });
     }
-  }, [activeRoom, myId]);
+  }, [activeRoom, myId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /* ── Initial unread counts from DB (runs once when rooms + user are ready) ── */
+  useEffect(() => {
+    if (!myId || visibleRooms.length === 0 || unreadInitializedRef.current) return;
+    unreadInitializedRef.current = true;
+    const init = async () => {
+      const { data: markers } = await supabase
+        .from('chat_read_markers')
+        .select('room, last_read_at')
+        .eq('user_id', myId);
+      const markerMap: Record<string, string> = {};
+      for (const m of markers ?? []) markerMap[m.room] = m.last_read_at;
+
+      const counts: Record<string, number> = {};
+      await Promise.all(
+        visibleRooms.map(async (room) => {
+          if (room.id === activeRoom) return; // already marked read on enter
+          const lastRead = markerMap[room.id];
+          let q = supabase
+            .from('chat_messages')
+            .select('id', { count: 'exact', head: true })
+            .eq('room', room.id)
+            .neq('sender_id', myId);
+          if (lastRead) q = q.gt('created_at', lastRead);
+          const { count } = await q;
+          if (count && count > 0) counts[room.id] = count;
+        }),
+      );
+      setUnread(prev => ({ ...counts, ...prev }));
+    };
+    init();
+  }, [myId, visibleRooms.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ── Realtime: active room ── */
   useEffect(() => {
