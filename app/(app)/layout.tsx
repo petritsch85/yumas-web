@@ -152,7 +152,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <LanguageProvider>
-      <div className="flex h-screen overflow-hidden">
+      <div className="flex overflow-hidden" style={{ height: '100dvh' }}>
         {sidebarOpen && (
           <div
             className="fixed inset-0 bg-black/50 z-30 md:hidden"

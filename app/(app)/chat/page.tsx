@@ -1133,28 +1133,41 @@ export default function ChatPage() {
   useEffect(() => { activeRoomRef.current = activeRoom; }, [activeRoom]);
   useEffect(() => { mobileViewRef.current = mobileView; }, [mobileView]);
 
-  // Lock all outer scroll so only the messages area scrolls on mobile.
-  // iOS Safari ignores overflow:hidden on divs for momentum scrolling, so we
-  // also set overscroll-behavior:none on <html>/<body> and strip the <main>
-  // padding that leaves gray gaps on mobile (gaps the user accidentally swipes).
+  // Lock all outer scroll so only the messages area scrolls.
+  // On iOS Safari, overflow:hidden alone doesn't stop document-level momentum
+  // scroll. position:fixed on body is the only reliable prevention.
   useEffect(() => {
     const main = document.querySelector('main');
     const html = document.documentElement;
     const body = document.body;
     if (!main) return;
-    const prevOverflow = main.style.overflow;
-    const prevPadding = main.style.padding;
-    const prevHtmlOverscroll = html.style.overscrollBehavior;
-    const prevBodyOverscroll = body.style.overscrollBehavior;
+
+    const prev = {
+      mainOverflow: main.style.overflow,
+      mainPadding: main.style.padding,
+      htmlOverscroll: html.style.overscrollBehavior,
+      bodyPosition: body.style.position,
+      bodyOverflow: body.style.overflow,
+      bodyWidth: body.style.width,
+      bodyHeight: body.style.height,
+    };
+
     main.style.overflow = 'hidden';
     main.style.padding = '0';
     html.style.overscrollBehavior = 'none';
-    body.style.overscrollBehavior = 'none';
+    body.style.position = 'fixed';
+    body.style.overflow = 'hidden';
+    body.style.width = '100%';
+    body.style.height = '100%';
+
     return () => {
-      main.style.overflow = prevOverflow;
-      main.style.padding = prevPadding;
-      html.style.overscrollBehavior = prevHtmlOverscroll;
-      body.style.overscrollBehavior = prevBodyOverscroll;
+      main.style.overflow = prev.mainOverflow;
+      main.style.padding = prev.mainPadding;
+      html.style.overscrollBehavior = prev.htmlOverscroll;
+      body.style.position = prev.bodyPosition;
+      body.style.overflow = prev.bodyOverflow;
+      body.style.width = prev.bodyWidth;
+      body.style.height = prev.bodyHeight;
     };
   }, []);
 
