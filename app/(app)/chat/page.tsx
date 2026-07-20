@@ -2128,54 +2128,57 @@ export default function ChatPage() {
                 {canvasEditing ? (
                   <>
                     {canvasBlocks.map((block, idx) => (
-                      <div key={block.id} className="flex gap-2 items-start group">
-                        {/* Move up/down */}
-                        <div className="flex flex-col gap-0.5 pt-1 flex-shrink-0">
-                          <button
-                            onClick={() => moveBlock(idx, -1)}
-                            disabled={idx === 0}
-                            className="p-0.5 rounded text-gray-300 hover:text-gray-600 disabled:opacity-20 disabled:cursor-not-allowed"
-                          >
-                            <ChevronUp size={14} />
-                          </button>
-                          <button
-                            onClick={() => moveBlock(idx, 1)}
-                            disabled={idx === canvasBlocks.length - 1}
-                            className="p-0.5 rounded text-gray-300 hover:text-gray-600 disabled:opacity-20 disabled:cursor-not-allowed"
-                          >
-                            <ChevronDown size={14} />
-                          </button>
+                      <div key={block.id} className="rounded-xl border border-gray-200 overflow-hidden bg-white shadow-sm">
+                        {/* Block toolbar */}
+                        <div className="flex items-center justify-between px-3 py-1.5 bg-gray-50 border-b border-gray-200">
+                          <span className="text-[11px] font-medium text-gray-400 uppercase tracking-wide">
+                            {block.type === 'text' ? 'Text' : block.mediaType === 'video' ? 'Video' : 'Image'}
+                          </span>
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={() => moveBlock(idx, -1)}
+                              disabled={idx === 0}
+                              className="flex items-center gap-0.5 px-2 py-0.5 rounded bg-white border border-gray-200 text-gray-500 hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed text-xs"
+                            >
+                              <ChevronUp size={13} /> Up
+                            </button>
+                            <button
+                              onClick={() => moveBlock(idx, 1)}
+                              disabled={idx === canvasBlocks.length - 1}
+                              className="flex items-center gap-0.5 px-2 py-0.5 rounded bg-white border border-gray-200 text-gray-500 hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed text-xs"
+                            >
+                              <ChevronDown size={13} /> Down
+                            </button>
+                            <button
+                              onClick={() => setCanvasBlocks(bs => bs.filter(b => b.id !== block.id))}
+                              className="px-2 py-0.5 rounded bg-white border border-gray-200 text-red-400 hover:bg-red-50 hover:border-red-300 text-xs"
+                            >
+                              Remove
+                            </button>
+                          </div>
                         </div>
 
                         {/* Block content */}
-                        <div className="flex-1 min-w-0">
+                        <div>
                           {block.type === 'text' ? (
                             <textarea
                               value={block.content}
                               onChange={e => setCanvasBlocks(bs => bs.map(b => b.id === block.id ? { ...b, content: e.target.value } : b))}
-                              className="w-full min-h-[80px] text-sm text-gray-800 leading-relaxed outline-none resize-none bg-gray-50 rounded-xl px-3 py-2 border border-gray-200 focus:border-[#1B5E20] focus:bg-white transition-colors"
+                              className="w-full min-h-[80px] text-sm text-gray-800 leading-relaxed outline-none resize-none px-4 py-3 focus:bg-green-50/30 transition-colors"
                               placeholder="Write text here…"
                               style={{ fontSize: '16px' }}
                             />
                           ) : (
-                            <div className="rounded-xl overflow-hidden bg-black">
+                            <div className="bg-gray-100">
                               {block.mediaType === 'image' ? (
                                 // eslint-disable-next-line @next/next/no-img-element
-                                <img src={block.url} alt="" className="w-full max-h-64 object-contain" />
+                                <img src={block.url} alt="" className="w-full max-h-72 object-contain" />
                               ) : (
-                                <video src={block.url} controls preload="metadata" playsInline className="w-full max-h-64 bg-black" onLoadedMetadata={e => { (e.target as HTMLVideoElement).currentTime = 0.001; }} />
+                                <video src={block.url} controls preload="metadata" playsInline className="w-full max-h-72" onLoadedMetadata={e => { (e.target as HTMLVideoElement).currentTime = 0.001; }} />
                               )}
                             </div>
                           )}
                         </div>
-
-                        {/* Delete block */}
-                        <button
-                          onClick={() => setCanvasBlocks(bs => bs.filter(b => b.id !== block.id))}
-                          className="flex-shrink-0 mt-1 p-1 text-gray-300 hover:text-red-500 transition-colors"
-                        >
-                          <X size={14} />
-                        </button>
                       </div>
                     ))}
 
