@@ -636,24 +636,27 @@ function MessageBubble({
           </div>
         ) : (
           <>
-            {/* Reply quote block */}
-            {msg.reply_to?.id && (
-              <div className={`rounded-xl px-2.5 py-1.5 mb-0.5 max-w-full border-l-2 ${
-                isOwn ? 'bg-[#1B5E20]/10 border-[#1B5E20]/50' : 'bg-gray-200/70 border-gray-400'
-              }`}>
-                <p className={`text-[10px] font-semibold mb-0.5 ${isOwn ? 'text-[#1B5E20]' : 'text-gray-600'}`}>
-                  {msg.reply_to.sender_name}
-                </p>
-                <p className="text-xs text-gray-500 truncate max-w-[220px]">
-                  {msg.reply_to.content ?? (msg.reply_to.media_type ? '📷 Media' : '…')}
-                </p>
-              </div>
-            )}
-
-            {/* Main bubble */}
-            <div className={`rounded-2xl px-3 py-2 text-sm ${
+            {/* Main bubble — quote embedded inside when replying */}
+            <div className={`rounded-2xl text-sm overflow-hidden ${
               isOwn ? 'bg-[#1B5E20] text-white rounded-tr-sm' : 'bg-gray-100 text-gray-900 rounded-tl-sm'
             }`}>
+              {msg.reply_to?.id && (
+                <div
+                  className={`flex gap-0 border-l-[3px] mx-2 mt-2 mb-1 rounded-sm overflow-hidden ${
+                    isOwn ? 'border-white/60 bg-white/15' : 'border-[#1B5E20] bg-black/5'
+                  }`}
+                >
+                  <div className="px-2 py-1 min-w-0">
+                    <p className={`text-[10px] font-bold mb-0.5 truncate ${isOwn ? 'text-white/80' : 'text-[#1B5E20]'}`}>
+                      {msg.reply_to.sender_name}
+                    </p>
+                    <p className={`text-xs truncate max-w-[220px] ${isOwn ? 'text-white/70' : 'text-gray-500'}`}>
+                      {msg.reply_to.content ?? (msg.reply_to.media_type ? '📷 Media' : '…')}
+                    </p>
+                  </div>
+                </div>
+              )}
+              <div className="px-3 py-2">
               {msg.media_url && msg.media_type === 'image' && (
                 <a href={msg.media_url} target="_blank" rel="noopener noreferrer" className="block mb-1">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -668,6 +671,7 @@ function MessageBubble({
                   {highlightMentions(msg.content, allProfiles, isOwn)}
                 </p>
               )}
+              </div>{/* end inner px-3 py-2 */}
             </div>
 
             {msg.edited_at && (
