@@ -56,7 +56,21 @@ export async function PATCH(
     // never breaks the main permissions save.
     if (chatRooms !== undefined) {
       await admin.from('profiles').update({ chat_rooms: chatRooms }).eq('id', id);
-      // Intentionally ignore errors — column may not exist yet
+
+      // Keep chat_channels.member_ids in sync so RLS lets the user query their channels.
+      const { data: allChannels } = await admin.from('chat_channels').select('id, member_ids');
+      if (allChannels) {
+        for (const channel of allChannels) {
+          const currentMembers: string[] = channel.member_ids ?? [];
+          const shouldBeMember = (chatRooms as string[]).includes(channel.id);
+          const isMember = currentMembers.includes(id);
+          if (shouldBeMember && !isMember) {
+            await admin.from('chat_channels').update({ member_ids: [...currentMembers, id] }).eq('id', channel.id);
+          } else if (!shouldBeMember && isMember) {
+            await admin.from('chat_channels').update({ member_ids: currentMembers.filter((m: string) => m !== id) }).eq('id', channel.id);
+          }
+        }
+      }
     }
 
     // Optionally update auth fields (email and/or password)

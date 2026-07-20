@@ -1203,7 +1203,10 @@ export default function ChatPage() {
   const staticVisibleRooms = isAdmin
     ? ROOMS
     : ROOMS.filter(r => profile?.chat_rooms?.includes(r.id));
-  const visibleRooms = [...staticVisibleRooms, ...dynamicChannels];
+  const visibleDynamicChannels = isAdmin
+    ? dynamicChannels
+    : dynamicChannels.filter(c => profile?.chat_rooms?.includes(c.id));
+  const visibleRooms = [...staticVisibleRooms, ...visibleDynamicChannels];
 
   /* ── Chat groups ── */
   const { data: chatGroups = [] } = useQuery<ChatGroup[]>({
