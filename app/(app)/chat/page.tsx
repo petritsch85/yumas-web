@@ -5,7 +5,7 @@ import { createPortal } from 'react-dom';
 import dynamic from 'next/dynamic';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
-import { Send, Paperclip, MessageCircle, ChevronLeft, X, Users, ClipboardList, CheckSquare, Square, Plus, Pencil, Smile, CornerUpLeft, Bell, Calendar, Flag, UserCheck, KeyRound, Eye, EyeOff, Copy, Check, BookOpen, Lock, Unlock, Loader2 } from 'lucide-react';
+import { Send, Paperclip, MessageCircle, ChevronLeft, ChevronUp, ChevronDown, X, Users, ClipboardList, CheckSquare, Square, Plus, Pencil, Smile, CornerUpLeft, Bell, Calendar, Flag, UserCheck, KeyRound, Eye, EyeOff, Copy, Check, BookOpen, Lock, Unlock, Loader2 } from 'lucide-react';
 import type { Profile } from '@/types';
 
 const EmojiPicker = dynamic(() => import('emoji-picker-react'), { ssr: false });
@@ -63,6 +63,10 @@ type RoomCanvasMedia = {
   created_at: string;
   created_by: string | null;
 };
+
+type CanvasBlock =
+  | { id: string; type: 'text'; content: string }
+  | { id: string; type: 'media'; url: string; mediaType: 'image' | 'video' };
 
 type Notif = {
   id: string;
@@ -1096,7 +1100,7 @@ export default function ChatPage() {
   const [toast, setToast] = useState<{ title: string; body: string } | null>(null);
   const [showCanvasPanel, setShowCanvasPanel] = useState(false);
   const [canvasEditing, setCanvasEditing] = useState(false);
-  const [canvasDraft, setCanvasDraft] = useState('');
+  const [canvasBlocks, setCanvasBlocks] = useState<CanvasBlock[]>([]);
   const [canvasMediaUploading, setCanvasMediaUploading] = useState(false);
   const canvasFileInputRef = useRef<HTMLInputElement>(null);
   const [showGroupModal, setShowGroupModal] = useState(false);
@@ -1297,19 +1301,17 @@ export default function ChatPage() {
     },
   });
 
-  const { data: canvasMedia = [] } = useQuery<RoomCanvasMedia[]>({
-    queryKey: ['room-canvas-media', activeRoom],
-    queryFn: async () => {
-      if (activeRoom.startsWith('dm::') || activeRoom.startsWith('group::')) return [];
-      const { data } = await supabase.from('room_canvas_media').select('*').eq('room', activeRoom).order('created_at', { ascending: true });
-      return (data ?? []) as RoomCanvasMedia[];
-    },
-    staleTime: 0,
-  });
-
-  const addCanvasMediaMutation = useMutation({
-    mutationFn: async (file: File) => {
-      const isVideo = file.type.startsWith('video/');
+  const handleCanvasMedia = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    const isImage = file.type.startsWith('image/');
+    const isVideo = file.type.startsWith('video/');
+    if (!isImage && !isVideo) { alert('Only images and videos are supported.'); return; }
+    if (isImage && file.size > 20 * 1024 * 1024) { alert('Image too large. Max 20 MB.'); return; }
+    if (isVideo && file.size > 500 * 1024 * 1024) { alert('Video too large. Max 500 MB.'); return; }
+    setCanvasMediaUploading(true);
+    try {
       let url: string;
       if (isVideo) {
         const res = await fetch(`/api/r2/presign?filename=${encodeURIComponent(file.name)}&type=${encodeURIComponent(file.type)}`);
@@ -1325,32 +1327,11 @@ export default function ChatPage() {
         if (upErr) throw upErr;
         ({ data: { publicUrl: url } } = supabase.storage.from('chat-media').getPublicUrl(path));
       }
-      const { error } = await supabase.from('room_canvas_media').insert({ room: activeRoom, url, media_type: isVideo ? 'video' : 'image', created_by: myId });
-      if (error) throw error;
-    },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['room-canvas-media', activeRoom] }),
-  });
-
-  const deleteCanvasMediaMutation = useMutation({
-    mutationFn: async (id: string) => {
-      const { error } = await supabase.from('room_canvas_media').delete().eq('id', id);
-      if (error) throw error;
-    },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['room-canvas-media', activeRoom] }),
-  });
-
-  const handleCanvasMedia = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = '';
-    if (!file) return;
-    const isImage = file.type.startsWith('image/');
-    const isVideo = file.type.startsWith('video/');
-    if (!isImage && !isVideo) { alert('Only images and videos are supported.'); return; }
-    if (isImage && file.size > 20 * 1024 * 1024) { alert('Image too large. Max 20 MB.'); return; }
-    if (isVideo && file.size > 500 * 1024 * 1024) { alert('Video too large. Max 500 MB.'); return; }
-    setCanvasMediaUploading(true);
-    try { await addCanvasMediaMutation.mutateAsync(file); }
-    finally { setCanvasMediaUploading(false); }
+      const newBlock: CanvasBlock = { id: Math.random().toString(36).slice(2), type: 'media', url, mediaType: isVideo ? 'video' : 'image' };
+      setCanvasBlocks(bs => [...bs, newBlock]);
+    } finally {
+      setCanvasMediaUploading(false);
+    }
   };
 
   const showToast = (title: string, body: string) => {
@@ -2026,6 +2007,30 @@ export default function ChatPage() {
         const updatedByName = roomCanvas?.updated_by
           ? (allProfiles.find(p => p.id === roomCanvas.updated_by)?.full_name ?? 'Unknown')
           : null;
+
+        // Parse stored blocks from DB for view mode
+        const viewBlocks: CanvasBlock[] = (() => {
+          const raw = roomCanvas?.content;
+          if (!raw) return [];
+          try {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed)) return parsed as CanvasBlock[];
+            return [{ id: '0', type: 'text', content: raw }];
+          } catch {
+            return [{ id: '0', type: 'text', content: raw }];
+          }
+        })();
+
+        const moveBlock = (idx: number, dir: -1 | 1) => {
+          setCanvasBlocks(bs => {
+            const next = [...bs];
+            const swap = idx + dir;
+            if (swap < 0 || swap >= next.length) return bs;
+            [next[idx], next[swap]] = [next[swap], next[idx]];
+            return next;
+          });
+        };
+
         return (
           <div className="fixed inset-0 z-50 flex flex-col justify-end" onClick={() => { setShowCanvasPanel(false); setCanvasEditing(false); }}>
             <div className="absolute inset-0 bg-black/40" />
@@ -2044,7 +2049,6 @@ export default function ChatPage() {
                   )}
                 </div>
                 <div className="flex items-center gap-2">
-                  {/* Admin: toggle read-only */}
                   {isAdmin && (
                     <button
                       onClick={() => saveCanvasMutation.mutate({ content: roomCanvas?.content ?? '', is_editable: isReadOnly })}
@@ -2054,10 +2058,23 @@ export default function ChatPage() {
                       {isReadOnly ? <><Unlock size={12} /> Unlock</> : <><Lock size={12} /> Lock</>}
                     </button>
                   )}
-                  {/* Edit / Save */}
                   {canEdit && !canvasEditing && (
                     <button
-                      onClick={() => { setCanvasDraft(roomCanvas?.content ?? ''); setCanvasEditing(true); }}
+                      onClick={() => {
+                        const raw = roomCanvas?.content;
+                        let blocks: CanvasBlock[] = [];
+                        if (raw) {
+                          try {
+                            const parsed = JSON.parse(raw);
+                            blocks = Array.isArray(parsed) ? parsed : [{ id: Math.random().toString(36).slice(2), type: 'text', content: raw }];
+                          } catch {
+                            blocks = [{ id: Math.random().toString(36).slice(2), type: 'text', content: raw }];
+                          }
+                        }
+                        if (blocks.length === 0) blocks = [{ id: Math.random().toString(36).slice(2), type: 'text', content: '' }];
+                        setCanvasBlocks(blocks);
+                        setCanvasEditing(true);
+                      }}
                       className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#1B5E20] text-white text-xs font-medium"
                     >
                       <Pencil size={12} /> Edit
@@ -2067,7 +2084,7 @@ export default function ChatPage() {
                     <>
                       <button onClick={() => setCanvasEditing(false)} className="px-3 py-1.5 rounded-lg border border-gray-200 text-xs text-gray-600">Cancel</button>
                       <button
-                        onClick={() => saveCanvasMutation.mutate({ content: canvasDraft, is_editable: roomCanvas?.is_editable ?? true })}
+                        onClick={() => saveCanvasMutation.mutate({ content: JSON.stringify(canvasBlocks), is_editable: roomCanvas?.is_editable ?? true })}
                         disabled={saveCanvasMutation.isPending}
                         className="px-3 py-1.5 rounded-lg bg-[#1B5E20] text-white text-xs font-medium disabled:opacity-40"
                       >
@@ -2080,68 +2097,106 @@ export default function ChatPage() {
               </div>
 
               {/* Content */}
-              <div className="flex-1 overflow-y-auto px-5 py-4 flex flex-col gap-4">
+              <div className="flex-1 overflow-y-auto px-5 py-4 flex flex-col gap-3">
+                {canvasEditing ? (
+                  <>
+                    {canvasBlocks.map((block, idx) => (
+                      <div key={block.id} className="flex gap-2 items-start group">
+                        {/* Move up/down */}
+                        <div className="flex flex-col gap-0.5 pt-1 flex-shrink-0">
+                          <button
+                            onClick={() => moveBlock(idx, -1)}
+                            disabled={idx === 0}
+                            className="p-0.5 rounded text-gray-300 hover:text-gray-600 disabled:opacity-20 disabled:cursor-not-allowed"
+                          >
+                            <ChevronUp size={14} />
+                          </button>
+                          <button
+                            onClick={() => moveBlock(idx, 1)}
+                            disabled={idx === canvasBlocks.length - 1}
+                            className="p-0.5 rounded text-gray-300 hover:text-gray-600 disabled:opacity-20 disabled:cursor-not-allowed"
+                          >
+                            <ChevronDown size={14} />
+                          </button>
+                        </div>
 
-                {/* Media grid */}
-                {(canvasMedia.length > 0 || (canvasEditing && canEdit)) && (
-                  <div>
-                    {canvasMedia.length > 0 && (
-                      <div className="grid grid-cols-3 gap-2 mb-3">
-                        {canvasMedia.map(m => (
-                          <div key={m.id} className="relative group rounded-xl overflow-hidden bg-black">
-                            {m.media_type === 'image' ? (
-                              <a href={m.url} target="_blank" rel="noopener noreferrer">
-                                {/* eslint-disable-next-line @next/next/no-img-element */}
-                                <img src={m.url} alt="" className="w-full h-28 object-cover" />
-                              </a>
-                            ) : (
-                              <video src={m.url} controls preload="metadata" playsInline className="w-full h-28 object-cover bg-black" onLoadedMetadata={e => { (e.target as HTMLVideoElement).currentTime = 0.001; }} />
-                            )}
-                            {canvasEditing && (
-                              <button
-                                onClick={() => deleteCanvasMediaMutation.mutate(m.id)}
-                                className="absolute top-1 right-1 bg-black/60 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
-                              >
-                                <X size={12} />
-                              </button>
-                            )}
-                          </div>
-                        ))}
+                        {/* Block content */}
+                        <div className="flex-1 min-w-0">
+                          {block.type === 'text' ? (
+                            <textarea
+                              value={block.content}
+                              onChange={e => setCanvasBlocks(bs => bs.map(b => b.id === block.id ? { ...b, content: e.target.value } : b))}
+                              className="w-full min-h-[80px] text-sm text-gray-800 leading-relaxed outline-none resize-none bg-gray-50 rounded-xl px-3 py-2 border border-gray-200 focus:border-[#1B5E20] focus:bg-white transition-colors"
+                              placeholder="Write text here…"
+                              style={{ fontSize: '16px' }}
+                            />
+                          ) : (
+                            <div className="rounded-xl overflow-hidden bg-black">
+                              {block.mediaType === 'image' ? (
+                                // eslint-disable-next-line @next/next/no-img-element
+                                <img src={block.url} alt="" className="w-full max-h-64 object-contain" />
+                              ) : (
+                                <video src={block.url} controls preload="metadata" playsInline className="w-full max-h-64 bg-black" onLoadedMetadata={e => { (e.target as HTMLVideoElement).currentTime = 0.001; }} />
+                              )}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Delete block */}
+                        <button
+                          onClick={() => setCanvasBlocks(bs => bs.filter(b => b.id !== block.id))}
+                          className="flex-shrink-0 mt-1 p-1 text-gray-300 hover:text-red-500 transition-colors"
+                        >
+                          <X size={14} />
+                        </button>
                       </div>
-                    )}
-                    {canvasEditing && canEdit && (
+                    ))}
+
+                    {/* Add block buttons */}
+                    <div className="flex gap-2 pt-1">
+                      <button
+                        onClick={() => setCanvasBlocks(bs => [...bs, { id: Math.random().toString(36).slice(2), type: 'text', content: '' }])}
+                        className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-dashed border-gray-300 text-gray-500 text-xs hover:border-[#1B5E20] hover:text-[#1B5E20] transition-colors"
+                      >
+                        <Plus size={13} /> Add text
+                      </button>
                       <button
                         onClick={() => canvasFileInputRef.current?.click()}
                         disabled={canvasMediaUploading}
-                        className="flex items-center gap-2 px-3 py-2.5 rounded-xl border border-dashed border-gray-300 text-gray-500 text-sm hover:border-[#1B5E20] hover:text-[#1B5E20] transition-colors w-full justify-center disabled:opacity-40"
+                        className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-dashed border-gray-300 text-gray-500 text-xs hover:border-[#1B5E20] hover:text-[#1B5E20] transition-colors disabled:opacity-40"
                       >
-                        {canvasMediaUploading ? <Loader2 size={14} className="animate-spin" /> : <Paperclip size={14} />}
+                        {canvasMediaUploading ? <Loader2 size={13} className="animate-spin" /> : <Paperclip size={13} />}
                         {canvasMediaUploading ? 'Uploading…' : 'Add photo or video'}
                       </button>
-                    )}
+                    </div>
                     <input ref={canvasFileInputRef} type="file" accept="image/*,video/mp4,video/quicktime,video/webm" className="hidden" onChange={handleCanvasMedia} />
-                  </div>
-                )}
-
-                {/* Text */}
-                {canvasEditing ? (
-                  <textarea
-                    value={canvasDraft}
-                    onChange={e => setCanvasDraft(e.target.value)}
-                    className="w-full min-h-[30vh] text-sm text-gray-800 leading-relaxed outline-none resize-none"
-                    placeholder="Write anything here — passwords, links, notes, instructions…"
-                    style={{ fontSize: '16px' }}
-                    autoFocus
-                  />
-                ) : roomCanvas?.content ? (
-                  <p className="text-sm text-gray-800 leading-relaxed whitespace-pre-wrap">{roomCanvas.content}</p>
-                ) : canvasMedia.length === 0 ? (
+                  </>
+                ) : viewBlocks.length > 0 ? (
+                  viewBlocks.map((block, idx) => (
+                    <div key={block.id ?? idx}>
+                      {block.type === 'text' ? (
+                        <p className="text-sm text-gray-800 leading-relaxed whitespace-pre-wrap">{block.content}</p>
+                      ) : (
+                        <div className="rounded-xl overflow-hidden bg-black">
+                          {block.mediaType === 'image' ? (
+                            <a href={block.url} target="_blank" rel="noopener noreferrer">
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img src={block.url} alt="" className="w-full max-h-80 object-contain" />
+                            </a>
+                          ) : (
+                            <video src={block.url} controls preload="metadata" playsInline className="w-full max-h-80 bg-black" onLoadedMetadata={e => { (e.target as HTMLVideoElement).currentTime = 0.001; }} />
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ))
+                ) : (
                   <div className="flex flex-col items-center justify-center py-16 text-gray-400 select-none">
                     <BookOpen size={36} className="mb-2 opacity-25" />
                     <p className="text-sm">Canvas is empty</p>
                     {canEdit && <p className="text-xs mt-1">Tap Edit to add content</p>}
                   </div>
-                ) : null}
+                )}
               </div>
 
               {/* Footer */}
