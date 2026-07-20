@@ -5,7 +5,7 @@ import { createPortal } from 'react-dom';
 import dynamic from 'next/dynamic';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
-import { Send, Paperclip, MessageCircle, ChevronLeft, ChevronUp, ChevronDown, X, Users, ClipboardList, CheckSquare, Square, Plus, Pencil, Smile, CornerUpLeft, Bell, Calendar, Flag, UserCheck, KeyRound, Eye, EyeOff, Copy, Check, BookOpen, Lock, Unlock, Loader2 } from 'lucide-react';
+import { Send, Paperclip, MessageCircle, ChevronLeft, ChevronUp, ChevronDown, X, Users, ClipboardList, CheckSquare, Square, Plus, Pencil, Smile, CornerUpLeft, Bell, Calendar, Flag, UserCheck, FileText, Eye, EyeOff, Copy, Check, BookOpen, Lock, Unlock, Loader2 } from 'lucide-react';
 import type { Profile } from '@/types';
 
 const EmojiPicker = dynamic(() => import('emoji-picker-react'), { ssr: false });
@@ -1993,7 +1993,8 @@ export default function ChatPage() {
                   onClick={() => setShowCanvasPanel(true)}
                   className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors"
                 >
-                  <KeyRound size={14} />
+                  <FileText size={14} />
+                  <span className="text-xs font-medium">Documents</span>
                 </button>
                 {roomMembers.length > 0 && (
                   <button
@@ -2169,7 +2170,7 @@ export default function ChatPage() {
               <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
                 <div className="flex items-center gap-2">
                   <BookOpen size={16} className="text-gray-500" />
-                  <span className="font-semibold text-gray-900">Canvas — {activeLabel}</span>
+                  <span className="font-semibold text-gray-900">Documents — {activeLabel}</span>
                   {isReadOnly && (
                     <span className="flex items-center gap-1 text-[10px] text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full">
                       <Lock size={9} /> Read-only
@@ -2343,7 +2344,7 @@ export default function ChatPage() {
                 ) : (
                   <div className="flex flex-col items-center justify-center py-16 text-gray-400 select-none">
                     <BookOpen size={36} className="mb-2 opacity-25" />
-                    <p className="text-sm">Canvas is empty</p>
+                    <p className="text-sm">Documents is empty</p>
                     {canEdit && <p className="text-xs mt-1">Tap Edit to add content</p>}
                   </div>
                 )}
@@ -2838,7 +2839,7 @@ export default function ChatPage() {
                     onClick={() => setShowCanvasPanel(true)}
                     className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors"
                   >
-                    <KeyRound size={14} />
+                    <FileText size={14} />
                   </button>
                   {roomMembers.length > 0 && (
                     <button
