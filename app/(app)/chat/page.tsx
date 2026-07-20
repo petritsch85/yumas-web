@@ -1352,8 +1352,12 @@ export default function ChatPage() {
 
 
   const createNotif = async (userId: string, type: string, title: string, body: string, metadata: Record<string, unknown> = {}) => {
-    const { error } = await supabase.from('notifications').insert({ user_id: userId, type, title, body, metadata });
-    if (error) console.error('createNotif failed:', error.message, { userId, type });
+    const res = await fetch('/api/notifications', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: userId, type, title, body, metadata }),
+    });
+    if (!res.ok) console.error('createNotif failed:', await res.text(), { userId, type });
   };
 
   const addTaskMutation = useMutation({
@@ -1503,11 +1507,12 @@ export default function ChatPage() {
 
   const markNotifReadMutation = useMutation({
     mutationFn: async (id: string | 'all') => {
-      if (id === 'all') {
-        await supabase.from('notifications').update({ read: true }).eq('user_id', myId).eq('read', false);
-      } else {
-        await supabase.from('notifications').update({ read: true }).eq('id', id);
-      }
+      const res = await fetch('/api/notifications', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, user_id: myId }),
+      });
+      if (!res.ok) throw new Error(await res.text());
     },
     onMutate: (id: string | 'all') => {
       // Snapshot for rollback on error
