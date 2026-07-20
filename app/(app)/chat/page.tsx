@@ -1170,15 +1170,18 @@ export default function ChatPage() {
   const otherProfiles = allProfiles.filter(p => p.id !== myId);
 
   /* ── Dynamic channels (admin-created) ── */
+  // Fetch via server API (admin client) so RLS on chat_channels does not
+  // filter out channels the user was granted via profile.chat_rooms but is
+  // not yet in member_ids.
   const { data: dynamicChannels = [] } = useQuery<ChatChannel[]>({
-    queryKey: ['chat-channels'],
+    queryKey: ['chat-channels', myId],
     queryFn: async () => {
-      const { data } = await supabase
-        .from('chat_channels')
-        .select('*')
-        .order('created_at', { ascending: true });
-      return (data ?? []) as ChatChannel[];
+      if (!myId) return [];
+      const res = await fetch(`/api/chat/channels?userId=${myId}`);
+      if (!res.ok) return [];
+      return res.json();
     },
+    enabled: !!myId,
     staleTime: 30_000,
   });
 
