@@ -1556,24 +1556,11 @@ export default function ChatPage() {
   /* ── Mark room as read ── */
   useEffect(() => {
     setUnread(prev => { const n = { ...prev }; delete n[activeRoom]; return n; });
-    // Instantly hide mention badges for this room
-    setLocallyCleared(prev => ({ ...prev, [activeRoom]: Date.now() }));
     if (myId) {
       supabase.from('chat_read_markers').upsert(
         { user_id: myId, room: activeRoom, last_read_at: new Date().toISOString() },
         { onConflict: 'user_id,room' },
       ).then(() => {});
-      // Mark all unread mention notifications for this room as read
-      supabase
-        .from('notifications')
-        .update({ read: true })
-        .eq('user_id', myId)
-        .eq('read', false)
-        .eq('type', 'mention')
-        .contains('metadata', { room: activeRoom })
-        .then(() => {
-          qc.invalidateQueries({ queryKey: ['notifications', myId] });
-        });
     }
   }, [activeRoom, myId]); // eslint-disable-line react-hooks/exhaustive-deps
 
