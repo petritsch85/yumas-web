@@ -1128,8 +1128,10 @@ export default function ChatPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const activeRoomRef = useRef(activeRoom);
+  const mobileViewRef = useRef(mobileView);
 
   useEffect(() => { activeRoomRef.current = activeRoom; }, [activeRoom]);
+  useEffect(() => { mobileViewRef.current = mobileView; }, [mobileView]);
 
   // Prevent the layout's main element from scrolling — chat handles its own internal scroll
   useEffect(() => {
@@ -1687,7 +1689,16 @@ export default function ChatPage() {
         event: 'INSERT', schema: 'public', table: 'chat_messages',
       }, (payload) => {
         const msg = payload.new as ChatMessage;
-        if (msg.room !== activeRoomRef.current) {
+        // On mobile the user is only actively reading a room when mobileView === 'chat'.
+        // On the list/notifications screen, activeRoom is still set but the user
+        // isn't seeing it — count new messages for ALL rooms including the default
+        // activeRoom (General). On desktop mobileView stays 'list' but the chat is
+        // always visible, so use window width to differentiate.
+        const isMobileWidth = typeof window !== 'undefined' && window.innerWidth < 768;
+        const activelyViewing =
+          msg.room === activeRoomRef.current &&
+          (!isMobileWidth || mobileViewRef.current === 'chat');
+        if (!activelyViewing) {
           setUnread(prev => ({ ...prev, [msg.room]: (prev[msg.room] ?? 0) + 1 }));
         }
       })
