@@ -1778,7 +1778,8 @@ export default function OutgoingBillsPage() {
                         <div key={line.id} className="flex gap-2 items-center">
                           <input
                             type="text"
-                            className={`${inputCls} flex-1`}
+                            className={`${inputCls} flex-1 min-w-0`}
+                            style={{ width: 'auto' }}
                             placeholder="Beschreibung…"
                             value={line.description}
                             onChange={e => setCateringLines(ls => ls.map(l => l.id === line.id ? { ...l, description: e.target.value } : l))}
@@ -1786,7 +1787,7 @@ export default function OutgoingBillsPage() {
                           <input
                             type="number"
                             step="0.01"
-                            className={`${inputCls} w-36 text-right`}
+                            className="flex-shrink-0 w-32 bg-white border border-gray-300 rounded-lg px-3 py-2.5 text-sm text-gray-900 text-right placeholder:text-gray-400 shadow-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/40 focus:border-[#1B5E20] transition-colors"
                             placeholder="0,00"
                             value={line.amount}
                             onChange={e => setCateringLines(ls => ls.map(l => l.id === line.id ? { ...l, amount: e.target.value } : l))}
