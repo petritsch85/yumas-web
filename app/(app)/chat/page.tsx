@@ -66,7 +66,7 @@ type RoomCanvasMedia = {
 
 type CanvasBlock =
   | { id: string; type: 'text'; content: string }
-  | { id: string; type: 'media'; url: string; mediaType: 'image' | 'video' };
+  | { id: string; type: 'media'; url: string; mediaType: 'image' | 'video'; caption?: string };
 
 type Notif = {
   id: string;
@@ -2169,13 +2169,22 @@ export default function ChatPage() {
                               style={{ fontSize: '16px' }}
                             />
                           ) : (
-                            <div className="bg-gray-100">
-                              {block.mediaType === 'image' ? (
-                                // eslint-disable-next-line @next/next/no-img-element
-                                <img src={block.url} alt="" className="w-full max-h-72 object-contain" />
-                              ) : (
-                                <video src={block.url} controls preload="metadata" playsInline className="w-full max-h-72" onLoadedMetadata={e => { (e.target as HTMLVideoElement).currentTime = 0.001; }} />
-                              )}
+                            <div>
+                              <div className="bg-gray-100">
+                                {block.mediaType === 'image' ? (
+                                  // eslint-disable-next-line @next/next/no-img-element
+                                  <img src={block.url} alt="" className="w-full max-h-72 object-contain" />
+                                ) : (
+                                  <video src={block.url} controls preload="metadata" playsInline className="w-full max-h-72" onLoadedMetadata={e => { (e.target as HTMLVideoElement).currentTime = 0.001; }} />
+                                )}
+                              </div>
+                              <input
+                                type="text"
+                                value={block.caption ?? ''}
+                                onChange={e => setCanvasBlocks(bs => bs.map(b => b.id === block.id ? { ...b, caption: e.target.value } : b))}
+                                className="w-full px-4 py-2 text-sm text-gray-600 outline-none border-t border-gray-200 placeholder:text-gray-400 bg-white"
+                                placeholder="Add a caption…"
+                              />
                             </div>
                           )}
                         </div>
@@ -2207,14 +2216,17 @@ export default function ChatPage() {
                       {block.type === 'text' ? (
                         <p className="text-sm text-gray-800 leading-relaxed whitespace-pre-wrap">{block.content}</p>
                       ) : (
-                        <div className="rounded-xl overflow-hidden bg-black">
+                        <div className="rounded-xl overflow-hidden border border-gray-100">
                           {block.mediaType === 'image' ? (
                             <a href={block.url} target="_blank" rel="noopener noreferrer">
                               {/* eslint-disable-next-line @next/next/no-img-element */}
-                              <img src={block.url} alt="" className="w-full max-h-80 object-contain" />
+                              <img src={block.url} alt="" className="w-full max-h-80 object-contain bg-gray-100" />
                             </a>
                           ) : (
                             <video src={block.url} controls preload="metadata" playsInline className="w-full max-h-80 bg-black" onLoadedMetadata={e => { (e.target as HTMLVideoElement).currentTime = 0.001; }} />
+                          )}
+                          {block.caption && (
+                            <p className="px-4 py-2 text-sm text-gray-500 bg-white border-t border-gray-100">{block.caption}</p>
                           )}
                         </div>
                       )}
