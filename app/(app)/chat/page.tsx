@@ -1133,13 +1133,29 @@ export default function ChatPage() {
   useEffect(() => { activeRoomRef.current = activeRoom; }, [activeRoom]);
   useEffect(() => { mobileViewRef.current = mobileView; }, [mobileView]);
 
-  // Prevent the layout's main element from scrolling — chat handles its own internal scroll
+  // Lock all outer scroll so only the messages area scrolls on mobile.
+  // iOS Safari ignores overflow:hidden on divs for momentum scrolling, so we
+  // also set overscroll-behavior:none on <html>/<body> and strip the <main>
+  // padding that leaves gray gaps on mobile (gaps the user accidentally swipes).
   useEffect(() => {
     const main = document.querySelector('main');
+    const html = document.documentElement;
+    const body = document.body;
     if (!main) return;
-    const prev = main.style.overflow;
+    const prevOverflow = main.style.overflow;
+    const prevPadding = main.style.padding;
+    const prevHtmlOverscroll = html.style.overscrollBehavior;
+    const prevBodyOverscroll = body.style.overscrollBehavior;
     main.style.overflow = 'hidden';
-    return () => { main.style.overflow = prev; };
+    main.style.padding = '0';
+    html.style.overscrollBehavior = 'none';
+    body.style.overscrollBehavior = 'none';
+    return () => {
+      main.style.overflow = prevOverflow;
+      main.style.padding = prevPadding;
+      html.style.overscrollBehavior = prevHtmlOverscroll;
+      body.style.overscrollBehavior = prevBodyOverscroll;
+    };
   }, []);
 
   /* ── Current user ── */
@@ -1921,7 +1937,7 @@ export default function ChatPage() {
   /* ─── Render ─────────────────────────────────────────────────────────────── */
   return (
     <>
-    <div className="flex h-full bg-white rounded-xl border border-gray-100 overflow-hidden shadow-sm">
+    <div className="flex h-full bg-white overflow-hidden md:rounded-xl md:border md:border-gray-100 md:shadow-sm">
 
       {/* ── MOBILE: Channel list ── */}
       {mobileView === 'list' && (
