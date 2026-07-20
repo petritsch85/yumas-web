@@ -1089,7 +1089,7 @@ export default function ChatPage() {
   const [locallyCleared, setLocallyCleared] = useState<Record<string, number>>({});
   const [text, setText] = useState('');
   const [unread, setUnread] = useState<Record<string, number>>({});
-  const unreadInitializedRef = useRef(false);
+  const initializedRoomsRef = useRef<Set<string>>(new Set());
   const [uploading, setUploading] = useState(false);
   const [mobileView, setMobileView] = useState<'list' | 'chat' | 'notifications'>('list');
   const [showMobileMembers, setShowMobileMembers] = useState(false);
@@ -1564,10 +1564,14 @@ export default function ChatPage() {
     }
   }, [activeRoom, myId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  /* ── Initial unread counts from DB (runs once when rooms + user are ready) ── */
+  /* ── Initial unread counts from DB — runs for each new room as they appear ── */
   useEffect(() => {
-    if (!myId || visibleRooms.length === 0 || unreadInitializedRef.current) return;
-    unreadInitializedRef.current = true;
+    if (!myId || visibleRooms.length === 0) return;
+    // Only fetch rooms we haven't fetched yet (handles dynamic channels loading late)
+    const newRooms = visibleRooms.filter(r => !initializedRoomsRef.current.has(r.id));
+    if (newRooms.length === 0) return;
+    newRooms.forEach(r => initializedRoomsRef.current.add(r.id));
+
     const init = async () => {
       const { data: markers } = await supabase
         .from('chat_read_markers')
@@ -1578,8 +1582,7 @@ export default function ChatPage() {
 
       const counts: Record<string, number> = {};
       await Promise.all(
-        visibleRooms.map(async (room) => {
-          if (room.id === activeRoom) return; // already marked read on enter
+        newRooms.map(async (room) => {
           const lastRead = markerMap[room.id];
           let q = supabase
             .from('chat_messages')
@@ -1591,10 +1594,13 @@ export default function ChatPage() {
           if (count && count > 0) counts[room.id] = count;
         }),
       );
+      // Merge counts but don't override in-memory realtime increments
       setUnread(prev => ({ ...counts, ...prev }));
+      // Clear the currently-active room (read_marker was just upserted on enter)
+      setUnread(prev => { const n = { ...prev }; delete n[activeRoom]; return n; });
     };
     init();
-  }, [myId, visibleRooms.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [myId, visibleRooms]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ── Realtime: active room ── */
   useEffect(() => {
