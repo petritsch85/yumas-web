@@ -1379,8 +1379,8 @@ export default function OutgoingBillsPage() {
           {/* Receipt import banner */}
           <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4 flex items-center justify-between gap-4">
             <div>
-              <p className="text-sm font-semibold text-gray-800">Import from receipt photo</p>
-              <p className="text-xs text-gray-400 mt-0.5">Take a photo of the POS Kassenbon — amounts, VAT split and date are filled in automatically</p>
+              <p className="text-sm font-semibold text-gray-800">Import from receipt</p>
+              <p className="text-xs text-gray-400 mt-0.5">Take a photo or upload a PDF of the POS Kassenbon — amounts, VAT split and date are filled in automatically</p>
             </div>
             <div className="flex items-center gap-3 flex-shrink-0">
               {receiptDataUrl && (
@@ -1416,12 +1416,14 @@ export default function OutgoingBillsPage() {
               <input
                 ref={receiptInputRef}
                 type="file"
-                accept="image/*"
-                capture="environment"
+                accept="image/*,application/pdf"
                 className="hidden"
                 onChange={(e) => {
                   const file = e.target.files?.[0];
-                  if (file) handleReceiptImage(file);
+                  if (file) {
+                    if (file.type === 'application/pdf') handleOrderbirdPdf(file);
+                    else handleReceiptImage(file);
+                  }
                   e.target.value = '';
                 }}
               />
