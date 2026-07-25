@@ -65,7 +65,7 @@ function TxRow({ tx, onSave }: { tx: CfTx; onSave: (id: string, patch: Partial<C
   const locations = isIn ? IN_LOCATIONS : OUT_LOCATIONS;
 
   const [notes, setNotes] = useState(tx.notes ?? '');
-  const notesTimer = useRef<ReturnType<typeof setTimeout>>();
+  const notesTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   const patch = useCallback((field: string, value: string) => {
     onSave(tx.id, { [field]: value } as Partial<CfTx>);
