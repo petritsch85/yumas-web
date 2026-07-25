@@ -94,6 +94,9 @@ export function classifyTransaction(
       cp.includes('neue medien muennich')
     ) return { category: 'Marketing', salesType: 'Other' };
 
+    // Amazon
+    if (cp.includes('amazon')) return { category: 'Amazon', salesType: 'Other' };
+
     // Financing — loan repayments, interest
     if (
       (cp.includes('sparkasse') && (desc.includes('darl') || desc.includes('tilgung'))) ||

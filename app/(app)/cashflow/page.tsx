@@ -30,7 +30,7 @@ type CfTx = {
 type TxPage = { data: CfTx[]; count: number; page: number; pageSize: number };
 
 /* ── Constants ──────────────────────────────────────────────────────── */
-const OUT_CATEGORIES = ['Personnel','Suppliers','Rent','OpenTable','Orderbird','Tax Advisor','Insurance','Energy','Marketing','Financing','Other'];
+const OUT_CATEGORIES = ['Personnel','Suppliers','Rent','OpenTable','Orderbird','Tax Advisor','Insurance','Energy','Marketing','Financing','Amazon','Other'];
 const OUT_LOCATIONS  = ['Westend','Eschborn','Taunus','ZK','HQ/Admin','Other'];
 const IN_LOCATIONS   = ['Westend','Eschborn','Taunus','Catering','Other'];
 const SALES_TYPES    = ['In-House','Delivery','Other'];
@@ -56,6 +56,7 @@ const CAT_COLOURS: Record<string, string> = {
   Energy:       'bg-amber-100 text-amber-800',
   Marketing:    'bg-indigo-100 text-indigo-800',
   Financing:    'bg-red-100 text-red-800',
+  Amazon:       'bg-yellow-100 text-yellow-900',
   Other:        'bg-gray-100 text-gray-600',
 };
 
