@@ -185,7 +185,7 @@ const NAV_GROUPS: NavGroup[] = [
     adminOnly: true,
     items: [
       { labelKey: 'sidebar.nav.plReports',      href: '/reports',                     icon: BarChart3 },
-      { labelKey: 'sidebar.nav.cashFlowCheck',  href: '/coming-soon/cash-flow',       icon: Banknote },
+      { labelKey: 'sidebar.nav.cashFlowCheck',  href: '/cashflow',                    icon: Banknote },
       { labelKey: 'sidebar.nav.demandForecast', href: '/coming-soon/demand-forecast', icon: TrendingDown },
     ],
   },
