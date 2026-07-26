@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Upload, Loader2, ChevronLeft, ChevronRight,
   TrendingUp, TrendingDown, Minus,
-  Link2, Link2Off, X, Search, CheckCircle2,
+  Link2, Link2Off, X, Search, CheckCircle2, Check,
 } from 'lucide-react';
 
 /* ── Types ─────────────────────────────────────────────────────────── */
@@ -38,6 +38,7 @@ type CfTx = {
   notes: string;
   bill_id: string | null;
   bill: BillRef | null;
+  confirmed: boolean;
 };
 
 type TxPage = { data: CfTx[]; count: number; page: number; pageSize: number };
@@ -227,20 +228,25 @@ function TxRow({
   onSave,
 }: {
   tx: CfTx;
-  onSave: (id: string, patch: Record<string, string | null>) => void;
+  onSave: (id: string, patch: Record<string, string | boolean | null>) => void;
 }) {
   const isIn = tx.direction === 'in';
   const locations = isIn ? IN_LOCATIONS : OUT_LOCATIONS;
+  const locked = tx.confirmed;
 
   const [notes, setNotes] = useState(tx.notes ?? '');
   const [showModal, setShowModal] = useState(false);
   const notesTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
-  const patch = useCallback((field: string, value: string | null) => {
+  // Keep notes in sync when tx updates after confirm/unconfirm
+  useEffect(() => { setNotes(tx.notes ?? ''); }, [tx.notes]);
+
+  const patch = useCallback((field: string, value: string | boolean | null) => {
     onSave(tx.id, { [field]: value });
   }, [tx.id, onSave]);
 
   const onNotesChange = (v: string) => {
+    if (locked) return;
     setNotes(v);
     clearTimeout(notesTimer.current);
     notesTimer.current = setTimeout(() => patch('notes', v), 800);
@@ -256,9 +262,17 @@ function TxRow({
     setShowModal(false);
   }, [patch]);
 
+  const rowBg = locked
+    ? isIn
+      ? 'bg-green-50/70 border-l-2 border-l-green-500'
+      : 'bg-green-50/70 border-l-2 border-l-green-500'
+    : isIn
+      ? 'border-l-2 border-l-green-400'
+      : 'border-l-2 border-l-red-400';
+
   return (
     <>
-      {showModal && (
+      {showModal && !locked && (
         <BillMatchModal
           tx={tx}
           onLink={handleLink}
@@ -266,7 +280,7 @@ function TxRow({
           onClose={() => setShowModal(false)}
         />
       )}
-      <tr className={`border-b border-gray-100 hover:bg-gray-50/50 text-sm ${isIn ? 'border-l-2 border-l-green-400' : 'border-l-2 border-l-red-400'}`}>
+      <tr className={`border-b border-gray-100 text-sm transition-colors ${rowBg} ${locked ? '' : 'hover:bg-gray-50/50'}`}>
         {/* Date */}
         <td className="py-2 px-3 text-gray-500 whitespace-nowrap font-mono text-xs">
           {fmtDate(tx.date)}
@@ -291,6 +305,10 @@ function TxRow({
         <td className="py-2 px-3">
           {isIn ? (
             <span className="text-xs text-gray-400 italic">—</span>
+          ) : locked ? (
+            <span className={`text-xs font-medium px-1.5 py-0.5 rounded-full ${CAT_COLOURS[tx.category] ?? CAT_COLOURS.Other}`}>
+              {tx.category}
+            </span>
           ) : (
             <select
               value={tx.category}
@@ -304,19 +322,25 @@ function TxRow({
 
         {/* Location */}
         <td className="py-2 px-3">
-          <select
-            value={tx.location}
-            onChange={e => patch('location', e.target.value)}
-            className="text-xs bg-white border border-gray-200 rounded px-1.5 py-0.5 text-gray-700 outline-none cursor-pointer hover:border-gray-400"
-          >
-            {locations.map(l => <option key={l} value={l}>{l}</option>)}
-          </select>
+          {locked ? (
+            <span className="text-xs text-gray-600 bg-white border border-gray-200 rounded px-1.5 py-0.5">{tx.location}</span>
+          ) : (
+            <select
+              value={tx.location}
+              onChange={e => patch('location', e.target.value)}
+              className="text-xs bg-white border border-gray-200 rounded px-1.5 py-0.5 text-gray-700 outline-none cursor-pointer hover:border-gray-400"
+            >
+              {locations.map(l => <option key={l} value={l}>{l}</option>)}
+            </select>
+          )}
         </td>
 
         {/* Sales type (incoming only) */}
         <td className="py-2 px-3">
           {!isIn ? (
             <span className="text-xs text-gray-400 italic">—</span>
+          ) : locked ? (
+            <span className="text-xs text-gray-600 bg-white border border-gray-200 rounded px-1.5 py-0.5">{tx.sales_type}</span>
           ) : (
             <select
               value={tx.sales_type}
@@ -330,13 +354,17 @@ function TxRow({
 
         {/* Notes */}
         <td className="py-2 px-3">
-          <input
-            type="text"
-            value={notes}
-            onChange={e => onNotesChange(e.target.value)}
-            placeholder="Add note…"
-            className="w-full text-xs bg-transparent border-b border-dashed border-gray-200 focus:border-gray-400 outline-none py-0.5 text-gray-700 placeholder-gray-300"
-          />
+          {locked ? (
+            <span className="text-xs text-gray-500">{tx.notes || <span className="text-gray-300">—</span>}</span>
+          ) : (
+            <input
+              type="text"
+              value={notes}
+              onChange={e => onNotesChange(e.target.value)}
+              placeholder="Add note…"
+              className="w-full text-xs bg-transparent border-b border-dashed border-gray-200 focus:border-gray-400 outline-none py-0.5 text-gray-700 placeholder-gray-300"
+            />
+          )}
         </td>
 
         {/* Bill (outgoing only) */}
@@ -345,22 +373,37 @@ function TxRow({
             <span className="text-xs text-gray-300">—</span>
           ) : tx.bill ? (
             <button
-              onClick={() => setShowModal(true)}
+              onClick={() => !locked && setShowModal(true)}
               title={`${tx.bill.supplier_name} · ${tx.bill.invoice_number ?? 'no inv#'}`}
-              className="flex items-center gap-1 text-xs font-medium text-green-700 bg-green-50 border border-green-200 rounded-full px-2 py-0.5 hover:bg-green-100 transition-colors max-w-[120px]"
+              className={`flex items-center gap-1 text-xs font-medium text-green-700 bg-green-50 border border-green-200 rounded-full px-2 py-0.5 max-w-[120px] transition-colors ${locked ? 'cursor-default opacity-80' : 'hover:bg-green-100 cursor-pointer'}`}
             >
               <Link2 size={10} className="flex-shrink-0" />
               <span className="truncate">{tx.bill.invoice_number ?? tx.bill.supplier_name}</span>
             </button>
           ) : (
             <button
-              onClick={() => setShowModal(true)}
-              className="flex items-center gap-1 text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5 hover:bg-amber-100 transition-colors"
+              onClick={() => !locked && setShowModal(true)}
+              className={`flex items-center gap-1 text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5 transition-colors ${locked ? 'cursor-default opacity-50' : 'hover:bg-amber-100 cursor-pointer'}`}
             >
               <Link2Off size={10} />
               No Bill
             </button>
           )}
+        </td>
+
+        {/* Confirm */}
+        <td className="py-2 px-3">
+          <button
+            onClick={() => patch('confirmed', !locked)}
+            title={locked ? 'Click to unconfirm and unlock row' : 'Confirm this row'}
+            className={`flex items-center justify-center w-7 h-7 rounded-full border-2 transition-all ${
+              locked
+                ? 'bg-green-600 border-green-600 text-white hover:bg-red-500 hover:border-red-500'
+                : 'bg-white border-gray-300 text-gray-300 hover:border-green-500 hover:text-green-500'
+            }`}
+          >
+            <Check size={13} strokeWidth={3} />
+          </button>
         </td>
       </tr>
     </>
@@ -426,7 +469,7 @@ export default function CashFlowPage() {
 
   /* Patch mutation */
   const patchMut = useMutation({
-    mutationFn: ({ id, patch }: { id: string; patch: Record<string, string | null> }) =>
+    mutationFn: ({ id, patch }: { id: string; patch: Record<string, string | boolean | null> }) =>
       fetch(`/api/cashflow/transactions/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -437,7 +480,7 @@ export default function CashFlowPage() {
     },
   });
 
-  const handleSave = useCallback((id: string, patch: Record<string, string | null>) => {
+  const handleSave = useCallback((id: string, patch: Record<string, string | boolean | null>) => {
     patchMut.mutate({ id, patch });
   }, [patchMut]);
 
@@ -651,6 +694,7 @@ export default function CashFlowPage() {
                       <th className="text-left py-2.5 px-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Type</th>
                       <th className="text-left py-2.5 px-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Notes</th>
                       <th className="text-left py-2.5 px-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Bill</th>
+                      <th className="text-left py-2.5 px-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Confirm</th>
                     </tr>
                   </thead>
                   <tbody>
