@@ -3,8 +3,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  Upload, Loader2, ChevronLeft, ChevronRight,
-  TrendingUp, TrendingDown, Minus,
+  Upload, Loader2, TrendingUp, TrendingDown, Minus,
   Link2, Link2Off, X, Search, CheckCircle2, Check,
 } from 'lucide-react';
 
@@ -61,6 +60,40 @@ const OUT_CATEGORIES = ['Personnel','Suppliers','Rent','OpenTable','Orderbird','
 const OUT_LOCATIONS  = ['Westend','Eschborn','Taunus','ZK','HQ/Admin','Other'];
 const IN_LOCATIONS   = ['Westend','Eschborn','Taunus','Catering','Other'];
 const SALES_TYPES    = ['In-House','Delivery','Other'];
+
+/* ── Period helpers ─────────────────────────────────────────────────── */
+type Period = 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'Jan' | 'Feb' | 'Mar' | 'Apr' | 'May' | 'Jun' | 'Jul' | 'Aug' | 'Sep' | 'Oct' | 'Nov' | 'Dec';
+
+const QUARTER_PERIODS: Record<string, Period[]> = {
+  Q1: ['Jan', 'Feb', 'Mar'],
+  Q2: ['Apr', 'May', 'Jun'],
+  Q3: ['Jul', 'Aug', 'Sep'],
+  Q4: ['Oct', 'Nov', 'Dec'],
+};
+
+const MONTH_NUM: Record<string, number> = {
+  Jan: 1, Feb: 2, Mar: 3, Apr: 4, May: 5, Jun: 6,
+  Jul: 7, Aug: 8, Sep: 9, Oct: 10, Nov: 11, Dec: 12,
+};
+
+function periodDateRange(year: number, period: Period): { dateFrom: string; dateTo: string } {
+  if (period in QUARTER_PERIODS) {
+    const months = QUARTER_PERIODS[period];
+    const firstMonth = MONTH_NUM[months[0]];
+    const lastMonth  = MONTH_NUM[months[months.length - 1]];
+    const lastDay    = new Date(year, lastMonth, 0).getDate();
+    return {
+      dateFrom: `${year}-${String(firstMonth).padStart(2, '0')}-01`,
+      dateTo:   `${year}-${String(lastMonth).padStart(2, '0')}-${lastDay}`,
+    };
+  }
+  const m = MONTH_NUM[period];
+  const lastDay = new Date(year, m, 0).getDate();
+  return {
+    dateFrom: `${year}-${String(m).padStart(2, '0')}-01`,
+    dateTo:   `${year}-${String(m).padStart(2, '0')}-${lastDay}`,
+  };
+}
 
 /* ── Helpers ────────────────────────────────────────────────────────── */
 function eur(cents: number) {
@@ -120,7 +153,6 @@ function BillMatchModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 flex flex-col max-h-[80vh]">
-        {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
           <div>
             <h3 className="font-semibold text-gray-900 text-sm">Link to Bill</h3>
@@ -128,12 +160,9 @@ function BillMatchModal({
               {tx.counterparty || '—'} · {eur(tx.amount_cents)}
             </p>
           </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
-            <X size={18} />
-          </button>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
         </div>
 
-        {/* Currently linked */}
         {tx.bill && (
           <div className="mx-4 mt-3 p-3 rounded-xl bg-green-50 border border-green-200 flex items-center justify-between gap-3">
             <div className="flex items-center gap-2">
@@ -143,16 +172,12 @@ function BillMatchModal({
                 <div className="text-xs text-green-700">{tx.bill.invoice_number ?? 'No invoice #'} · {eurAmt(tx.bill.gross_amount)}</div>
               </div>
             </div>
-            <button
-              onClick={onUnlink}
-              className="text-xs text-red-500 hover:text-red-700 font-medium whitespace-nowrap flex items-center gap-1"
-            >
+            <button onClick={onUnlink} className="text-xs text-red-500 hover:text-red-700 font-medium whitespace-nowrap flex items-center gap-1">
               <Link2Off size={12} /> Remove
             </button>
           </div>
         )}
 
-        {/* Search */}
         <div className="px-4 pt-3 pb-2">
           <div className="flex items-center gap-2 border border-gray-200 rounded-lg px-3 py-2 focus-within:border-[#1B5E20]">
             <Search size={14} className="text-gray-400 flex-shrink-0" />
@@ -168,7 +193,6 @@ function BillMatchModal({
           <p className="text-xs text-gray-400 mt-1.5">Bills sorted by closest amount match first</p>
         </div>
 
-        {/* Results */}
         <div className="overflow-y-auto flex-1 px-4 pb-4 space-y-1.5">
           {results.length === 0 && !isFetching && (
             <div className="py-8 text-center text-gray-400 text-sm">No bills found</div>
@@ -180,9 +204,7 @@ function BillMatchModal({
               <button
                 key={bill.id}
                 onClick={() => onLink(bill.id)}
-                className={`w-full text-left rounded-xl border p-3 transition-colors hover:border-[#1B5E20] hover:bg-green-50/50 ${
-                  isLinked ? 'border-green-400 bg-green-50' : 'border-gray-200 bg-white'
-                }`}
+                className={`w-full text-left rounded-xl border p-3 transition-colors hover:border-[#1B5E20] hover:bg-green-50/50 ${isLinked ? 'border-green-400 bg-green-50' : 'border-gray-200 bg-white'}`}
               >
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
@@ -194,12 +216,8 @@ function BillMatchModal({
                     </div>
                   </div>
                   <div className="text-right flex-shrink-0">
-                    <div className={`text-sm font-semibold ${amountMatch ? 'text-green-700' : 'text-gray-900'}`}>
-                      {eurAmt(bill.gross_amount)}
-                    </div>
-                    {amountMatch && (
-                      <div className="text-xs text-green-600 font-medium">≈ match</div>
-                    )}
+                    <div className={`text-sm font-semibold ${amountMatch ? 'text-green-700' : 'text-gray-900'}`}>{eurAmt(bill.gross_amount)}</div>
+                    {amountMatch && <div className="text-xs text-green-600 font-medium">≈ match</div>}
                   </div>
                 </div>
                 {bill.category && (
@@ -209,8 +227,7 @@ function BillMatchModal({
                       : bill.status === 'paid' ? 'bg-blue-100 text-blue-800'
                       : 'bg-amber-100 text-amber-800'
                     }`}>{bill.status}</span>
-                    {' '}
-                    <span className="text-xs text-gray-400">{bill.category}</span>
+                    {' '}<span className="text-xs text-gray-400">{bill.category}</span>
                   </div>
                 )}
               </button>
@@ -238,7 +255,6 @@ function TxRow({
   const [showModal, setShowModal] = useState(false);
   const notesTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
-  // Keep notes in sync when tx updates after confirm/unconfirm
   useEffect(() => { setNotes(tx.notes ?? ''); }, [tx.notes]);
 
   const patch = useCallback((field: string, value: string | boolean | null) => {
@@ -252,156 +268,95 @@ function TxRow({
     notesTimer.current = setTimeout(() => patch('notes', v), 800);
   };
 
-  const handleLink = useCallback((billId: string) => {
-    patch('bill_id', billId);
-    setShowModal(false);
-  }, [patch]);
-
-  const handleUnlink = useCallback(() => {
-    patch('bill_id', null);
-    setShowModal(false);
-  }, [patch]);
+  const handleLink = useCallback((billId: string) => { patch('bill_id', billId); setShowModal(false); }, [patch]);
+  const handleUnlink = useCallback(() => { patch('bill_id', null); setShowModal(false); }, [patch]);
 
   const rowBg = locked
-    ? isIn
-      ? 'bg-green-50/70 border-l-2 border-l-green-500'
-      : 'bg-green-50/70 border-l-2 border-l-green-500'
-    : isIn
-      ? 'border-l-2 border-l-green-400'
-      : 'border-l-2 border-l-red-400';
+    ? 'bg-green-50/70 border-l-2 border-l-green-500'
+    : isIn ? 'border-l-2 border-l-green-400' : 'border-l-2 border-l-red-400';
 
   return (
     <>
       {showModal && !locked && (
-        <BillMatchModal
-          tx={tx}
-          onLink={handleLink}
-          onUnlink={handleUnlink}
-          onClose={() => setShowModal(false)}
-        />
+        <BillMatchModal tx={tx} onLink={handleLink} onUnlink={handleUnlink} onClose={() => setShowModal(false)} />
       )}
       <tr className={`border-b border-gray-100 text-sm transition-colors ${rowBg} ${locked ? '' : 'hover:bg-gray-50/50'}`}>
-        {/* Date */}
-        <td className="py-2 px-3 text-gray-500 whitespace-nowrap font-mono text-xs">
-          {fmtDate(tx.date)}
-        </td>
+        <td className="py-2 px-3 text-gray-500 whitespace-nowrap font-mono text-xs">{fmtDate(tx.date)}</td>
 
-        {/* Counterparty */}
         <td className="py-2 px-3 max-w-[220px]" title={tx.counterparty}>
           <div className="truncate text-gray-900">{tx.counterparty || '—'}</div>
           {tx.description && (
-            <div className="truncate text-gray-400 text-xs mt-0.5" title={tx.description}>
-              {tx.description.slice(0, 80)}
-            </div>
+            <div className="truncate text-gray-400 text-xs mt-0.5" title={tx.description}>{tx.description.slice(0, 80)}</div>
           )}
         </td>
 
-        {/* Amount */}
         <td className={`py-2 px-3 text-right whitespace-nowrap font-semibold tabular-nums ${isIn ? 'text-green-700' : 'text-red-700'}`}>
           {isIn ? '+' : '−'} {eur(tx.amount_cents)}
         </td>
 
-        {/* Category (outgoing only) */}
         <td className="py-2 px-3">
-          {isIn ? (
-            <span className="text-xs text-gray-400 italic">—</span>
-          ) : locked ? (
-            <span className={`text-xs font-medium px-1.5 py-0.5 rounded-full ${CAT_COLOURS[tx.category] ?? CAT_COLOURS.Other}`}>
-              {tx.category}
-            </span>
-          ) : (
-            <select
-              value={tx.category}
-              onChange={e => patch('category', e.target.value)}
-              className={`text-xs font-medium px-1.5 py-0.5 rounded-full border-0 outline-none cursor-pointer ${CAT_COLOURS[tx.category] ?? CAT_COLOURS.Other}`}
-            >
+          {isIn ? <span className="text-xs text-gray-400 italic">—</span>
+          : locked ? <span className={`text-xs font-medium px-1.5 py-0.5 rounded-full ${CAT_COLOURS[tx.category] ?? CAT_COLOURS.Other}`}>{tx.category}</span>
+          : (
+            <select value={tx.category} onChange={e => patch('category', e.target.value)}
+              className={`text-xs font-medium px-1.5 py-0.5 rounded-full border-0 outline-none cursor-pointer ${CAT_COLOURS[tx.category] ?? CAT_COLOURS.Other}`}>
               {OUT_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
             </select>
           )}
         </td>
 
-        {/* Location */}
         <td className="py-2 px-3">
-          {locked ? (
-            <span className="text-xs text-gray-600 bg-white border border-gray-200 rounded px-1.5 py-0.5">{tx.location}</span>
-          ) : (
-            <select
-              value={tx.location}
-              onChange={e => patch('location', e.target.value)}
-              className="text-xs bg-white border border-gray-200 rounded px-1.5 py-0.5 text-gray-700 outline-none cursor-pointer hover:border-gray-400"
-            >
+          {locked ? <span className="text-xs text-gray-600 bg-white border border-gray-200 rounded px-1.5 py-0.5">{tx.location}</span>
+          : (
+            <select value={tx.location} onChange={e => patch('location', e.target.value)}
+              className="text-xs bg-white border border-gray-200 rounded px-1.5 py-0.5 text-gray-700 outline-none cursor-pointer hover:border-gray-400">
               {locations.map(l => <option key={l} value={l}>{l}</option>)}
             </select>
           )}
         </td>
 
-        {/* Sales type (incoming only) */}
         <td className="py-2 px-3">
-          {!isIn ? (
-            <span className="text-xs text-gray-400 italic">—</span>
-          ) : locked ? (
-            <span className="text-xs text-gray-600 bg-white border border-gray-200 rounded px-1.5 py-0.5">{tx.sales_type}</span>
-          ) : (
-            <select
-              value={tx.sales_type}
-              onChange={e => patch('sales_type', e.target.value)}
-              className="text-xs bg-white border border-gray-200 rounded px-1.5 py-0.5 text-gray-700 outline-none cursor-pointer hover:border-gray-400"
-            >
+          {!isIn ? <span className="text-xs text-gray-400 italic">—</span>
+          : locked ? <span className="text-xs text-gray-600 bg-white border border-gray-200 rounded px-1.5 py-0.5">{tx.sales_type}</span>
+          : (
+            <select value={tx.sales_type} onChange={e => patch('sales_type', e.target.value)}
+              className="text-xs bg-white border border-gray-200 rounded px-1.5 py-0.5 text-gray-700 outline-none cursor-pointer hover:border-gray-400">
               {SALES_TYPES.map(s => <option key={s} value={s}>{s}</option>)}
             </select>
           )}
         </td>
 
-        {/* Notes */}
         <td className="py-2 px-3">
-          {locked ? (
-            <span className="text-xs text-gray-500">{tx.notes || <span className="text-gray-300">—</span>}</span>
-          ) : (
-            <input
-              type="text"
-              value={notes}
-              onChange={e => onNotesChange(e.target.value)}
-              placeholder="Add note…"
-              className="w-full text-xs bg-transparent border-b border-dashed border-gray-200 focus:border-gray-400 outline-none py-0.5 text-gray-700 placeholder-gray-300"
-            />
+          {locked ? <span className="text-xs text-gray-500">{tx.notes || <span className="text-gray-300">—</span>}</span>
+          : (
+            <input type="text" value={notes} onChange={e => onNotesChange(e.target.value)} placeholder="Add note…"
+              className="w-full text-xs bg-transparent border-b border-dashed border-gray-200 focus:border-gray-400 outline-none py-0.5 text-gray-700 placeholder-gray-300" />
           )}
         </td>
 
-        {/* Bill (outgoing only) */}
         <td className="py-2 px-3 min-w-[130px]">
-          {isIn ? (
-            <span className="text-xs text-gray-300">—</span>
-          ) : tx.bill ? (
-            <button
-              onClick={() => !locked && setShowModal(true)}
-              title={`${tx.bill.supplier_name} · ${tx.bill.invoice_number ?? 'no inv#'}`}
-              className={`flex items-center gap-1 text-xs font-medium text-green-700 bg-green-50 border border-green-200 rounded-full px-2 py-0.5 max-w-[120px] transition-colors ${locked ? 'cursor-default opacity-80' : 'hover:bg-green-100 cursor-pointer'}`}
-            >
+          {isIn ? <span className="text-xs text-gray-300">—</span>
+          : tx.bill ? (
+            <button onClick={() => !locked && setShowModal(true)} title={`${tx.bill.supplier_name} · ${tx.bill.invoice_number ?? 'no inv#'}`}
+              className={`flex items-center gap-1 text-xs font-medium text-green-700 bg-green-50 border border-green-200 rounded-full px-2 py-0.5 max-w-[120px] transition-colors ${locked ? 'cursor-default opacity-80' : 'hover:bg-green-100 cursor-pointer'}`}>
               <Link2 size={10} className="flex-shrink-0" />
               <span className="truncate">{tx.bill.invoice_number ?? tx.bill.supplier_name}</span>
             </button>
           ) : (
-            <button
-              onClick={() => !locked && setShowModal(true)}
-              className={`flex items-center gap-1 text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5 transition-colors ${locked ? 'cursor-default opacity-50' : 'hover:bg-amber-100 cursor-pointer'}`}
-            >
-              <Link2Off size={10} />
-              No Bill
+            <button onClick={() => !locked && setShowModal(true)}
+              className={`flex items-center gap-1 text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5 transition-colors ${locked ? 'cursor-default opacity-50' : 'hover:bg-amber-100 cursor-pointer'}`}>
+              <Link2Off size={10} /> No Bill
             </button>
           )}
         </td>
 
-        {/* Confirm */}
         <td className="py-2 px-3">
-          <button
-            onClick={() => patch('confirmed', !locked)}
+          <button onClick={() => patch('confirmed', !locked)}
             title={locked ? 'Click to unconfirm and unlock row' : 'Confirm this row'}
             className={`flex items-center justify-center w-7 h-7 rounded-full border-2 transition-all ${
-              locked
-                ? 'bg-green-600 border-green-600 text-white hover:bg-red-500 hover:border-red-500'
-                : 'bg-white border-gray-300 text-gray-300 hover:border-green-500 hover:text-green-500'
-            }`}
-          >
+              locked ? 'bg-green-600 border-green-600 text-white hover:bg-red-500 hover:border-red-500'
+                     : 'bg-white border-gray-300 text-gray-300 hover:border-green-500 hover:text-green-500'
+            }`}>
             <Check size={13} strokeWidth={3} />
           </button>
         </td>
@@ -420,51 +375,55 @@ export default function CashFlowPage() {
   const [uploading, setUploading] = useState(false);
   const [uploadMsg, setUploadMsg] = useState('');
 
+  /* Time navigation */
+  const [selectedYear, setSelectedYear] = useState(2026);
+  const [selectedPeriod, setSelectedPeriod] = useState<Period>('Q1');
+
+  // Available years (hardcoded for now; extend as more data is uploaded)
+  const availableYears = [2026];
+
+  // Period buttons: quarter buttons + their months
+  const quarters: Period[] = ['Q1', 'Q2', 'Q3', 'Q4'];
+  const monthsForYear: Period[] = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
   /* Filters */
-  const [selectedUploadId, setSelectedUploadId] = useState<string>('');
   const [dirFilter, setDirFilter] = useState<'all' | 'in' | 'out'>('all');
   const [catFilter, setCatFilter] = useState('All');
   const [locFilter, setLocFilter] = useState('All');
   const [typeFilter, setTypeFilter] = useState('All');
-  const [page, setPage] = useState(1);
 
-  /* Fetch uploads list */
+  const { dateFrom, dateTo } = periodDateRange(selectedYear, selectedPeriod);
+
+  /* Fetch uploads list (for upload UI only) */
   const { data: uploads = [] } = useQuery<CfUpload[]>({
     queryKey: ['cashflow-uploads'],
     queryFn: () => fetch('/api/cashflow/uploads').then(r => r.json()),
   });
 
-  /* Fetch transactions */
-  const params = new URLSearchParams({ page: String(page) });
-  if (selectedUploadId) params.set('uploadId', selectedUploadId);
+  /* Fetch transactions for selected period */
+  const params = new URLSearchParams({ dateFrom, dateTo });
   if (dirFilter !== 'all') params.set('direction', dirFilter);
   if (catFilter !== 'All') params.set('category', catFilter);
   if (locFilter !== 'All') params.set('location', locFilter);
   if (typeFilter !== 'All') params.set('salesType', typeFilter);
 
   const { data: txPage, isFetching } = useQuery<TxPage>({
-    queryKey: ['cashflow-tx', selectedUploadId, dirFilter, catFilter, locFilter, typeFilter, page],
+    queryKey: ['cashflow-tx', dateFrom, dateTo, dirFilter, catFilter, locFilter, typeFilter],
     queryFn: () => fetch(`/api/cashflow/transactions?${params}`).then(r => r.json()),
-    enabled: !!selectedUploadId,
     placeholderData: prev => prev,
   });
 
   const txs: CfTx[] = txPage?.data ?? [];
   const totalCount  = txPage?.count ?? 0;
-  const pageSize    = txPage?.pageSize ?? 100;
-  const totalPages  = Math.max(1, Math.ceil(totalCount / pageSize));
 
-  /* Summary totals */
-  const { data: allTx } = useQuery<TxPage>({
-    queryKey: ['cashflow-tx-all', selectedUploadId],
-    queryFn: () => fetch(`/api/cashflow/transactions?uploadId=${selectedUploadId}&page=1`).then(r => r.json()),
-    enabled: !!selectedUploadId,
+  /* Summary (unfiltered totals for selected period) */
+  const { data: summaryPage } = useQuery<TxPage>({
+    queryKey: ['cashflow-summary', dateFrom, dateTo],
+    queryFn: () => fetch(`/api/cashflow/transactions?dateFrom=${dateFrom}&dateTo=${dateTo}`).then(r => r.json()),
   });
-
-  const selectedUpload = uploads.find(u => u.id === selectedUploadId);
-  const allRows: CfTx[] = allTx?.data ?? [];
-  const totalIn  = allRows.filter(t => t.direction === 'in').reduce((s, t) => s + t.amount_cents, 0);
-  const totalOut = allRows.filter(t => t.direction === 'out').reduce((s, t) => s + t.amount_cents, 0);
+  const summaryRows = summaryPage?.data ?? [];
+  const totalIn  = summaryRows.filter(t => t.direction === 'in').reduce((s, t) => s + t.amount_cents, 0);
+  const totalOut = summaryRows.filter(t => t.direction === 'out').reduce((s, t) => s + t.amount_cents, 0);
   const net      = totalIn - totalOut;
 
   /* Patch mutation */
@@ -475,9 +434,7 @@ export default function CashFlowPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(patch),
       }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['cashflow-tx'] });
-    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['cashflow-tx'] }); },
   });
 
   const handleSave = useCallback((id: string, patch: Record<string, string | boolean | null>) => {
@@ -498,8 +455,8 @@ export default function CashFlowPage() {
       if (!res.ok) throw new Error(json.error ?? 'Upload failed');
       setUploadMsg(`✓ ${json.count} transactions imported`);
       qc.invalidateQueries({ queryKey: ['cashflow-uploads'] });
-      setSelectedUploadId(json.uploadId);
-      setPage(1);
+      qc.invalidateQueries({ queryKey: ['cashflow-tx'] });
+      qc.invalidateQueries({ queryKey: ['cashflow-summary'] });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Upload error';
       setUploadMsg(`Error: ${msg}`);
@@ -509,7 +466,12 @@ export default function CashFlowPage() {
     }
   };
 
-  const resetFilters = () => { setDirFilter('all'); setCatFilter('All'); setLocFilter('All'); setTypeFilter('All'); setPage(1); };
+  const resetFilters = () => { setDirFilter('all'); setCatFilter('All'); setLocFilter('All'); setTypeFilter('All'); };
+
+  // Which months belong to the selected quarter (for highlighting)
+  const activeQuarterMonths: Period[] = selectedPeriod in QUARTER_PERIODS
+    ? QUARTER_PERIODS[selectedPeriod]
+    : (Object.entries(QUARTER_PERIODS).find(([, months]) => months.includes(selectedPeriod as Period))?.[1] ?? []);
 
   return (
     <div className="space-y-6">
@@ -519,8 +481,6 @@ export default function CashFlowPage() {
           <h1 className="text-2xl font-bold text-gray-900">Cash Flow</h1>
           <p className="text-sm text-gray-500 mt-0.5">Bank account transactions — classify and allocate</p>
         </div>
-
-        {/* Upload section */}
         <div className="flex items-center gap-3 flex-wrap">
           <input
             type="text"
@@ -529,51 +489,77 @@ export default function CashFlowPage() {
             placeholder="Period label (e.g. Q1-2026)"
             className="text-sm border border-gray-200 rounded-lg px-3 py-2 w-48 outline-none focus:border-[#1B5E20]"
           />
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            disabled={uploading}
-            className="flex items-center gap-2 px-4 py-2 bg-[#1B5E20] text-white text-sm font-semibold rounded-lg hover:bg-[#2E7D32] disabled:opacity-60 transition-colors"
-          >
+          <button onClick={() => fileInputRef.current?.click()} disabled={uploading}
+            className="flex items-center gap-2 px-4 py-2 bg-[#1B5E20] text-white text-sm font-semibold rounded-lg hover:bg-[#2E7D32] disabled:opacity-60 transition-colors">
             {uploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
             {uploading ? 'Importing…' : 'Upload CSV'}
           </button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".csv,text/csv"
-            className="hidden"
-            onChange={e => { const f = e.target.files?.[0]; if (f) handleUpload(f); }}
-          />
+          <input ref={fileInputRef} type="file" accept=".csv,text/csv" className="hidden"
+            onChange={e => { const f = e.target.files?.[0]; if (f) handleUpload(f); }} />
           {uploadMsg && (
-            <span className={`text-sm font-medium ${uploadMsg.startsWith('Error') ? 'text-red-600' : 'text-green-700'}`}>
-              {uploadMsg}
-            </span>
+            <span className={`text-sm font-medium ${uploadMsg.startsWith('Error') ? 'text-red-600' : 'text-green-700'}`}>{uploadMsg}</span>
           )}
         </div>
       </div>
 
-      {/* Period selector */}
-      {uploads.length > 0 && (
-        <div className="flex items-center gap-3">
-          <span className="text-sm font-medium text-gray-600">Period:</span>
-          <div className="flex flex-wrap gap-2">
-            {uploads.map(u => (
-              <button
-                key={u.id}
-                onClick={() => { setSelectedUploadId(u.id); resetFilters(); }}
-                className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
-                  selectedUploadId === u.id
+      {/* Year + Period navigation */}
+      <div className="bg-white rounded-xl border border-gray-100 shadow-sm px-5 py-4 space-y-3">
+        {/* Year row */}
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-semibold text-gray-400 uppercase tracking-wide w-12">Year</span>
+          <div className="flex gap-2">
+            {availableYears.map(y => (
+              <button key={y} onClick={() => { setSelectedYear(y); resetFilters(); }}
+                className={`px-4 py-1.5 rounded-lg text-sm font-bold border transition-colors ${
+                  selectedYear === y
                     ? 'bg-[#1B5E20] text-white border-[#1B5E20]'
                     : 'bg-white text-gray-700 border-gray-200 hover:border-gray-400'
-                }`}
-              >
-                {u.period_label}
-                <span className="ml-1.5 text-xs opacity-70">({u.transaction_count})</span>
+                }`}>
+                {y}
               </button>
             ))}
           </div>
         </div>
-      )}
+
+        {/* Quarter + Month rows */}
+        <div className="flex items-start gap-2 flex-wrap">
+          <span className="text-xs font-semibold text-gray-400 uppercase tracking-wide w-12 pt-1.5">Period</span>
+          <div className="flex flex-col gap-2">
+            {/* Quarters */}
+            <div className="flex gap-2">
+              {quarters.map(q => (
+                <button key={q} onClick={() => { setSelectedPeriod(q); resetFilters(); }}
+                  className={`px-4 py-1.5 rounded-lg text-sm font-semibold border transition-colors ${
+                    selectedPeriod === q
+                      ? 'bg-[#1B5E20] text-white border-[#1B5E20]'
+                      : 'bg-white text-gray-700 border-gray-200 hover:border-gray-400'
+                  }`}>
+                  {q}
+                </button>
+              ))}
+            </div>
+            {/* Months */}
+            <div className="flex gap-1.5 flex-wrap">
+              {monthsForYear.map(m => {
+                const isSelected = selectedPeriod === m;
+                const inActiveQuarter = activeQuarterMonths.includes(m);
+                return (
+                  <button key={m} onClick={() => { setSelectedPeriod(m); resetFilters(); }}
+                    className={`px-3 py-1 rounded-lg text-xs font-medium border transition-colors ${
+                      isSelected
+                        ? 'bg-[#2E7D32] text-white border-[#2E7D32]'
+                        : inActiveQuarter
+                          ? 'bg-green-50 text-green-800 border-green-200 hover:border-green-400'
+                          : 'bg-white text-gray-500 border-gray-200 hover:border-gray-400'
+                    }`}>
+                    {m}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      </div>
 
       {/* Empty state */}
       {uploads.length === 0 && (
@@ -584,7 +570,7 @@ export default function CashFlowPage() {
         </div>
       )}
 
-      {selectedUploadId && (
+      {uploads.length > 0 && (
         <>
           {/* Summary cards */}
           <div className="grid grid-cols-3 gap-4">
@@ -617,58 +603,40 @@ export default function CashFlowPage() {
             </div>
           </div>
 
-          {selectedUpload && selectedUpload.transaction_count > 100 && (
-            <p className="text-xs text-gray-400 -mt-2">Summary figures are based on the first 100 transactions. Full aggregation will be added in a future update.</p>
-          )}
-
           {/* Filter bar */}
           <div className="bg-white rounded-xl border border-gray-100 shadow-sm px-4 py-3 flex flex-wrap items-center gap-3">
             <div className="flex rounded-lg border border-gray-200 overflow-hidden text-sm">
               {(['all','in','out'] as const).map(d => (
-                <button
-                  key={d}
-                  onClick={() => { setDirFilter(d); setPage(1); }}
-                  className={`px-3 py-1.5 font-medium capitalize transition-colors ${dirFilter === d ? 'bg-[#1B5E20] text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
-                >
+                <button key={d} onClick={() => setDirFilter(d)}
+                  className={`px-3 py-1.5 font-medium capitalize transition-colors ${dirFilter === d ? 'bg-[#1B5E20] text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>
                   {d === 'all' ? 'All' : d === 'in' ? 'Incoming' : 'Outgoing'}
                 </button>
               ))}
             </div>
 
-            {(dirFilter !== 'in') && (
-              <select
-                value={catFilter}
-                onChange={e => { setCatFilter(e.target.value); setPage(1); }}
-                className="text-sm border border-gray-200 rounded-lg px-2 py-1.5 outline-none focus:border-gray-400"
-              >
+            {dirFilter !== 'in' && (
+              <select value={catFilter} onChange={e => setCatFilter(e.target.value)}
+                className="text-sm border border-gray-200 rounded-lg px-2 py-1.5 outline-none focus:border-gray-400">
                 <option value="All">All categories</option>
                 {OUT_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
               </select>
             )}
 
-            <select
-              value={locFilter}
-              onChange={e => { setLocFilter(e.target.value); setPage(1); }}
-              className="text-sm border border-gray-200 rounded-lg px-2 py-1.5 outline-none focus:border-gray-400"
-            >
+            <select value={locFilter} onChange={e => setLocFilter(e.target.value)}
+              className="text-sm border border-gray-200 rounded-lg px-2 py-1.5 outline-none focus:border-gray-400">
               <option value="All">All locations</option>
               {[...new Set([...OUT_LOCATIONS, ...IN_LOCATIONS])].map(l => <option key={l} value={l}>{l}</option>)}
             </select>
 
-            {(dirFilter !== 'out') && (
-              <select
-                value={typeFilter}
-                onChange={e => { setTypeFilter(e.target.value); setPage(1); }}
-                className="text-sm border border-gray-200 rounded-lg px-2 py-1.5 outline-none focus:border-gray-400"
-              >
+            {dirFilter !== 'out' && (
+              <select value={typeFilter} onChange={e => setTypeFilter(e.target.value)}
+                className="text-sm border border-gray-200 rounded-lg px-2 py-1.5 outline-none focus:border-gray-400">
                 <option value="All">All types</option>
                 {SALES_TYPES.map(s => <option key={s} value={s}>{s}</option>)}
               </select>
             )}
 
-            <span className="ml-auto text-xs text-gray-400">
-              {totalCount} transactions
-            </span>
+            <span className="ml-auto text-xs text-gray-400">{totalCount} transactions</span>
           </div>
 
           {/* Table */}
@@ -679,7 +647,7 @@ export default function CashFlowPage() {
               </div>
             )}
             {!isFetching && txs.length === 0 && (
-              <div className="py-12 text-center text-gray-400 text-sm">No transactions match your filters.</div>
+              <div className="py-12 text-center text-gray-400 text-sm">No transactions for this period.</div>
             )}
             {txs.length > 0 && (
               <div className="overflow-x-auto">
@@ -698,34 +666,9 @@ export default function CashFlowPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {txs.map(tx => (
-                      <TxRow key={tx.id} tx={tx} onSave={handleSave} />
-                    ))}
+                    {txs.map(tx => <TxRow key={tx.id} tx={tx} onSave={handleSave} />)}
                   </tbody>
                 </table>
-              </div>
-            )}
-
-            {/* Pagination */}
-            {totalPages > 1 && (
-              <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100">
-                <button
-                  onClick={() => setPage(p => Math.max(1, p - 1))}
-                  disabled={page === 1}
-                  className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-gray-200 text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  <ChevronLeft size={14} /> Previous
-                </button>
-                <span className="text-sm text-gray-500">
-                  Page {page} of {totalPages}
-                </span>
-                <button
-                  onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-                  disabled={page === totalPages}
-                  className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-gray-200 text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  Next <ChevronRight size={14} />
-                </button>
               </div>
             )}
           </div>
