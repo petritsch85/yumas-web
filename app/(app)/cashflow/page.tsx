@@ -68,24 +68,14 @@ const OUT_LOCATIONS = ['Westend','Eschborn','Taunus','ZK','HQ/Admin','Other'];
 const IN_LOCATIONS  = ['Westend','Eschborn','Taunus','Catering','Other'];
 
 /* ── Category colours (chips + option bg) ───────────────────────────── */
-const CAT_CHIP: Record<string, string> = {
-  'C - Personnel':   'bg-blue-100 text-blue-800',
-  'C - Suppliers':   'bg-orange-100 text-orange-800',
-  'C - Rent':        'bg-purple-100 text-purple-800',
-  'C - OpenTable':   'bg-teal-100 text-teal-800',
-  'C - Orderbird':   'bg-cyan-100 text-cyan-800',
-  'C - Tax Advisor': 'bg-yellow-100 text-yellow-800',
-  'C - Insurance':   'bg-pink-100 text-pink-800',
-  'C - Energy':      'bg-amber-100 text-amber-800',
-  'C - Marketing':   'bg-indigo-100 text-indigo-800',
-  'C - Financing':   'bg-red-100 text-red-800',
-  'C - Amazon':      'bg-yellow-100 text-yellow-900',
-  'C - Other':       'bg-red-50 text-red-500',
-  'S - In House':    'bg-green-100 text-green-800',
-  'S - Delivery':    'bg-emerald-100 text-emerald-800',
-  'S - Catering':    'bg-lime-100 text-lime-800',
-  'S - Other':       'bg-green-50 text-green-600',
-};
+const C_CHIP = 'bg-red-100 text-gray-900';
+const S_CHIP = 'bg-green-100 text-gray-900';
+
+function catChip(cat: string): string {
+  if (cat.startsWith('C - ')) return C_CHIP;
+  if (cat.startsWith('S - ')) return S_CHIP;
+  return 'bg-gray-100 text-gray-700';
+}
 
 // Inline style for <option> background (native select)
 function optionBg(cat: string): string {
@@ -271,7 +261,7 @@ function TxRow({ tx, onSave }: {
     ? 'bg-green-50/70 border-l-2 border-l-green-500'
     : isIn ? 'border-l-2 border-l-green-400' : 'border-l-2 border-l-red-400';
 
-  const chipClass = CAT_CHIP[tx.category] ?? (isIn ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-500');
+  const chipClass = catChip(tx.category);
 
   return (
     <>
