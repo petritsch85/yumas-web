@@ -30,6 +30,12 @@ export type BillData = {
     city     : string;
     poNumber?: string;
     att?     : string;
+    leistungsempfaenger?: {
+      company  : string;
+      street?  : string;
+      postcode?: string;
+      city?    : string;
+    };
   };
   introText       : string;
   // Type A – monthly orders
@@ -226,6 +232,22 @@ export function BillDocument({ data }: { data: BillData }) {
             <Text key={i} style={{ fontSize: 10, lineHeight: 1.3, marginBottom: 0 }}>{line as string}</Text>
           ))}
         </View>
+
+        {/* ── Leistungsempfänger (optional second address) ──────── */}
+        {data.recipient.leistungsempfaenger && (
+          <View style={{ lineHeight: 1.55, marginBottom: 18 }}>
+            <Text style={{ fontSize: 10, fontFamily: 'Courier-Bold', marginBottom: 2 }}>Leistungsempfänger:</Text>
+            {[
+              data.recipient.leistungsempfaenger.company,
+              data.recipient.leistungsempfaenger.street  || null,
+              (data.recipient.leistungsempfaenger.postcode || data.recipient.leistungsempfaenger.city)
+                ? `${data.recipient.leistungsempfaenger.postcode ?? ''} ${data.recipient.leistungsempfaenger.city ?? ''}`.trim()
+                : null,
+            ].filter(Boolean).map((line, i) => (
+              <Text key={i} style={{ fontSize: 10 }}>{line as string}</Text>
+            ))}
+          </View>
+        )}
 
         {/* ── Stornorechnung title (only for cancellation invoices) ── */}
         {data.storno && (

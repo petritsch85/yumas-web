@@ -65,16 +65,19 @@ type OutgoingBill = {
 };
 
 type Customer = {
-  id:           string;
-  company_name: string;
-  extra_line:   string | null;
-  contact_name: string | null;
-  street:       string | null;
-  postcode:     string | null;
-  city:         string | null;
-  po_number:    string | null;
-  att:          string | null;
-  updated_at:   string;
+  id:             string;
+  company_name:   string;
+  extra_line:     string | null;
+  contact_name:   string | null;
+  street:         string | null;
+  postcode:       string | null;
+  city:           string | null;
+  po_number:      string | null;
+  att:            string | null;
+  leist_street:   string | null;
+  leist_postcode: string | null;
+  leist_city:     string | null;
+  updated_at:     string;
 };
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -174,6 +177,10 @@ export default function OutgoingBillsPage() {
   const [city,              setCity]              = useState('');
   const [poNumber,          setPoNumber]          = useState('');
   const [att,               setAtt]               = useState('');
+  const [showLeist,         setShowLeist]         = useState(false);
+  const [leistStreet,       setLeistStreet]       = useState('');
+  const [leistPostcode,     setLeistPostcode]     = useState('');
+  const [leistCity,         setLeistCity]         = useState('');
   const [introText,         setIntroText]         = useState(makeIntroDinner(''));
   const [inputMode,         setInputMode]         = useState<'brutto' | 'netto' | 'pauschale' | 'catering'>('brutto');
   const [pauschaleTotal,    setPauschaleTotal]    = useState('');
@@ -326,6 +333,10 @@ export default function OutgoingBillsPage() {
     setCity(c.city ?? '');
     setPoNumber(c.po_number ?? '');
     setAtt(c.att ?? '');
+    setLeistStreet(c.leist_street ?? '');
+    setLeistPostcode(c.leist_postcode ?? '');
+    setLeistCity(c.leist_city ?? '');
+    setShowLeist(!!(c.extra_line || c.leist_street || c.leist_postcode || c.leist_city));
     setCustomerQuery('');
     setShowSuggestions(false);
   };
@@ -337,14 +348,17 @@ export default function OutgoingBillsPage() {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          company_name: company,
-          extra_line:   extra       || null,
-          contact_name: contactName || null,
-          street:       street      || null,
-          postcode:     postcode    || null,
-          city:         city        || null,
-          po_number:    poNumber    || null,
-          att:          att         || null,
+          company_name:   company,
+          extra_line:     extra         || null,
+          contact_name:   contactName   || null,
+          street:         street        || null,
+          postcode:       postcode      || null,
+          city:           city          || null,
+          po_number:      poNumber      || null,
+          att:            att           || null,
+          leist_street:   leistStreet   || null,
+          leist_postcode: leistPostcode || null,
+          leist_city:     leistCity     || null,
         }),
       });
     } catch { /* silent */ }
@@ -763,7 +777,15 @@ export default function OutgoingBillsPage() {
       eventDate:        billEventDate || undefined,
       issuingLocation:  billIssuingLoc || undefined,
       type:             billType === 'monthly' ? 'monthly' : 'dinner',
-      recipient: { company, extra, contact: contactName, street, postcode, city, poNumber, att },
+      recipient: {
+        company, extra, contact: contactName, street, postcode, city, poNumber, att,
+        leistungsempfaenger: (showLeist && extra.trim()) ? {
+          company:  extra.trim(),
+          street:   leistStreet   || undefined,
+          postcode: leistPostcode || undefined,
+          city:     leistCity     || undefined,
+        } : undefined,
+      },
       introText,
       lineItems:        billType === 'monthly' ? lineItems        : undefined,
       essenBrutto:         isDinnerLike && inputMode !== 'catering' ? essenBruttoN     : undefined,
@@ -792,7 +814,7 @@ export default function OutgoingBillsPage() {
       } : undefined,
     };
   }, [invoiceNumber, billDate, billEventDate, billIssuingLoc, billType, company, extra,
-       contactName, street, postcode, city, poNumber, att, introText, lineItems,
+       contactName, street, postcode, city, poNumber, att, showLeist, leistStreet, leistPostcode, leistCity, introText, lineItems,
        essenBruttoN, getraenkeBruttoN, essenN, getraenkeN, mwstEssen, mwstGetraenke, trinkgeldN,
        anzahlungBruttoN, anzahlungNettoN, anzahlungBill, ermaessigungN,
        includeReceipt, receiptDataUrl, stornoSourceBill,
@@ -1598,14 +1620,9 @@ export default function OutgoingBillsPage() {
               </div>
 
               <div>
-                <label className={labelCls}>Company Name *</label>
+                <label className={labelCls}>Rechnungsempfänger *</label>
                 <input className={inputCls} placeholder="e.g. KIA Europe GmbH"
                   value={company} onChange={(e) => setCompany(e.target.value)} />
-              </div>
-              <div>
-                <label className={labelCls}>Extra line (e.g. branch name — optional)</label>
-                <input className={inputCls} placeholder="e.g. Zweigniederlassung Deutschland"
-                  value={extra} onChange={(e) => setExtra(e.target.value)} />
               </div>
               <div>
                 <label className={labelCls}>Contact Name (optional)</label>
@@ -1641,6 +1658,52 @@ export default function OutgoingBillsPage() {
                     value={att} onChange={(e) => setAtt(e.target.value)} />
                 </div>
               </div>
+
+              {/* Leistungsempfänger toggle */}
+              {!showLeist ? (
+                <button
+                  type="button"
+                  onClick={() => setShowLeist(true)}
+                  className="text-xs text-[#1B5E20] hover:underline font-medium mt-1 text-left"
+                >
+                  + Add Leistungsempfänger
+                </button>
+              ) : (
+                <div className="border border-dashed border-gray-300 rounded-xl p-4 space-y-3">
+                  <div className="flex items-center justify-between mb-1">
+                    <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Leistungsempfänger</p>
+                    <button
+                      type="button"
+                      onClick={() => { setShowLeist(false); setExtra(''); setLeistStreet(''); setLeistPostcode(''); setLeistCity(''); }}
+                      className="text-xs text-gray-400 hover:text-red-500"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                  <div>
+                    <label className={labelCls}>Company Name *</label>
+                    <input className={inputCls} placeholder="e.g. GBT Deutschland GmbH"
+                      value={extra} onChange={(e) => setExtra(e.target.value)} />
+                  </div>
+                  <div>
+                    <label className={labelCls}>Street Address (optional)</label>
+                    <input className={inputCls} placeholder="e.g. Solmsstraße 73"
+                      value={leistStreet} onChange={(e) => setLeistStreet(e.target.value)} />
+                  </div>
+                  <div className="grid grid-cols-3 gap-3">
+                    <div>
+                      <label className={labelCls}>Postcode</label>
+                      <input className={inputCls} placeholder="60486"
+                        value={leistPostcode} onChange={(e) => setLeistPostcode(e.target.value)} />
+                    </div>
+                    <div className="col-span-2">
+                      <label className={labelCls}>City</label>
+                      <input className={inputCls} placeholder="Frankfurt am Main"
+                        value={leistCity} onChange={(e) => setLeistCity(e.target.value)} />
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
