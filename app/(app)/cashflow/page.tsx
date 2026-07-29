@@ -409,17 +409,17 @@ export default function CashFlowPage() {
   const txs        = txPage?.data ?? [];
   const totalCount = txPage?.count ?? 0;
 
-  type AggRow = { category: string | null; direction: 'in' | 'out'; amount_cents: number };
+  type AggRow = { category: string | null; direction: 'in' | 'out'; total_cents: number };
   const { data: aggRows = [] } = useQuery<AggRow[]>({
     queryKey: ['cashflow-agg', dateFrom, dateTo],
     queryFn: () => fetch(`/api/cashflow/aggregate?dateFrom=${dateFrom}&dateTo=${dateTo}`).then(r => r.json()),
   });
-  const totalIn  = aggRows.filter(t => t.direction === 'in').reduce((s,t) => s + t.amount_cents, 0);
-  const totalOut = aggRows.filter(t => t.direction === 'out').reduce((s,t) => s + t.amount_cents, 0);
+  const totalIn  = aggRows.filter(t => t.direction === 'in').reduce((s,t) => s + t.total_cents, 0);
+  const totalOut = aggRows.filter(t => t.direction === 'out').reduce((s,t) => s + t.total_cents, 0);
   const net      = totalIn - totalOut;
 
   // P&L buckets — signed: incoming = +, outgoing = −
-  const signed = (t: AggRow) => t.direction === 'in' ? t.amount_cents : -t.amount_cents;
+  const signed = (t: AggRow) => t.direction === 'in' ? t.total_cents : -t.total_cents;
   const catNetSum = (cat: string) =>
     aggRows.filter(t => t.category === cat).reduce((s: number, t: AggRow) => s + signed(t), 0);
   const plSales     = aggRows.filter(t => (t.category ?? '').startsWith('S - ')).reduce((s: number, t: AggRow) => s + signed(t), 0);

@@ -2,23 +2,19 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase-admin';
 
 // GET /api/cashflow/aggregate?dateFrom=&dateTo=
-// Returns all rows (category, direction, amount_cents only) with no page limit
-// Used by the P&L summary table so counts are always exact regardless of transaction volume
+// Calls a DB-side GROUP BY function — returns one row per category/direction pair,
+// bypassing PostgREST's default 1000-row limit entirely.
 export async function GET(req: NextRequest) {
   const p        = req.nextUrl.searchParams;
-  const dateFrom = p.get('dateFrom');
-  const dateTo   = p.get('dateTo');
+  const dateFrom = p.get('dateFrom') || null;
+  const dateTo   = p.get('dateTo')   || null;
 
   const admin = getSupabaseAdmin();
-  let q = admin
-    .from('cashflow_transactions')
-    .select('category, direction, amount_cents');
+  const { data, error } = await admin.rpc('cashflow_aggregate', {
+    p_date_from: dateFrom,
+    p_date_to:   dateTo,
+  });
 
-  if (dateFrom) q = q.gte('date', dateFrom);
-  if (dateTo)   q = q.lte('date', dateTo);
-
-  const { data, error } = await q;
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-
   return NextResponse.json(data ?? []);
 }
