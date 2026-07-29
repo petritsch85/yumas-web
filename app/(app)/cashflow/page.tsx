@@ -418,6 +418,17 @@ export default function CashFlowPage() {
   const totalOut = summaryRows.filter(t => t.direction === 'out').reduce((s,t) => s + t.amount_cents, 0);
   const net      = totalIn - totalOut;
 
+  // P&L buckets
+  const catSum = (cat: string) => summaryRows.filter(t => t.category === cat).reduce((s: number, t: CfTx) => s + t.amount_cents, 0);
+  const plSales = summaryRows.filter(t => (t.category ?? '').startsWith('S - ')).reduce((s: number, t: CfTx) => s + t.amount_cents, 0);
+  const plCogs  = catSum('C - Suppliers');
+  const plStaff = catSum('C - Personnel');
+  const plRent  = catSum('C - Rent');
+  const plOther = summaryRows.filter(t =>
+    t.direction === 'out' && !['C - Suppliers', 'C - Personnel', 'C - Rent'].includes(t.category ?? '')
+  ).reduce((s: number, t: CfTx) => s + t.amount_cents, 0);
+  const plFcf = plSales - plCogs - plStaff - plRent - plOther;
+
   const patchMut = useMutation({
     mutationFn: ({ id, patch }: { id: string; patch: Record<string, string | boolean | null> }) =>
       fetch(`/api/cashflow/transactions/${id}`, {
@@ -537,35 +548,32 @@ export default function CashFlowPage() {
 
       {uploads.length > 0 && (
         <>
-          {/* Summary cards */}
-          <div className="grid grid-cols-3 gap-4">
-            <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center flex-shrink-0">
-                <TrendingUp size={18} className="text-green-700" />
-              </div>
-              <div>
-                <p className="text-xs text-gray-500 font-medium uppercase tracking-wide">Total In</p>
-                <p className="text-lg font-bold text-green-700 tabular-nums">{eur(totalIn)}</p>
-              </div>
-            </div>
-            <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center flex-shrink-0">
-                <TrendingDown size={18} className="text-red-700" />
-              </div>
-              <div>
-                <p className="text-xs text-gray-500 font-medium uppercase tracking-wide">Total Out</p>
-                <p className="text-lg font-bold text-red-700 tabular-nums">{eur(totalOut)}</p>
-              </div>
-            </div>
-            <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 flex items-center gap-3">
-              <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${net >= 0 ? 'bg-green-100' : 'bg-red-100'}`}>
-                <Minus size={18} className={net >= 0 ? 'text-green-700' : 'text-red-700'} />
-              </div>
-              <div>
-                <p className="text-xs text-gray-500 font-medium uppercase tracking-wide">Net</p>
-                <p className={`text-lg font-bold tabular-nums ${net >= 0 ? 'text-green-700' : 'text-red-700'}`}>{eur(Math.abs(net))}</p>
-              </div>
-            </div>
+          {/* P&L summary table */}
+          <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+            <table className="w-full text-sm">
+              <tbody>
+                {[
+                  { label: 'Sales',  value: plSales,  isIncome: true },
+                  { label: 'COGS',   value: plCogs,   isIncome: false },
+                  { label: 'Staff',  value: plStaff,  isIncome: false },
+                  { label: 'Rent',   value: plRent,   isIncome: false },
+                  { label: 'Other',  value: plOther,  isIncome: false },
+                ].map(({ label, value, isIncome }) => (
+                  <tr key={label} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
+                    <td className="px-5 py-3 font-medium text-gray-700 w-32">{label}</td>
+                    <td className={`px-5 py-3 text-right tabular-nums font-semibold ${isIncome ? 'text-green-700' : 'text-red-700'}`}>
+                      {isIncome ? '' : '– '}{eur(value)}
+                    </td>
+                  </tr>
+                ))}
+                <tr className="bg-gray-50 border-t-2 border-gray-200">
+                  <td className="px-5 py-3.5 font-bold text-gray-900">FCF</td>
+                  <td className={`px-5 py-3.5 text-right tabular-nums font-bold text-base ${plFcf >= 0 ? 'text-green-700' : 'text-red-700'}`}>
+                    {plFcf < 0 ? '– ' : ''}{eur(Math.abs(plFcf))}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
           </div>
 
           {/* Filter bar */}
