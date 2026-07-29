@@ -424,10 +424,12 @@ export default function CashFlowPage() {
   const plCogs  = catSum('C - Suppliers');
   const plStaff = catSum('C - Personnel');
   const plRent  = catSum('C - Rent');
+  const plFinancing = catSum('C - Financing');
   const plOther = summaryRows.filter(t =>
-    t.direction === 'out' && !['C - Suppliers', 'C - Personnel', 'C - Rent'].includes(t.category ?? '')
+    t.direction === 'out' && !['C - Suppliers', 'C - Personnel', 'C - Rent', 'C - Financing'].includes(t.category ?? '')
   ).reduce((s: number, t: CfTx) => s + t.amount_cents, 0);
-  const plFcf = plSales - plCogs - plStaff - plRent - plOther;
+  const plFcf          = plSales - plCogs - plStaff - plRent - plOther;
+  const plChangeInCash = plFcf - plFinancing;
 
   const patchMut = useMutation({
     mutationFn: ({ id, patch }: { id: string; patch: Record<string, string | boolean | null> }) =>
@@ -570,6 +572,18 @@ export default function CashFlowPage() {
                   <td className="px-5 py-3.5 font-bold text-gray-900">FCF</td>
                   <td className={`px-5 py-3.5 text-right tabular-nums font-bold text-base ${plFcf >= 0 ? 'text-green-700' : 'text-red-700'}`}>
                     {plFcf < 0 ? '– ' : ''}{eur(Math.abs(plFcf))}
+                  </td>
+                </tr>
+                <tr className="border-t border-gray-100 hover:bg-gray-50 transition-colors">
+                  <td className="px-5 py-3 font-medium text-gray-700">Financing</td>
+                  <td className="px-5 py-3 text-right tabular-nums font-semibold text-red-700">
+                    – {eur(plFinancing)}
+                  </td>
+                </tr>
+                <tr className="bg-gray-50 border-t-2 border-gray-200">
+                  <td className="px-5 py-3.5 font-bold text-gray-900">Change in Cash</td>
+                  <td className={`px-5 py-3.5 text-right tabular-nums font-bold text-base ${plChangeInCash >= 0 ? 'text-green-700' : 'text-red-700'}`}>
+                    {plChangeInCash < 0 ? '– ' : ''}{eur(Math.abs(plChangeInCash))}
                   </td>
                 </tr>
               </tbody>
