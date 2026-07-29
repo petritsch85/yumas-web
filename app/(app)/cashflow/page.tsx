@@ -4,7 +4,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Upload, Loader2, TrendingUp, TrendingDown, Minus,
-  Link2, Link2Off, X, Search, CheckCircle2, Check,
+  Link2, Link2Off, X, Search, CheckCircle2, Check, XCircle,
 } from 'lucide-react';
 
 /* ── Types ─────────────────────────────────────────────────────────── */
@@ -418,18 +418,23 @@ export default function CashFlowPage() {
   const totalOut = summaryRows.filter(t => t.direction === 'out').reduce((s,t) => s + t.amount_cents, 0);
   const net      = totalIn - totalOut;
 
-  // P&L buckets
-  const catSum = (cat: string) => summaryRows.filter(t => t.category === cat).reduce((s: number, t: CfTx) => s + t.amount_cents, 0);
-  const plSales = summaryRows.filter(t => (t.category ?? '').startsWith('S - ')).reduce((s: number, t: CfTx) => s + t.amount_cents, 0);
-  const plCogs  = catSum('C - Suppliers');
-  const plStaff = catSum('C - Personnel');
-  const plRent  = catSum('C - Rent');
-  const plFinancing = catSum('C - Financing');
-  const plOther = summaryRows.filter(t =>
-    t.direction === 'out' && !['C - Suppliers', 'C - Personnel', 'C - Rent', 'C - Financing'].includes(t.category ?? '')
-  ).reduce((s: number, t: CfTx) => s + t.amount_cents, 0);
-  const plFcf          = plSales - plCogs - plStaff - plRent - plOther;
-  const plChangeInCash = plFcf - plFinancing;
+  // P&L buckets — signed: incoming = +, outgoing = −
+  const signed = (t: CfTx) => t.direction === 'in' ? t.amount_cents : -t.amount_cents;
+  const catNetSum = (cat: string) =>
+    summaryRows.filter(t => t.category === cat).reduce((s: number, t: CfTx) => s + signed(t), 0);
+  const plSales     = summaryRows.filter(t => (t.category ?? '').startsWith('S - ')).reduce((s: number, t: CfTx) => s + signed(t), 0);
+  const plCogs      = catNetSum('C - Suppliers');
+  const plStaff     = catNetSum('C - Personnel');
+  const plRent      = catNetSum('C - Rent');
+  const plFinancing = catNetSum('C - Financing');
+  const plOther     = summaryRows.filter(t =>
+    (t.category ?? '').startsWith('C - ') &&
+    !['C - Suppliers', 'C - Personnel', 'C - Rent', 'C - Financing'].includes(t.category ?? '')
+  ).reduce((s: number, t: CfTx) => s + signed(t), 0);
+  const plFcf          = plSales + plCogs + plStaff + plRent + plOther;
+  const plChangeInCash = plFcf + plFinancing;
+  // Verify: Change in Cash should equal net (all transactions summed with signs)
+  const checkOk = Math.abs(plChangeInCash - net) < 1;
 
   const patchMut = useMutation({
     mutationFn: ({ id, patch }: { id: string; patch: Record<string, string | boolean | null> }) =>
@@ -554,17 +559,17 @@ export default function CashFlowPage() {
           <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
             <table className="w-full text-sm">
               <tbody>
-                {[
-                  { label: 'Sales',  value: plSales,  isIncome: true },
-                  { label: 'COGS',   value: plCogs,   isIncome: false },
-                  { label: 'Staff',  value: plStaff,  isIncome: false },
-                  { label: 'Rent',   value: plRent,   isIncome: false },
-                  { label: 'Other',  value: plOther,  isIncome: false },
-                ].map(({ label, value, isIncome }) => (
+                {([
+                  { label: 'Sales',     value: plSales },
+                  { label: 'COGS',      value: plCogs  },
+                  { label: 'Staff',     value: plStaff },
+                  { label: 'Rent',      value: plRent  },
+                  { label: 'Other',     value: plOther },
+                ] as { label: string; value: number }[]).map(({ label, value }) => (
                   <tr key={label} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
                     <td className="px-5 py-3 font-medium text-gray-700 w-32">{label}</td>
-                    <td className={`px-5 py-3 text-right tabular-nums font-semibold ${isIncome ? 'text-green-700' : 'text-red-700'}`}>
-                      {isIncome ? '' : '– '}{eur(value)}
+                    <td className={`px-5 py-3 text-right tabular-nums font-semibold ${value >= 0 ? 'text-green-700' : 'text-red-700'}`}>
+                      {value < 0 ? '– ' : ''}{eur(Math.abs(value))}
                     </td>
                   </tr>
                 ))}
@@ -576,12 +581,17 @@ export default function CashFlowPage() {
                 </tr>
                 <tr className="border-t border-gray-100 hover:bg-gray-50 transition-colors">
                   <td className="px-5 py-3 font-medium text-gray-700">Financing</td>
-                  <td className="px-5 py-3 text-right tabular-nums font-semibold text-red-700">
-                    – {eur(plFinancing)}
+                  <td className={`px-5 py-3 text-right tabular-nums font-semibold ${plFinancing >= 0 ? 'text-green-700' : 'text-red-700'}`}>
+                    {plFinancing < 0 ? '– ' : ''}{eur(Math.abs(plFinancing))}
                   </td>
                 </tr>
                 <tr className="bg-gray-50 border-t-2 border-gray-200">
-                  <td className="px-5 py-3.5 font-bold text-gray-900">Change in Cash</td>
+                  <td className="px-5 py-3.5 font-bold text-gray-900 flex items-center gap-2">
+                    Change in Cash
+                    {checkOk
+                      ? <CheckCircle2 size={15} className="text-green-600 flex-shrink-0" />
+                      : <XCircle size={15} className="text-red-500 flex-shrink-0" />}
+                  </td>
                   <td className={`px-5 py-3.5 text-right tabular-nums font-bold text-base ${plChangeInCash >= 0 ? 'text-green-700' : 'text-red-700'}`}>
                     {plChangeInCash < 0 ? '– ' : ''}{eur(Math.abs(plChangeInCash))}
                   </td>
