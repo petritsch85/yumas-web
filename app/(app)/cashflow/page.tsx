@@ -71,6 +71,15 @@ const IN_LOCATIONS  = ['Westend','Eschborn','Taunus','Catering','Other'];
 const C_CHIP = 'bg-red-100 text-gray-900';
 const S_CHIP = 'bg-green-100 text-gray-900';
 
+function defaultVatRate(cat: string | null): number {
+  if (!cat) return 0;
+  if (cat === 'C - Personnel') return 0;
+  if (cat === 'C - Financing') return 0;
+  if (cat.startsWith('C - ')) return 19;
+  if (cat.startsWith('S - ')) return 10;
+  return 0;
+}
+
 function catChip(cat: string): string {
   if (cat.startsWith('C - ')) return C_CHIP;
   if (cat.startsWith('S - ')) return S_CHIP;
@@ -283,10 +292,30 @@ function TxRow({ tx, onSave }: {
           )}
         </td>
 
-        {/* Amount */}
+        {/* Amount Brutto */}
         <td className={`py-2 px-3 text-right whitespace-nowrap font-semibold tabular-nums ${isIn ? 'text-green-700' : 'text-red-700'}`}>
           {isIn ? '+' : '−'} {eur(tx.amount_cents)}
         </td>
+
+        {/* VAT %, VAT €, Amount Netto */}
+        {(() => {
+          const rate     = defaultVatRate(tx.category);
+          const vatCents = rate === 0 ? 0 : Math.round(tx.amount_cents * rate / (100 + rate));
+          const nettoCents = tx.amount_cents - vatCents;
+          return (
+            <>
+              <td className="py-2 px-3 text-right whitespace-nowrap text-xs text-gray-500 tabular-nums">
+                {rate}%
+              </td>
+              <td className="py-2 px-3 text-right whitespace-nowrap text-xs text-gray-500 tabular-nums">
+                {rate === 0 ? '—' : eur(vatCents)}
+              </td>
+              <td className={`py-2 px-3 text-right whitespace-nowrap text-xs tabular-nums font-medium ${isIn ? 'text-green-700' : 'text-red-700'}`}>
+                {isIn ? '+' : '−'} {eur(nettoCents)}
+              </td>
+            </>
+          );
+        })()}
 
         {/* Category — unified for both in and out */}
         <td className="py-2 px-3">
@@ -648,7 +677,10 @@ export default function CashFlowPage() {
                     <tr>
                       <th className="text-left py-2.5 px-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Date</th>
                       <th className="text-left py-2.5 px-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Counterparty</th>
-                      <th className="text-right py-2.5 px-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Amount</th>
+                      <th className="text-right py-2.5 px-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Amount Brutto</th>
+                      <th className="text-right py-2.5 px-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">VAT %</th>
+                      <th className="text-right py-2.5 px-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">VAT €</th>
+                      <th className="text-right py-2.5 px-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Amount Netto</th>
                       <th className="text-left py-2.5 px-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Category</th>
                       <th className="text-left py-2.5 px-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Location</th>
                       <th className="text-left py-2.5 px-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Notes</th>
