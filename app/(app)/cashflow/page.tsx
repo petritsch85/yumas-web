@@ -409,28 +409,28 @@ export default function CashFlowPage() {
   const txs        = txPage?.data ?? [];
   const totalCount = txPage?.count ?? 0;
 
-  const { data: summaryPage } = useQuery<TxPage>({
-    queryKey: ['cashflow-summary', dateFrom, dateTo],
-    queryFn: () => fetch(`/api/cashflow/transactions?dateFrom=${dateFrom}&dateTo=${dateTo}`).then(r => r.json()),
+  type AggRow = { category: string | null; direction: 'in' | 'out'; amount_cents: number };
+  const { data: aggRows = [] } = useQuery<AggRow[]>({
+    queryKey: ['cashflow-agg', dateFrom, dateTo],
+    queryFn: () => fetch(`/api/cashflow/aggregate?dateFrom=${dateFrom}&dateTo=${dateTo}`).then(r => r.json()),
   });
-  const summaryRows = summaryPage?.data ?? [];
-  const totalIn  = summaryRows.filter(t => t.direction === 'in').reduce((s,t) => s + t.amount_cents, 0);
-  const totalOut = summaryRows.filter(t => t.direction === 'out').reduce((s,t) => s + t.amount_cents, 0);
+  const totalIn  = aggRows.filter(t => t.direction === 'in').reduce((s,t) => s + t.amount_cents, 0);
+  const totalOut = aggRows.filter(t => t.direction === 'out').reduce((s,t) => s + t.amount_cents, 0);
   const net      = totalIn - totalOut;
 
   // P&L buckets — signed: incoming = +, outgoing = −
-  const signed = (t: CfTx) => t.direction === 'in' ? t.amount_cents : -t.amount_cents;
+  const signed = (t: AggRow) => t.direction === 'in' ? t.amount_cents : -t.amount_cents;
   const catNetSum = (cat: string) =>
-    summaryRows.filter(t => t.category === cat).reduce((s: number, t: CfTx) => s + signed(t), 0);
-  const plSales     = summaryRows.filter(t => (t.category ?? '').startsWith('S - ')).reduce((s: number, t: CfTx) => s + signed(t), 0);
+    aggRows.filter(t => t.category === cat).reduce((s: number, t: AggRow) => s + signed(t), 0);
+  const plSales     = aggRows.filter(t => (t.category ?? '').startsWith('S - ')).reduce((s: number, t: AggRow) => s + signed(t), 0);
   const plCogs      = catNetSum('C - Suppliers');
   const plStaff     = catNetSum('C - Personnel');
   const plRent      = catNetSum('C - Rent');
   const plFinancing = catNetSum('C - Financing');
-  const plOther     = summaryRows.filter(t =>
+  const plOther     = aggRows.filter(t =>
     (t.category ?? '').startsWith('C - ') &&
     !['C - Suppliers', 'C - Personnel', 'C - Rent', 'C - Financing'].includes(t.category ?? '')
-  ).reduce((s: number, t: CfTx) => s + signed(t), 0);
+  ).reduce((s: number, t: AggRow) => s + signed(t), 0);
   const plFcf          = plSales + plCogs + plStaff + plRent + plOther;
   const plChangeInCash = plFcf + plFinancing;
   // Verify: Change in Cash should equal net (all transactions summed with signs)
@@ -463,7 +463,7 @@ export default function CashFlowPage() {
       setUploadMsg(`✓ ${json.count} transactions imported`);
       qc.invalidateQueries({ queryKey: ['cashflow-uploads'] });
       qc.invalidateQueries({ queryKey: ['cashflow-tx'] });
-      qc.invalidateQueries({ queryKey: ['cashflow-summary'] });
+      qc.invalidateQueries({ queryKey: ['cashflow-agg'] });
     } catch (err: unknown) {
       setUploadMsg(`Error: ${err instanceof Error ? err.message : 'Upload error'}`);
     } finally {
