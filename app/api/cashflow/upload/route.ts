@@ -2,8 +2,14 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase-admin';
 import { classifyTransaction } from '@/lib/cashflow-categorize';
 
-// Parse a CSV string handling quoted fields (fields may contain commas and newlines inside quotes)
-function parseCSVRow(line: string): string[] {
+// Auto-detect delimiter: German bank CSVs use semicolons, others use commas
+function detectDelimiter(sample: string): string {
+  const semis  = (sample.match(/;/g)  ?? []).length;
+  const commas = (sample.match(/,/g)  ?? []).length;
+  return semis > commas ? ';' : ',';
+}
+
+function parseCSVRow(line: string, delimiter: string): string[] {
   const fields: string[] = [];
   let i = 0;
   while (i <= line.length) {
@@ -16,20 +22,19 @@ function parseCSVRow(line: string): string[] {
         else if (line[i] === '"') { i++; break; }
         else { field += line[i++]; }
       }
-      fields.push(field);
-      if (line[i] === ',') i++;
+      fields.push(field.trim());
+      if (line[i] === delimiter) i++;
     } else {
       let field = '';
-      while (i < line.length && line[i] !== ',') field += line[i++];
+      while (i < line.length && line[i] !== delimiter) field += line[i++];
       fields.push(field.trim());
-      if (line[i] === ',') i++;
+      if (line[i] === delimiter) i++;
     }
   }
   return fields;
 }
 
 function splitCSVLines(text: string): string[] {
-  // Split on newlines not inside quotes
   const lines: string[] = [];
   let cur = '';
   let inQuote = false;
@@ -49,9 +54,35 @@ function splitCSVLines(text: string): string[] {
 }
 
 function parseGermanDate(s: string): string | null {
-  const m = s.trim().match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
-  if (!m) return null;
-  return `${m[3]}-${m[2]}-${m[1]}`;
+  s = s.trim();
+  // DD/MM/YYYY
+  const slash = s.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (slash) return `${slash[3]}-${slash[2]}-${slash[1]}`;
+  // DD.MM.YYYY
+  const dot = s.match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
+  if (dot)   return `${dot[3]}-${dot[2]}-${dot[1]}`;
+  return null;
+}
+
+// Handles integer cents (already in minor units) OR German decimal euro format "1.234,56"
+function parseAmountCents(s: string): number | null {
+  const clean = s.trim().replace(/\s/g, '');
+  if (!clean) return null;
+
+  // Pure integer → treat as cents
+  if (/^-?\d+$/.test(clean)) return parseInt(clean, 10);
+
+  // German format: optional sign, digits with optional dot-thousands, comma-decimal
+  // e.g. "-1.234,56" or "1234,56" or "-720.600,00"
+  const german = clean.match(/^(-?)(\d{1,3}(?:\.\d{3})*),(\d{2})$/) ??
+                 clean.match(/^(-?)(\d+),(\d{2})$/);
+  if (german) {
+    const sign  = german[1] === '-' ? -1 : 1;
+    const whole = german[2].replace(/\./g, '');
+    return sign * (parseInt(whole, 10) * 100 + parseInt(german[3], 10));
+  }
+
+  return null;
 }
 
 export async function POST(req: NextRequest) {
@@ -69,12 +100,16 @@ export async function POST(req: NextRequest) {
     try { text = new TextDecoder('utf-8', { fatal: true }).decode(buf); }
     catch { text = new TextDecoder('iso-8859-1').decode(buf); }
 
-    const lines = splitCSVLines(text);
-    const dataLines = lines.slice(1); // skip header
+    const delimiter = detectDelimiter(text.slice(0, 500));
+    const lines     = splitCSVLines(text);
+
+    // Find the header row that contains "Buchungstag" — some bank exports have metadata before it
+    const headerIdx = lines.findIndex(l => /Buchungstag/i.test(l));
+    const dataLines = headerIdx >= 0 ? lines.slice(headerIdx + 1) : lines.slice(1);
 
     const admin = getSupabaseAdmin();
 
-    // Create upload record first (without file_path — column may not exist yet before migration)
+    // Create upload record first (file_path added separately — column may not exist before migration)
     const { data: upload, error: uploadErr } = await admin
       .from('cashflow_uploads')
       .insert({ filename: file.name, period_label: periodLabel.trim(), transaction_count: 0 })
@@ -83,31 +118,36 @@ export async function POST(req: NextRequest) {
 
     if (uploadErr || !upload) return NextResponse.json({ error: uploadErr?.message ?? 'Upload create failed' }, { status: 500 });
 
-    // Save original CSV to storage then record the path — both steps are non-fatal
+    // Save original CSV to storage — non-fatal if it fails
     try {
-      await admin.storage.createBucket('cashflow-files', { public: false }).catch(() => {/* already exists */});
+      await admin.storage.createBucket('cashflow-files', { public: false }).catch(() => {});
       const safeLabel = periodLabel.trim().replace(/[^a-zA-Z0-9-_]/g, '_');
       const storagePath = `uploads/${safeLabel}_${Date.now()}_${file.name}`;
       const { error: storeErr } = await admin.storage
         .from('cashflow-files')
         .upload(storagePath, buf, { contentType: 'text/csv', upsert: false });
       if (!storeErr) {
-        // Silently ignored if file_path column doesn't exist yet (migration not yet run)
         await admin.from('cashflow_uploads').update({ file_path: storagePath }).eq('id', upload.id);
       }
     } catch { /* non-fatal */ }
 
     const txRows: object[] = [];
     for (const line of dataLines) {
-      const cols = parseCSVRow(line);
-      if (cols.length < 4) continue;
+      const cols = parseCSVRow(line, delimiter);
 
-      const [dateStr, description, counterparty, amountStr] = cols;
+      // Expected: Buchungstag | Verwendungszweck | Kundenreferenz (End-to-End) | Beguenstigter/Zahlungspflichtiger | Betrag
+      if (cols.length < 5) continue;
+
+      const dateStr     = cols[0];
+      const description = cols[1];
+      const counterparty = cols[3];   // col 3 = Beguenstigter/Zahlungspflichtiger
+      const amountStr   = cols[4];    // col 4 = Betrag
+
       const date = parseGermanDate(dateStr);
       if (!date) continue;
 
-      const amountCents = parseInt(amountStr.replace(/\s/g, ''), 10);
-      if (isNaN(amountCents)) continue;
+      const amountCents = parseAmountCents(amountStr);
+      if (amountCents === null) continue;
 
       const direction = amountCents >= 0 ? 'in' : 'out';
       const { category, salesType } = classifyTransaction(counterparty, description, direction);

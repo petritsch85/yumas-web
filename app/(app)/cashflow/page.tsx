@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Upload, Loader2, TrendingUp, TrendingDown, Minus,
   Link2, Link2Off, X, Search, CheckCircle2, Check, XCircle,
-  Download, ChevronDown, ChevronUp, FileText,
+  Download, ChevronDown, ChevronUp, FileText, Info,
 } from 'lucide-react';
 
 /* ── Types ─────────────────────────────────────────────────────────── */
@@ -408,8 +408,9 @@ export default function CashFlowPage() {
   const [periodLabel, setPeriodLabel] = useState('');
   const [uploading, setUploading]     = useState(false);
   const [uploadMsg, setUploadMsg]     = useState('');
-  const [showUploadLog, setShowUploadLog] = useState(false);
-  const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [showUploadLog, setShowUploadLog]   = useState(false);
+  const [downloadingId, setDownloadingId]   = useState<string | null>(null);
+  const [showFormatInfo, setShowFormatInfo] = useState(false);
 
   const [selectedYear, setSelectedYear]     = useState(2026);
   const [selectedPeriod, setSelectedPeriod] = useState<Period>('Q1');
@@ -545,10 +546,17 @@ export default function CashFlowPage() {
           <input type="text" value={periodLabel} onChange={e => setPeriodLabel(e.target.value)}
             placeholder="Period label (e.g. Q1-2026)"
             className="text-sm border border-gray-200 rounded-lg px-3 py-2 w-48 outline-none focus:border-[#1B5E20]" />
-          <button onClick={() => fileInputRef.current?.click()} disabled={uploading}
-            className="flex items-center gap-2 px-4 py-2 bg-[#1B5E20] text-white text-sm font-semibold rounded-lg hover:bg-[#2E7D32] disabled:opacity-60 transition-colors">
-            {uploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
-            {uploading ? 'Importing…' : 'Upload CSV'}
+          <div className="relative">
+            <button onClick={() => fileInputRef.current?.click()} disabled={uploading}
+              className="flex items-center gap-2 px-4 py-2 bg-[#1B5E20] text-white text-sm font-semibold rounded-lg hover:bg-[#2E7D32] disabled:opacity-60 transition-colors">
+              {uploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+              {uploading ? 'Importing…' : 'Upload CSV'}
+            </button>
+          </div>
+          <button onClick={() => setShowFormatInfo(v => !v)}
+            className={`p-2 rounded-lg border transition-colors ${showFormatInfo ? 'border-indigo-300 bg-indigo-50 text-indigo-600' : 'border-gray-200 text-gray-400 hover:text-gray-600'}`}
+            title="Required CSV format">
+            <Info size={15} />
           </button>
           <input ref={fileInputRef} type="file" accept=".csv,text/csv" className="hidden"
             onChange={e => { const f = e.target.files?.[0]; if (f) handleUpload(f); }} />
@@ -557,6 +565,43 @@ export default function CashFlowPage() {
           )}
         </div>
       </div>
+
+      {/* CSV format info panel */}
+      {showFormatInfo && (
+        <div className="bg-indigo-50 border border-indigo-200 rounded-xl px-5 py-4 text-sm">
+          <p className="font-semibold text-indigo-900 mb-2">Required CSV format</p>
+          <p className="text-indigo-700 mb-3">The file must have exactly these 5 columns (semicolon-separated, as exported by German banks):</p>
+          <div className="overflow-x-auto">
+            <table className="text-xs border-collapse w-full max-w-2xl">
+              <thead>
+                <tr className="bg-indigo-100">
+                  <th className="border border-indigo-200 px-3 py-1.5 text-left font-semibold text-indigo-800">#</th>
+                  <th className="border border-indigo-200 px-3 py-1.5 text-left font-semibold text-indigo-800">Column name</th>
+                  <th className="border border-indigo-200 px-3 py-1.5 text-left font-semibold text-indigo-800">Format</th>
+                  <th className="border border-indigo-200 px-3 py-1.5 text-left font-semibold text-indigo-800">Example</th>
+                </tr>
+              </thead>
+              <tbody className="text-indigo-700">
+                {[
+                  ['1', 'Buchungstag', 'DD/MM/YYYY or DD.MM.YYYY', '30/06/2026'],
+                  ['2', 'Verwendungszweck', 'Free text (purpose)', 'Abschlag fuer 06/2026'],
+                  ['3', 'Kundenreferenz (End-to-End)', 'Reference number or blank', '165196'],
+                  ['4', 'Beguenstigter/Zahlungspflichtiger', 'Counterparty name', 'Pham, Giang Houng'],
+                  ['5', 'Betrag', 'Integer cents (e.g. -80000) or German decimal euros (e.g. -800,00)', '-80000'],
+                ].map(([n, col, fmt, ex]) => (
+                  <tr key={n} className="even:bg-indigo-50/50">
+                    <td className="border border-indigo-200 px-3 py-1.5 font-mono text-indigo-500">{n}</td>
+                    <td className="border border-indigo-200 px-3 py-1.5 font-semibold">{col}</td>
+                    <td className="border border-indigo-200 px-3 py-1.5">{fmt}</td>
+                    <td className="border border-indigo-200 px-3 py-1.5 font-mono">{ex}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="text-indigo-600 text-xs mt-3">Delimiter is auto-detected (semicolon or comma). Rows with unparseable dates or amounts are skipped silently — if 0 rows import, check the Upload Log for the count.</p>
+        </div>
+      )}
 
       {/* Year + Period navigation */}
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm px-5 py-4 space-y-3">
