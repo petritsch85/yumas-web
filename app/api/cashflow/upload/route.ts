@@ -74,8 +74,16 @@ export async function POST(req: NextRequest) {
 
     const admin = getSupabaseAdmin();
 
-    // Save original CSV to storage (cashflow-files bucket) so the upload log can serve it
-    let storedFilePath: string | null = null;
+    // Create upload record first (without file_path — column may not exist yet before migration)
+    const { data: upload, error: uploadErr } = await admin
+      .from('cashflow_uploads')
+      .insert({ filename: file.name, period_label: periodLabel.trim(), transaction_count: 0 })
+      .select()
+      .single();
+
+    if (uploadErr || !upload) return NextResponse.json({ error: uploadErr?.message ?? 'Upload create failed' }, { status: 500 });
+
+    // Save original CSV to storage then record the path — both steps are non-fatal
     try {
       await admin.storage.createBucket('cashflow-files', { public: false }).catch(() => {/* already exists */});
       const safeLabel = periodLabel.trim().replace(/[^a-zA-Z0-9-_]/g, '_');
@@ -83,16 +91,11 @@ export async function POST(req: NextRequest) {
       const { error: storeErr } = await admin.storage
         .from('cashflow-files')
         .upload(storagePath, buf, { contentType: 'text/csv', upsert: false });
-      if (!storeErr) storedFilePath = storagePath;
-    } catch { /* non-fatal — upload log will show without download link */ }
-
-    const { data: upload, error: uploadErr } = await admin
-      .from('cashflow_uploads')
-      .insert({ filename: file.name, period_label: periodLabel.trim(), transaction_count: 0, file_path: storedFilePath })
-      .select()
-      .single();
-
-    if (uploadErr || !upload) return NextResponse.json({ error: uploadErr?.message ?? 'Upload create failed' }, { status: 500 });
+      if (!storeErr) {
+        // Silently ignored if file_path column doesn't exist yet (migration not yet run)
+        await admin.from('cashflow_uploads').update({ file_path: storagePath }).eq('id', upload.id);
+      }
+    } catch { /* non-fatal */ }
 
     const txRows: object[] = [];
     for (const line of dataLines) {
