@@ -481,7 +481,15 @@ export default function CashFlowPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(patch),
       }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['cashflow-tx'] }); },
+    onSuccess: (_data, { id, patch }) => {
+      // Update the row in-place across all cached transaction pages — no refetch, no reshuffling
+      qc.setQueriesData<TxPage>(
+        { queryKey: ['cashflow-tx'] },
+        old => old ? { ...old, data: old.data.map(tx => tx.id === id ? { ...tx, ...patch } as CfTx : tx) } : old,
+      );
+      // Recalculate P&L totals since category/direction may have changed
+      qc.invalidateQueries({ queryKey: ['cashflow-agg'] });
+    },
   });
 
   const handleSave = useCallback((id: string, patch: Record<string, string | boolean | null>) => {
