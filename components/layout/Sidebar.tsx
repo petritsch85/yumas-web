@@ -158,19 +158,6 @@ const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
-    labelKey: 'sidebar.groups.inStore',
-    items: [
-      {
-        labelKey: 'sidebar.nav.staffVideos', href: '/staff-videos', icon: Users, permKey: 'staff_videos',
-        children: [
-          { labelKey: 'sidebar.nav.foodPrep',   href: '/staff-videos/food-prep',   icon: UtensilsCrossed },
-          { labelKey: 'sidebar.nav.drinksPrep', href: '/staff-videos/drinks-prep', icon: Utensils },
-        ],
-      },
-      { labelKey: 'sidebar.nav.shiftRoster', href: '/coming-soon/shift-roster', icon: CalendarDays, adminOnly: true },
-    ],
-  },
-  {
     labelKey: 'sidebar.groups.staffing',
     adminOnly: true,
     items: [
