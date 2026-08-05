@@ -2,13 +2,14 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase-admin';
 
 // GET /api/cashflow/uploads/[id]/file  — returns a short-lived signed download URL
-export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
   const admin = getSupabaseAdmin();
 
   const { data: upload, error } = await admin
     .from('cashflow_uploads')
     .select('file_path, filename')
-    .eq('id', params.id)
+    .eq('id', id)
     .single();
 
   if (error || !upload) return NextResponse.json({ error: 'Not found' }, { status: 404 });
