@@ -5,6 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Upload, Loader2, TrendingUp, TrendingDown, Minus,
   Link2, Link2Off, X, Search, CheckCircle2, Check, XCircle,
+  Download, ChevronDown, ChevronUp, FileText,
 } from 'lucide-react';
 
 /* ── Types ─────────────────────────────────────────────────────────── */
@@ -14,6 +15,7 @@ type CfUpload = {
   period_label: string;
   uploaded_at: string;
   transaction_count: number;
+  file_path: string | null;
 };
 
 type BillRef = {
@@ -406,6 +408,8 @@ export default function CashFlowPage() {
   const [periodLabel, setPeriodLabel] = useState('');
   const [uploading, setUploading]     = useState(false);
   const [uploadMsg, setUploadMsg]     = useState('');
+  const [showUploadLog, setShowUploadLog] = useState(false);
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
   const [selectedYear, setSelectedYear]     = useState(2026);
   const [selectedPeriod, setSelectedPeriod] = useState<Period>('Q1');
@@ -441,7 +445,11 @@ export default function CashFlowPage() {
   type AggRow = { category: string | null; direction: 'in' | 'out'; total_cents: number };
   const { data: aggRows = [] } = useQuery<AggRow[]>({
     queryKey: ['cashflow-agg', dateFrom, dateTo],
-    queryFn: () => fetch(`/api/cashflow/aggregate?dateFrom=${dateFrom}&dateTo=${dateTo}`).then(r => r.json()),
+    queryFn: async () => {
+      const res = await fetch(`/api/cashflow/aggregate?dateFrom=${dateFrom}&dateTo=${dateTo}`);
+      const json = await res.json();
+      return Array.isArray(json) ? json : [];
+    },
   });
   const totalIn  = aggRows.filter(t => t.direction === 'in').reduce((s,t) => s + t.total_cents, 0);
   const totalOut = aggRows.filter(t => t.direction === 'out').reduce((s,t) => s + t.total_cents, 0);
@@ -502,6 +510,24 @@ export default function CashFlowPage() {
   };
 
   const resetFilters = () => { setDirFilter('all'); setCatFilter('All'); setLocFilter('All'); };
+
+  const handleDownload = async (upload: CfUpload) => {
+    if (!upload.file_path) { alert('Original file was not saved for this upload.'); return; }
+    setDownloadingId(upload.id);
+    try {
+      const res  = await fetch(`/api/cashflow/uploads/${upload.id}/file`);
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? 'Download failed');
+      const a = document.createElement('a');
+      a.href = json.url;
+      a.download = json.filename ?? upload.filename;
+      a.click();
+    } catch (err) {
+      alert(`Download failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    } finally {
+      setDownloadingId(null);
+    }
+  };
 
   const activeQuarterMonths: Period[] = selectedPeriod in QUARTER_PERIODS
     ? QUARTER_PERIODS[selectedPeriod]
@@ -573,6 +599,70 @@ export default function CashFlowPage() {
           </div>
         </div>
       </div>
+
+      {/* Upload Log */}
+      {uploads.length > 0 && (
+        <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+          <button
+            onClick={() => setShowUploadLog(v => !v)}
+            className="w-full flex items-center justify-between px-5 py-3.5 hover:bg-gray-50 transition-colors">
+            <div className="flex items-center gap-2">
+              <FileText size={15} className="text-gray-400" />
+              <span className="text-sm font-semibold text-gray-700">Upload Log</span>
+              <span className="text-xs text-gray-400 bg-gray-100 rounded-full px-2 py-0.5">{uploads.length}</span>
+            </div>
+            {showUploadLog ? <ChevronUp size={15} className="text-gray-400" /> : <ChevronDown size={15} className="text-gray-400" />}
+          </button>
+
+          {showUploadLog && (
+            <div className="border-t border-gray-100">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 border-b border-gray-100">
+                  <tr>
+                    <th className="text-left px-5 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">Period</th>
+                    <th className="text-left px-5 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">Filename</th>
+                    <th className="text-left px-5 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">Uploaded</th>
+                    <th className="text-right px-5 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">Rows</th>
+                    <th className="px-5 py-2.5"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {uploads.map(u => (
+                    <tr key={u.id} className="border-b border-gray-50 hover:bg-gray-50 transition-colors last:border-0">
+                      <td className="px-5 py-2.5">
+                        <span className="font-mono text-xs bg-green-50 text-green-800 px-2 py-0.5 rounded-full border border-green-200">{u.period_label}</span>
+                      </td>
+                      <td className="px-5 py-2.5 text-gray-600 text-xs truncate max-w-48">{u.filename}</td>
+                      <td className="px-5 py-2.5 text-gray-500 text-xs">
+                        {new Date(u.uploaded_at).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                      </td>
+                      <td className="px-5 py-2.5 text-right tabular-nums text-sm font-semibold text-gray-800">
+                        {u.transaction_count.toLocaleString('de-DE')}
+                        {u.transaction_count === 0 && <span className="ml-2 text-xs text-amber-600 font-normal">(parse error?)</span>}
+                      </td>
+                      <td className="px-5 py-2.5 text-right">
+                        {u.file_path ? (
+                          <button
+                            onClick={() => handleDownload(u)}
+                            disabled={downloadingId === u.id}
+                            className="flex items-center gap-1.5 ml-auto text-xs text-indigo-600 hover:text-indigo-800 font-medium disabled:opacity-50 transition-colors">
+                            {downloadingId === u.id
+                              ? <Loader2 size={12} className="animate-spin" />
+                              : <Download size={12} />}
+                            Download
+                          </button>
+                        ) : (
+                          <span className="text-xs text-gray-300">—</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
 
       {uploads.length === 0 && (
         <div className="bg-white rounded-xl border border-dashed border-gray-300 p-12 text-center">
