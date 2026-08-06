@@ -135,6 +135,12 @@ function fmtDate(iso: string) {
   const [y,m,d] = iso.split('-');
   return `${d}.${m}.${y}`;
 }
+// Split a brutto (gross) amount into VAT and netto — all values in cents
+function vatSplit(bruttoAbs: number, vatPct: number) {
+  if (vatPct === 0) return { mwst: 0, netto: bruttoAbs };
+  const mwst = Math.round(bruttoAbs * vatPct / (100 + vatPct));
+  return { mwst, netto: bruttoAbs - mwst };
+}
 
 /* ── Bill Match Modal ───────────────────────────────────────────────── */
 function BillMatchModal({ tx, onLink, onUnlink, onClose }: {
@@ -728,49 +734,141 @@ export default function CashFlowPage() {
       {uploads.length > 0 && (
         <>
           {/* P&L summary table */}
-          <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-            <table className="w-full text-sm">
-              <tbody>
-                {([
-                  { label: 'Sales',     value: plSales },
-                  { label: 'COGS',      value: plCogs  },
-                  { label: 'Staff',     value: plStaff },
-                  { label: 'Rent',      value: plRent  },
-                  { label: 'Other',     value: plOther },
-                ] as { label: string; value: number }[]).map(({ label, value }) => (
-                  <tr key={label} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
-                    <td className="px-5 py-3 font-medium text-gray-700 w-32">{label}</td>
-                    <td className={`px-5 py-3 text-right tabular-nums font-semibold ${value >= 0 ? 'text-green-700' : 'text-red-700'}`}>
-                      {value < 0 ? '– ' : ''}{eur(Math.abs(value))}
-                    </td>
-                  </tr>
-                ))}
-                <tr className="bg-gray-50 border-t-2 border-gray-200">
-                  <td className="px-5 py-3.5 font-bold text-gray-900">FCF</td>
-                  <td className={`px-5 py-3.5 text-right tabular-nums font-bold text-base ${plFcf >= 0 ? 'text-green-700' : 'text-red-700'}`}>
-                    {plFcf < 0 ? '– ' : ''}{eur(Math.abs(plFcf))}
-                  </td>
-                </tr>
-                <tr className="border-t border-gray-100 hover:bg-gray-50 transition-colors">
-                  <td className="px-5 py-3 font-medium text-gray-700">Financing</td>
-                  <td className={`px-5 py-3 text-right tabular-nums font-semibold ${plFinancing >= 0 ? 'text-green-700' : 'text-red-700'}`}>
-                    {plFinancing < 0 ? '– ' : ''}{eur(Math.abs(plFinancing))}
-                  </td>
-                </tr>
-                <tr className="bg-gray-50 border-t-2 border-gray-200">
-                  <td className="px-5 py-3.5 font-bold text-gray-900 flex items-center gap-2">
-                    Change in Cash
-                    {checkOk
-                      ? <CheckCircle2 size={15} className="text-green-600 flex-shrink-0" />
-                      : <XCircle size={15} className="text-red-500 flex-shrink-0" />}
-                  </td>
-                  <td className={`px-5 py-3.5 text-right tabular-nums font-bold text-base ${plChangeInCash >= 0 ? 'text-green-700' : 'text-red-700'}`}>
-                    {plChangeInCash < 0 ? '– ' : ''}{eur(Math.abs(plChangeInCash))}
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
+          {(() => {
+            const salesAbs = Math.abs(plSales);
+            const pctSales = (v: number) =>
+              salesAbs > 0
+                ? (Math.abs(v) / salesAbs * 100).toLocaleString('de-DE', { maximumFractionDigits: 1 }) + '%'
+                : '—';
+
+            const salesVat  = vatSplit(salesAbs,         10);
+            const cogsVat   = vatSplit(Math.abs(plCogs),  19);
+            const staffVat  = vatSplit(Math.abs(plStaff),  0);
+            const rentVat   = vatSplit(Math.abs(plRent),  19);
+            const otherVat  = vatSplit(Math.abs(plOther), 19);
+
+            const valCell = (v: number, bold = false, large = false) => (
+              <td className={`px-5 py-3 text-right tabular-nums ${bold ? 'font-bold' : 'font-semibold'} ${large ? 'text-base' : ''} ${v >= 0 ? 'text-green-700' : 'text-red-700'}`}>
+                {v < 0 ? '– ' : ''}{eur(Math.abs(v))}
+              </td>
+            );
+            const euroCell = (cents: number) => (
+              <td className="px-4 py-3 text-right tabular-nums text-gray-600 text-xs">{eur(cents)}</td>
+            );
+            const dashCell = () => (
+              <td className="px-4 py-3 text-right text-gray-300 text-xs">—</td>
+            );
+            const pctRow = (label: string, val: number) => (
+              <tr className="bg-gray-50/60 border-b border-gray-100">
+                <td className="px-5 py-1.5 text-xs text-gray-400 italic pl-9">{label}</td>
+                {dashCell()}{dashCell()}{dashCell()}{dashCell()}
+                <td className="px-5 py-1.5 text-right text-xs tabular-nums text-gray-500 font-medium">{pctSales(val)}</td>
+              </tr>
+            );
+
+            return (
+              <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm min-w-[700px]">
+                    <thead className="bg-gray-50 border-b border-gray-200">
+                      <tr>
+                        <th className="text-left px-5 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide w-36">Row</th>
+                        <th className="text-right px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">Brutto Sales (€)</th>
+                        <th className="text-right px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">MwSt (€)</th>
+                        <th className="text-right px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">MwSt (%)</th>
+                        <th className="text-right px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">Netto Sales (€)</th>
+                        <th className="text-right px-5 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">Value (€)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {/* Sales */}
+                      <tr className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
+                        <td className="px-5 py-3 font-medium text-gray-700">Sales</td>
+                        {euroCell(salesAbs)}
+                        {euroCell(salesVat.mwst)}
+                        <td className="px-4 py-3 text-right tabular-nums text-gray-500 text-xs">10%</td>
+                        {euroCell(salesVat.netto)}
+                        {valCell(plSales)}
+                      </tr>
+
+                      {/* COGS */}
+                      <tr className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
+                        <td className="px-5 py-3 font-medium text-gray-700">COGS</td>
+                        {euroCell(Math.abs(plCogs))}
+                        {euroCell(cogsVat.mwst)}
+                        <td className="px-4 py-3 text-right tabular-nums text-gray-500 text-xs">{plCogs !== 0 ? '19%' : '—'}</td>
+                        {euroCell(cogsVat.netto)}
+                        {valCell(plCogs)}
+                      </tr>
+                      {pctRow('as % of sales', plCogs)}
+
+                      {/* Staff */}
+                      <tr className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
+                        <td className="px-5 py-3 font-medium text-gray-700">Staff</td>
+                        {euroCell(Math.abs(plStaff))}
+                        <td className="px-4 py-3 text-right tabular-nums text-gray-300 text-xs">—</td>
+                        <td className="px-4 py-3 text-right tabular-nums text-gray-500 text-xs">{plStaff !== 0 ? '0%' : '—'}</td>
+                        {euroCell(staffVat.netto)}
+                        {valCell(plStaff)}
+                      </tr>
+                      {pctRow('as % of sales', plStaff)}
+
+                      {/* Rent */}
+                      <tr className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
+                        <td className="px-5 py-3 font-medium text-gray-700">Rent</td>
+                        {euroCell(Math.abs(plRent))}
+                        {euroCell(rentVat.mwst)}
+                        <td className="px-4 py-3 text-right tabular-nums text-gray-500 text-xs">{plRent !== 0 ? '19%' : '—'}</td>
+                        {euroCell(rentVat.netto)}
+                        {valCell(plRent)}
+                      </tr>
+                      {pctRow('as % of sales', plRent)}
+
+                      {/* Other */}
+                      <tr className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
+                        <td className="px-5 py-3 font-medium text-gray-700">Other</td>
+                        {euroCell(Math.abs(plOther))}
+                        {euroCell(otherVat.mwst)}
+                        <td className="px-4 py-3 text-right tabular-nums text-gray-500 text-xs">{plOther !== 0 ? '19%' : '—'}</td>
+                        {euroCell(otherVat.netto)}
+                        {valCell(plOther)}
+                      </tr>
+                      {pctRow('as % of sales', plOther)}
+
+                      {/* FCF */}
+                      <tr className="bg-gray-50 border-t-2 border-gray-200">
+                        <td className="px-5 py-3.5 font-bold text-gray-900">FCF</td>
+                        {dashCell()}{dashCell()}{dashCell()}{dashCell()}
+                        {valCell(plFcf, true, true)}
+                      </tr>
+                      {pctRow('as % of sales', plFcf)}
+
+                      {/* Financing */}
+                      <tr className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
+                        <td className="px-5 py-3 font-medium text-gray-700">Financing</td>
+                        {dashCell()}{dashCell()}{dashCell()}{dashCell()}
+                        {valCell(plFinancing)}
+                      </tr>
+
+                      {/* Change in Cash */}
+                      <tr className="bg-gray-50 border-t-2 border-gray-200">
+                        <td className="px-5 py-3.5 font-bold text-gray-900">
+                          <span className="flex items-center gap-2">
+                            Change in Cash
+                            {checkOk
+                              ? <CheckCircle2 size={15} className="text-green-600 flex-shrink-0" />
+                              : <XCircle size={15} className="text-red-500 flex-shrink-0" />}
+                          </span>
+                        </td>
+                        {dashCell()}{dashCell()}{dashCell()}{dashCell()}
+                        {valCell(plChangeInCash, true, true)}
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Filter bar */}
           <div className="bg-white rounded-xl border border-gray-100 shadow-sm px-4 py-3 flex flex-wrap items-center gap-3">
