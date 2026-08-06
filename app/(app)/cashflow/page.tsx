@@ -96,11 +96,13 @@ function optionBg(cat: string): string {
 }
 
 /* ── Period helpers ─────────────────────────────────────────────────── */
-type Period = 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'Jan' | 'Feb' | 'Mar' | 'Apr' | 'May' | 'Jun' | 'Jul' | 'Aug' | 'Sep' | 'Oct' | 'Nov' | 'Dec';
+type Period = 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'H1' | 'H2' | 'Jan' | 'Feb' | 'Mar' | 'Apr' | 'May' | 'Jun' | 'Jul' | 'Aug' | 'Sep' | 'Oct' | 'Nov' | 'Dec';
 
 const QUARTER_PERIODS: Record<string, Period[]> = {
   Q1: ['Jan','Feb','Mar'], Q2: ['Apr','May','Jun'],
   Q3: ['Jul','Aug','Sep'], Q4: ['Oct','Nov','Dec'],
+  H1: ['Jan','Feb','Mar','Apr','May','Jun'],
+  H2: ['Jul','Aug','Sep','Oct','Nov','Dec'],
 };
 
 const MONTH_NUM: Record<string, number> = {
@@ -698,12 +700,19 @@ export default function CashFlowPage() {
         <div className="flex items-start gap-2 flex-wrap">
           <span className="text-xs font-semibold text-gray-400 uppercase tracking-wide w-12 pt-1.5">Period</span>
           <div className="flex flex-col gap-2">
-            <div className="flex gap-2">
+            <div className="flex gap-2 flex-wrap">
               {quarters.map(q => (
                 <button key={q} onClick={() => { setSelectedPeriod(q); resetFilters(); }}
                   className={`px-4 py-1.5 rounded-lg text-sm font-semibold border transition-colors ${
                     selectedPeriod === q ? 'bg-[#1B5E20] text-white border-[#1B5E20]' : 'bg-white text-gray-700 border-gray-200 hover:border-gray-400'
                   }`}>{q}</button>
+              ))}
+              <div className="w-px bg-gray-200 self-stretch mx-1" />
+              {(['H1','H2'] as Period[]).map(h => (
+                <button key={h} onClick={() => { setSelectedPeriod(h); resetFilters(); }}
+                  className={`px-4 py-1.5 rounded-lg text-sm font-semibold border transition-colors ${
+                    selectedPeriod === h ? 'bg-[#1B5E20] text-white border-[#1B5E20]' : 'bg-white text-gray-700 border-gray-200 hover:border-gray-400'
+                  }`}>{h}</button>
               ))}
             </div>
             <div className="flex gap-1.5 flex-wrap">
