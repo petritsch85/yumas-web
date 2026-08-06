@@ -135,11 +135,19 @@ function fmtDate(iso: string) {
   const [y,m,d] = iso.split('-');
   return `${d}.${m}.${y}`;
 }
-// Split a brutto (gross) amount into VAT and netto — all values in cents
-function vatSplit(bruttoAbs: number, vatPct: number) {
-  if (vatPct === 0) return { mwst: 0, netto: bruttoAbs };
-  const mwst = Math.round(bruttoAbs * vatPct / (100 + vatPct));
-  return { mwst, netto: bruttoAbs - mwst };
+// Compute VAT breakdown for a set of aggRows using the per-category defaultVatRate.
+// All amounts in cents; brutto/mwst/netto are absolute (unsigned).
+function bucketVat(rows: { category: string | null; total_cents: number }[]) {
+  let bruttoAbs = 0, mwstAbs = 0;
+  for (const row of rows) {
+    const rate = defaultVatRate(row.category);
+    const m = rate === 0 ? 0 : Math.round(row.total_cents * rate / (100 + rate));
+    bruttoAbs += row.total_cents;
+    mwstAbs   += m;
+  }
+  const nettoAbs    = bruttoAbs - mwstAbs;
+  const blendedPct  = bruttoAbs > 0 ? (mwstAbs / bruttoAbs * 100) : 0;
+  return { bruttoAbs, mwstAbs, nettoAbs, blendedPct };
 }
 
 /* ── Bill Match Modal ───────────────────────────────────────────────── */
@@ -477,8 +485,22 @@ export default function CashFlowPage() {
   ).reduce((s: number, t: AggRow) => s + signed(t), 0);
   const plFcf          = plSales + plCogs + plStaff + plRent + plOther;
   const plChangeInCash = plFcf + plFinancing;
-  // Verify: Change in Cash should equal net (all transactions summed with signs)
   const checkOk = Math.abs(plChangeInCash - net) < 1;
+
+  // VAT breakdowns — summed from individual category rows, not applied as a flat rate to the bucket total
+  const salesVatRows  = aggRows.filter(t => (t.category ?? '').startsWith('S - '));
+  const cogsVatRows   = aggRows.filter(t => t.category === 'C - Suppliers');
+  const staffVatRows  = aggRows.filter(t => t.category === 'C - Personnel');
+  const rentVatRows   = aggRows.filter(t => t.category === 'C - Rent');
+  const otherVatRows  = aggRows.filter(t =>
+    (t.category ?? '').startsWith('C - ') &&
+    !['C - Suppliers', 'C - Personnel', 'C - Rent', 'C - Financing'].includes(t.category ?? ''),
+  );
+  const salesVat  = bucketVat(salesVatRows);
+  const cogsVat   = bucketVat(cogsVatRows);
+  const staffVat  = bucketVat(staffVatRows);
+  const rentVat   = bucketVat(rentVatRows);
+  const otherVat  = bucketVat(otherVatRows);
 
   const patchMut = useMutation({
     mutationFn: ({ id, patch }: { id: string; patch: Record<string, string | boolean | null> }) =>
@@ -740,12 +762,8 @@ export default function CashFlowPage() {
               salesAbs > 0
                 ? (Math.abs(v) / salesAbs * 100).toLocaleString('de-DE', { maximumFractionDigits: 1 }) + '%'
                 : '—';
-
-            const salesVat  = vatSplit(salesAbs,         10);
-            const cogsVat   = vatSplit(Math.abs(plCogs),  19);
-            const staffVat  = vatSplit(Math.abs(plStaff),  0);
-            const rentVat   = vatSplit(Math.abs(plRent),  19);
-            const otherVat  = vatSplit(Math.abs(plOther), 19);
+            const fmtPct = (p: number, hasData: boolean) =>
+              !hasData ? '—' : p.toLocaleString('de-DE', { maximumFractionDigits: 1 }) + '%';
 
             const valCell = (v: number, bold = false, large = false) => (
               <td className={`px-5 py-3 text-right tabular-nums ${bold ? 'font-bold' : 'font-semibold'} ${large ? 'text-base' : ''} ${v >= 0 ? 'text-green-700' : 'text-red-700'}`}>
@@ -784,20 +802,20 @@ export default function CashFlowPage() {
                       {/* Sales */}
                       <tr className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
                         <td className="px-5 py-3 font-medium text-gray-700">Sales</td>
-                        {euroCell(salesAbs)}
-                        {euroCell(salesVat.mwst)}
-                        <td className="px-4 py-3 text-right tabular-nums text-gray-500 text-xs">10%</td>
-                        {euroCell(salesVat.netto)}
+                        {euroCell(salesVat.bruttoAbs)}
+                        {euroCell(salesVat.mwstAbs)}
+                        <td className="px-4 py-3 text-right tabular-nums text-gray-500 text-xs">{fmtPct(salesVat.blendedPct, salesVat.bruttoAbs > 0)}</td>
+                        {euroCell(salesVat.nettoAbs)}
                         {valCell(plSales)}
                       </tr>
 
                       {/* COGS */}
                       <tr className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
                         <td className="px-5 py-3 font-medium text-gray-700">COGS</td>
-                        {euroCell(Math.abs(plCogs))}
-                        {euroCell(cogsVat.mwst)}
-                        <td className="px-4 py-3 text-right tabular-nums text-gray-500 text-xs">{plCogs !== 0 ? '19%' : '—'}</td>
-                        {euroCell(cogsVat.netto)}
+                        {euroCell(cogsVat.bruttoAbs)}
+                        {euroCell(cogsVat.mwstAbs)}
+                        <td className="px-4 py-3 text-right tabular-nums text-gray-500 text-xs">{fmtPct(cogsVat.blendedPct, cogsVat.bruttoAbs > 0)}</td>
+                        {euroCell(cogsVat.nettoAbs)}
                         {valCell(plCogs)}
                       </tr>
                       {pctRow('as % of sales', plCogs)}
@@ -805,10 +823,10 @@ export default function CashFlowPage() {
                       {/* Staff */}
                       <tr className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
                         <td className="px-5 py-3 font-medium text-gray-700">Staff</td>
-                        {euroCell(Math.abs(plStaff))}
-                        <td className="px-4 py-3 text-right tabular-nums text-gray-300 text-xs">—</td>
-                        <td className="px-4 py-3 text-right tabular-nums text-gray-500 text-xs">{plStaff !== 0 ? '0%' : '—'}</td>
-                        {euroCell(staffVat.netto)}
+                        {euroCell(staffVat.bruttoAbs)}
+                        {euroCell(staffVat.mwstAbs)}
+                        <td className="px-4 py-3 text-right tabular-nums text-gray-500 text-xs">{fmtPct(staffVat.blendedPct, staffVat.bruttoAbs > 0)}</td>
+                        {euroCell(staffVat.nettoAbs)}
                         {valCell(plStaff)}
                       </tr>
                       {pctRow('as % of sales', plStaff)}
@@ -816,10 +834,10 @@ export default function CashFlowPage() {
                       {/* Rent */}
                       <tr className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
                         <td className="px-5 py-3 font-medium text-gray-700">Rent</td>
-                        {euroCell(Math.abs(plRent))}
-                        {euroCell(rentVat.mwst)}
-                        <td className="px-4 py-3 text-right tabular-nums text-gray-500 text-xs">{plRent !== 0 ? '19%' : '—'}</td>
-                        {euroCell(rentVat.netto)}
+                        {euroCell(rentVat.bruttoAbs)}
+                        {euroCell(rentVat.mwstAbs)}
+                        <td className="px-4 py-3 text-right tabular-nums text-gray-500 text-xs">{fmtPct(rentVat.blendedPct, rentVat.bruttoAbs > 0)}</td>
+                        {euroCell(rentVat.nettoAbs)}
                         {valCell(plRent)}
                       </tr>
                       {pctRow('as % of sales', plRent)}
@@ -827,10 +845,10 @@ export default function CashFlowPage() {
                       {/* Other */}
                       <tr className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
                         <td className="px-5 py-3 font-medium text-gray-700">Other</td>
-                        {euroCell(Math.abs(plOther))}
-                        {euroCell(otherVat.mwst)}
-                        <td className="px-4 py-3 text-right tabular-nums text-gray-500 text-xs">{plOther !== 0 ? '19%' : '—'}</td>
-                        {euroCell(otherVat.netto)}
+                        {euroCell(otherVat.bruttoAbs)}
+                        {euroCell(otherVat.mwstAbs)}
+                        <td className="px-4 py-3 text-right tabular-nums text-gray-500 text-xs">{fmtPct(otherVat.blendedPct, otherVat.bruttoAbs > 0)}</td>
+                        {euroCell(otherVat.nettoAbs)}
                         {valCell(plOther)}
                       </tr>
                       {pctRow('as % of sales', plOther)}
