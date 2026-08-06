@@ -148,7 +148,8 @@ function bucketVat(rows: { category: string | null; total_cents: number }[]) {
     mwstAbs   += m;
   }
   const nettoAbs    = bruttoAbs - mwstAbs;
-  const blendedPct  = bruttoAbs > 0 ? (mwstAbs / bruttoAbs * 100) : 0;
+  // German convention: MwSt % = VAT / netto (not / brutto), so 10% VAT on 100€ net → 10%, not 9.09%
+  const blendedPct  = nettoAbs > 0 ? (mwstAbs / nettoAbs * 100) : 0;
   return { bruttoAbs, mwstAbs, nettoAbs, blendedPct };
 }
 
