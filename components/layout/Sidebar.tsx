@@ -158,9 +158,10 @@ const NAV_GROUPS: NavGroup[] = [
     labelKey: 'sidebar.groups.analysis',
     adminOnly: true,
     items: [
-      { labelKey: 'sidebar.nav.plReports',      href: '/reports',                     icon: BarChart3 },
+      { labelKey: 'sidebar.nav.plReports',       href: '/reports',                     icon: BarChart3 },
       { labelKey: 'sidebar.nav.cashFlowCheck',  href: '/cashflow',                    icon: Banknote },
       { labelKey: 'sidebar.nav.demandForecast', href: '/coming-soon/demand-forecast', icon: TrendingDown },
+      { labelKey: 'sidebar.nav.counterparties', href: '/counterparties',              icon: Building2 },
       {
         labelKey: 'sidebar.nav.bills', href: '/bills', icon: FilePlus, permKey: 'bills',
         children: [

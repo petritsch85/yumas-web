@@ -40,6 +40,15 @@ type CfTx = {
   bill_id: string | null;
   bill: BillRef | null;
   confirmed: boolean;
+  counterparty_id: string | null;
+};
+
+type Counterparty = {
+  id: string;
+  name: string;
+  category: string | null;
+  default_vat_rate: number | null;
+  keywords: string[];
 };
 
 type TxPage = { data: CfTx[]; count: number; page: number; pageSize: number };
@@ -137,6 +146,14 @@ function fmtDate(iso: string) {
   const [y,m,d] = iso.split('-');
   return `${d}.${m}.${y}`;
 }
+function matchCounterparty(rawName: string | null, counterparties: Counterparty[]): Counterparty | null {
+  if (!rawName || counterparties.length === 0) return null;
+  const lower = rawName.toLowerCase();
+  return counterparties.find(cp =>
+    cp.keywords.some(kw => kw && lower.includes(kw.toLowerCase()))
+  ) ?? null;
+}
+
 // Compute VAT breakdown for a set of aggRows using the per-category defaultVatRate.
 // All amounts in cents; brutto/mwst/netto are absolute (unsigned).
 function bucketVat(rows: { category: string | null; total_cents: number }[]) {
@@ -257,9 +274,10 @@ function BillMatchModal({ tx, onLink, onUnlink, onClose }: {
 }
 
 /* ── Row component ──────────────────────────────────────────────────── */
-function TxRow({ tx, onSave }: {
+function TxRow({ tx, onSave, counterparties }: {
   tx: CfTx;
   onSave: (id: string, patch: Record<string, string | boolean | null>) => void;
+  counterparties: Counterparty[];
 }) {
   const isIn = tx.direction === 'in';
   const locations = isIn ? IN_LOCATIONS : OUT_LOCATIONS;
@@ -301,7 +319,7 @@ function TxRow({ tx, onSave }: {
         {/* Date */}
         <td className="py-2 px-3 text-gray-500 whitespace-nowrap font-mono text-xs">{fmtDate(tx.date)}</td>
 
-        {/* Counterparty */}
+        {/* Counterparty (raw bank) */}
         <td className="py-2 px-3 max-w-[220px]" title={tx.counterparty}>
           <div className="truncate text-gray-900">{tx.counterparty || '—'}</div>
           {tx.description && (
@@ -310,6 +328,47 @@ function TxRow({ tx, onSave }: {
             </div>
           )}
         </td>
+
+        {/* Yumas Counterparty */}
+        {(() => {
+          const pinned   = tx.counterparty_id ? counterparties.find(cp => cp.id === tx.counterparty_id) ?? null : null;
+          const autoMatch = pinned ? null : matchCounterparty(tx.counterparty, counterparties);
+          const resolved  = pinned ?? autoMatch;
+          const isAuto    = !pinned && !!autoMatch;
+          return (
+            <td className="py-2 px-3 max-w-[180px]">
+              {resolved ? (
+                <div className="flex items-center gap-1">
+                  <span className={`text-xs truncate ${isAuto ? 'text-gray-400 italic' : 'text-gray-800 font-medium'}`}>
+                    {resolved.name}
+                  </span>
+                  {pinned && !locked && (
+                    <button
+                      title="Remove assignment"
+                      onClick={() => onSave(tx.id, { counterparty_id: null })}
+                      className="text-gray-300 hover:text-red-400 flex-shrink-0"
+                    >
+                      <X size={10} />
+                    </button>
+                  )}
+                </div>
+              ) : locked ? (
+                <span className="text-gray-300 text-xs">—</span>
+              ) : (
+                <select
+                  value=""
+                  onChange={e => e.target.value && onSave(tx.id, { counterparty_id: e.target.value })}
+                  className="text-xs text-gray-400 border-0 outline-none cursor-pointer bg-transparent hover:text-gray-700 max-w-[160px]"
+                >
+                  <option value="">Assign…</option>
+                  {counterparties.map(cp => (
+                    <option key={cp.id} value={cp.id}>{cp.name}</option>
+                  ))}
+                </select>
+              )}
+            </td>
+          );
+        })()}
 
         {/* Amount Brutto */}
         <td className={`py-2 px-3 text-right whitespace-nowrap font-semibold tabular-nums ${isIn ? 'text-green-700' : 'text-red-700'}`}>
@@ -461,6 +520,12 @@ export default function CashFlowPage() {
 
   const txs        = txPage?.data ?? [];
   const totalCount = txPage?.count ?? 0;
+
+  const { data: counterparties = [] } = useQuery<Counterparty[]>({
+    queryKey: ['counterparties'],
+    queryFn: () => fetch('/api/counterparties').then(r => r.json()),
+    staleTime: 60_000,
+  });
 
   const handleSort = (col: string) => {
     setSortCol(prev => {
@@ -988,9 +1053,10 @@ export default function CashFlowPage() {
                   <thead className="bg-gray-50 border-b border-gray-200">
                     <tr>
                       {([
-                        { col: 'date',        label: 'Date',          align: 'left'  },
-                        { col: 'counterparty',label: 'Counterparty',  align: 'left'  },
-                        { col: 'brutto',      label: 'Amount Brutto', align: 'right' },
+                        { col: 'date',        label: 'Date',               align: 'left'  },
+                        { col: 'counterparty',label: 'Counterparty',       align: 'left'  },
+                        { col: 'yumas_cp',    label: 'Yumas Counterparty', align: 'left'  },
+                        { col: 'brutto',      label: 'Amount Brutto',      align: 'right' },
                         { col: 'vatpct',      label: 'VAT %',         align: 'right' },
                         { col: 'vateur',      label: 'VAT €',         align: 'right' },
                         { col: 'netto',       label: 'Amount Netto',  align: 'right' },
@@ -1019,7 +1085,7 @@ export default function CashFlowPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {sortedTxs.map(tx => <TxRow key={tx.id} tx={tx} onSave={handleSave} />)}
+                    {sortedTxs.map(tx => <TxRow key={tx.id} tx={tx} onSave={handleSave} counterparties={counterparties} />)}
                   </tbody>
                 </table>
               </div>
