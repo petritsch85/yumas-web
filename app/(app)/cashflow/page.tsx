@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Upload, Loader2, TrendingUp, TrendingDown, Minus,
@@ -425,6 +425,8 @@ export default function CashFlowPage() {
   const [showUploadLog, setShowUploadLog]   = useState(false);
   const [downloadingId, setDownloadingId]   = useState<string | null>(null);
   const [showFormatInfo, setShowFormatInfo] = useState(false);
+  const [sortCol, setSortCol] = useState<string | null>(null);
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
 
   const [selectedYear, setSelectedYear]     = useState(2026);
   const [selectedPeriod, setSelectedPeriod] = useState<Period>('Q1');
@@ -456,6 +458,47 @@ export default function CashFlowPage() {
 
   const txs        = txPage?.data ?? [];
   const totalCount = txPage?.count ?? 0;
+
+  const handleSort = (col: string) => {
+    setSortCol(prev => {
+      if (prev === col) { setSortDir(d => d === 'asc' ? 'desc' : 'asc'); return col; }
+      setSortDir('desc');
+      return col;
+    });
+  };
+
+  const sortedTxs = useMemo(() => {
+    if (!sortCol) return txs;
+    return [...txs].sort((a, b) => {
+      let av: number | string, bv: number | string;
+      switch (sortCol) {
+        case 'date':         av = a.date;          bv = b.date;          break;
+        case 'counterparty': av = a.counterparty ?? ''; bv = b.counterparty ?? ''; break;
+        case 'brutto':       av = a.direction === 'in' ?  a.amount_cents : -a.amount_cents;
+                             bv = b.direction === 'in' ?  b.amount_cents : -b.amount_cents; break;
+        case 'vatpct':       av = defaultVatRate(a.category); bv = defaultVatRate(b.category); break;
+        case 'vateur': {
+          const ra = defaultVatRate(a.category), rb = defaultVatRate(b.category);
+          av = ra === 0 ? 0 : Math.round(a.amount_cents * ra / (100 + ra));
+          bv = rb === 0 ? 0 : Math.round(b.amount_cents * rb / (100 + rb));
+          break;
+        }
+        case 'netto': {
+          const ra = defaultVatRate(a.category), rb = defaultVatRate(b.category);
+          const va = ra === 0 ? 0 : Math.round(a.amount_cents * ra / (100 + ra));
+          const vb = rb === 0 ? 0 : Math.round(b.amount_cents * rb / (100 + rb));
+          av = (a.direction === 'in' ? 1 : -1) * (a.amount_cents - va);
+          bv = (b.direction === 'in' ? 1 : -1) * (b.amount_cents - vb);
+          break;
+        }
+        case 'category': av = a.category ?? ''; bv = b.category ?? ''; break;
+        case 'location': av = a.location  ?? ''; bv = b.location  ?? ''; break;
+        default:         av = 0; bv = 0;
+      }
+      const cmp = typeof av === 'string' ? av.localeCompare(bv as string) : (av as number) - (bv as number);
+      return sortDir === 'asc' ? cmp : -cmp;
+    });
+  }, [txs, sortCol, sortDir]);
 
   type AggRow = { category: string | null; direction: 'in' | 'out'; total_cents: number };
   const { data: aggRows = [] } = useQuery<AggRow[]>({
@@ -934,21 +977,39 @@ export default function CashFlowPage() {
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50 border-b border-gray-200">
                     <tr>
-                      <th className="text-left py-2.5 px-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Date</th>
-                      <th className="text-left py-2.5 px-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Counterparty</th>
-                      <th className="text-right py-2.5 px-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Amount Brutto</th>
-                      <th className="text-right py-2.5 px-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">VAT %</th>
-                      <th className="text-right py-2.5 px-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">VAT €</th>
-                      <th className="text-right py-2.5 px-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Amount Netto</th>
-                      <th className="text-left py-2.5 px-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Category</th>
-                      <th className="text-left py-2.5 px-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Location</th>
-                      <th className="text-left py-2.5 px-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Notes</th>
-                      <th className="text-left py-2.5 px-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Bill</th>
-                      <th className="text-left py-2.5 px-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Confirm</th>
+                      {([
+                        { col: 'date',        label: 'Date',          align: 'left'  },
+                        { col: 'counterparty',label: 'Counterparty',  align: 'left'  },
+                        { col: 'brutto',      label: 'Amount Brutto', align: 'right' },
+                        { col: 'vatpct',      label: 'VAT %',         align: 'right' },
+                        { col: 'vateur',      label: 'VAT €',         align: 'right' },
+                        { col: 'netto',       label: 'Amount Netto',  align: 'right' },
+                        { col: 'category',    label: 'Category',      align: 'left'  },
+                        { col: 'location',    label: 'Location',      align: 'left'  },
+                      ] as { col: string; label: string; align: 'left' | 'right' }[]).map(({ col, label, align }) => {
+                        const active = sortCol === col;
+                        return (
+                          <th key={col}
+                            onClick={() => handleSort(col)}
+                            className={`py-2.5 px-3 text-xs font-semibold uppercase tracking-wide cursor-pointer select-none transition-colors whitespace-nowrap
+                              ${align === 'right' ? 'text-right' : 'text-left'}
+                              ${active ? 'text-[#1B5E20]' : 'text-gray-500 hover:text-gray-800'}`}>
+                            <span className={`inline-flex items-center gap-1 ${align === 'right' ? 'flex-row-reverse' : ''}`}>
+                              {label}
+                              <span className={`transition-opacity ${active ? 'opacity-100' : 'opacity-25'}`}>
+                                {active && sortDir === 'asc' ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
+                              </span>
+                            </span>
+                          </th>
+                        );
+                      })}
+                      <th className="py-2.5 px-3 text-xs font-semibold text-gray-500 uppercase tracking-wide text-left">Notes</th>
+                      <th className="py-2.5 px-3 text-xs font-semibold text-gray-500 uppercase tracking-wide text-left">Bill</th>
+                      <th className="py-2.5 px-3 text-xs font-semibold text-gray-500 uppercase tracking-wide text-left">Confirm</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {txs.map(tx => <TxRow key={tx.id} tx={tx} onSave={handleSave} />)}
+                    {sortedTxs.map(tx => <TxRow key={tx.id} tx={tx} onSave={handleSave} />)}
                   </tbody>
                 </table>
               </div>
