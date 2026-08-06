@@ -161,12 +161,6 @@ const NAV_GROUPS: NavGroup[] = [
       { labelKey: 'sidebar.nav.plReports',      href: '/reports',                     icon: BarChart3 },
       { labelKey: 'sidebar.nav.cashFlowCheck',  href: '/cashflow',                    icon: Banknote },
       { labelKey: 'sidebar.nav.demandForecast', href: '/coming-soon/demand-forecast', icon: TrendingDown },
-    ],
-  },
-  {
-    labelKey: 'sidebar.groups.admin',
-    items: [
-      { labelKey: 'sidebar.nav.accounts',     href: '/coming-soon/accounts',      icon: Building2, adminOnly: true },
       {
         labelKey: 'sidebar.nav.bills', href: '/bills', icon: FilePlus, permKey: 'bills',
         children: [
@@ -174,7 +168,6 @@ const NAV_GROUPS: NavGroup[] = [
           { labelKey: 'sidebar.nav.outgoing', href: '/bills/outgoing', icon: FileCheck, permKey: 'bills_create' },
         ],
       },
-      { labelKey: 'sidebar.nav.approveBills', href: '/coming-soon/approve-bills', icon: FileCheck, adminOnly: true },
     ],
   },
   {
