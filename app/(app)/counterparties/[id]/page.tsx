@@ -86,10 +86,11 @@ function fmtDate(iso: string) {
   const [y,m,d] = iso.split('-');
   return `${d}.${m}.${y}`;
 }
-function kwMatch(raw: string | null, keywords: string[]): boolean {
-  if (!raw || !keywords.length) return false;
+function kwMatch(raw: string | null, keywords: string[], name?: string): boolean {
+  if (!raw) return false;
   const lower = raw.toLowerCase();
-  return keywords.some(kw => kw && lower.includes(kw.toLowerCase()));
+  const terms = keywords.length > 0 ? keywords : (name ? [name] : []);
+  return terms.some(kw => kw && lower.includes(kw.toLowerCase()));
 }
 
 export default function CounterpartyDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -182,13 +183,13 @@ export default function CounterpartyDetailPage({ params }: { params: Promise<{ i
   const matchedTxs = useMemo(() => {
     if (!txPage?.data) return [];
     return txPage.data.filter(tx =>
-      tx.counterparty_id === id || kwMatch(tx.counterparty, currentKeywords)
+      tx.counterparty_id === id || kwMatch(tx.counterparty, currentKeywords, cp?.name)
     );
   }, [txPage, id, currentKeywords]);
 
   const matchedBills = useMemo(() =>
-    allBills.filter(b => kwMatch(b.supplier_name, currentKeywords)),
-  [allBills, currentKeywords]);
+    allBills.filter(b => kwMatch(b.supplier_name, currentKeywords, cp?.name)),
+  [allBills, currentKeywords, cp?.name]);
 
   const stats = useMemo(() => {
     let totalIn = 0, totalOut = 0;

@@ -54,10 +54,11 @@ function fmtDate(iso: string) {
   const [y, m, d] = iso.split('-');
   return `${d}.${m}.${y}`;
 }
-function kwMatch(raw: string | null, keywords: string[]): boolean {
-  if (!raw || !keywords.length) return false;
+function kwMatch(raw: string | null, keywords: string[], name?: string): boolean {
+  if (!raw) return false;
   const lower = raw.toLowerCase();
-  return keywords.some(kw => kw && lower.includes(kw.toLowerCase()));
+  const terms = keywords.length > 0 ? keywords : (name ? [name] : []);
+  return terms.some(kw => kw && lower.includes(kw.toLowerCase()));
 }
 
 /* ── Inline panel shown when a counterparty row is expanded ── */
@@ -83,13 +84,13 @@ function CpPanel({ cp }: { cp: Counterparty }) {
   const matchedTxs = useMemo(() => {
     if (!txPage?.data) return [];
     return txPage.data.filter(tx =>
-      tx.counterparty_id === cp.id || kwMatch(tx.counterparty, cp.keywords)
+      tx.counterparty_id === cp.id || kwMatch(tx.counterparty, cp.keywords, cp.name)
     ).sort((a, b) => b.date.localeCompare(a.date));
   }, [txPage, cp]);
 
   const matchedBills = useMemo(() =>
-    bills.filter(b => kwMatch(b.supplier_name, cp.keywords))
-  , [bills, cp.keywords]);
+    bills.filter(b => kwMatch(b.supplier_name, cp.keywords, cp.name))
+  , [bills, cp.keywords, cp.name]);
 
   const stats = useMemo(() => {
     let totalIn = 0, totalOut = 0;

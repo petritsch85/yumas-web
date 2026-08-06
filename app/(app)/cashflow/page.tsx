@@ -149,9 +149,11 @@ function fmtDate(iso: string) {
 function matchCounterparty(rawName: string | null, counterparties: Counterparty[]): Counterparty | null {
   if (!rawName || counterparties.length === 0) return null;
   const lower = rawName.toLowerCase();
-  return counterparties.find(cp =>
-    cp.keywords.some(kw => kw && lower.includes(kw.toLowerCase()))
-  ) ?? null;
+  return counterparties.find(cp => {
+    // Use explicit keywords if defined, otherwise fall back to the counterparty name itself
+    const terms = cp.keywords.length > 0 ? cp.keywords : [cp.name];
+    return terms.some(kw => kw && lower.includes(kw.toLowerCase()));
+  }) ?? null;
 }
 
 // Compute VAT breakdown for a set of aggRows using the per-category defaultVatRate.
