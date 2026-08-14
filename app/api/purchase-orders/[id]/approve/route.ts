@@ -44,7 +44,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     // Load PO lines
     const { data: lines } = await admin
       .from('purchase_order_lines')
-      .select('display_name, einheit, quantity_ordered, unit_price, line_total')
+      .select('display_name, einheit, quantity_ordered, unit_price')
       .eq('po_id', poId);
 
     // Mark as sent
@@ -64,7 +64,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       `- ${l.display_name}: ${l.quantity_ordered} ${l.einheit ?? ''}${l.unit_price > 0 ? ` à €${Number(l.unit_price).toFixed(2)}` : ''}`
     ).join('\n');
 
-    const totalBrutto = (lines ?? []).reduce((s: number, l: any) => s + (Number(l.line_total) || 0), 0);
+    const totalBrutto = (lines ?? []).reduce((s: number, l: any) => s + (Number(l.unit_price) || 0) * (Number(l.quantity_ordered) || 0), 0);
 
     const emailBody = `Sehr geehrte Damen und Herren,
 

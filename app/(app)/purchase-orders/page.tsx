@@ -168,7 +168,6 @@ export default function PurchaseOrdersPage() {
         quantity_ordered: parseFloat(l.qty),
         quantity_received: 0,
         unit_price: l.unitPrice,
-        line_total: parseFloat(l.qty) * l.unitPrice,
       }));
 
       const { error: linesErr } = await supabase.from('purchase_order_lines').insert(lineInserts);
