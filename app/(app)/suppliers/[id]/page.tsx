@@ -442,7 +442,7 @@ export default function SupplierDetailPage() {
                       )}
                     </td>
                     <td className="px-4 py-3">
-                      <div className="flex items-center gap-2 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
+                      <div className="flex items-center gap-2 justify-end">
                         <button
                           onClick={() => {
                             setEditingRowId(siId);
