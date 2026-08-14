@@ -87,6 +87,61 @@ export default function SupplierDetailPage() {
     },
   });
 
+  // Delivery locations
+  const { data: allLocations = [] } = useQuery<{ id: string; name: string }[]>({
+    queryKey: ['locations'],
+    queryFn: async () => {
+      const { data } = await supabase.from('locations').select('id, name').order('name');
+      return data ?? [];
+    },
+  });
+
+  const { data: supplierLocationIds = [], refetch: refetchSupplierLocations } = useQuery<string[]>({
+    queryKey: ['supplier-locations', id],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('supplier_locations')
+        .select('location_id')
+        .eq('supplier_id', id);
+      return (data ?? []).map((r: any) => r.location_id);
+    },
+    enabled: !!id,
+  });
+
+  const [locDraft, setLocDraft] = useState<string[] | null>(null);
+  const [savingLocs, setSavingLocs] = useState(false);
+  const [savedLocs, setSavedLocs] = useState(false);
+
+  // Sync locDraft when data loads
+  useEffect(() => {
+    if (locDraft === null && supplierLocationIds.length >= 0) {
+      setLocDraft(supplierLocationIds);
+    }
+  }, [supplierLocationIds, locDraft]);
+
+  async function saveLocations() {
+    if (!locDraft) return;
+    setSavingLocs(true);
+    await supabase.from('supplier_locations').delete().eq('supplier_id', id!);
+    if (locDraft.length > 0) {
+      await supabase.from('supplier_locations').insert(
+        locDraft.map(lid => ({ supplier_id: id!, location_id: lid }))
+      );
+    }
+    setSavingLocs(false);
+    setSavedLocs(true);
+    refetchSupplierLocations();
+    qc.invalidateQueries({ queryKey: ['supplier-locations', id] });
+    setTimeout(() => setSavedLocs(false), 2000);
+  }
+
+  function toggleLocation(locId: string) {
+    setLocDraft(prev => {
+      const cur = prev ?? supplierLocationIds;
+      return cur.includes(locId) ? cur.filter(l => l !== locId) : [...cur, locId];
+    });
+  }
+
   const { data: allItems = [] } = useQuery<Item[]>({
     queryKey: ['items-list'],
     queryFn: async () => {
@@ -348,6 +403,48 @@ export default function SupplierDetailPage() {
             </div>
           </div>
         )}
+      </div>
+
+      {/* Delivery Locations */}
+      <div className="bg-white rounded-lg shadow-sm border border-gray-100 p-6 mb-6">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="font-semibold text-gray-900">Delivery Locations</h2>
+          <button
+            onClick={saveLocations}
+            disabled={savingLocs}
+            className={`flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg transition-colors ${
+              savedLocs
+                ? 'bg-green-600 text-white'
+                : 'bg-[#1B5E20] text-white hover:bg-[#2E7D32] disabled:opacity-60'
+            }`}
+          >
+            {savedLocs ? <><Check size={14} /> Saved</> : <><Save size={14} /> Save</>}
+          </button>
+        </div>
+        <p className="text-xs text-gray-400 mb-4">Tick all locations this supplier delivers to. Only these will appear in the New PO dropdown.</p>
+        <div className="flex flex-wrap gap-3">
+          {allLocations.map(loc => {
+            const checked = (locDraft ?? supplierLocationIds).includes(loc.id);
+            return (
+              <button
+                key={loc.id}
+                type="button"
+                onClick={() => toggleLocation(loc.id)}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg border text-sm font-medium transition-colors ${
+                  checked
+                    ? 'bg-[#1B5E20] text-white border-[#1B5E20]'
+                    : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'
+                }`}
+              >
+                {checked && <Check size={14} />}
+                {loc.name}
+              </button>
+            );
+          })}
+          {allLocations.length === 0 && (
+            <p className="text-sm text-gray-400">No locations found — add them to the locations table first.</p>
+          )}
+        </div>
       </div>
 
       {/* Current Items and Prices */}

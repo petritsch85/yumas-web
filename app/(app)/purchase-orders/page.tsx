@@ -143,8 +143,8 @@ export default function PurchaseOrdersPage() {
     enabled: !!poSupplierId && showModal,
   });
 
-  // Locations
-  const { data: locations } = useQuery({
+  // All locations (used as fallback)
+  const { data: allLocations } = useQuery({
     queryKey: ['locations'],
     queryFn: async () => {
       const { data } = await supabase.from('locations').select('id, name').order('name');
@@ -152,6 +152,24 @@ export default function PurchaseOrdersPage() {
     },
     enabled: showModal,
   });
+
+  // Locations for selected supplier (from supplier_locations junction table)
+  const { data: supplierLocationIds } = useQuery({
+    queryKey: ['supplier-locations-modal', poSupplierId],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('supplier_locations')
+        .select('location_id')
+        .eq('supplier_id', poSupplierId);
+      return (data ?? []).map((r: any) => r.location_id as string);
+    },
+    enabled: !!poSupplierId && showModal,
+  });
+
+  // Filter to only the supplier's locations (fall back to all if none configured)
+  const locations = poSupplierId && supplierLocationIds && supplierLocationIds.length > 0
+    ? (allLocations ?? []).filter(l => supplierLocationIds.includes(l.id))
+    : (allLocations ?? []);
 
   useEffect(() => {
     setPoLines([emptyLine()]);
