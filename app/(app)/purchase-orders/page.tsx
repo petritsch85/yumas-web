@@ -166,10 +166,12 @@ export default function PurchaseOrdersPage() {
     enabled: !!poSupplierId && showModal,
   });
 
-  // Filter to only the supplier's locations (fall back to all if none configured)
-  const locations = poSupplierId && supplierLocationIds && supplierLocationIds.length > 0
-    ? (allLocations ?? []).filter(l => supplierLocationIds.includes(l.id))
-    : (allLocations ?? []);
+  // Only show locations confirmed for this supplier; empty list blocks PO creation
+  const locations = poSupplierId
+    ? (supplierLocationIds && supplierLocationIds.length > 0
+        ? (allLocations ?? []).filter(l => supplierLocationIds.includes(l.id))
+        : [])
+    : [];
 
   useEffect(() => {
     setPoLines([emptyLine()]);
@@ -380,14 +382,21 @@ export default function PurchaseOrdersPage() {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Delivery Location</label>
-                <select
-                  value={poLocationId}
-                  onChange={e => setPoLocationId(e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-700"
-                >
-                  <option value="">Select location…</option>
-                  {locations?.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
-                </select>
+                {poSupplierId && supplierLocationIds !== undefined && locations.length === 0 ? (
+                  <p className="text-sm text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                    Please confirm potential locations first on the supplier page.
+                  </p>
+                ) : (
+                  <select
+                    value={poLocationId}
+                    onChange={e => setPoLocationId(e.target.value)}
+                    disabled={!poSupplierId}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-700 disabled:bg-gray-50 disabled:text-gray-400"
+                  >
+                    <option value="">Select location…</option>
+                    {locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+                  </select>
+                )}
               </div>
 
               <div>
