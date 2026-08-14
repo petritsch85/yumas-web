@@ -24,7 +24,7 @@ const STATUS_TRANSITIONS: Record<POStatus, POStatus | null> = {
 
 const TRANSITION_LABELS: Partial<Record<POStatus, string>> = {
   pending_approval : 'Submit for Approval',
-  approved         : 'Approve Order',
+  approved         : 'Approve and Send Order',
   sent             : 'Mark as Sent',
   confirmed        : 'Supplier Confirmed',
   partial          : 'Mark Partial Delivery',
@@ -61,10 +61,13 @@ export default function PODetailPage() {
   const { id }      = useParams<{ id: string }>() ?? {};
   const router      = useRouter();
   const queryClient = useQueryClient();
-  const [replyOpen, setReplyOpen]   = useState(false);
-  const [replyText, setReplyText]   = useState('');
-  const [replyError, setReplyError] = useState('');
-  const [expanded, setExpanded]     = useState<Record<string, boolean>>({});
+  const [replyOpen, setReplyOpen]         = useState(false);
+  const [replyText, setReplyText]         = useState('');
+  const [replyError, setReplyError]       = useState('');
+  const [expanded, setExpanded]           = useState<Record<string, boolean>>({});
+  const [approveOpen, setApproveOpen]     = useState(false);
+  const [approveEmailText, setApproveEmailText] = useState('');
+  const [approveError, setApproveError]   = useState('');
 
   const { data: profile } = useQuery({
     queryKey: ['my-profile'],
@@ -148,6 +151,58 @@ export default function PODetailPage() {
     onError: (e: Error) => setReplyError(e.message),
   });
 
+  const approvePO = useMutation({
+    mutationFn: async (emailBody: string) => {
+      setApproveError('');
+      const { data: { session } } = await supabase.auth.getSession();
+      const res = await fetch(`/api/purchase-orders/${id}/approve`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${session?.access_token ?? ''}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ emailBody }),
+      });
+      if (!res.ok) { const e = await res.json(); throw new Error(e.error ?? 'Approve failed'); }
+    },
+    onSuccess: () => {
+      setApproveOpen(false);
+      queryClient.invalidateQueries({ queryKey: ['po', id] });
+      queryClient.invalidateQueries({ queryKey: ['po-messages', id] });
+    },
+    onError: (e: Error) => setApproveError(e.message),
+  });
+
+  function buildEmailText(poData: typeof po) {
+    if (!poData) return '';
+    const poLines = (poData.lines ?? []) as Record<string, unknown>[];
+    const dest = (poData.destination_location as { name: string } | null)?.name ?? '—';
+    const lineItems = poLines.map(l => {
+      const name = (l.display_name as string | null) ?? ((l.item as { name: string } | null)?.name) ?? '—';
+      const qty = l.quantity_ordered as number;
+      const price = l.unit_price as number;
+      return `  - ${name}: ${qty}  à €${fmt(price)}`;
+    }).join('\n');
+    return [
+      'Sehr geehrte Damen und Herren,',
+      '',
+      'ich hoffe, Sie sind wohlauf. Ich möchte gerne folgende Bestellung aufgeben:',
+      '',
+      `Bestellnummer: ${poData.po_number}`,
+      `Bestelldatum: ${poData.order_date}`,
+      `Lieferort: ${dest}`,
+      '',
+      'Bestellte Artikel:',
+      lineItems,
+      '',
+      'Bitte bestätigen Sie den Eingang dieser Bestellung und teilen Sie uns das voraussichtliche Lieferdatum mit.',
+      '',
+      'Herzliche Grüße,',
+      'Yumas GmbH',
+      'Feuerbachstraße 46, 60325 Frankfurt',
+    ].join('\n');
+  }
+
   if (isLoading) return (
     <div className="space-y-4">
       {[...Array(3)].map((_, i) => <div key={i} className="h-40 bg-white rounded-lg animate-pulse" />)}
@@ -196,7 +251,14 @@ export default function PODetailPage() {
           {/* Advance status button */}
           {nextStatus && TRANSITION_LABELS[nextStatus] && (!needsApproval || canApprove) && (
             <button
-              onClick={() => advanceStatus.mutate(nextStatus)}
+              onClick={() => {
+                if (nextStatus === 'approved') {
+                  setApproveEmailText(buildEmailText(po));
+                  setApproveOpen(true);
+                } else {
+                  advanceStatus.mutate(nextStatus);
+                }
+              }}
               disabled={advanceStatus.isPending}
               className={`flex items-center gap-2 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors disabled:opacity-50 ${btnColour}`}
             >
@@ -399,6 +461,48 @@ export default function PODetailPage() {
           </div>
         )}
       </div>
+      {/* ── Approve & Send Email modal ──────────────────────────── */}
+      {approveOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-xl mx-4 flex flex-col max-h-[90vh]">
+            <div className="px-6 py-4 border-b border-gray-100 flex items-start justify-between">
+              <div>
+                <h2 className="font-semibold text-gray-900 text-lg">Approve &amp; Send Order</h2>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  To: {supplier?.email ?? '—'} · {po.po_number as string}
+                </p>
+              </div>
+              <button onClick={() => setApproveOpen(false)} className="text-gray-400 hover:text-gray-600 text-xl leading-none mt-0.5">×</button>
+            </div>
+            <div className="px-6 py-4 flex-1 overflow-y-auto">
+              <label className="block text-xs font-medium text-gray-500 mb-2">Email text — edit before sending</label>
+              <textarea
+                value={approveEmailText}
+                onChange={e => setApproveEmailText(e.target.value)}
+                rows={18}
+                className="w-full border border-[#1B5E20] rounded-lg px-3 py-2.5 text-sm font-mono leading-relaxed focus:outline-none focus:ring-2 focus:ring-[#1B5E20] resize-y"
+              />
+              {approveError && <p className="mt-2 text-sm text-red-600">{approveError}</p>}
+            </div>
+            <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-3">
+              <button
+                onClick={() => setApproveOpen(false)}
+                className="px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => approvePO.mutate(approveEmailText)}
+                disabled={approvePO.isPending}
+                className="flex items-center gap-2 px-5 py-2 text-sm font-semibold text-white bg-[#1B5E20] rounded-lg hover:bg-[#2E7D32] disabled:opacity-50"
+              >
+                <CheckCircle size={15} />
+                {approvePO.isPending ? 'Sending…' : 'Approve & Send Email'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
