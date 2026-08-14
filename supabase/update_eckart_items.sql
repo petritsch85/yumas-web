@@ -5,9 +5,20 @@ DO $$
 DECLARE
   v_supplier_id uuid;
   v_item_id     uuid;
+
+  -- Item definitions: (name, package_size)
+  items_data text[][] := ARRAY[
+    ARRAY['Hähnchenschenkel 300g je Stk/ 6kg pro Karton', 'Karton'],
+    ARRAY['Querrippe Rind portioniert (1 KG)',             'KG'],
+    ARRAY['Rinder Nacken',                                 'Kg'],
+    ARRAY['Rindfleisch gewürfelt 4x4 cm (1 KG)',           'KG'],
+    ARRAY['Schweinegeschnetzeltes a.d. Lachs',             'Kg'],
+    ARRAY['Schweinenacken gewürfelt 4x4 cm (1 KG)',        'KG']
+  ];
+  rec text[];
 BEGIN
 
-  -- Find Eckart supplier (matches any name containing 'Eckart')
+  -- Find Eckart supplier
   SELECT id INTO v_supplier_id
   FROM suppliers
   WHERE name ILIKE '%eckart%'
@@ -20,48 +31,19 @@ BEGIN
   -- Remove all existing supplier_items for Eckart
   DELETE FROM supplier_items WHERE supplier_id = v_supplier_id;
 
-  -- Helper: insert item if it doesn't exist, then link to Eckart
-  -- 1. Hähnchenschenkel 300g je Stk/ 6kg pro Karton
-  INSERT INTO items (name) VALUES ('Hähnchenschenkel 300g je Stk/ 6kg pro Karton')
-  ON CONFLICT (name) DO NOTHING;
-  SELECT id INTO v_item_id FROM items WHERE name = 'Hähnchenschenkel 300g je Stk/ 6kg pro Karton';
-  INSERT INTO supplier_items (supplier_id, item_id, unit_price, package_size, is_preferred)
-  VALUES (v_supplier_id, v_item_id, 0, 'Karton', true);
+  FOREACH rec SLICE 1 IN ARRAY items_data
+  LOOP
+    -- Get existing item or insert new one
+    SELECT id INTO v_item_id FROM items WHERE name = rec[1] LIMIT 1;
 
-  -- 2. Querrippe Rind portioniert (1 KG)
-  INSERT INTO items (name) VALUES ('Querrippe Rind portioniert (1 KG)')
-  ON CONFLICT (name) DO NOTHING;
-  SELECT id INTO v_item_id FROM items WHERE name = 'Querrippe Rind portioniert (1 KG)';
-  INSERT INTO supplier_items (supplier_id, item_id, unit_price, package_size, is_preferred)
-  VALUES (v_supplier_id, v_item_id, 0, 'KG', true);
+    IF v_item_id IS NULL THEN
+      INSERT INTO items (name) VALUES (rec[1]) RETURNING id INTO v_item_id;
+    END IF;
 
-  -- 3. Rinder Nacken
-  INSERT INTO items (name) VALUES ('Rinder Nacken')
-  ON CONFLICT (name) DO NOTHING;
-  SELECT id INTO v_item_id FROM items WHERE name = 'Rinder Nacken';
-  INSERT INTO supplier_items (supplier_id, item_id, unit_price, package_size, is_preferred)
-  VALUES (v_supplier_id, v_item_id, 0, 'Kg', true);
-
-  -- 4. Rindfleisch gewürfelt 4x4 cm (1 KG)
-  INSERT INTO items (name) VALUES ('Rindfleisch gewürfelt 4x4 cm (1 KG)')
-  ON CONFLICT (name) DO NOTHING;
-  SELECT id INTO v_item_id FROM items WHERE name = 'Rindfleisch gewürfelt 4x4 cm (1 KG)';
-  INSERT INTO supplier_items (supplier_id, item_id, unit_price, package_size, is_preferred)
-  VALUES (v_supplier_id, v_item_id, 0, 'KG', true);
-
-  -- 5. Schweinegeschnetzeltes a.d. Lachs
-  INSERT INTO items (name) VALUES ('Schweinegeschnetzeltes a.d. Lachs')
-  ON CONFLICT (name) DO NOTHING;
-  SELECT id INTO v_item_id FROM items WHERE name = 'Schweinegeschnetzeltes a.d. Lachs';
-  INSERT INTO supplier_items (supplier_id, item_id, unit_price, package_size, is_preferred)
-  VALUES (v_supplier_id, v_item_id, 0, 'Kg', true);
-
-  -- 6. Schweinenacken gewürfelt 4x4 cm (1 KG)
-  INSERT INTO items (name) VALUES ('Schweinenacken gewürfelt 4x4 cm (1 KG)')
-  ON CONFLICT (name) DO NOTHING;
-  SELECT id INTO v_item_id FROM items WHERE name = 'Schweinenacken gewürfelt 4x4 cm (1 KG)';
-  INSERT INTO supplier_items (supplier_id, item_id, unit_price, package_size, is_preferred)
-  VALUES (v_supplier_id, v_item_id, 0, 'KG', true);
+    -- Link item to Eckart
+    INSERT INTO supplier_items (supplier_id, item_id, unit_price, package_size, is_preferred)
+    VALUES (v_supplier_id, v_item_id, 0, rec[2], true);
+  END LOOP;
 
   RAISE NOTICE 'Done — 6 items linked to supplier %', v_supplier_id;
 END $$;
