@@ -61,6 +61,8 @@ export type BillData = {
   cateringBrutto?       : number;
   cateringDescription?  : string;
   cateringLines?        : { description: string; amount: number }[];
+  // Ad Hoc mode: per-line VAT rate
+  adHocLines?           : { description: string; amountNetto: number; vat: 7 | 19 }[];
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -175,6 +177,18 @@ export function BillDocument({ data }: { data: BillData }) {
   const cateringBruttoVal = data.cateringBrutto ?? cateringNettoVal * 1.07;
   const cateringMwstAmt   = cateringBruttoVal - cateringNettoVal;
 
+  // Ad Hoc mode
+  const isAdHoc       = (data.adHocLines?.length ?? 0) > 0;
+  const ahLines       = data.adHocLines ?? [];
+  const ahNetto7      = ahLines.filter(l => l.vat === 7).reduce((s, l) => s + l.amountNetto, 0);
+  const ahNetto19     = ahLines.filter(l => l.vat === 19).reduce((s, l) => s + l.amountNetto, 0);
+  const ahMwst7       = ahNetto7  * 0.07;
+  const ahMwst19      = ahNetto19 * 0.19;
+  const ahBrutto7     = ahNetto7  * 1.07;
+  const ahBrutto19    = ahNetto19 * 1.19;
+  const ahTotalNetto  = ahNetto7  + ahNetto19;
+  const ahTotalBrutto = ahBrutto7 + ahBrutto19;
+
   // Dinner – use passed-in values; fall back to deriving from netto if brutto not provided
   const mwstEssenRate     = (data.mwstEssenPct    ?? 7)  / 100;
   const mwstGetraenkeRate = (data.mwstGetraenkePct ?? 19) / 100;
@@ -187,7 +201,7 @@ export function BillDocument({ data }: { data: BillData }) {
   const mwstEssenAmt      = essenBrutto     - essenNetto;
   const mwstGetraenkeAmt  = getraenkeBrutto - getraenkeNetto;
   const mwstGesamtAmt     = mwstEssenAmt + mwstGetraenkeAmt;
-  const gesamtBetrag      = isMonthly ? 0 : isCatering ? cateringBruttoVal : gesamtBrutto + tip;
+  const gesamtBetrag      = isMonthly ? 0 : isCatering ? cateringBruttoVal : isAdHoc ? ahTotalBrutto : gesamtBrutto + tip;
 
   if (isMonthly && data.lineItems) {
     gesamtNetto   = data.lineItems.reduce((s, i) => s + i.qty * i.unitPrice, 0);
@@ -342,8 +356,41 @@ export function BillDocument({ data }: { data: BillData }) {
           </View>
         )}
 
+        {/* ── TYPE B-adhoc: per-line VAT ───────────────────────────── */}
+        {!isMonthly && isAdHoc && (
+          <View>
+            {/* Line items */}
+            <View style={s.groupGap}>
+              {ahLines.map((l, i) => (
+                <View key={i} style={s.amountRow}>
+                  <Text style={{ flex: 1 }}>{l.description || `Position ${i + 1}`} ({l.vat}% MwSt)</Text>
+                  <Text>{fmt(l.amountNetto)}</Text>
+                </View>
+              ))}
+            </View>
+            {/* Netto total */}
+            <View style={s.groupGap}>
+              <AmtRowBold label="Gesamt Netto" value={ahTotalNetto} />
+            </View>
+            {/* MwSt breakdown */}
+            <View style={s.groupGap}>
+              {ahMwst7  > 0 && <AmtRow label="MwSt (7%)"  value={ahMwst7} />}
+              {ahMwst19 > 0 && <AmtRow label="MwSt (19%)" value={ahMwst19} />}
+            </View>
+            {/* Brutto breakdown */}
+            <View style={s.groupGap}>
+              {ahBrutto7  > 0 && <AmtRow label="Brutto (7% MwSt)"  value={ahBrutto7} />}
+              {ahBrutto19 > 0 && <AmtRow label="Brutto (19% MwSt)" value={ahBrutto19} />}
+              <AmtRowBold label="Gesamt Brutto" value={ahTotalBrutto} />
+            </View>
+            <View style={{ marginTop: 2 }}>
+              <AmtRowBold label="Gesamtbetrag (zu zahlen)" value={ahTotalBrutto} />
+            </View>
+          </View>
+        )}
+
         {/* ── TYPE B: dinner amounts ───────────────────────────────── */}
-        {!isMonthly && !isCatering && (
+        {!isMonthly && !isCatering && !isAdHoc && (
           <View>
             {/* Group 1: Netto split */}
             <View style={s.groupGap}>

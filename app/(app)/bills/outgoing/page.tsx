@@ -182,7 +182,7 @@ export default function OutgoingBillsPage() {
   const [leistPostcode,     setLeistPostcode]     = useState('');
   const [leistCity,         setLeistCity]         = useState('');
   const [introText,         setIntroText]         = useState(makeIntroDinner(''));
-  const [inputMode,         setInputMode]         = useState<'brutto' | 'netto' | 'pauschale' | 'catering'>('brutto');
+  const [inputMode,         setInputMode]         = useState<'brutto' | 'netto' | 'pauschale' | 'catering' | 'adhoc'>('brutto');
   const [pauschaleTotal,    setPauschaleTotal]    = useState('');
   const [pauschaleIsNetto,  setPauschaleIsNetto]  = useState(false);
   const [essenBrutto,       setEssenBrutto]       = useState('');
@@ -193,6 +193,7 @@ export default function OutgoingBillsPage() {
   const [mwstGetraenke,     setMwstGetraenke]     = useState('19');
   const [trinkgeld,         setTrinkgeld]         = useState('');
   const [cateringLines,     setCateringLines]     = useState<{ id: string; description: string; amount: string }[]>([{ id: uid(), description: '', amount: '' }]);
+  const [adHocLines,        setAdHocLines]        = useState<{ id: string; description: string; amount: string; vat: 7 | 19 }[]>([{ id: uid(), description: '', amount: '', vat: 7 }]);
   const [cateringDesc,      setCateringDesc]      = useState('');
   const [lineItems,             setLineItems]             = useState<LineItem[]>([{ qty: 1, item: '', unitPrice: 0 }]);
   const [generating,            setGenerating]            = useState(false);
@@ -416,6 +417,14 @@ export default function OutgoingBillsPage() {
   const cateringBruttoN = cateringNettoN * 1.07;
   const cateringMwstN   = cateringBruttoN - cateringNettoN;
 
+  // Ad Hoc totals (per-line VAT)
+  const ahNetto7      = adHocLines.filter(l => l.vat === 7).reduce((s, l) => s + (parseFloat(l.amount) || 0), 0);
+  const ahNetto19     = adHocLines.filter(l => l.vat === 19).reduce((s, l) => s + (parseFloat(l.amount) || 0), 0);
+  const ahMwst7       = ahNetto7  * 0.07;
+  const ahMwst19      = ahNetto19 * 0.19;
+  const ahTotalNetto  = ahNetto7  + ahNetto19;
+  const ahTotalBrutto = ahNetto7 * 1.07 + ahNetto19 * 1.19;
+
   // Live totals (dinner: driven by brutto or netto inputs + mwst rates)
   const mwstEssenRate     = (parseFloat(mwstEssen)    || 7)  / 100;
   const mwstGetraenkeRate = (parseFloat(mwstGetraenke) || 19) / 100;
@@ -450,15 +459,20 @@ export default function OutgoingBillsPage() {
   const linesTotal = lineItems.reduce((s, i) => s + i.qty * i.unitPrice, 0);
   const netto      = billType === 'monthly' ? linesTotal :
                      inputMode === 'catering' ? cateringNettoN :
+                     inputMode === 'adhoc'    ? ahTotalNetto :
                      essenN + getraenkeN;
   const mwst7      = billType === 'monthly' ? netto * 0.07 :
                      inputMode === 'catering' ? cateringMwstN :
+                     inputMode === 'adhoc'    ? ahMwst7 :
                      mwstVatEssen;
-  const mwst19     = billType !== 'monthly' && inputMode !== 'catering' ? mwstVatGetraenke : 0;
+  const mwst19     = billType !== 'monthly' && inputMode !== 'catering' && inputMode !== 'adhoc' ? mwstVatGetraenke :
+                     inputMode === 'adhoc' ? ahMwst19 : 0;
   const brutto     = billType === 'monthly' ? netto + mwst7 :
                      inputMode === 'catering' ? cateringBruttoN :
+                     inputMode === 'adhoc'    ? ahTotalBrutto :
                      bruttoGesamt;
   const billTotal  = inputMode === 'catering' ? cateringBruttoN :
+                     inputMode === 'adhoc'    ? ahTotalBrutto :
                      brutto + (billType !== 'monthly' ? trinkgeldN : 0);
   const ermaessigungN = parseFloat(ermaessigung) || 0;
 
@@ -660,8 +674,8 @@ export default function OutgoingBillsPage() {
       customer_address: [street, postcode, city].filter(Boolean).join(', ') || null,
       issuing_location: billIssuingLoc || null,
       shift_type:       (billType !== 'monthly' ? (stornoSourceBill?.shift_type ?? 'dinner') : null) as 'dinner' | 'lunch' | null,
-      net_food:         billType !== 'monthly' ? (inputMode === 'catering' ? cateringNettoN : essenN) : 0,
-      net_drinks:       billType !== 'monthly' && inputMode !== 'catering' ? getraenkeN : 0,
+      net_food:         billType !== 'monthly' ? (inputMode === 'catering' ? cateringNettoN : inputMode === 'adhoc' ? ahNetto7 : essenN) : 0,
+      net_drinks:       billType !== 'monthly' && inputMode !== 'catering' && inputMode !== 'adhoc' ? getraenkeN : inputMode === 'adhoc' ? ahNetto19 : 0,
       net_total:        netto,
       vat_7:            mwst7,
       vat_19:           mwst19,
@@ -801,6 +815,9 @@ export default function OutgoingBillsPage() {
       cateringLines:       inputMode === 'catering'
         ? cateringLines.filter(l => l.description.trim() || parseFloat(l.amount)).map(l => ({ description: l.description.trim(), amount: parseFloat(l.amount) || 0 }))
         : undefined,
+      adHocLines:          inputMode === 'adhoc'
+        ? adHocLines.filter(l => l.description.trim() || parseFloat(l.amount)).map(l => ({ description: l.description.trim(), amountNetto: parseFloat(l.amount) || 0, vat: l.vat }))
+        : undefined,
       anzahlungBrutto:  anzahlungBruttoN > 0          ? anzahlungBruttoN              : undefined,
       anzahlungNetto:   anzahlungNettoN  > 0          ? anzahlungNettoN               : undefined,
       anzahlungVat7:    (anzahlungBill?.vat_7  ?? 0) > 0 ? anzahlungBill!.vat_7      : undefined,
@@ -818,7 +835,8 @@ export default function OutgoingBillsPage() {
        essenBruttoN, getraenkeBruttoN, essenN, getraenkeN, mwstEssen, mwstGetraenke, trinkgeldN,
        anzahlungBruttoN, anzahlungNettoN, anzahlungBill, ermaessigungN,
        includeReceipt, receiptDataUrl, stornoSourceBill,
-       inputMode, cateringNettoN, cateringBruttoN, cateringDesc, cateringLines]);
+       inputMode, cateringNettoN, cateringBruttoN, cateringDesc, cateringLines, adHocLines,
+       ahNetto7, ahNetto19, ahTotalNetto, ahTotalBrutto]);
 
   // Auto-populate next invoice number when bills load
   useEffect(() => {
@@ -1798,6 +1816,13 @@ export default function OutgoingBillsPage() {
                   >
                     Catering
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => setInputMode('adhoc')}
+                    className={`px-3 py-1.5 transition-colors border-l border-gray-200 ${inputMode === 'adhoc' ? 'bg-[#1B5E20] text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}
+                  >
+                    Ad Hoc
+                  </button>
                 </div>
               </div>
 
@@ -1907,8 +1932,97 @@ export default function OutgoingBillsPage() {
                 </div>
               )}
 
-              {/* Row 1: Brutto — hidden in catering mode */}
-              {inputMode !== 'catering' && <div className="grid grid-cols-3 gap-4 mb-4">
+              {/* Ad Hoc: per-line VAT rate */}
+              {inputMode === 'adhoc' && (
+                <div className="mb-4 p-3 bg-violet-50 rounded-lg border border-violet-200 space-y-4">
+                  <div>
+                    <label className={labelCls}>Positionen (erscheinen auf der Rechnung)</label>
+                    <div className="space-y-2 mt-1">
+                      {adHocLines.map((line, idx) => (
+                        <div key={line.id} className="flex gap-2 items-center">
+                          <input
+                            type="text"
+                            className={`${inputCls} flex-1 min-w-0`}
+                            placeholder="Beschreibung…"
+                            value={line.description}
+                            onChange={e => setAdHocLines(ls => ls.map(l => l.id === line.id ? { ...l, description: e.target.value } : l))}
+                          />
+                          <input
+                            type="number"
+                            step="0.01"
+                            className="flex-shrink-0 w-32 bg-white border border-gray-300 rounded-lg px-3 py-2.5 text-sm text-gray-900 text-right placeholder:text-gray-400 shadow-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/40 focus:border-[#1B5E20] transition-colors"
+                            placeholder="0,00 Netto"
+                            value={line.amount}
+                            onChange={e => setAdHocLines(ls => ls.map(l => l.id === line.id ? { ...l, amount: e.target.value } : l))}
+                          />
+                          {/* VAT toggle */}
+                          <div className="flex rounded-lg border border-gray-300 overflow-hidden text-xs font-semibold flex-shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => setAdHocLines(ls => ls.map(l => l.id === line.id ? { ...l, vat: 7 } : l))}
+                              className={`px-2.5 py-1.5 transition-colors ${line.vat === 7 ? 'bg-[#1B5E20] text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}
+                            >7%</button>
+                            <button
+                              type="button"
+                              onClick={() => setAdHocLines(ls => ls.map(l => l.id === line.id ? { ...l, vat: 19 } : l))}
+                              className={`px-2.5 py-1.5 transition-colors border-l border-gray-300 ${line.vat === 19 ? 'bg-[#1B5E20] text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}
+                            >19%</button>
+                          </div>
+                          {adHocLines.length > 1 && (
+                            <button
+                              onClick={() => setAdHocLines(ls => ls.filter(l => l.id !== line.id))}
+                              className="text-gray-400 hover:text-red-500 flex-shrink-0 p-1"
+                            >
+                              <X size={15} />
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                    <button
+                      onClick={() => setAdHocLines(ls => [...ls, { id: uid(), description: '', amount: '', vat: 7 }])}
+                      className="mt-2 flex items-center gap-1.5 text-xs text-violet-700 hover:text-violet-900"
+                    >
+                      <Plus size={13} /> Zeile hinzufügen
+                    </button>
+                  </div>
+                  {/* Live totals */}
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className={labelCls}>Gesamt Netto (€) — berechnet</label>
+                      <div className={`${inputCls} !bg-gray-200 !border-gray-300 !shadow-none text-gray-500 cursor-not-allowed select-none`}>
+                        {fmtEur(ahTotalNetto)}
+                      </div>
+                    </div>
+                    <div>
+                      <label className={labelCls}>Gesamt Brutto (€) — berechnet</label>
+                      <div className={`${inputCls} !bg-gray-200 !border-gray-300 !shadow-none text-gray-500 cursor-not-allowed select-none`}>
+                        {fmtEur(ahTotalBrutto)}
+                      </div>
+                    </div>
+                    {ahMwst7 > 0 && (
+                      <div>
+                        <label className={labelCls}>MwSt 7% — berechnet</label>
+                        <div className={`${inputCls} !bg-gray-200 !border-gray-300 !shadow-none text-gray-500 cursor-not-allowed select-none`}>
+                          {fmtEur(ahMwst7)}
+                        </div>
+                      </div>
+                    )}
+                    {ahMwst19 > 0 && (
+                      <div>
+                        <label className={labelCls}>MwSt 19% — berechnet</label>
+                        <div className={`${inputCls} !bg-gray-200 !border-gray-300 !shadow-none text-gray-500 cursor-not-allowed select-none`}>
+                          {fmtEur(ahMwst19)}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  <p className="text-xs text-violet-700">Netto-Beträge eingeben · MwSt wird automatisch berechnet · Negative Beträge = Rabatte</p>
+                </div>
+              )}
+
+              {/* Row 1: Brutto — hidden in catering / adhoc mode */}
+              {inputMode !== 'catering' && inputMode !== 'adhoc' && <div className="grid grid-cols-3 gap-4 mb-4">
                 <div>
                   <label className={labelCls}>Essen Brutto (€)</label>
                   {inputMode === 'brutto' ? (
@@ -1949,8 +2063,8 @@ export default function OutgoingBillsPage() {
                 </div>
               </div>}
 
-              {/* Row 2: MwSt rate inputs — hidden in catering mode */}
-              {inputMode !== 'catering' && <div className="grid grid-cols-3 gap-4 mb-4">
+              {/* Row 2: MwSt rate inputs — hidden in catering / adhoc mode */}
+              {inputMode !== 'catering' && inputMode !== 'adhoc' && <div className="grid grid-cols-3 gap-4 mb-4">
                 <div>
                   <label className={labelCls}>MwSt Essen (%)</label>
                   {inputMode === 'pauschale' ? (
@@ -1977,8 +2091,8 @@ export default function OutgoingBillsPage() {
                 </div>
               </div>}
 
-              {/* Row 3: Netto (editable in netto mode, calculated in brutto mode) + Trinkgeld — hidden in catering mode */}
-              {inputMode !== 'catering' && <div className="grid grid-cols-3 gap-4">
+              {/* Row 3: Netto (editable in netto mode, calculated in brutto mode) + Trinkgeld — hidden in catering / adhoc mode */}
+              {inputMode !== 'catering' && inputMode !== 'adhoc' && <div className="grid grid-cols-3 gap-4">
                 <div>
                   <label className={labelCls}>Essen Netto (€)</label>
                   {inputMode === 'netto' ? (
