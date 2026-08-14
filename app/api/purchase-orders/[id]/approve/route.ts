@@ -27,7 +27,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       .eq('id', user.id)
       .single();
 
-    if (!APPROVER_NAMES.includes(profile?.full_name ?? '')) {
+    if (!profile || !APPROVER_NAMES.includes(profile.full_name ?? '')) {
       return NextResponse.json({ error: 'Not authorized to approve orders' }, { status: 403 });
     }
 
@@ -81,7 +81,7 @@ ${totalBrutto > 0 ? `\nGesamtbetrag: €${totalBrutto.toFixed(2)}` : ''}
 Bitte bestätigen Sie den Eingang dieser Bestellung.
 
 Mit freundlichen Grüßen,
-${profile.full_name}
+${profile?.full_name ?? ''}
 Yumas GmbH`;
 
     const apiKey = process.env.RESEND_API_KEY;
