@@ -17,12 +17,21 @@ const APPROVER_NAMES = ['Nikolas Peters', 'Benjamin Peters', 'Marino Wolf'];
 
 type PoLine = {
   id: string;
-  siId: string;       // supplier_items.id (dropdown selection)
-  dbItemId: string;   // items.id (stored in purchase_order_lines.item_id)
+  siId: string;
+  dbItemId: string;
   displayName: string;
   einheit: string;
   unitPrice: number;
   qty: string;
+};
+
+type ApproveTarget = {
+  poId: string;
+  poNumber: string;
+  supplierName: string;
+  supplierEmail: string;
+  locationName: string;
+  orderDate: string;
 };
 
 function uid() { return Math.random().toString(36).slice(2); }
@@ -33,6 +42,35 @@ function generatePoNumber() {
   return `PO-${ymd}-${Math.floor(Math.random() * 9000 + 1000)}`;
 }
 
+function buildEmailText(
+  approverName: string,
+  target: ApproveTarget,
+  lines: { display_name: string; quantity_ordered: number; einheit: string; unit_price: number }[]
+): string {
+  const lineRows = lines.map(l => {
+    const priceStr = l.unit_price > 0 ? ` à €${Number(l.unit_price).toFixed(2)}` : '';
+    return `  - ${l.display_name}: ${l.quantity_ordered} ${l.einheit ?? ''}${priceStr}`;
+  }).join('\n');
+
+  return `Sehr geehrte Damen und Herren,
+
+ich hoffe, Sie sind wohlauf. Ich möchte gerne folgende Bestellung aufgeben:
+
+Bestellnummer: ${target.poNumber}
+Bestelldatum: ${target.orderDate}
+Lieferort: ${target.locationName}
+
+Bestellte Artikel:
+${lineRows}
+
+Bitte bestätigen Sie den Eingang dieser Bestellung und teilen Sie uns das voraussichtliche Lieferdatum mit.
+
+Herzliche Grüße,
+${approverName}
+Yumas GmbH
+Feuerbachstraße 46, 60325 Frankfurt`;
+}
+
 export default function PurchaseOrdersPage() {
   const router = useRouter();
   const { t } = useT();
@@ -40,11 +78,16 @@ export default function PurchaseOrdersPage() {
   const [statusFilter, setStatusFilter] = useState<POStatus | 'all'>('all');
   const [showModal, setShowModal] = useState(false);
 
-  // Modal state
+  // New PO modal state
   const [poSupplierId, setPoSupplierId] = useState('');
   const [poLocationId, setPoLocationId] = useState('');
   const [poLines, setPoLines] = useState<PoLine[]>([emptyLine()]);
   const [submitError, setSubmitError] = useState('');
+
+  // Approve email modal state
+  const [approveTarget, setApproveTarget] = useState<ApproveTarget | null>(null);
+  const [emailText, setEmailText] = useState('');
+  const [approveError, setApproveError] = useState('');
 
   // Current user profile
   const { data: profile } = useQuery({
@@ -72,7 +115,7 @@ export default function PurchaseOrdersPage() {
     },
   });
 
-  // App-buying suppliers (only loaded when modal is open)
+  // App-buying suppliers
   const { data: suppliers } = useQuery({
     queryKey: ['suppliers-app-buying'],
     queryFn: async () => {
@@ -105,7 +148,6 @@ export default function PurchaseOrdersPage() {
     enabled: showModal,
   });
 
-  // Reset lines when supplier changes
   useEffect(() => {
     setPoLines([emptyLine()]);
   }, [poSupplierId]);
@@ -130,9 +172,36 @@ export default function PurchaseOrdersPage() {
       siId,
       dbItemId: (si as any).item_id ?? '',
       displayName: (si.items as any)?.name ?? '',
-      einheit: (si as any).package_size ?? '',
+      einheit: String((si as any).package_size ?? ''),
       unitPrice: (si as any).unit_price ?? 0,
     });
+  }
+
+  // Open approve email modal: fetch lines, pre-fill email
+  async function openApproveModal(po: Record<string, unknown>) {
+    const target: ApproveTarget = {
+      poId: po.id as string,
+      poNumber: po.po_number as string,
+      supplierName: (po.supplier as any)?.name ?? '',
+      supplierEmail: (po.supplier as any)?.email ?? '',
+      locationName: (po.destination_location as any)?.name ?? '',
+      orderDate: po.order_date as string ?? new Date().toISOString().slice(0, 10),
+    };
+
+    const { data: lines } = await supabase
+      .from('purchase_order_lines')
+      .select('display_name, quantity_ordered, einheit, unit_price')
+      .eq('po_id', target.poId);
+
+    const text = buildEmailText(
+      profile?.full_name ?? 'Yumas Team',
+      target,
+      (lines ?? []) as any
+    );
+
+    setApproveTarget(target);
+    setEmailText(text);
+    setApproveError('');
   }
 
   const submitMut = useMutation({
@@ -181,18 +250,26 @@ export default function PurchaseOrdersPage() {
   });
 
   const approveMut = useMutation({
-    mutationFn: async (poId: string) => {
+    mutationFn: async ({ poId, emailBody }: { poId: string; emailBody: string }) => {
       const { data: { session } } = await supabase.auth.getSession();
       const res = await fetch(`/api/purchase-orders/${poId}/approve`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${session?.access_token ?? ''}` },
+        headers: {
+          Authorization: `Bearer ${session?.access_token ?? ''}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ emailBody }),
       });
       if (!res.ok) {
         const e = await res.json();
         throw new Error(e.error ?? 'Approval failed');
       }
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['purchase-orders'] }),
+    onSuccess: () => {
+      setApproveTarget(null);
+      queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
+    },
+    onError: (e: Error) => setApproveError(e.message),
   });
 
   return (
@@ -209,7 +286,6 @@ export default function PurchaseOrdersPage() {
             </div>
 
             <div className="p-5 space-y-5">
-              {/* Supplier */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Supplier</label>
                 <select
@@ -222,7 +298,6 @@ export default function PurchaseOrdersPage() {
                 </select>
               </div>
 
-              {/* Location */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Delivery Location</label>
                 <select
@@ -235,7 +310,6 @@ export default function PurchaseOrdersPage() {
                 </select>
               </div>
 
-              {/* Items */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Items</label>
                 <div className="space-y-2">
@@ -285,9 +359,7 @@ export default function PurchaseOrdersPage() {
                 </button>
               </div>
 
-              {submitError && (
-                <p className="text-sm text-red-600">{submitError}</p>
-              )}
+              {submitError && <p className="text-sm text-red-600">{submitError}</p>}
             </div>
 
             <div className="p-5 border-t border-gray-100 flex justify-end gap-3">
@@ -303,6 +375,55 @@ export default function PurchaseOrdersPage() {
                 className="px-4 py-2 text-sm font-medium text-white bg-[#1B5E20] rounded-lg hover:bg-[#2E7D32] disabled:opacity-50"
               >
                 {submitMut.isPending ? 'Sending…' : 'Send for Approval'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Approve Email Modal */}
+      {approveTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl mx-4 max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between p-5 border-b border-gray-100 shrink-0">
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900">Approve & Send Order</h2>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  To: <span className="font-medium">{approveTarget.supplierEmail || 'bestellung@lieferant.de'}</span>
+                  &nbsp;·&nbsp;{approveTarget.poNumber}
+                </p>
+              </div>
+              <button onClick={() => setApproveTarget(null)} className="text-gray-400 hover:text-gray-600">
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="p-5 flex-1 overflow-y-auto">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Email text — edit before sending
+              </label>
+              <textarea
+                value={emailText}
+                onChange={e => setEmailText(e.target.value)}
+                rows={18}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm font-mono leading-relaxed focus:outline-none focus:ring-2 focus:ring-green-700 resize-y"
+              />
+              {approveError && <p className="mt-2 text-sm text-red-600">{approveError}</p>}
+            </div>
+
+            <div className="p-5 border-t border-gray-100 flex justify-end gap-3 shrink-0">
+              <button
+                onClick={() => setApproveTarget(null)}
+                className="px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => approveMut.mutate({ poId: approveTarget.poId, emailBody: emailText })}
+                disabled={approveMut.isPending}
+                className="px-4 py-2 text-sm font-medium text-white bg-[#1B5E20] rounded-lg hover:bg-[#2E7D32] disabled:opacity-50"
+              >
+                {approveMut.isPending ? 'Sending…' : 'Approve & Send Email'}
               </button>
             </div>
           </div>
@@ -383,11 +504,10 @@ export default function PurchaseOrdersPage() {
                       <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
                         {po.status === 'pending_approval' && (
                           <button
-                            onClick={() => approveMut.mutate(po.id as string)}
-                            disabled={approveMut.isPending}
-                            className="px-3 py-1 text-xs font-medium text-white bg-green-700 rounded-md hover:bg-green-800 disabled:opacity-50 whitespace-nowrap"
+                            onClick={() => openApproveModal(po)}
+                            className="px-3 py-1 text-xs font-medium text-white bg-green-700 rounded-md hover:bg-green-800 whitespace-nowrap"
                           >
-                            {approveMut.isPending ? '…' : 'Approve'}
+                            Approve
                           </button>
                         )}
                       </td>
