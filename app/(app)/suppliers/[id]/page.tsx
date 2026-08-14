@@ -39,6 +39,7 @@ export default function SupplierDetailPage() {
   const qc = useQueryClient();
 
   const [form, setForm] = useState<SupplierForm | null>(null);
+  const [editing, setEditing] = useState(false);
   const [savedInfo, setSavedInfo] = useState(false);
 
   const [addingRow, setAddingRow] = useState(false);
@@ -112,6 +113,7 @@ export default function SupplierDetailPage() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['supplier', id] });
       qc.invalidateQueries({ queryKey: ['suppliers'] });
+      setEditing(false);
       setSavedInfo(true);
       setTimeout(() => setSavedInfo(false), 2000);
     },
@@ -219,64 +221,113 @@ export default function SupplierDetailPage() {
         </div>
       </div>
 
-      {/* Editable info card */}
+      {/* Info card */}
       <div className="bg-white rounded-lg shadow-sm border border-gray-100 p-6 mb-6">
         <div className="flex items-center justify-between mb-4">
           <h2 className="font-semibold text-gray-900">Supplier Information</h2>
-          <button
-            onClick={() => form && saveInfoMut.mutate(form)}
-            disabled={saveInfoMut.isPending}
-            className={`flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg transition-colors ${
-              savedInfo
-                ? 'bg-green-600 text-white'
-                : 'bg-[#1B5E20] text-white hover:bg-[#2E7D32] disabled:opacity-60'
-            }`}
-          >
-            {savedInfo ? <><Check size={14} /> Saved</> : <><Save size={14} /> Save</>}
-          </button>
+          {!editing ? (
+            <button
+              onClick={() => setEditing(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg border border-gray-200 text-gray-600 hover:border-gray-400 hover:text-gray-800 transition-colors"
+            >
+              Edit
+            </button>
+          ) : (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => {
+                  // reset form to saved values on cancel
+                  const sv = supplier as Record<string, unknown>;
+                  setForm({
+                    contact_name:  (sv.contact_name as string)  ?? '',
+                    email:         (sv.email as string)          ?? '',
+                    phone:         (sv.phone as string)          ?? '',
+                    address:       (sv.address as string)        ?? '',
+                    payment_terms: (sv.payment_terms as string)  ?? '',
+                    app_buying:    (sv.app_buying as boolean)    ?? false,
+                  });
+                  setEditing(false);
+                }}
+                className="px-3 py-1.5 text-sm font-medium rounded-lg border border-gray-200 text-gray-500 hover:border-gray-400 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => form && saveInfoMut.mutate(form)}
+                disabled={saveInfoMut.isPending}
+                className={`flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg transition-colors ${
+                  savedInfo
+                    ? 'bg-green-600 text-white'
+                    : 'bg-[#1B5E20] text-white hover:bg-[#2E7D32] disabled:opacity-60'
+                }`}
+              >
+                {savedInfo ? <><Check size={14} /> Saved</> : <><Save size={14} /> Save</>}
+              </button>
+            </div>
+          )}
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-          {([
-            ['contact_name', 'Contact Name', 'text'],
-            ['email',        'Email',         'email'],
-            ['phone',        'Phone',         'tel'],
-            ['address',      'Address',       'text'],
-            ['payment_terms','Payment Terms', 'text'],
-          ] as [keyof SupplierForm, string, string][]).map(([key, label, type]) => (
-            <div key={key}>
-              <label className="block text-xs font-medium text-gray-500 mb-1">{label}</label>
-              <input
-                type={type}
-                value={form[key] as string}
-                onChange={e => setF(key, e.target.value)}
-                placeholder={`Enter ${label.toLowerCase()}…`}
-                className={inputCls}
-              />
-            </div>
-          ))}
+        {/* Read-only view */}
+        {!editing && (
+          <dl className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3 text-sm">
+            {([
+              ['Contact Name', form?.contact_name],
+              ['Email',        form?.email],
+              ['Phone',        form?.phone],
+              ['Address',      form?.address],
+              ['Payment Terms',form?.payment_terms],
+              ['App Buying',   form?.app_buying ? 'Yes' : 'No'],
+            ] as [string, string][]).map(([label, value]) => (
+              <div key={label} className="flex flex-col gap-0.5">
+                <dt className="text-xs font-medium text-gray-400 uppercase tracking-wide">{label}</dt>
+                <dd className="text-gray-800">{value || <span className="text-gray-300">—</span>}</dd>
+              </div>
+            ))}
+          </dl>
+        )}
 
-          {/* App Buying toggle */}
-          <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">App Buying</label>
-            <div className="flex items-center gap-3 mt-1">
-              {(['Yes', 'No'] as const).map(opt => (
-                <button
-                  key={opt}
-                  type="button"
-                  onClick={() => setF('app_buying', opt === 'Yes')}
-                  className={`px-4 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
-                    (opt === 'Yes') === form.app_buying
-                      ? 'bg-[#1B5E20] text-white border-[#1B5E20]'
-                      : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'
-                  }`}
-                >
-                  {opt}
-                </button>
-              ))}
+        {/* Edit form */}
+        {editing && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+            {([
+              ['contact_name', 'Contact Name', 'text'],
+              ['email',        'Email',         'email'],
+              ['phone',        'Phone',         'tel'],
+              ['address',      'Address',       'text'],
+              ['payment_terms','Payment Terms', 'text'],
+            ] as [keyof SupplierForm, string, string][]).map(([key, label, type]) => (
+              <div key={key}>
+                <label className="block text-xs font-medium text-gray-500 mb-1">{label}</label>
+                <input
+                  type={type}
+                  value={form![key] as string}
+                  onChange={e => setF(key, e.target.value)}
+                  placeholder={`Enter ${label.toLowerCase()}…`}
+                  className={inputCls}
+                />
+              </div>
+            ))}
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">App Buying</label>
+              <div className="flex items-center gap-3 mt-1">
+                {(['Yes', 'No'] as const).map(opt => (
+                  <button
+                    key={opt}
+                    type="button"
+                    onClick={() => setF('app_buying', opt === 'Yes')}
+                    className={`px-4 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
+                      (opt === 'Yes') === form!.app_buying
+                        ? 'bg-[#1B5E20] text-white border-[#1B5E20]'
+                        : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'
+                    }`}
+                  >
+                    {opt}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
-        </div>
+        )}
       </div>
 
       {/* Items supplied */}
