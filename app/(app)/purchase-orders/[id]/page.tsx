@@ -3,7 +3,8 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
 import { useParams, useRouter } from 'next/navigation';
-import { ArrowLeft, Send, CheckCircle, XCircle, Clock, AlertTriangle } from 'lucide-react';
+import { useState } from 'react';
+import { ArrowLeft, Send, CheckCircle, XCircle, Clock, AlertTriangle, Mail, MailOpen, Reply } from 'lucide-react';
 import { useT } from '@/lib/i18n';
 import { StatusBadge } from '@/components/ui/StatusBadge';
 import { formatDate } from '@/lib/utils';
@@ -45,11 +46,25 @@ const STATUS_COLOURS: Partial<Record<POStatus, string>> = {
 const fmt = (n: number) =>
   n.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+type POMesage = {
+  id: string;
+  direction: 'outbound' | 'inbound';
+  from_email: string;
+  to_email: string;
+  subject: string;
+  body: string;
+  created_at: string;
+};
+
 export default function PODetailPage() {
   const { t } = useT();
   const { id }      = useParams<{ id: string }>() ?? {};
   const router      = useRouter();
   const queryClient = useQueryClient();
+  const [replyOpen, setReplyOpen]   = useState(false);
+  const [replyText, setReplyText]   = useState('');
+  const [replyError, setReplyError] = useState('');
+  const [expanded, setExpanded]     = useState<Record<string, boolean>>({});
 
   const { data: profile } = useQuery({
     queryKey: ['my-profile'],
@@ -96,6 +111,41 @@ export default function PODetailPage() {
       if (error) throw error;
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['po', id] }),
+  });
+
+  const { data: messages } = useQuery({
+    queryKey: ['po-messages', id],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('po_messages')
+        .select('*')
+        .eq('po_id', id)
+        .order('created_at', { ascending: true });
+      return (data ?? []) as POMesage[];
+    },
+    refetchInterval: 30_000, // poll every 30s to pick up inbound emails
+  });
+
+  const sendReply = useMutation({
+    mutationFn: async () => {
+      setReplyError('');
+      const { data: { session } } = await supabase.auth.getSession();
+      const res = await fetch(`/api/purchase-orders/${id}/reply`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${session?.access_token ?? ''}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ body: replyText }),
+      });
+      if (!res.ok) { const e = await res.json(); throw new Error(e.error ?? 'Send failed'); }
+    },
+    onSuccess: () => {
+      setReplyText('');
+      setReplyOpen(false);
+      queryClient.invalidateQueries({ queryKey: ['po-messages', id] });
+    },
+    onError: (e: Error) => setReplyError(e.message),
   });
 
   if (isLoading) return (
@@ -254,6 +304,98 @@ export default function PODetailPage() {
                 </tr>
               </tbody>
             </table>
+          </div>
+        )}
+      </div>
+      {/* ── Email thread ───────────────────────────────────────── */}
+      <div className="bg-white rounded-lg shadow-sm border border-gray-100 mt-5">
+        <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+          <h2 className="font-semibold text-gray-900 flex items-center gap-2">
+            <Mail size={16} className="text-gray-400" />
+            Supplier Messages
+            {messages && messages.length > 0 && (
+              <span className="text-xs font-medium text-gray-400 bg-gray-100 rounded-full px-2 py-0.5">{messages.length}</span>
+            )}
+          </h2>
+          <button
+            onClick={() => { setReplyOpen(v => !v); setReplyText(''); setReplyError(''); }}
+            className="flex items-center gap-1.5 text-sm font-medium text-green-700 hover:text-green-900"
+          >
+            <Reply size={15} /> Reply
+          </button>
+        </div>
+
+        <div className="divide-y divide-gray-50">
+          {!messages || messages.length === 0 ? (
+            <div className="px-5 py-8 text-center text-gray-400 text-sm">No messages yet</div>
+          ) : messages.map((msg) => {
+            const isOut = msg.direction === 'outbound';
+            const isOpen = expanded[msg.id] ?? false;
+            const preview = msg.body?.split('\n').filter(Boolean)[0] ?? '';
+            return (
+              <div key={msg.id} className={`px-5 py-4 ${isOut ? '' : 'bg-blue-50/40'}`}>
+                <div
+                  className="flex items-start gap-3 cursor-pointer"
+                  onClick={() => setExpanded(prev => ({ ...prev, [msg.id]: !prev[msg.id] }))}
+                >
+                  <div className={`mt-0.5 p-1.5 rounded-full shrink-0 ${isOut ? 'bg-green-100' : 'bg-blue-100'}`}>
+                    {isOut
+                      ? <Send size={12} className="text-green-700" />
+                      : <MailOpen size={12} className="text-blue-600" />
+                    }
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-sm font-medium text-gray-900">
+                        {isOut ? 'You' : msg.from_email}
+                      </span>
+                      <span className="text-xs text-gray-400">→ {isOut ? msg.to_email : 'bestellungen@yumas.de'}</span>
+                      <span className="text-xs text-gray-400 ml-auto">
+                        {new Date(msg.created_at).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    </div>
+                    {!isOpen && (
+                      <p className="text-xs text-gray-500 mt-0.5 truncate">{preview}</p>
+                    )}
+                  </div>
+                </div>
+                {isOpen && (
+                  <pre className="mt-3 ml-9 text-sm text-gray-700 whitespace-pre-wrap font-sans leading-relaxed bg-gray-50 rounded-lg p-3 border border-gray-100">
+                    {msg.body}
+                  </pre>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Reply compose */}
+        {replyOpen && (
+          <div className="px-5 py-4 border-t border-gray-100 bg-gray-50 rounded-b-lg">
+            <textarea
+              value={replyText}
+              onChange={e => setReplyText(e.target.value)}
+              placeholder="Type your reply…"
+              rows={6}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm font-mono leading-relaxed focus:outline-none focus:ring-2 focus:ring-green-700 resize-y bg-white"
+            />
+            {replyError && <p className="mt-1 text-sm text-red-600">{replyError}</p>}
+            <div className="flex justify-end gap-3 mt-3">
+              <button
+                onClick={() => setReplyOpen(false)}
+                className="px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg hover:bg-white"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => sendReply.mutate()}
+                disabled={sendReply.isPending || !replyText.trim()}
+                className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-[#1B5E20] rounded-lg hover:bg-[#2E7D32] disabled:opacity-50"
+              >
+                <Send size={14} />
+                {sendReply.isPending ? 'Sending…' : 'Send Reply'}
+              </button>
+            </div>
           </div>
         )}
       </div>

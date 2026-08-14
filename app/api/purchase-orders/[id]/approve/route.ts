@@ -67,6 +67,19 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       });
     }
 
+    // Save outgoing email to thread
+    const fromEmail = process.env.RESEND_FROM_EMAIL?.match(/<(.+)>/)?.[1]
+      ?? process.env.RESEND_FROM_EMAIL
+      ?? 'bestellungen@yumas.de';
+    await admin.from('po_messages').insert({
+      po_id:      poId,
+      direction:  'outbound',
+      from_email: fromEmail,
+      to_email:   supplierEmail,
+      subject:    `Bestellung ${po.po_number} – Yumas GmbH`,
+      body:       emailBody,
+    }).then(() => null); // best-effort — don't fail approval if this fails
+
     return NextResponse.json({ success: true });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message ?? 'Unexpected error' }, { status: 500 });
