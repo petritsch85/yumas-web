@@ -1,6 +1,6 @@
 'use client';
 
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
 import { useRouter } from 'next/navigation';
 import { Plus } from 'lucide-react';
@@ -11,6 +11,7 @@ export default function SuppliersPage() {
   const router = useRouter();
   const { t } = useT();
   const [search, setSearch] = useState('');
+  const qc = useQueryClient();
 
   const { data: suppliers, isLoading } = useQuery({
     queryKey: ['suppliers'],
@@ -21,6 +22,22 @@ export default function SuppliersPage() {
         .order('name');
       return data ?? [];
     },
+  });
+
+  const toggleAppBuying = useMutation({
+    mutationFn: async ({ id, value }: { id: string; value: boolean }) => {
+      await supabase.from('suppliers').update({ app_buying: value }).eq('id', id);
+    },
+    onMutate: async ({ id, value }) => {
+      await qc.cancelQueries({ queryKey: ['suppliers'] });
+      const prev = qc.getQueryData<Record<string, unknown>[]>(['suppliers']);
+      qc.setQueryData<Record<string, unknown>[]>(['suppliers'], old =>
+        old?.map(s => s.id === id ? { ...s, app_buying: value } : s) ?? []
+      );
+      return { prev };
+    },
+    onError: (_e, _v, ctx) => qc.setQueryData(['suppliers'], ctx?.prev),
+    onSettled: () => qc.invalidateQueries({ queryKey: ['suppliers'] }),
   });
 
   const filtered = (suppliers as Record<string, unknown>[] ?? []).filter((s) =>
@@ -62,6 +79,7 @@ export default function SuppliersPage() {
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{t('suppliers.table.email')}</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{t('suppliers.table.phone')}</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{t('suppliers.table.status')}</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">App Buying</th>
                 </tr>
               </thead>
               <tbody>
@@ -79,6 +97,21 @@ export default function SuppliersPage() {
                       <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${supplier.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
                         {supplier.is_active ? t('common.active') : t('common.inactive')}
                       </span>
+                    </td>
+                    <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
+                      <button
+                        onClick={() => toggleAppBuying.mutate({
+                          id: supplier.id as string,
+                          value: !(supplier.app_buying as boolean),
+                        })}
+                        className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium transition-colors ${
+                          supplier.app_buying
+                            ? 'bg-[#1B5E20] text-white hover:bg-[#2E7D32]'
+                            : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                        }`}
+                      >
+                        {supplier.app_buying ? 'Yes' : 'No'}
+                      </button>
                     </td>
                   </tr>
                 ))}
