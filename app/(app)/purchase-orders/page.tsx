@@ -2,9 +2,9 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { Plus, X, Trash2 } from 'lucide-react';
+import { Plus, X, Trash2, Upload, CheckCircle, Eye } from 'lucide-react';
 import { StatusBadge } from '@/components/ui/StatusBadge';
 import { formatDate } from '@/lib/utils';
 import type { POStatus } from '@/types';
@@ -89,6 +89,11 @@ export default function PurchaseOrdersPage() {
   const [emailText, setEmailText] = useState('');
   const [approveError, setApproveError] = useState('');
 
+  // Lieferschein upload/view state
+  const [uploadingPoId, setUploadingPoId] = useState<string | null>(null);
+  const [viewingUrl, setViewingUrl] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   // Current user profile
   const { data: profile } = useQuery({
     queryKey: ['my-profile'],
@@ -107,7 +112,7 @@ export default function PurchaseOrdersPage() {
     queryFn: async () => {
       let q = supabase
         .from('purchase_orders')
-        .select('*, supplier:suppliers(name, email), destination_location:locations(name)')
+        .select('*, supplier:suppliers(name, email), destination_location:locations(name), lieferschein_url')
         .order('created_at', { ascending: false });
       if (statusFilter !== 'all') q = q.eq('status', statusFilter);
       const { data } = await q;
@@ -272,8 +277,65 @@ export default function PurchaseOrdersPage() {
     onError: (e: Error) => setApproveError(e.message),
   });
 
+  async function handleFileSelected(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file || !uploadingPoId) return;
+    e.target.value = '';
+
+    const ext = file.name.split('.').pop() ?? 'jpg';
+    const path = `${uploadingPoId}/${Date.now()}.${ext}`;
+
+    const { error: upErr } = await supabase.storage
+      .from('lieferscheine')
+      .upload(path, file, { upsert: true });
+
+    if (upErr) { alert('Upload failed: ' + upErr.message); setUploadingPoId(null); return; }
+
+    const { data: { publicUrl } } = supabase.storage.from('lieferscheine').getPublicUrl(path);
+
+    await supabase
+      .from('purchase_orders')
+      .update({ lieferschein_url: publicUrl })
+      .eq('id', uploadingPoId);
+
+    setUploadingPoId(null);
+    queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
+  }
+
   return (
     <div>
+      {/* Hidden file input for Lieferschein upload */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        className="hidden"
+        onChange={handleFileSelected}
+      />
+
+      {/* Lieferschein image viewer */}
+      {viewingUrl && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70"
+          onClick={() => setViewingUrl(null)}
+        >
+          <div className="relative max-w-3xl max-h-[90vh] mx-4" onClick={e => e.stopPropagation()}>
+            <button
+              onClick={() => setViewingUrl(null)}
+              className="absolute -top-3 -right-3 bg-white rounded-full p-1 shadow-lg text-gray-600 hover:text-gray-900 z-10"
+            >
+              <X size={18} />
+            </button>
+            <img
+              src={viewingUrl}
+              alt="Lieferschein"
+              className="rounded-lg max-h-[85vh] w-auto object-contain shadow-2xl"
+            />
+          </div>
+        </div>
+      )}
+
       {/* New PO Modal */}
       {showModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
@@ -479,6 +541,7 @@ export default function PurchaseOrdersPage() {
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{t('purchaseOrders.table.orderDate')}</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{t('purchaseOrders.table.expected')}</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{t('purchaseOrders.table.status')}</th>
+                  <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Lieferschein</th>
                   {isApprover && <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Action</th>}
                 </tr>
               </thead>
@@ -500,6 +563,31 @@ export default function PurchaseOrdersPage() {
                         : <StatusBadge status={po.status as string} />
                       }
                     </td>
+                    {/* Lieferschein cell */}
+                    <td className="px-4 py-3 text-center" onClick={e => e.stopPropagation()}>
+                      {po.lieferschein_url ? (
+                        <div className="flex items-center justify-center gap-1.5">
+                          <CheckCircle size={16} className="text-green-600 shrink-0" />
+                          <button
+                            onClick={() => setViewingUrl(po.lieferschein_url as string)}
+                            className="text-xs text-green-700 hover:text-green-900 font-medium underline underline-offset-2"
+                          >
+                            View
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => {
+                            setUploadingPoId(po.id as string);
+                            fileInputRef.current?.click();
+                          }}
+                          className="inline-flex items-center gap-1 text-xs text-gray-400 hover:text-gray-600 border border-dashed border-gray-300 hover:border-gray-400 rounded px-2 py-1 transition-colors"
+                        >
+                          <Upload size={12} /> Upload
+                        </button>
+                      )}
+                    </td>
+
                     {isApprover && (
                       <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
                         {po.status === 'pending_approval' && (
