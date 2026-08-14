@@ -86,7 +86,6 @@ const NAV_GROUPS: NavGroup[] = [
   {
     labelKey: 'sidebar.groups.data',
     items: [
-      { labelKey: 'sidebar.nav.suppliers', href: '/suppliers',            icon: Store,           permKey: 'suppliers' },
       { labelKey: 'sidebar.nav.menus',     href: '/products/menus',      icon: UtensilsCrossed, permKey: 'products' },
       {
         labelKey: 'sidebar.nav.products', href: '/products', icon: Package, permKey: 'products',
@@ -111,6 +110,7 @@ const NAV_GROUPS: NavGroup[] = [
   {
     labelKey: 'sidebar.groups.supplyChain',
     items: [
+      { labelKey: 'sidebar.nav.suppliers', href: '/suppliers', icon: Store, permKey: 'suppliers' },
       {
         labelKey: 'sidebar.nav.inventory', href: '/inventory', icon: ClipboardList, permKey: 'inventory',
         children: [
