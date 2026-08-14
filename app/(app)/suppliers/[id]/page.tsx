@@ -109,31 +109,13 @@ export default function SupplierDetailPage() {
   });
 
   const [locDraft, setLocDraft] = useState<string[] | null>(null);
-  const [savingLocs, setSavingLocs] = useState(false);
-  const [savedLocs, setSavedLocs] = useState(false);
 
-  // Sync locDraft when data loads
+  // Sync locDraft when supplier locations load or editing starts
   useEffect(() => {
-    if (locDraft === null && supplierLocationIds.length >= 0) {
+    if (locDraft === null) {
       setLocDraft(supplierLocationIds);
     }
-  }, [supplierLocationIds, locDraft]);
-
-  async function saveLocations() {
-    if (!locDraft) return;
-    setSavingLocs(true);
-    await supabase.from('supplier_locations').delete().eq('supplier_id', id!);
-    if (locDraft.length > 0) {
-      await supabase.from('supplier_locations').insert(
-        locDraft.map(lid => ({ supplier_id: id!, location_id: lid }))
-      );
-    }
-    setSavingLocs(false);
-    setSavedLocs(true);
-    refetchSupplierLocations();
-    qc.invalidateQueries({ queryKey: ['supplier-locations', id] });
-    setTimeout(() => setSavedLocs(false), 2000);
-  }
+  }, [supplierLocationIds]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function toggleLocation(locId: string) {
     setLocDraft(prev => {
@@ -168,10 +150,19 @@ export default function SupplierDetailPage() {
         app_buying:    f.app_buying,
       }).eq('id', id!);
       if (error) throw error;
+
+      // Save delivery locations in the same operation
+      await supabase.from('supplier_locations').delete().eq('supplier_id', id!);
+      if (locDraft && locDraft.length > 0) {
+        await supabase.from('supplier_locations').insert(
+          locDraft.map(lid => ({ supplier_id: id!, location_id: lid }))
+        );
+      }
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['supplier', id] });
       qc.invalidateQueries({ queryKey: ['suppliers'] });
+      qc.invalidateQueries({ queryKey: ['supplier-locations', id] });
       setEditing(false);
       setSavedInfo(true);
       setTimeout(() => setSavedInfo(false), 2000);
@@ -358,6 +349,15 @@ export default function SupplierDetailPage() {
                 <dd className="text-gray-800">{value || <span className="text-gray-300">—</span>}</dd>
               </div>
             ))}
+            <div className="flex flex-col gap-0.5 md:col-span-2">
+              <dt className="text-xs font-medium text-gray-400 uppercase tracking-wide">Delivery Locations</dt>
+              <dd className="text-gray-800">
+                {supplierLocationIds.length > 0
+                  ? allLocations.filter(l => supplierLocationIds.includes(l.id)).map(l => l.name).join(', ')
+                  : <span className="text-gray-300">—</span>
+                }
+              </dd>
+            </div>
           </dl>
         )}
 
@@ -401,50 +401,31 @@ export default function SupplierDetailPage() {
                 ))}
               </div>
             </div>
+            <div className="md:col-span-2">
+              <label className="block text-xs font-medium text-gray-500 mb-2">Delivery Locations</label>
+              <div className="flex flex-wrap gap-2">
+                {allLocations.map(loc => {
+                  const checked = (locDraft ?? supplierLocationIds).includes(loc.id);
+                  return (
+                    <button
+                      key={loc.id}
+                      type="button"
+                      onClick={() => toggleLocation(loc.id)}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
+                        checked
+                          ? 'bg-[#1B5E20] text-white border-[#1B5E20]'
+                          : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'
+                      }`}
+                    >
+                      {checked && <Check size={13} />}
+                      {loc.name}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
           </div>
         )}
-      </div>
-
-      {/* Delivery Locations */}
-      <div className="bg-white rounded-lg shadow-sm border border-gray-100 p-6 mb-6">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="font-semibold text-gray-900">Delivery Locations</h2>
-          <button
-            onClick={saveLocations}
-            disabled={savingLocs}
-            className={`flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg transition-colors ${
-              savedLocs
-                ? 'bg-green-600 text-white'
-                : 'bg-[#1B5E20] text-white hover:bg-[#2E7D32] disabled:opacity-60'
-            }`}
-          >
-            {savedLocs ? <><Check size={14} /> Saved</> : <><Save size={14} /> Save</>}
-          </button>
-        </div>
-        <p className="text-xs text-gray-400 mb-4">Tick all locations this supplier delivers to. Only these will appear in the New PO dropdown.</p>
-        <div className="flex flex-wrap gap-3">
-          {allLocations.map(loc => {
-            const checked = (locDraft ?? supplierLocationIds).includes(loc.id);
-            return (
-              <button
-                key={loc.id}
-                type="button"
-                onClick={() => toggleLocation(loc.id)}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg border text-sm font-medium transition-colors ${
-                  checked
-                    ? 'bg-[#1B5E20] text-white border-[#1B5E20]'
-                    : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'
-                }`}
-              >
-                {checked && <Check size={14} />}
-                {loc.name}
-              </button>
-            );
-          })}
-          {allLocations.length === 0 && (
-            <p className="text-sm text-gray-400">No locations found — add them to the locations table first.</p>
-          )}
-        </div>
       </div>
 
       {/* Current Items and Prices */}
