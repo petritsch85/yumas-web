@@ -22,14 +22,12 @@ type SupplierForm = {
 type NewRow = {
   itemId: string;
   itemName: string;
-  sku: string;
+  unit: string;
   unitPrice: string;
-  packageSize: string;
-  isPreferred: boolean;
 };
 
 const EMPTY_ROW: NewRow = {
-  itemId: '', itemName: '', sku: '', unitPrice: '', packageSize: '', isPreferred: false,
+  itemId: '', itemName: '', unit: '', unitPrice: '',
 };
 
 export default function SupplierDetailPage() {
@@ -50,7 +48,8 @@ export default function SupplierDetailPage() {
 
   // Inline row editing
   const [editingRowId, setEditingRowId] = useState<string | null>(null);
-  const [editRowDraft, setEditRowDraft] = useState<{ unitPrice: string; packageSize: string; isPreferred: boolean } | null>(null);
+  const [editRowItemId, setEditRowItemId] = useState<string | null>(null);
+  const [editRowDraft, setEditRowDraft] = useState<{ unit: string; unitPrice: string } | null>(null);
 
   const { data: supplier, isLoading } = useQuery({
     queryKey: ['supplier', id],
@@ -174,15 +173,17 @@ export default function SupplierDetailPage() {
       const payload: Record<string, unknown> = {
         supplier_id:  id,
         unit_price:   parseFloat(row.unitPrice) || 0,
-        package_size: row.packageSize || null,
-        is_preferred: row.isPreferred,
+        is_preferred: false,
       };
       if (row.itemId) {
         payload.item_id = row.itemId;
+        if (row.unit) {
+          await supabase.from('items').update({ sku: row.unit }).eq('id', row.itemId);
+        }
       } else {
         const { data: newItem, error } = await supabase
           .from('items')
-          .insert({ name: row.itemName.trim(), sku: row.sku || null })
+          .insert({ name: row.itemName.trim(), sku: row.unit || null })
           .select('id')
           .single();
         if (error) throw error;
@@ -207,23 +208,25 @@ export default function SupplierDetailPage() {
   });
 
   const updateItem = useMutation({
-    mutationFn: async ({ siId, draft }: { siId: string; draft: { unitPrice: string; packageSize: string; isPreferred: boolean } }) => {
+    mutationFn: async ({ siId, itemId, draft }: { siId: string; itemId: string | null; draft: { unit: string; unitPrice: string } }) => {
       const { error } = await supabase.from('supplier_items').update({
-        unit_price:   parseFloat(draft.unitPrice) || 0,
-        package_size: draft.packageSize || null,
-        is_preferred: draft.isPreferred,
+        unit_price: parseFloat(draft.unitPrice) || 0,
       }).eq('id', siId);
       if (error) throw error;
+      if (itemId) {
+        await supabase.from('items').update({ sku: draft.unit || null }).eq('id', itemId);
+      }
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['supplier-items-list', id] });
       setEditingRowId(null);
+      setEditRowItemId(null);
       setEditRowDraft(null);
     },
   });
 
   const handleSelectItem = (item: Item) => {
-    setNewRow(r => ({ ...r, itemId: item.id, itemName: item.name, sku: item.sku ?? '' }));
+    setNewRow(r => ({ ...r, itemId: item.id, itemName: item.name, unit: item.sku ?? '' }));
     setItemSearch(item.name);
     setShowDropdown(false);
   };
@@ -446,10 +449,8 @@ export default function SupplierDetailPage() {
             <thead className="bg-gray-50">
               <tr>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Item</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">SKU</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Unit</th>
                 <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Unit Price</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Package Size</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Preferred</th>
                 <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
               </tr>
             </thead>
@@ -462,7 +463,14 @@ export default function SupplierDetailPage() {
                   /* ── Inline edit row ── */
                   <tr key={i} className="border-t border-[#1B5E20]/30 bg-green-50/40">
                     <td className="px-4 py-2 font-medium text-gray-900">{item?.name as string ?? '—'}</td>
-                    <td className="px-4 py-2 font-mono text-xs text-gray-500">{item?.sku as string ?? '—'}</td>
+                    <td className="px-4 py-2">
+                      <input
+                        value={editRowDraft.unit}
+                        onChange={e => setEditRowDraft(d => d ? { ...d, unit: e.target.value } : d)}
+                        placeholder="e.g. kg"
+                        className="w-full border border-gray-200 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-[#1B5E20] max-w-[80px]"
+                      />
+                    </td>
                     <td className="px-4 py-2">
                       <input
                         type="number" min="0" step="0.01"
@@ -472,32 +480,16 @@ export default function SupplierDetailPage() {
                       />
                     </td>
                     <td className="px-4 py-2">
-                      <input
-                        value={editRowDraft.packageSize}
-                        onChange={e => setEditRowDraft(d => d ? { ...d, packageSize: e.target.value } : d)}
-                        className="w-full border border-gray-200 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-[#1B5E20] max-w-[80px]"
-                      />
-                    </td>
-                    <td className="px-4 py-2">
-                      <button
-                        type="button"
-                        onClick={() => setEditRowDraft(d => d ? { ...d, isPreferred: !d.isPreferred } : d)}
-                        className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium transition-colors ${editRowDraft.isPreferred ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}
-                      >
-                        {editRowDraft.isPreferred ? 'Primary' : 'No'}
-                      </button>
-                    </td>
-                    <td className="px-4 py-2">
                       <div className="flex items-center gap-1.5 justify-end">
                         <button
-                          onClick={() => updateItem.mutate({ siId, draft: editRowDraft })}
+                          onClick={() => updateItem.mutate({ siId, itemId: editRowItemId, draft: editRowDraft })}
                           disabled={updateItem.isPending}
                           className="flex items-center gap-1 px-2.5 py-1 bg-[#1B5E20] text-white text-xs font-medium rounded hover:bg-[#2E7D32] disabled:opacity-50 transition-colors"
                         >
                           <Check size={12} /> Save
                         </button>
                         <button
-                          onClick={() => { setEditingRowId(null); setEditRowDraft(null); }}
+                          onClick={() => { setEditingRowId(null); setEditRowItemId(null); setEditRowDraft(null); }}
                           className="flex items-center gap-1 px-2.5 py-1 bg-gray-100 text-gray-600 text-xs font-medium rounded hover:bg-gray-200 transition-colors"
                         >
                           <X size={12} /> Cancel
@@ -509,25 +501,17 @@ export default function SupplierDetailPage() {
                   /* ── Read-only row ── */
                   <tr key={i} className="border-t border-gray-100 hover:bg-gray-50 group">
                     <td className="px-4 py-3 font-medium text-gray-900">{item?.name as string ?? '—'}</td>
-                    <td className="px-4 py-3 font-mono text-xs text-gray-500">{item?.sku as string ?? '—'}</td>
+                    <td className="px-4 py-3 text-xs text-gray-500">{item?.sku as string ?? '—'}</td>
                     <td className="px-4 py-3 text-right text-gray-800">{formatCurrency(si.unit_price as number)}</td>
-                    <td className="px-4 py-3 text-gray-600">{si.package_size as string ?? '—'}</td>
-                    <td className="px-4 py-3">
-                      {si.is_preferred ? (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">Primary</span>
-                      ) : (
-                        <span className="text-gray-400 text-xs">No</span>
-                      )}
-                    </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2 justify-end">
                         <button
                           onClick={() => {
                             setEditingRowId(siId);
+                            setEditRowItemId((item?.id as string) ?? null);
                             setEditRowDraft({
-                              unitPrice:   String(si.unit_price ?? ''),
-                              packageSize: (si.package_size as string) ?? '',
-                              isPreferred: (si.is_preferred as boolean) ?? false,
+                              unit:      (item?.sku as string) ?? '',
+                              unitPrice: String(si.unit_price ?? ''),
                             });
                           }}
                           className="text-gray-400 hover:text-[#1B5E20] transition-colors"
@@ -579,26 +563,15 @@ export default function SupplierDetailPage() {
                     </div>
                   </td>
                   <td className="px-4 py-2">
-                    <input value={newRow.sku} onChange={e => setNewRow(r => ({ ...r, sku: e.target.value }))}
-                      placeholder="SKU"
-                      className="w-full border border-gray-200 rounded px-2 py-1 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-[#1B5E20] max-w-[100px]" />
+                    <input value={newRow.unit} onChange={e => setNewRow(r => ({ ...r, unit: e.target.value }))}
+                      placeholder="e.g. kg"
+                      className="w-full border border-gray-200 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-[#1B5E20] max-w-[80px]" />
                   </td>
                   <td className="px-4 py-2">
                     <input type="number" min="0" step="0.01" value={newRow.unitPrice}
                       onChange={e => setNewRow(r => ({ ...r, unitPrice: e.target.value }))}
                       placeholder="0.00"
                       className="w-full border border-gray-200 rounded px-2 py-1 text-sm text-right focus:outline-none focus:ring-1 focus:ring-[#1B5E20] max-w-[90px] ml-auto block" />
-                  </td>
-                  <td className="px-4 py-2">
-                    <input value={newRow.packageSize} onChange={e => setNewRow(r => ({ ...r, packageSize: e.target.value }))}
-                      placeholder="e.g. 1"
-                      className="w-full border border-gray-200 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-[#1B5E20] max-w-[80px]" />
-                  </td>
-                  <td className="px-4 py-2">
-                    <button type="button" onClick={() => setNewRow(r => ({ ...r, isPreferred: !r.isPreferred }))}
-                      className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium transition-colors ${newRow.isPreferred ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
-                      {newRow.isPreferred ? 'Primary' : 'No'}
-                    </button>
                   </td>
                   <td className="px-4 py-2">
                     <div className="flex items-center gap-1.5 justify-end">
@@ -617,7 +590,7 @@ export default function SupplierDetailPage() {
 
               {(!items || items.length === 0) && !addingRow && (
                 <tr>
-                  <td colSpan={6} className="p-8 text-center text-gray-400 text-sm">
+                  <td colSpan={4} className="p-8 text-center text-gray-400 text-sm">
                     No items yet. Click <strong>Add Item</strong> to get started.
                   </td>
                 </tr>
