@@ -3,7 +3,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
 import { useParams, useRouter } from 'next/navigation';
-import { ArrowLeft, Plus, Check, X, Trash2, Save } from 'lucide-react';
+import { ArrowLeft, Plus, Check, X, Trash2, Save, Pencil } from 'lucide-react';
 import { formatCurrency } from '@/lib/utils';
 import { useT } from '@/lib/i18n';
 import { useState, useRef, useEffect } from 'react';
@@ -47,6 +47,10 @@ export default function SupplierDetailPage() {
   const [itemSearch, setItemSearch] = useState('');
   const [showDropdown, setShowDropdown] = useState(false);
   const itemInputRef = useRef<HTMLInputElement>(null);
+
+  // Inline row editing
+  const [editingRowId, setEditingRowId] = useState<string | null>(null);
+  const [editRowDraft, setEditRowDraft] = useState<{ unitPrice: string; packageSize: string; isPreferred: boolean } | null>(null);
 
   const { data: supplier, isLoading } = useQuery({
     queryKey: ['supplier', id],
@@ -154,6 +158,22 @@ export default function SupplierDetailPage() {
       await supabase.from('supplier_items').delete().eq('id', siId);
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['supplier-items-list', id] }),
+  });
+
+  const updateItem = useMutation({
+    mutationFn: async ({ siId, draft }: { siId: string; draft: { unitPrice: string; packageSize: string; isPreferred: boolean } }) => {
+      const { error } = await supabase.from('supplier_items').update({
+        unit_price:   parseFloat(draft.unitPrice) || 0,
+        package_size: draft.packageSize || null,
+        is_preferred: draft.isPreferred,
+      }).eq('id', siId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['supplier-items-list', id] });
+      setEditingRowId(null);
+      setEditRowDraft(null);
+    },
   });
 
   const handleSelectItem = (item: Item) => {
@@ -330,10 +350,10 @@ export default function SupplierDetailPage() {
         )}
       </div>
 
-      {/* Items supplied */}
+      {/* Current Items and Prices */}
       <div className="bg-white rounded-lg shadow-sm border border-gray-100">
         <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
-          <h2 className="font-semibold text-gray-900">Items Supplied</h2>
+          <h2 className="font-semibold text-gray-900">Current Items and Prices</h2>
           {!addingRow && (
             <button
               onClick={handleStartAdd}
@@ -352,13 +372,63 @@ export default function SupplierDetailPage() {
                 <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Unit Price</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Package Size</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Preferred</th>
-                <th className="px-4 py-3" />
+                <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
               </tr>
             </thead>
             <tbody>
               {items?.map((si, i) => {
                 const item = si.item as Record<string, unknown> | null;
-                return (
+                const siId = si.id as string;
+                const isEditingThis = editingRowId === siId;
+                return isEditingThis && editRowDraft ? (
+                  /* ── Inline edit row ── */
+                  <tr key={i} className="border-t border-[#1B5E20]/30 bg-green-50/40">
+                    <td className="px-4 py-2 font-medium text-gray-900">{item?.name as string ?? '—'}</td>
+                    <td className="px-4 py-2 font-mono text-xs text-gray-500">{item?.sku as string ?? '—'}</td>
+                    <td className="px-4 py-2">
+                      <input
+                        type="number" min="0" step="0.01"
+                        value={editRowDraft.unitPrice}
+                        onChange={e => setEditRowDraft(d => d ? { ...d, unitPrice: e.target.value } : d)}
+                        className="w-full border border-gray-200 rounded px-2 py-1 text-sm text-right focus:outline-none focus:ring-1 focus:ring-[#1B5E20] max-w-[90px] ml-auto block"
+                      />
+                    </td>
+                    <td className="px-4 py-2">
+                      <input
+                        value={editRowDraft.packageSize}
+                        onChange={e => setEditRowDraft(d => d ? { ...d, packageSize: e.target.value } : d)}
+                        className="w-full border border-gray-200 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-[#1B5E20] max-w-[80px]"
+                      />
+                    </td>
+                    <td className="px-4 py-2">
+                      <button
+                        type="button"
+                        onClick={() => setEditRowDraft(d => d ? { ...d, isPreferred: !d.isPreferred } : d)}
+                        className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium transition-colors ${editRowDraft.isPreferred ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}
+                      >
+                        {editRowDraft.isPreferred ? 'Primary' : 'No'}
+                      </button>
+                    </td>
+                    <td className="px-4 py-2">
+                      <div className="flex items-center gap-1.5 justify-end">
+                        <button
+                          onClick={() => updateItem.mutate({ siId, draft: editRowDraft })}
+                          disabled={updateItem.isPending}
+                          className="flex items-center gap-1 px-2.5 py-1 bg-[#1B5E20] text-white text-xs font-medium rounded hover:bg-[#2E7D32] disabled:opacity-50 transition-colors"
+                        >
+                          <Check size={12} /> Save
+                        </button>
+                        <button
+                          onClick={() => { setEditingRowId(null); setEditRowDraft(null); }}
+                          className="flex items-center gap-1 px-2.5 py-1 bg-gray-100 text-gray-600 text-xs font-medium rounded hover:bg-gray-200 transition-colors"
+                        >
+                          <X size={12} /> Cancel
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ) : (
+                  /* ── Read-only row ── */
                   <tr key={i} className="border-t border-gray-100 hover:bg-gray-50 group">
                     <td className="px-4 py-3 font-medium text-gray-900">{item?.name as string ?? '—'}</td>
                     <td className="px-4 py-3 font-mono text-xs text-gray-500">{item?.sku as string ?? '—'}</td>
@@ -371,13 +441,30 @@ export default function SupplierDetailPage() {
                         <span className="text-gray-400 text-xs">No</span>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-right">
-                      <button
-                        onClick={() => deleteItem.mutate(si.id as string)}
-                        className="opacity-0 group-hover:opacity-100 text-gray-300 hover:text-red-500 transition-all"
-                      >
-                        <Trash2 size={14} />
-                      </button>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button
+                          onClick={() => {
+                            setEditingRowId(siId);
+                            setEditRowDraft({
+                              unitPrice:   String(si.unit_price ?? ''),
+                              packageSize: (si.package_size as string) ?? '',
+                              isPreferred: (si.is_preferred as boolean) ?? false,
+                            });
+                          }}
+                          className="text-gray-400 hover:text-[#1B5E20] transition-colors"
+                          title="Edit"
+                        >
+                          <Pencil size={14} />
+                        </button>
+                        <button
+                          onClick={() => deleteItem.mutate(siId)}
+                          className="text-gray-400 hover:text-red-500 transition-colors"
+                          title="Delete"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 );
