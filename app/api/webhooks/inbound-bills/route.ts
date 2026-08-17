@@ -75,22 +75,37 @@ type Attachment = { Name: string; Content: string; ContentType: string };
 
 async function extractFromAttachment(attachment: Attachment): Promise<Record<string, unknown>> {
   const isPdf = attachment.ContentType === 'application/pdf' || attachment.Name.toLowerCase().endsWith('.pdf');
-  const contentBlock = isPdf
-    ? { type: 'document' as const, source: { type: 'base64' as const, media_type: 'application/pdf' as const, data: attachment.Content } }
-    : { type: 'image' as const, source: { type: 'base64' as const, media_type: (attachment.ContentType || 'image/jpeg') as 'image/jpeg' | 'image/png', data: attachment.Content } };
+  const textBlock = { type: 'text' as const, text: `Extract all invoice data from this file (filename: ${attachment.Name}) and return the JSON structure described. Return valid JSON only — no markdown, no trailing commas.` };
 
-  const response = await anthropic.messages.create({
-    model: 'claude-opus-4-5',
-    max_tokens: 8192,
-    system: SYSTEM_PROMPT,
-    messages: [{
-      role: 'user',
-      content: [
-        contentBlock as Parameters<typeof anthropic.messages.create>[0]['messages'][0]['content'][0],
-        { type: 'text', text: `Extract all invoice data from this file (filename: ${attachment.Name}) and return the JSON structure described. Return valid JSON only — no markdown, no trailing commas.` },
-      ],
-    }],
-  });
+  let response;
+  if (isPdf) {
+    response = await anthropic.messages.create({
+      model: 'claude-opus-4-5',
+      max_tokens: 8192,
+      system: SYSTEM_PROMPT,
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: attachment.Content } },
+          textBlock,
+        ],
+      }],
+    });
+  } else {
+    const imageType = (attachment.ContentType === 'image/png' ? 'image/png' : 'image/jpeg') as 'image/jpeg' | 'image/png';
+    response = await anthropic.messages.create({
+      model: 'claude-opus-4-5',
+      max_tokens: 8192,
+      system: SYSTEM_PROMPT,
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'image', source: { type: 'base64', media_type: imageType, data: attachment.Content } },
+          textBlock,
+        ],
+      }],
+    });
+  }
 
   const raw = response.content[0].type === 'text' ? response.content[0].text : '';
   const jsonStr = cleanResponse(raw);
