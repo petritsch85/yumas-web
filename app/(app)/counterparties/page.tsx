@@ -338,15 +338,24 @@ function CounterpartyForm({
 /* ── Main page ── */
 export default function CounterpartiesPage() {
   const qc = useQueryClient();
-  const [adding, setAdding]       = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
+  const [adding, setAdding]         = useState(false);
+  const [editingId, setEditingId]   = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [assignedMsg, setAssignedMsg] = useState<string | null>(null);
 
   const { data: counterparties = [], isLoading } = useQuery<Counterparty[]>({
     queryKey: ['counterparties'],
     queryFn: () => fetch('/api/counterparties').then(r => r.json()),
     staleTime: 30_000,
   });
+
+  const showAssigned = (count: number) => {
+    if (count > 0) {
+      setAssignedMsg(`✓ ${count} cash flow transaction${count === 1 ? '' : 's'} auto-assigned`);
+      setTimeout(() => setAssignedMsg(null), 5000);
+    }
+    qc.invalidateQueries({ queryKey: ['cashflow-tx'] });
+  };
 
   const createMut = useMutation({
     mutationFn: (body: object) => fetch('/api/counterparties', {
@@ -355,7 +364,8 @@ export default function CounterpartiesPage() {
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ['counterparties'] });
       setAdding(false);
-      if (data?.id) setExpandedId(data.id); // auto-expand after save
+      if (data?.id) setExpandedId(data.id);
+      showAssigned(data?.assigned ?? 0);
     },
   });
 
@@ -363,10 +373,11 @@ export default function CounterpartiesPage() {
     mutationFn: ({ id, body }: { id: string; body: object }) => fetch(`/api/counterparties/${id}`, {
       method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
     }).then(r => r.json()),
-    onSuccess: (_data, { id }) => {
+    onSuccess: (data, { id }) => {
       qc.invalidateQueries({ queryKey: ['counterparties'] });
       setEditingId(null);
-      setExpandedId(id); // keep expanded after edit
+      setExpandedId(id);
+      showAssigned(data?.assigned ?? 0);
     },
   });
 
@@ -400,6 +411,12 @@ export default function CounterpartiesPage() {
           </button>
         )}
       </div>
+
+      {assignedMsg && (
+        <div className="mb-4 px-4 py-2.5 bg-green-50 border border-green-200 rounded-lg text-sm font-medium text-green-800">
+          {assignedMsg}
+        </div>
+      )}
 
       {adding && (
         <div className="mb-4">
