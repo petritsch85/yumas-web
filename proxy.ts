@@ -29,7 +29,7 @@ export async function proxy(request: NextRequest) {
 
   const { pathname } = request.nextUrl;
 
-  if (!session && !pathname.startsWith('/login')) {
+  if (!session && !pathname.startsWith('/login') && !pathname.startsWith('/api/webhooks/')) {
     const url = request.nextUrl.clone();
     url.pathname = '/login';
     return NextResponse.redirect(url);
