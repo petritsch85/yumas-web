@@ -6,7 +6,7 @@ import { supabase } from '@/lib/supabase-browser';
 import {
   Upload, FileCheck, AlertCircle, Loader2,
   CheckCircle2, Clock, Banknote, Trash2,
-  ChevronDown, Eye, X, FilePlus, Save, MapPin, Calendar, Pencil,
+  ChevronDown, Eye, X, FilePlus, Save, MapPin, Calendar, Pencil, LayoutList,
 } from 'lucide-react';
 
 import { useT } from '@/lib/i18n';
@@ -214,6 +214,7 @@ export default function BillsPage() {
   const [queue, setQueue]           = useState<QueueItem[]>([]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [savingAll, setSavingAll]   = useState(false);
+  const [linesBillId, setLinesBillId] = useState<string | null>(null);
 
   const [filterStatus,   setFilterStatus]   = useState('all');
   const [filterCategory, setFilterCategory] = useState('all');
@@ -253,6 +254,20 @@ export default function BillsPage() {
         .order('period_start', { ascending: false });
       return (data ?? []) as Bill[];
     },
+  });
+
+  const { data: billLines = [] } = useQuery({
+    queryKey: ['bill-lines', linesBillId],
+    queryFn: async () => {
+      if (!linesBillId) return [];
+      const { data } = await supabase
+        .from('bill_lines')
+        .select('id, description, quantity, unit_price, vat_rate, line_total, category')
+        .eq('bill_id', linesBillId)
+        .order('id');
+      return data ?? [];
+    },
+    enabled: !!linesBillId,
   });
 
   const uniqueLocations = Array.from(new Set(bills.map((b) => b.location_label).filter(Boolean))) as string[];
@@ -944,6 +959,13 @@ export default function BillsPage() {
                               </a>
                             )}
                             <button
+                              onClick={() => setLinesBillId(linesBillId === bill.id ? null : bill.id)}
+                              className={`transition-colors ${linesBillId === bill.id ? 'text-green-600' : 'text-gray-300 hover:text-green-600'}`}
+                              title="View line items"
+                            >
+                              <LayoutList size={14} />
+                            </button>
+                            <button
                               onClick={() => editingBillId === bill.id ? setEditingBillId(null) : startEdit(bill)}
                               className={`transition-colors ${editingBillId === bill.id ? 'text-indigo-500' : 'text-gray-300 hover:text-indigo-500'}`}
                               title="Edit"
@@ -1091,6 +1113,58 @@ export default function BillsPage() {
           )}
         </div>
       )}
+      {/* ── Line items modal ─────────────────────────────────────── */}
+      {linesBillId && (() => {
+        const bill = bills.find(b => b.id === linesBillId);
+        const fmtNum = (n: number) => n.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setLinesBillId(null)}>
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl mx-4 max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
+              <div className="px-6 py-4 border-b border-gray-100 flex items-start justify-between">
+                <div>
+                  <h2 className="font-semibold text-gray-900">{bill?.supplier_name}</h2>
+                  <p className="text-xs text-gray-400 mt-0.5">Invoice {bill?.invoice_number} · {fmtDate(bill?.invoice_date ?? null)}</p>
+                </div>
+                <button onClick={() => setLinesBillId(null)} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
+              </div>
+              <div className="overflow-y-auto flex-1">
+                {billLines.length === 0 ? (
+                  <div className="p-8 text-center text-gray-400 text-sm">No line items captured for this bill</div>
+                ) : (
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50 sticky top-0">
+                      <tr>
+                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Description</th>
+                        <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Qty</th>
+                        <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Unit Price</th>
+                        <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">VAT %</th>
+                        <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(billLines as Record<string, unknown>[]).map((line, i) => (
+                        <tr key={i} className="border-t border-gray-100 hover:bg-gray-50">
+                          <td className="px-4 py-2.5 text-gray-800">{line.description as string}</td>
+                          <td className="px-4 py-2.5 text-right text-gray-600">{line.quantity as number}</td>
+                          <td className="px-4 py-2.5 text-right text-gray-600">€{fmtNum(line.unit_price as number)}</td>
+                          <td className="px-4 py-2.5 text-right text-gray-500">{line.vat_rate as number}%</td>
+                          <td className="px-4 py-2.5 text-right font-medium text-gray-900">€{fmtNum(line.line_total as number)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr className="border-t-2 border-gray-200 bg-gray-50">
+                        <td colSpan={4} className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500">GROSS TOTAL</td>
+                        <td className="px-4 py-2.5 text-right font-bold text-gray-900">€{fmtNum(bill?.gross_amount ?? 0)}</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
