@@ -903,7 +903,8 @@ export default function BillsPage() {
             </div>
           ) : (
             <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
-              <table className="w-full text-sm">
+              <div className="overflow-x-auto">
+              <table className="w-full text-sm min-w-[1000px]">
                 <thead>
                   <tr className="bg-gray-50 border-b border-gray-200">
                     <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Supplier</th>
@@ -1149,6 +1150,7 @@ export default function BillsPage() {
                   </tr>
                 </tfoot>
               </table>
+              </div>
             </div>
           )}
         </div>
