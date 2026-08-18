@@ -285,14 +285,22 @@ export default function ItemsPage() {
     },
     staleTime: 30_000,
   });
-  const items: Item[] = Array.isArray(rawItems) ? rawItems : [];
+  const items: Item[] = Array.isArray(rawItems)
+    ? rawItems.map(item => ({
+        ...item,
+        keywords:               Array.isArray(item.keywords)               ? item.keywords               : [],
+        secondary_supplier_ids: Array.isArray(item.secondary_supplier_ids) ? item.secondary_supplier_ids : [],
+      }))
+    : [];
 
   const { data: rawCounterparties } = useQuery<Counterparty[]>({
     queryKey: ['counterparties'],
     queryFn: () => fetch('/api/counterparties').then(r => r.json()),
     staleTime: 60_000,
   });
-  const counterparties: Counterparty[] = Array.isArray(rawCounterparties) ? rawCounterparties : [];
+  const counterparties: Counterparty[] = Array.isArray(rawCounterparties)
+    ? rawCounterparties.map(cp => ({ ...cp, keywords: Array.isArray(cp.keywords) ? cp.keywords : [] }))
+    : [];
 
   const { data: rawBillLines } = useQuery<BillLine[]>({
     queryKey: ['bill-lines-all'],
