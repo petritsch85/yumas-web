@@ -62,6 +62,12 @@ type QueueItem = {
   periodEnd?:     string | null;
 };
 
+type Counterparty = {
+  id:       string;
+  name:     string;
+  keywords: string[];
+};
+
 type Bill = {
   id:             string;
   created_at:     string;
@@ -254,6 +260,12 @@ export default function BillsPage() {
         .order('period_start', { ascending: false });
       return (data ?? []) as Bill[];
     },
+  });
+
+  const { data: counterparties = [] } = useQuery<Counterparty[]>({
+    queryKey: ['counterparties'],
+    queryFn: () => fetch('/api/counterparties').then(r => r.json()),
+    staleTime: 60_000,
   });
 
   const { data: billLines = [] } = useQuery({
@@ -894,15 +906,17 @@ export default function BillsPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-gray-50 border-b border-gray-200">
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Supplier</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Invoice #</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Issue Date</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Location</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Category</th>
-                    <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Net / Mo</th>
-                    <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Gross</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Status</th>
-                    <th className="px-4 py-3 w-16"></th>
+                    <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Supplier</th>
+                    <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Invoice #</th>
+                    <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">Issue Date</th>
+                    <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Location</th>
+                    <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Category</th>
+                    <th className="px-3 py-2 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">Net / Mo</th>
+                    <th className="px-3 py-2 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">VAT %</th>
+                    <th className="px-3 py-2 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">VAT €</th>
+                    <th className="px-3 py-2 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Gross</th>
+                    <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Status</th>
+                    <th className="px-3 py-2 w-20"></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
@@ -916,41 +930,59 @@ export default function BillsPage() {
                       if (months > 1) monthlyNet = bill.net_amount / months;
                     }
                     const isSpread = bill.period_type === 'year' || bill.period_type === 'custom';
+                    const vatAmount = bill.vat_amount;
+                    const vatPct    = bill.net_amount > 0 ? (vatAmount / bill.net_amount * 100) : 0;
+                    const matchedCp = counterparties.find(cp => {
+                      const terms = cp.keywords.length > 0 ? cp.keywords : [cp.name];
+                      const lower  = bill.supplier_name.toLowerCase();
+                      return terms.some(kw => kw && lower.includes(kw.toLowerCase()));
+                    });
                     return (
                       <React.Fragment key={bill.id}>
                       <tr className="hover:bg-gray-50 transition-colors">
-                        <td className="px-4 py-3 font-semibold text-gray-900">{bill.supplier_name}</td>
-                        <td className="px-4 py-3 text-gray-500 font-mono text-xs">{bill.invoice_number ?? '—'}</td>
-                        <td className="px-4 py-3 text-gray-600 whitespace-nowrap text-xs">{fmtPeriod(bill)}</td>
-                        <td className="px-4 py-3">
+                        <td className="px-3 py-1.5 font-semibold text-gray-900 text-xs">
+                          <div className="flex items-center gap-1">
+                            <span>{matchedCp ? matchedCp.name : bill.supplier_name}</span>
+                            {matchedCp && (
+                              <span title="Matched counterparty" className="text-green-500 flex-shrink-0 cursor-default">
+                                <CheckCircle2 size={11} />
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-3 py-1.5 text-gray-500 font-mono text-xs">{bill.invoice_number ?? '—'}</td>
+                        <td className="px-3 py-1.5 text-gray-600 whitespace-nowrap text-xs">{fmtPeriod(bill)}</td>
+                        <td className="px-3 py-1.5">
                           {bill.location_label && (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-indigo-50 text-indigo-700 text-xs rounded-full">
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-indigo-50 text-indigo-700 text-xs rounded-full whitespace-nowrap">
                               <MapPin size={9} />{bill.location_label}
                             </span>
                           )}
                         </td>
-                        <td className="px-4 py-3">
+                        <td className="px-3 py-1.5">
                           {bill.category && (
-                            <span className="inline-block px-2 py-0.5 bg-gray-100 text-gray-600 text-xs rounded-full">
+                            <span className="inline-block px-1.5 py-0.5 bg-gray-100 text-gray-600 text-xs rounded-full whitespace-nowrap">
                               {bill.category}
                             </span>
                           )}
                         </td>
-                        <td className="px-4 py-3 text-right tabular-nums">
-                          <span className="text-gray-900">{fmt(monthlyNet)}</span>
-                          {isSpread && <span className="block text-[10px] text-gray-400">÷ month</span>}
+                        <td className="px-3 py-1.5 text-right tabular-nums">
+                          <span className="text-gray-900 text-xs">{fmt(monthlyNet)}</span>
+                          {isSpread && <span className="block text-[10px] text-gray-400">÷ mo</span>}
                         </td>
-                        <td className="px-4 py-3 text-right font-bold text-gray-900 tabular-nums">{fmt(bill.gross_amount)}</td>
-                        <td className="px-4 py-3">
+                        <td className="px-3 py-1.5 text-right tabular-nums text-xs text-gray-500">{vatPct.toFixed(0)}%</td>
+                        <td className="px-3 py-1.5 text-right tabular-nums text-xs text-gray-500">{fmt(vatAmount)}</td>
+                        <td className="px-3 py-1.5 text-right font-bold text-gray-900 tabular-nums text-xs">{fmt(bill.gross_amount)}</td>
+                        <td className="px-3 py-1.5">
                           <select value={bill.status} onChange={(e) => updateStatus(bill.id, e.target.value)}
-                            className={`text-xs font-semibold px-2 py-1 rounded-full border cursor-pointer focus:outline-none ${STATUS_STYLES[bill.status]}`}>
+                            className={`text-xs font-semibold px-2 py-0.5 rounded-full border cursor-pointer focus:outline-none ${STATUS_STYLES[bill.status]}`}>
                             <option value="pending">Pending</option>
                             <option value="approved">Approved</option>
                             <option value="paid">Paid</option>
                           </select>
                         </td>
-                        <td className="px-4 py-3">
-                          <div className="flex items-center gap-2">
+                        <td className="px-3 py-1.5">
+                          <div className="flex items-center gap-1.5">
                             {bill.file_path && (
                               <a href={`${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/bills/${bill.file_path}`}
                                 target="_blank" rel="noopener noreferrer"
@@ -981,7 +1013,7 @@ export default function BillsPage() {
                       {/* Inline edit row */}
                       {editingBillId === bill.id && editDraft && (
                         <tr className="bg-indigo-50/60">
-                          <td colSpan={9} className="px-4 py-4">
+                          <td colSpan={11} className="px-4 py-4">
                             <div className="grid grid-cols-5 gap-3 items-end">
                               {/* Location */}
                               <div>
@@ -1102,9 +1134,13 @@ export default function BillsPage() {
                 </tbody>
                 <tfoot>
                   <tr className="bg-gray-50 border-t-2 border-gray-200">
-                    <td colSpan={5} className="px-4 py-3 text-xs font-semibold text-gray-500">{filtered.length} bills</td>
-                    <td className="px-4 py-3 text-right font-bold text-gray-700 tabular-nums">{fmt(totals.net)}</td>
-                    <td className="px-4 py-3 text-right font-bold text-[#1B5E20] tabular-nums">{fmt(totals.gross)}</td>
+                    <td colSpan={5} className="px-3 py-2 text-xs font-semibold text-gray-500">{filtered.length} bills</td>
+                    <td className="px-3 py-2 text-right font-bold text-gray-700 tabular-nums text-xs">{fmt(totals.net)}</td>
+                    <td className="px-3 py-2 text-right text-xs text-gray-400 tabular-nums">
+                      {totals.net > 0 ? (totals.vat / totals.net * 100).toFixed(0) + '%' : '—'}
+                    </td>
+                    <td className="px-3 py-2 text-right font-bold text-amber-700 tabular-nums text-xs">{fmt(totals.vat)}</td>
+                    <td className="px-3 py-2 text-right font-bold text-[#1B5E20] tabular-nums text-xs">{fmt(totals.gross)}</td>
                     <td colSpan={2} />
                   </tr>
                 </tfoot>
