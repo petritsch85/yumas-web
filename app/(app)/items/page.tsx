@@ -24,7 +24,7 @@ type BillLine = {
   quantity: number;
   unit_price: number;
   line_total: number;
-  bill: { id: string; invoice_date: string | null; supplier_name: string } | null;
+  bill: { id: string; invoice_date: string | null; supplier_name: string }[] | null;
 };
 
 type FormState = {
@@ -53,7 +53,7 @@ function matchLines(item: Item, allLines: BillLine[]): BillLine[] {
       return terms.some(t => t && desc.includes(t.toLowerCase()));
     })
     .sort((a, b) =>
-      (b.bill?.invoice_date ?? '').localeCompare(a.bill?.invoice_date ?? '')
+      (b.bill?.[0]?.invoice_date ?? '').localeCompare(a.bill?.[0]?.invoice_date ?? '')
     );
 }
 
@@ -236,11 +236,11 @@ function PurchaseHistoryModal({
                 {lines.map(line => (
                   <tr key={line.id} className="border-t border-gray-100 hover:bg-gray-50">
                     <td className="px-4 py-2.5 text-gray-600 whitespace-nowrap font-mono text-xs">
-                      {fmtDate(line.bill?.invoice_date ?? null)}
+                      {fmtDate(line.bill?.[0]?.invoice_date ?? null)}
                     </td>
                     <td className="px-4 py-2.5 text-gray-800 text-sm">
-                      {line.bill?.supplier_name
-                        ? resolveSupplierName(line.bill.supplier_name, counterparties)
+                      {line.bill?.[0]?.supplier_name
+                        ? resolveSupplierName(line.bill[0].supplier_name, counterparties)
                         : '—'}
                     </td>
                     <td className="px-4 py-2.5 text-gray-500 text-xs max-w-[200px] truncate" title={line.description}>
