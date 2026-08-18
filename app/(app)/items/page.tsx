@@ -272,11 +272,16 @@ export default function ItemsPage() {
   const [editingId, setEditingId]     = useState<string | null>(null);
   const [historyItem, setHistoryItem] = useState<Item | null>(null);
 
-  const { data: items = [], isLoading } = useQuery<Item[]>({
+  const { data: rawItems, isLoading, isError } = useQuery<Item[]>({
     queryKey: ['items'],
-    queryFn: () => fetch('/api/items').then(r => r.json()),
+    queryFn: async () => {
+      const r = await fetch('/api/items');
+      if (!r.ok) throw new Error(await r.text());
+      return r.json();
+    },
     staleTime: 30_000,
   });
+  const items: Item[] = Array.isArray(rawItems) ? rawItems : [];
 
   const { data: counterparties = [] } = useQuery<Counterparty[]>({
     queryKey: ['counterparties'],
@@ -355,7 +360,14 @@ export default function ItemsPage() {
         </div>
       )}
 
-      {isLoading ? (
+      {isError ? (
+        <div className="py-12 text-center">
+          <div className="text-red-500 font-medium text-sm">Could not load items</div>
+          <div className="text-gray-400 text-xs mt-1">
+            Make sure you have run the items migration in Supabase (see <code>supabase/items_migration.sql</code>).
+          </div>
+        </div>
+      ) : isLoading ? (
         <div className="py-12 text-center text-gray-400 text-sm">Loading…</div>
       ) : items.length === 0 && !adding ? (
         <div className="py-16 text-center">
