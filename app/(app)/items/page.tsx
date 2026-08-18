@@ -25,7 +25,7 @@ type BillLine = {
   quantity: number;
   unit_price: number;
   line_total: number;
-  bill: Bill[] | null;
+  bill: Bill | null;
 };
 
 type FormState = {
@@ -54,7 +54,7 @@ function matchLines(item: Item, allLines: BillLine[]): BillLine[] {
       return terms.some(t => t && desc.includes(t.toLowerCase()));
     })
     .sort((a, b) =>
-      (b.bill?.[0]?.invoice_date ?? '').localeCompare(a.bill?.[0]?.invoice_date ?? '')
+      (b.bill?.invoice_date ?? '').localeCompare(a.bill?.invoice_date ?? '')
     );
 }
 
@@ -202,13 +202,13 @@ function PurchaseHistoryModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
       onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl mx-4 flex flex-col max-h-[80vh]">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl mx-4 flex flex-col max-h-[80vh]">
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
           <div>
             <h3 className="font-semibold text-gray-900">Purchase History — {item.name}</h3>
             <p className="text-xs text-gray-500 mt-0.5">
               {lines.length} purchase{lines.length !== 1 ? 's' : ''}
-              {item.kg_per_unit ? ` · 1 unit = ${item.kg_per_unit} kg / L` : ''}
+              {item.kg_per_unit ? ` · 1 unit = ${item.kg_per_unit} kg / L` : ' · set kg/L per unit to enable accurate price/kg'}
             </p>
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
@@ -222,40 +222,37 @@ function PurchaseHistoryModal({
             <table className="w-full text-sm">
               <thead className="bg-gray-50 sticky top-0 border-b border-gray-200">
                 <tr>
-                  <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase">Date</th>
+                  <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">Date</th>
                   <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase">Supplier</th>
                   <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase">Description</th>
                   <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase">Qty</th>
-                  <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase">Price / unit</th>
-                  {kgPerUnit !== 1 && (
-                    <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase">Price / kg·L</th>
-                  )}
-                  <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase">Total (net)</th>
+                  <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">Price / Unit</th>
+                  <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">Price / KG or L</th>
+                  <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">Total (net)</th>
                 </tr>
               </thead>
               <tbody>
                 {lines.map(line => {
-                  const bill = line.bill?.[0] ?? null;
+                  const bill = line.bill ?? null;
+                  const pricePerKg = line.unit_price / kgPerUnit;
                   return (
                     <tr key={line.id} className="border-t border-gray-100 hover:bg-gray-50">
                       <td className="px-4 py-2.5 text-gray-600 whitespace-nowrap font-mono text-xs">
                         {fmtDate(bill?.invoice_date ?? null)}
                       </td>
-                      <td className="px-4 py-2.5 text-gray-800 text-sm">
+                      <td className="px-4 py-2.5 text-gray-800 text-sm whitespace-nowrap">
                         {bill?.supplier_name
                           ? resolveSupplierName(bill.supplier_name, counterparties)
                           : '—'}
                       </td>
-                      <td className="px-4 py-2.5 text-gray-500 text-xs max-w-[200px] truncate" title={line.description}>
+                      <td className="px-4 py-2.5 text-gray-500 text-xs max-w-[220px] truncate" title={line.description}>
                         {line.description}
                       </td>
                       <td className="px-4 py-2.5 text-right text-gray-700 tabular-nums">{line.quantity}</td>
                       <td className="px-4 py-2.5 text-right text-gray-900 font-medium tabular-nums">{fmt(line.unit_price)}</td>
-                      {kgPerUnit !== 1 && (
-                        <td className="px-4 py-2.5 text-right text-[#1B5E20] font-semibold tabular-nums">
-                          {fmt(line.unit_price / kgPerUnit)}
-                        </td>
-                      )}
+                      <td className="px-4 py-2.5 text-right text-[#1B5E20] font-semibold tabular-nums">
+                        {fmt(pricePerKg)}
+                      </td>
                       <td className="px-4 py-2.5 text-right font-semibold text-gray-900 tabular-nums">{fmt(line.line_total)}</td>
                     </tr>
                   );
