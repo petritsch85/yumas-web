@@ -167,7 +167,7 @@ const NAV_GROUPS: NavGroup[] = [
         ],
       },
       { labelKey: 'sidebar.nav.cashFlowCheck', href: '/cashflow', icon: Banknote },
-      { labelKey: 'sidebar.nav.items',         href: '/items',    icon: Package },
+      { labelKey: 'sidebar.nav.purchasedGoods', href: '/items',    icon: Package },
     ],
   },
   {

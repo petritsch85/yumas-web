@@ -8,7 +8,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   if (!name?.trim()) return NextResponse.json({ error: 'Name required' }, { status: 400 });
 
   const admin = getSupabaseAdmin();
-  const { data, error } = await admin.from('items').update({
+  const { data, error } = await admin.from('purchased_goods').update({
     name:                   name.trim(),
     keywords:               Array.isArray(keywords) ? keywords.filter(Boolean) : [],
     primary_supplier_id:    primary_supplier_id || null,
@@ -23,7 +23,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const admin = getSupabaseAdmin();
-  const { error } = await admin.from('items').delete().eq('id', id);
+  const { error } = await admin.from('purchased_goods').delete().eq('id', id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ ok: true });
 }
