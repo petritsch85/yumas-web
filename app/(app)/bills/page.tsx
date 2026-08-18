@@ -950,7 +950,11 @@ export default function BillsPage() {
                             )}
                           </div>
                         </td>
-                        <td className="px-3 py-1.5 text-gray-500 font-mono text-xs">{bill.invoice_number ?? '—'}</td>
+                        <td className="px-3 py-1.5 text-xs">
+                          {bill.invoice_number
+                            ? <span title={bill.invoice_number} className="text-gray-400 cursor-default underline decoration-dashed underline-offset-2">Show</span>
+                            : <span className="text-gray-300">—</span>}
+                        </td>
                         <td className="px-3 py-1.5 text-gray-600 whitespace-nowrap text-xs">{fmtPeriod(bill)}</td>
                         <td className="px-3 py-1.5">
                           {bill.location_label && (
