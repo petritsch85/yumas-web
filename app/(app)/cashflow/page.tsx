@@ -321,52 +321,45 @@ function TxRow({ tx, onSave, counterparties }: {
         {/* Date */}
         <td className="py-2 px-3 text-gray-500 whitespace-nowrap font-mono text-xs">{fmtDate(tx.date)}</td>
 
-        {/* Counterparty (raw bank) */}
-        <td className="py-2 px-3 max-w-[220px]" title={tx.counterparty}>
-          <div className="truncate text-gray-900">{tx.counterparty || '—'}</div>
-          {tx.description && (
-            <div className="truncate text-gray-400 text-xs mt-0.5" title={tx.description}>
-              {tx.description.slice(0, 80)}
-            </div>
-          )}
-        </td>
-
-        {/* Yumas Counterparty */}
+        {/* Counterparty — shows matched short name with green tick, falls back to raw bank name */}
         {(() => {
-          const pinned   = tx.counterparty_id ? counterparties.find(cp => cp.id === tx.counterparty_id) ?? null : null;
+          const pinned    = tx.counterparty_id ? counterparties.find(cp => cp.id === tx.counterparty_id) ?? null : null;
           const autoMatch = pinned ? null : matchCounterparty(tx.counterparty, counterparties);
           const resolved  = pinned ?? autoMatch;
-          const isAuto    = !pinned && !!autoMatch;
           return (
-            <td className="py-2 px-3 max-w-[180px]">
+            <td className="py-2 px-3 max-w-[220px]">
               {resolved ? (
-                <div className="flex items-center gap-1">
-                  <span className={`text-xs truncate ${isAuto ? 'text-gray-400 italic' : 'text-gray-800 font-medium'}`}>
-                    {resolved.name}
-                  </span>
-                  {pinned && !locked && (
-                    <button
-                      title="Remove assignment"
-                      onClick={() => onSave(tx.id, { counterparty_id: null })}
-                      className="text-gray-300 hover:text-red-400 flex-shrink-0"
-                    >
-                      <X size={10} />
-                    </button>
-                  )}
-                </div>
-              ) : locked ? (
-                <span className="text-gray-300 text-xs">—</span>
+                <>
+                  <div className="flex items-center gap-1">
+                    <span className="font-semibold text-gray-900 truncate">{resolved.name}</span>
+                    <span title="Matched counterparty"><CheckCircle2 size={11} className="text-green-500 flex-shrink-0" /></span>
+                    {pinned && !locked && (
+                      <button title="Remove assignment" onClick={() => onSave(tx.id, { counterparty_id: null })}
+                        className="text-gray-300 hover:text-red-400 flex-shrink-0">
+                        <X size={10} />
+                      </button>
+                    )}
+                  </div>
+                  <div className="truncate text-gray-400 text-xs mt-0.5" title={tx.counterparty}>
+                    {tx.counterparty}
+                  </div>
+                </>
               ) : (
-                <select
-                  value=""
-                  onChange={e => e.target.value && onSave(tx.id, { counterparty_id: e.target.value })}
-                  className="text-xs text-gray-400 border-0 outline-none cursor-pointer bg-transparent hover:text-gray-700 max-w-[160px]"
-                >
-                  <option value="">Assign…</option>
-                  {counterparties.map(cp => (
-                    <option key={cp.id} value={cp.id}>{cp.name}</option>
-                  ))}
-                </select>
+                <>
+                  <div className="truncate text-gray-900">{tx.counterparty || '—'}</div>
+                  {tx.description && (
+                    <div className="truncate text-gray-400 text-xs mt-0.5" title={tx.description}>
+                      {tx.description.slice(0, 80)}
+                    </div>
+                  )}
+                  {!locked && (
+                    <select value="" onChange={e => e.target.value && onSave(tx.id, { counterparty_id: e.target.value })}
+                      className="text-xs text-gray-400 border-0 outline-none cursor-pointer bg-transparent hover:text-gray-700 mt-0.5">
+                      <option value="">Assign…</option>
+                      {counterparties.map(cp => <option key={cp.id} value={cp.id}>{cp.name}</option>)}
+                    </select>
+                  )}
+                </>
               )}
             </td>
           );
@@ -1057,7 +1050,6 @@ export default function CashFlowPage() {
                       {([
                         { col: 'date',        label: 'Date',               align: 'left'  },
                         { col: 'counterparty',label: 'Counterparty',       align: 'left'  },
-                        { col: 'yumas_cp',    label: 'Yumas Counterparty', align: 'left'  },
                         { col: 'brutto',      label: 'Amount Brutto',      align: 'right' },
                         { col: 'vatpct',      label: 'VAT %',         align: 'right' },
                         { col: 'vateur',      label: 'VAT €',         align: 'right' },
