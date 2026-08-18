@@ -166,8 +166,8 @@ const NAV_GROUPS: NavGroup[] = [
           { labelKey: 'sidebar.nav.outgoing', href: '/bills/outgoing', icon: FileCheck, permKey: 'bills_create' },
         ],
       },
-      { labelKey: 'sidebar.nav.cashFlowCheck',  href: '/cashflow',                    icon: Banknote },
-      { labelKey: 'sidebar.nav.demandForecast', href: '/coming-soon/demand-forecast', icon: TrendingDown },
+      { labelKey: 'sidebar.nav.cashFlowCheck', href: '/cashflow', icon: Banknote },
+      { labelKey: 'sidebar.nav.items',         href: '/items',    icon: Package },
     ],
   },
   {
