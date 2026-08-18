@@ -46,6 +46,14 @@ function fmtDate(d: string | null) {
   return `${day}.${m}.${y}`;
 }
 
+// Parse unit size in kg/L from description, e.g. "(3kg)" → 3, "(kg)" → 1
+function parseUnitKg(description: string, fallback = 1): number {
+  const match = description.match(/\((\d+(?:[.,]\d+)?)\s*(?:kg|l|liter|litre)\)/i);
+  if (match) return parseFloat(match[1].replace(',', '.'));
+  if (/\(\s*(?:kg|l|liter|litre)\s*\)/i.test(description)) return 1;
+  return fallback;
+}
+
 function matchLines(item: Item, allLines: BillLine[]): BillLine[] {
   const terms = [item.name, ...item.keywords].filter(Boolean);
   return allLines
@@ -226,6 +234,7 @@ function PurchaseHistoryModal({
                   <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase">Supplier</th>
                   <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase">Description</th>
                   <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase">Qty</th>
+                  <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase">Unit</th>
                   <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">Price / Unit</th>
                   <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">Price / KG or L</th>
                   <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">Total (net)</th>
@@ -234,7 +243,8 @@ function PurchaseHistoryModal({
               <tbody>
                 {lines.map(line => {
                   const bill = line.bill ?? null;
-                  const pricePerKg = line.unit_price / kgPerUnit;
+                  const unitKg = parseUnitKg(line.description, kgPerUnit);
+                  const pricePerKg = line.unit_price / unitKg;
                   return (
                     <tr key={line.id} className="border-t border-gray-100 hover:bg-gray-50">
                       <td className="px-4 py-2.5 text-gray-600 whitespace-nowrap font-mono text-xs">
@@ -249,6 +259,9 @@ function PurchaseHistoryModal({
                         {line.description}
                       </td>
                       <td className="px-4 py-2.5 text-right text-gray-700 tabular-nums">{line.quantity}</td>
+                      <td className="px-4 py-2.5 text-right text-gray-500 text-xs whitespace-nowrap">
+                        {unitKg === 1 ? '1 kg' : `${unitKg} kg`}
+                      </td>
                       <td className="px-4 py-2.5 text-right text-gray-900 font-medium tabular-nums">{fmt(line.unit_price)}</td>
                       <td className="px-4 py-2.5 text-right text-[#1B5E20] font-semibold tabular-nums">
                         {fmt(pricePerKg)}
