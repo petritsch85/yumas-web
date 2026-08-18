@@ -3,7 +3,6 @@
 import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Pencil, Trash2, X, Check, History, Tag, Package } from 'lucide-react';
-import { supabase } from '@/lib/supabase-browser';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type Counterparty = { id: string; name: string; keywords: string[] };
@@ -18,13 +17,15 @@ type Item = {
   created_at: string;
 };
 
+type Bill = { id: string; invoice_date: string | null; supplier_name: string };
+
 type BillLine = {
   id: string;
   description: string;
   quantity: number;
   unit_price: number;
   line_total: number;
-  bill: { id: string; invoice_date: string | null; supplier_name: string }[] | null;
+  bill: Bill[] | null;
 };
 
 type FormState = {
@@ -207,7 +208,7 @@ function PurchaseHistoryModal({
             <h3 className="font-semibold text-gray-900">Purchase History — {item.name}</h3>
             <p className="text-xs text-gray-500 mt-0.5">
               {lines.length} purchase{lines.length !== 1 ? 's' : ''}
-              {item.kg_per_unit && ` · 1 unit = ${item.kg_per_unit} kg / L`}
+              {item.kg_per_unit ? ` · 1 unit = ${item.kg_per_unit} kg / L` : ''}
             </p>
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
@@ -233,29 +234,32 @@ function PurchaseHistoryModal({
                 </tr>
               </thead>
               <tbody>
-                {lines.map(line => (
-                  <tr key={line.id} className="border-t border-gray-100 hover:bg-gray-50">
-                    <td className="px-4 py-2.5 text-gray-600 whitespace-nowrap font-mono text-xs">
-                      {fmtDate(line.bill?.[0]?.invoice_date ?? null)}
-                    </td>
-                    <td className="px-4 py-2.5 text-gray-800 text-sm">
-                      {line.bill?.[0]?.supplier_name
-                        ? resolveSupplierName(line.bill[0].supplier_name, counterparties)
-                        : '—'}
-                    </td>
-                    <td className="px-4 py-2.5 text-gray-500 text-xs max-w-[200px] truncate" title={line.description}>
-                      {line.description}
-                    </td>
-                    <td className="px-4 py-2.5 text-right text-gray-700 tabular-nums">{line.quantity}</td>
-                    <td className="px-4 py-2.5 text-right text-gray-900 font-medium tabular-nums">{fmt(line.unit_price)}</td>
-                    {kgPerUnit !== 1 && (
-                      <td className="px-4 py-2.5 text-right text-[#1B5E20] font-semibold tabular-nums">
-                        {fmt(line.unit_price / kgPerUnit)}
+                {lines.map(line => {
+                  const bill = line.bill?.[0] ?? null;
+                  return (
+                    <tr key={line.id} className="border-t border-gray-100 hover:bg-gray-50">
+                      <td className="px-4 py-2.5 text-gray-600 whitespace-nowrap font-mono text-xs">
+                        {fmtDate(bill?.invoice_date ?? null)}
                       </td>
-                    )}
-                    <td className="px-4 py-2.5 text-right font-semibold text-gray-900 tabular-nums">{fmt(line.line_total)}</td>
-                  </tr>
-                ))}
+                      <td className="px-4 py-2.5 text-gray-800 text-sm">
+                        {bill?.supplier_name
+                          ? resolveSupplierName(bill.supplier_name, counterparties)
+                          : '—'}
+                      </td>
+                      <td className="px-4 py-2.5 text-gray-500 text-xs max-w-[200px] truncate" title={line.description}>
+                        {line.description}
+                      </td>
+                      <td className="px-4 py-2.5 text-right text-gray-700 tabular-nums">{line.quantity}</td>
+                      <td className="px-4 py-2.5 text-right text-gray-900 font-medium tabular-nums">{fmt(line.unit_price)}</td>
+                      {kgPerUnit !== 1 && (
+                        <td className="px-4 py-2.5 text-right text-[#1B5E20] font-semibold tabular-nums">
+                          {fmt(line.unit_price / kgPerUnit)}
+                        </td>
+                      )}
+                      <td className="px-4 py-2.5 text-right font-semibold text-gray-900 tabular-nums">{fmt(line.line_total)}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           )}
@@ -283,22 +287,23 @@ export default function ItemsPage() {
   });
   const items: Item[] = Array.isArray(rawItems) ? rawItems : [];
 
-  const { data: counterparties = [] } = useQuery<Counterparty[]>({
+  const { data: rawCounterparties } = useQuery<Counterparty[]>({
     queryKey: ['counterparties'],
     queryFn: () => fetch('/api/counterparties').then(r => r.json()),
     staleTime: 60_000,
   });
+  const counterparties: Counterparty[] = Array.isArray(rawCounterparties) ? rawCounterparties : [];
 
-  const { data: billLines = [] } = useQuery<BillLine[]>({
+  const { data: rawBillLines } = useQuery<BillLine[]>({
     queryKey: ['bill-lines-all'],
     queryFn: async () => {
-      const { data } = await supabase
-        .from('bill_lines')
-        .select('id, description, quantity, unit_price, line_total, bill:bills(id, invoice_date, supplier_name)');
-      return (data ?? []) as BillLine[];
+      const r = await fetch('/api/items/bill-lines');
+      if (!r.ok) return [];
+      return r.json();
     },
     staleTime: 60_000,
   });
+  const billLines: BillLine[] = Array.isArray(rawBillLines) ? rawBillLines : [];
 
   const buildPayload = (data: FormState & { keywords: string[] }) => ({
     name:                   data.name,
@@ -364,7 +369,7 @@ export default function ItemsPage() {
         <div className="py-12 text-center">
           <div className="text-red-500 font-medium text-sm">Could not load items</div>
           <div className="text-gray-400 text-xs mt-1">
-            Make sure you have run the items migration in Supabase (see <code>supabase/items_migration.sql</code>).
+            Run the migration in Supabase: <code>supabase/items_migration.sql</code>
           </div>
         </div>
       ) : isLoading ? (
@@ -408,15 +413,15 @@ export default function ItemsPage() {
                     );
                   }
 
-                  const matched     = matchLines(item, billLines);
-                  const latest      = matched[0] ?? null;
-                  const kgPerUnit   = item.kg_per_unit ?? 1;
+                  const matched      = matchLines(item, billLines);
+                  const latest       = matched[0] ?? null;
+                  const kgPerUnit    = item.kg_per_unit ?? 1;
                   const pricePerUnit = latest?.unit_price ?? null;
-                  const pricePerKg  = pricePerUnit != null ? pricePerUnit / kgPerUnit : null;
-                  const primaryCp   = counterparties.find(c => c.id === item.primary_supplier_id);
+                  const pricePerKg   = pricePerUnit != null ? pricePerUnit / kgPerUnit : null;
+                  const primaryCp    = counterparties.find(c => c.id === item.primary_supplier_id);
                   const secondaryCps = item.secondary_supplier_ids
                     .map(id => counterparties.find(c => c.id === id))
-                    .filter((c): c is Counterparty => !!c);
+                    .filter((c): c is Counterparty => Boolean(c));
 
                   return (
                     <tr key={item.id} className="hover:bg-gray-50 transition-colors">
@@ -430,9 +435,9 @@ export default function ItemsPage() {
                             ))}
                           </div>
                         )}
-                        {item.kg_per_unit && (
+                        {item.kg_per_unit ? (
                           <div className="text-[10px] text-gray-400 mt-0.5">1 unit = {item.kg_per_unit} kg / L</div>
-                        )}
+                        ) : null}
                       </td>
                       <td className="px-4 py-2.5">
                         {primaryCp ? (
@@ -477,7 +482,10 @@ export default function ItemsPage() {
                             <Pencil size={13} />
                           </button>
                           <button
-                            onClick={() => { if (!confirm(`Delete "${item.name}"?`)) return; deleteMut.mutate(item.id); }}
+                            onClick={() => {
+                              if (!confirm(`Delete "${item.name}"?`)) return;
+                              deleteMut.mutate(item.id);
+                            }}
                             className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded transition-colors">
                             <Trash2 size={13} />
                           </button>
