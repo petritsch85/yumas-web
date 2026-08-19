@@ -3,6 +3,7 @@
 import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Pencil, Trash2, X, Check, History, Tag, Package } from 'lucide-react';
+import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type Counterparty = { id: string; name: string; keywords: string[] };
@@ -221,7 +222,7 @@ function PurchaseHistoryModal({
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
         </div>
-        <div className="overflow-y-auto flex-1">
+        <div className="overflow-y-auto max-h-[340px]">
           {lines.length === 0 ? (
             <div className="py-12 text-center text-gray-400 text-sm">
               No purchases found yet — add keywords if the item name doesn&apos;t match bill lines
@@ -274,6 +275,47 @@ function PurchaseHistoryModal({
             </table>
           )}
         </div>
+
+        {/* Price / KG or L chart */}
+        {lines.length > 0 && (() => {
+          const chartData = [...lines]
+            .filter(l => l.bill?.invoice_date)
+            .sort((a, b) => new Date(a.bill!.invoice_date!).getTime() - new Date(b.bill!.invoice_date!).getTime())
+            .map(l => ({
+              date: fmtDate(l.bill!.invoice_date!),
+              price: parseFloat((l.unit_price / parseUnitKg(l.description, kgPerUnit)).toFixed(2)),
+            }));
+          return (
+            <div className="border-t border-gray-100 px-4 pt-4 pb-3">
+              <p className="text-xs font-semibold text-gray-400 uppercase mb-2">Price / KG or L over time</p>
+              <ResponsiveContainer width="100%" height={180}>
+                <LineChart data={chartData} margin={{ top: 4, right: 12, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                  <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#9ca3af' }} tickLine={false} axisLine={false} />
+                  <YAxis
+                    tick={{ fontSize: 10, fill: '#9ca3af' }}
+                    tickLine={false}
+                    axisLine={false}
+                    tickFormatter={v => `${v} €`}
+                    width={48}
+                  />
+                  <Tooltip
+                    formatter={(v) => [typeof v === 'number' ? `${v.toFixed(2)} €` : v, 'Price / KG or L']}
+                    contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e5e7eb' }}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="price"
+                    stroke="#1B5E20"
+                    strokeWidth={2}
+                    dot={{ r: 3, fill: '#1B5E20', strokeWidth: 0 }}
+                    activeDot={{ r: 5 }}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          );
+        })()}
       </div>
     </div>
   );
