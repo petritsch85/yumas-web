@@ -311,29 +311,22 @@ export default function BillsPage() {
     });
 
   // ── Duplicate detection ───────────────────────────────────────────────────────
+  // A duplicate requires ALL THREE: same supplier + same gross + same net + same invoice number
   const duplicateIds = useMemo(() => {
     const ids = new Set<string>();
-    // Group by invoice_number + supplier (definitive)
-    const byInv = new Map<string, string[]>();
+    const byKey = new Map<string, string[]>();
     for (const b of bills) {
-      if (b.invoice_number) {
-        const key = `${b.supplier_name.toLowerCase()}|${b.invoice_number.toLowerCase()}`;
-        if (!byInv.has(key)) byInv.set(key, []);
-        byInv.get(key)!.push(b.id);
-      }
+      if (!b.invoice_number) continue;
+      const key = [
+        b.supplier_name.toLowerCase().trim(),
+        Math.round(b.gross_amount * 100),
+        Math.round(b.net_amount * 100),
+        b.invoice_number.toLowerCase().trim(),
+      ].join('|');
+      if (!byKey.has(key)) byKey.set(key, []);
+      byKey.get(key)!.push(b.id);
     }
-    for (const group of byInv.values()) {
-      if (group.length > 1) group.forEach(id => ids.add(id));
-    }
-    // Group by supplier + amount + date (probable)
-    const byAmt = new Map<string, string[]>();
-    for (const b of bills) {
-      const date = b.invoice_date ?? b.period_start ?? '';
-      const key  = `${b.supplier_name.toLowerCase()}|${Math.round(b.gross_amount * 100)}|${date}`;
-      if (!byAmt.has(key)) byAmt.set(key, []);
-      byAmt.get(key)!.push(b.id);
-    }
-    for (const group of byAmt.values()) {
+    for (const group of byKey.values()) {
       if (group.length > 1) group.forEach(id => ids.add(id));
     }
     return ids;
@@ -342,26 +335,18 @@ export default function BillsPage() {
   const isDuplicateInQueue = useCallback((item: QueueItem): boolean => {
     if (item.status !== 'done' || !item.data) return false;
     const d = item.data;
+    if (!d.invoice_number) return false;
     const norm = (s: string) => s.toLowerCase().trim();
-    return bills.some(b => {
-      if (b.invoice_number && d.invoice_number &&
-          norm(b.supplier_name) === norm(d.supplier_name) &&
-          norm(b.invoice_number) === norm(d.invoice_number)) return true;
-      if (norm(b.supplier_name) === norm(d.supplier_name) &&
-          Math.abs(b.gross_amount - d.gross_amount) < 0.01 &&
-          (b.invoice_date ?? '') !== '' &&
-          (b.invoice_date ?? '') === (d.invoice_date ?? '')) return true;
-      return false;
-    }) || queue.some(other => {
-      if (other.id === item.id || other.status !== 'done' || !other.data) return false;
-      const od = other.data;
-      if (d.invoice_number && od.invoice_number &&
-          norm(d.supplier_name) === norm(od.supplier_name) &&
-          norm(d.invoice_number) === norm(od.invoice_number)) return true;
-      if (norm(d.supplier_name) === norm(od.supplier_name) &&
-          Math.abs(d.gross_amount - od.gross_amount) < 0.01) return true;
-      return false;
-    });
+    const isMatch = (supplier: string, gross: number, net: number, inv: string) =>
+      norm(supplier) === norm(d.supplier_name) &&
+      Math.abs(gross - d.gross_amount) < 0.01 &&
+      Math.abs(net - d.net_amount) < 0.01 &&
+      norm(inv) === norm(d.invoice_number!);
+    return bills.some(b => b.invoice_number && isMatch(b.supplier_name, b.gross_amount, b.net_amount, b.invoice_number))
+      || queue.some(other => {
+        if (other.id === item.id || other.status !== 'done' || !other.data?.invoice_number) return false;
+        return isMatch(other.data.supplier_name, other.data.gross_amount, other.data.net_amount, other.data.invoice_number);
+      });
   }, [bills, queue]);
 
   const filtered = bills.filter((b) => {
