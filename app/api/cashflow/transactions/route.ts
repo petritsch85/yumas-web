@@ -16,7 +16,7 @@ export async function GET(req: NextRequest) {
   const admin = getSupabaseAdmin();
   let q = admin
     .from('cashflow_transactions')
-    .select('*, bill:bills(id, supplier_name, invoice_number, gross_amount)', { count: 'exact' })
+    .select('*, bill:bills(id, supplier_name, invoice_number, gross_amount, file_path)', { count: 'exact' })
     .order('date', { ascending: false })
     .order('created_at', { ascending: false })
     .range((page - 1) * pageSize, page * pageSize - 1);

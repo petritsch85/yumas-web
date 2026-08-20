@@ -23,6 +23,7 @@ type BillRef = {
   supplier_name: string;
   invoice_number: string | null;
   gross_amount: number;
+  file_path: string | null;
 };
 
 type CfTx = {
@@ -363,12 +364,22 @@ function TxRow({ tx, onSave, counterparties }: {
         {/* Bill */}
         <td className="py-2 px-2 whitespace-nowrap">
           {tx.bill ? (
-            <button onClick={() => !locked && setShowModal(true)}
-              title={`${tx.bill.supplier_name} · ${tx.bill.invoice_number ?? 'no inv#'}`}
-              className={`flex items-center gap-1 text-xs font-medium text-green-700 bg-green-50 border border-green-200 rounded-full px-2 py-0.5 max-w-[110px] transition-colors ${locked ? 'cursor-default opacity-80' : 'hover:bg-green-100 cursor-pointer'}`}>
-              <Link2 size={10} className="flex-shrink-0" />
-              <span className="truncate">{tx.bill.invoice_number ?? tx.bill.supplier_name}</span>
-            </button>
+            <div className="flex items-center gap-1">
+              <button
+                title={`${tx.bill.supplier_name}${tx.bill.invoice_number ? ' · ' + tx.bill.invoice_number : ''}`}
+                onClick={() => tx.bill?.file_path
+                  ? window.open(`/api/bills/${tx.bill.id}/pdf`, '_blank')
+                  : setShowModal(true)}
+                className="flex items-center justify-center w-6 h-6 rounded-full bg-green-50 border border-green-200 text-green-600 hover:bg-green-100 transition-colors cursor-pointer">
+                <CheckCircle2 size={13} />
+              </button>
+              {!locked && (
+                <button title="Unlink bill" onClick={() => patch('bill_id', null)}
+                  className="text-gray-300 hover:text-red-400 transition-colors">
+                  <X size={10} />
+                </button>
+              )}
+            </div>
           ) : (
             <button onClick={() => !locked && setShowModal(true)}
               className={`flex items-center gap-1 text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5 transition-colors ${locked ? 'cursor-default opacity-50' : 'hover:bg-amber-100 cursor-pointer'}`}>
