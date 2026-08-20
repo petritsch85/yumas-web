@@ -94,7 +94,7 @@ async function repairJSON(bad: string): Promise<string> {
     : `The following text is supposed to be a JSON object but has syntax errors. Fix it and return only valid JSON, no markdown, no trailing commas, all property names in double quotes:`;
 
   const repair = await client.messages.create({
-    model: 'claude-opus-4-5',
+    model: 'claude-haiku-4-5-20251001',
     max_tokens: 8192,
     messages: [
       {
@@ -116,7 +116,7 @@ export async function POST(req: NextRequest) {
     }
 
     const response = await client.messages.create({
-      model: 'claude-opus-4-5',
+      model: 'claude-haiku-4-5-20251001',
       max_tokens: 8192,
       system: SYSTEM_PROMPT,
       messages: [
