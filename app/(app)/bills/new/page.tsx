@@ -1,8 +1,8 @@
 'use client';
 
 import dynamic from 'next/dynamic';
-import { useState, useCallback } from 'react';
-import { Plus, Trash2, FileDown } from 'lucide-react';
+import { useState, useCallback, useRef } from 'react';
+import { Plus, Trash2, FileDown, ScanLine } from 'lucide-react';
 import type { BillData, LineItem } from '@/components/bills/BillDocument';
 import { useT } from '@/lib/i18n';
 
@@ -44,6 +44,52 @@ export default function NewBillPage() {
   ]);
 
   const [generating, setGenerating] = useState(false);
+  const [scanning, setScanning]     = useState(false);
+  const [scanError, setScanError]   = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleScanReceipt = async (file: File) => {
+    setScanError('');
+    setScanning(true);
+    try {
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const result = reader.result as string;
+          resolve(result.split(',')[1]);
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+
+      const res = await fetch('/api/extract-outgoing-bill', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pdfBase64: base64, fileName: file.name }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? 'Extraction failed');
+
+      const d = json.data as Record<string, unknown>;
+      if (d.customer_name)   setCompany(String(d.customer_name));
+      if (d.customer_name_extra) setExtra(String(d.customer_name_extra));
+      if (d.customer_street)  setStreet(String(d.customer_street));
+      if (d.customer_postcode) setPostcode(String(d.customer_postcode));
+      if (d.customer_city)    setCity(String(d.customer_city));
+      if (d.invoice_number)   setInvoiceNumber(String(d.invoice_number));
+      if (typeof d.net_food === 'number' && d.net_food)
+        setEssenNetto(String(d.net_food));
+      if (typeof d.net_drinks === 'number' && d.net_drinks)
+        setGetraenkeNetto(String(d.net_drinks));
+      if (typeof d.tips === 'number' && d.tips)
+        setTrinkgeld(String(d.tips));
+    } catch (err: any) {
+      setScanError(err.message ?? 'Failed to scan receipt');
+    } finally {
+      setScanning(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
 
   const handleTypeChange = (t: 'monthly' | 'dinner') => {
     setType(t);
@@ -166,7 +212,31 @@ export default function NewBillPage() {
 
         {/* ── Recipient ──────────────────────────────────────────── */}
         <div className="bg-white rounded-lg border border-gray-100 shadow-sm p-5">
-          <p className="text-sm font-bold text-gray-700 mb-4">Recipient</p>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".pdf"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) handleScanReceipt(f);
+            }}
+          />
+          <div className="flex items-center justify-between mb-4">
+            <p className="text-sm font-bold text-gray-700">Recipient</p>
+            <button
+              type="button"
+              disabled={scanning}
+              onClick={() => fileInputRef.current?.click()}
+              className="flex items-center gap-1.5 text-xs font-medium text-[#1B5E20] border border-[#1B5E20] rounded-lg px-3 py-1.5 hover:bg-green-50 transition-colors disabled:opacity-50"
+            >
+              <ScanLine size={13} />
+              {scanning ? 'Scanning…' : 'Scan receipt'}
+            </button>
+          </div>
+          {scanError && (
+            <p className="text-xs text-red-500 mb-3">{scanError}</p>
+          )}
           <div className="space-y-3">
             <div>
               <label className={labelCls}>Company Name *</label>

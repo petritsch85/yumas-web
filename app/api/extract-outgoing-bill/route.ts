@@ -29,8 +29,11 @@ The issuing Yumas location can be inferred from the address in the document head
 
 Return this exact JSON structure (valid JSON only — no markdown, no explanation, no trailing commas):
 {
-  "customer_name": "string — the company or person the invoice is addressed TO",
-  "customer_address": "string — full address of the customer, or null",
+  "customer_name": "string — the company or person the invoice is addressed TO (first line of Rechnungsempfänger)",
+  "customer_name_extra": "string or null — second line of recipient name if present (e.g. person name below company name)",
+  "customer_street": "string or null — street and house number of the customer",
+  "customer_postcode": "string or null — postcode of the customer",
+  "customer_city": "string or null — city of the customer",
   "invoice_number": "string or null",
   "invoice_date": "YYYY-MM-DD or null",
   "event_date": "YYYY-MM-DD or null — the date of the actual event/dinner/lunch",
@@ -49,6 +52,7 @@ Rules:
 - All amounts as plain numbers with dot as decimal separator (e.g. 2119.63 not 2.119,63)
 - Dates in YYYY-MM-DD format
 - customer_name is the RECIPIENT, never Yumas GmbH
+- Split the customer address into separate street / postcode / city fields — do NOT combine them
 - If a field is not found set it to null (for strings) or 0 (for numbers)
 
 CRITICAL — POS receipt tax classification:
@@ -82,16 +86,23 @@ function cleanResponse(text: string): string {
 
 export async function POST(req: NextRequest) {
   try {
-    const { storagePath, fileName } = await req.json();
-    if (!storagePath) return NextResponse.json({ error: 'No storage path provided' }, { status: 400 });
+    const body = await req.json();
+    const { storagePath, fileName } = body;
+    let { pdfBase64 } = body;
 
-    // Download PDF from Supabase Storage (server-side, no size limit)
-    const admin = getSupabaseAdmin();
-    const { data: fileBlob, error: dlErr } = await admin.storage.from('bills').download(storagePath);
-    if (dlErr || !fileBlob) {
-      return NextResponse.json({ error: `Could not download PDF: ${dlErr?.message ?? 'unknown'}` }, { status: 500 });
+    if (!pdfBase64 && !storagePath) {
+      return NextResponse.json({ error: 'Provide either pdfBase64 or storagePath' }, { status: 400 });
     }
-    const pdfBase64 = Buffer.from(await fileBlob.arrayBuffer()).toString('base64');
+
+    if (!pdfBase64) {
+      // Download PDF from Supabase Storage (server-side, no size limit)
+      const admin = getSupabaseAdmin();
+      const { data: fileBlob, error: dlErr } = await admin.storage.from('bills').download(storagePath);
+      if (dlErr || !fileBlob) {
+        return NextResponse.json({ error: `Could not download PDF: ${dlErr?.message ?? 'unknown'}` }, { status: 500 });
+      }
+      pdfBase64 = Buffer.from(await fileBlob.arrayBuffer()).toString('base64');
+    }
 
     const response = await client.messages.create({
       model: 'claude-haiku-4-5-20251001',
