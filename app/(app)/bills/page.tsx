@@ -6,7 +6,7 @@ import { supabase } from '@/lib/supabase-browser';
 import {
   Upload, FileCheck, AlertCircle, Loader2,
   CheckCircle2, Clock, Banknote, Trash2,
-  ChevronDown, Eye, X, FilePlus, Save, MapPin, Calendar, Pencil, LayoutList,
+  ChevronDown, ChevronUp, Eye, X, FilePlus, Save, MapPin, Calendar, Pencil, LayoutList,
   AlertTriangle,
 } from 'lucide-react';
 
@@ -228,6 +228,13 @@ export default function BillsPage() {
   const [filterLocation,   setFilterLocation]   = useState('all');
   const [filterMonth,      setFilterMonth]      = useState('all');
   const [filterDuplicates, setFilterDuplicates] = useState(false);
+  const [sortCol, setSortCol] = useState<string>('invoice_date');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+
+  const handleSort = (col: string) => {
+    if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setSortCol(col); setSortDir('desc'); }
+  };
 
   // Inline edit state for saved bills
   type EditDraft = {
@@ -368,6 +375,25 @@ export default function BillsPage() {
     if (filterDuplicates && !duplicateIds.has(b.id)) return false;
     return true;
   });
+
+  const sortedFiltered = useMemo(() => [...filtered].sort((a, b) => {
+    let av: string | number, bv: string | number;
+    switch (sortCol) {
+      case 'supplier':     av = a.supplier_name ?? '';              bv = b.supplier_name ?? '';              break;
+      case 'invoice_date': av = a.invoice_date ?? a.period_start ?? ''; bv = b.invoice_date ?? b.period_start ?? ''; break;
+      case 'location':     av = a.location_label ?? '';             bv = b.location_label ?? '';             break;
+      case 'category':     av = a.category ?? '';                   bv = b.category ?? '';                   break;
+      case 'net':          av = a.net_amount;                       bv = b.net_amount;                       break;
+      case 'vat_pct':      av = a.net_amount > 0 ? a.vat_amount / a.net_amount : 0;
+                           bv = b.net_amount > 0 ? b.vat_amount / b.net_amount : 0; break;
+      case 'vat_eur':      av = a.vat_amount;                       bv = b.vat_amount;                       break;
+      case 'gross':        av = a.gross_amount;                     bv = b.gross_amount;                     break;
+      case 'status':       av = a.status ?? '';                     bv = b.status ?? '';                     break;
+      default:             av = '';                                  bv = '';
+    }
+    const cmp = typeof av === 'string' ? av.localeCompare(bv as string) : (av as number) - (bv as number);
+    return sortDir === 'asc' ? cmp : -cmp;
+  }), [filtered, sortCol, sortDir]);
 
   const totals = {
     gross: filtered.reduce((s, b) => s + b.gross_amount, 0),
@@ -983,21 +1009,38 @@ export default function BillsPage() {
               <table className="w-full text-sm min-w-[1000px]">
                 <thead>
                   <tr className="bg-gray-50 border-b border-gray-200">
-                    <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Supplier</th>
+                    {([
+                      { col: 'supplier',     label: 'Supplier',    align: 'left'  },
+                      { col: 'invoice_date', label: 'Issue Date',  align: 'left'  },
+                      { col: 'location',     label: 'Location',    align: 'left'  },
+                      { col: 'category',     label: 'Category',    align: 'left'  },
+                      { col: 'net',          label: 'Net / Mo',    align: 'right' },
+                      { col: 'vat_pct',      label: 'VAT %',       align: 'right' },
+                      { col: 'vat_eur',      label: 'VAT €',       align: 'right' },
+                      { col: 'gross',        label: 'Gross',       align: 'right' },
+                      { col: 'status',       label: 'Status',      align: 'left'  },
+                    ] as { col: string; label: string; align: 'left' | 'right' }[]).map(({ col, label, align }) => {
+                      const active = sortCol === col;
+                      return (
+                        <th key={col} onClick={() => handleSort(col)}
+                          className={`px-3 py-2 text-xs font-semibold uppercase tracking-wide cursor-pointer select-none whitespace-nowrap transition-colors
+                            ${align === 'right' ? 'text-right' : 'text-left'}
+                            ${active ? 'text-[#1B5E20]' : 'text-gray-500 hover:text-gray-800'}`}>
+                          <span className={`inline-flex items-center gap-1 ${align === 'right' ? 'flex-row-reverse' : ''}`}>
+                            {label}
+                            <span className={`transition-opacity ${active ? 'opacity-100' : 'opacity-20'}`}>
+                              {active && sortDir === 'asc' ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
+                            </span>
+                          </span>
+                        </th>
+                      );
+                    })}
                     <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Invoice #</th>
-                    <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">Issue Date</th>
-                    <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Location</th>
-                    <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Category</th>
-                    <th className="px-3 py-2 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">Net / Mo</th>
-                    <th className="px-3 py-2 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">VAT %</th>
-                    <th className="px-3 py-2 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">VAT €</th>
-                    <th className="px-3 py-2 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Gross</th>
-                    <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Status</th>
                     <th className="px-3 py-2 w-20"></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                  {filtered.map((bill) => {
+                  {sortedFiltered.map((bill) => {
                     // Compute monthly amount for display
                     let monthlyNet = bill.net_amount;
                     if (bill.period_start && bill.period_end && bill.period_type !== 'single_date') {
@@ -1032,11 +1075,6 @@ export default function BillsPage() {
                             )}
                           </div>
                         </td>
-                        <td className="px-3 py-1.5 text-xs">
-                          {bill.invoice_number
-                            ? <span title={bill.invoice_number} className="text-gray-400 cursor-default underline decoration-dashed underline-offset-2">Show</span>
-                            : <span className="text-gray-300">—</span>}
-                        </td>
                         <td className="px-3 py-1.5 text-gray-600 whitespace-nowrap text-xs">{fmtPeriod(bill)}</td>
                         <td className="px-3 py-1.5">
                           {bill.location_label && (
@@ -1066,6 +1104,11 @@ export default function BillsPage() {
                             <option value="approved">Approved</option>
                             <option value="paid">Paid</option>
                           </select>
+                        </td>
+                        <td className="px-3 py-1.5 text-xs">
+                          {bill.invoice_number
+                            ? <span title={bill.invoice_number} className="text-gray-400 cursor-default underline decoration-dashed underline-offset-2">Show</span>
+                            : <span className="text-gray-300">—</span>}
                         </td>
                         <td className="px-3 py-1.5">
                           <div className="flex items-center gap-1.5">
