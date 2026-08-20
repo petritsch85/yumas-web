@@ -142,7 +142,11 @@ async function saveBillToDB(item: QueueItem, userId: string | null): Promise<voi
 
   const bytes = Uint8Array.from(atob(item.base64), (c) => c.charCodeAt(0));
   const blob  = new Blob([bytes], { type: 'application/pdf' });
-  const path  = `bills/${Date.now()}_${item.fileName}`;
+  const safeName = item.fileName
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')  // strip accents/umlauts
+    .replace(/[^a-zA-Z0-9._-]/g, '_')                 // spaces & special chars → _
+    .replace(/_+/g, '_');                              // collapse consecutive _
+  const path  = `bills/${Date.now()}_${safeName}`;
   const { error: upErr } = await supabase.storage.from('bills').upload(path, blob);
   if (upErr) throw new Error(`PDF upload failed: ${upErr.message}`);
   const file_path = path;
