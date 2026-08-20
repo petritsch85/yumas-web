@@ -1,12 +1,13 @@
 'use client';
 
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
 import {
   Upload, FileCheck, AlertCircle, Loader2,
   CheckCircle2, Clock, Banknote, Trash2,
   ChevronDown, Eye, X, FilePlus, Save, MapPin, Calendar, Pencil, LayoutList,
+  AlertTriangle,
 } from 'lucide-react';
 
 import { useT } from '@/lib/i18n';
@@ -222,10 +223,11 @@ export default function BillsPage() {
   const [savingAll, setSavingAll]   = useState(false);
   const [linesBillId, setLinesBillId] = useState<string | null>(null);
 
-  const [filterStatus,   setFilterStatus]   = useState('all');
-  const [filterCategory, setFilterCategory] = useState('all');
-  const [filterLocation, setFilterLocation] = useState('all');
-  const [filterMonth,    setFilterMonth]    = useState('all');
+  const [filterStatus,     setFilterStatus]     = useState('all');
+  const [filterCategory,   setFilterCategory]   = useState('all');
+  const [filterLocation,   setFilterLocation]   = useState('all');
+  const [filterMonth,      setFilterMonth]      = useState('all');
+  const [filterDuplicates, setFilterDuplicates] = useState(false);
 
   // Inline edit state for saved bills
   type EditDraft = {
@@ -301,6 +303,60 @@ export default function BillsPage() {
       return { value: ym, label };
     });
 
+  // ── Duplicate detection ───────────────────────────────────────────────────────
+  const duplicateIds = useMemo(() => {
+    const ids = new Set<string>();
+    // Group by invoice_number + supplier (definitive)
+    const byInv = new Map<string, string[]>();
+    for (const b of bills) {
+      if (b.invoice_number) {
+        const key = `${b.supplier_name.toLowerCase()}|${b.invoice_number.toLowerCase()}`;
+        if (!byInv.has(key)) byInv.set(key, []);
+        byInv.get(key)!.push(b.id);
+      }
+    }
+    for (const group of byInv.values()) {
+      if (group.length > 1) group.forEach(id => ids.add(id));
+    }
+    // Group by supplier + amount + date (probable)
+    const byAmt = new Map<string, string[]>();
+    for (const b of bills) {
+      const date = b.invoice_date ?? b.period_start ?? '';
+      const key  = `${b.supplier_name.toLowerCase()}|${Math.round(b.gross_amount * 100)}|${date}`;
+      if (!byAmt.has(key)) byAmt.set(key, []);
+      byAmt.get(key)!.push(b.id);
+    }
+    for (const group of byAmt.values()) {
+      if (group.length > 1) group.forEach(id => ids.add(id));
+    }
+    return ids;
+  }, [bills]);
+
+  const isDuplicateInQueue = useCallback((item: QueueItem): boolean => {
+    if (item.status !== 'done' || !item.data) return false;
+    const d = item.data;
+    const norm = (s: string) => s.toLowerCase().trim();
+    return bills.some(b => {
+      if (b.invoice_number && d.invoice_number &&
+          norm(b.supplier_name) === norm(d.supplier_name) &&
+          norm(b.invoice_number) === norm(d.invoice_number)) return true;
+      if (norm(b.supplier_name) === norm(d.supplier_name) &&
+          Math.abs(b.gross_amount - d.gross_amount) < 0.01 &&
+          (b.invoice_date ?? '') !== '' &&
+          (b.invoice_date ?? '') === (d.invoice_date ?? '')) return true;
+      return false;
+    }) || queue.some(other => {
+      if (other.id === item.id || other.status !== 'done' || !other.data) return false;
+      const od = other.data;
+      if (d.invoice_number && od.invoice_number &&
+          norm(d.supplier_name) === norm(od.supplier_name) &&
+          norm(d.invoice_number) === norm(od.invoice_number)) return true;
+      if (norm(d.supplier_name) === norm(od.supplier_name) &&
+          Math.abs(d.gross_amount - od.gross_amount) < 0.01) return true;
+      return false;
+    });
+  }, [bills, queue]);
+
   const filtered = bills.filter((b) => {
     if (filterStatus   !== 'all' && b.status         !== filterStatus)   return false;
     if (filterCategory !== 'all' && b.category        !== filterCategory) return false;
@@ -309,6 +365,7 @@ export default function BillsPage() {
       const dateStr = b.invoice_date ?? b.period_start ?? '';
       if (!dateStr.startsWith(filterMonth)) return false;
     }
+    if (filterDuplicates && !duplicateIds.has(b.id)) return false;
     return true;
   });
 
@@ -630,12 +687,17 @@ export default function BillsPage() {
                       {item.status === 'extracting' && <p className="text-sm font-semibold text-blue-600">Claude is reading…</p>}
                       {item.status === 'waiting'    && <p className="text-sm text-gray-400">Waiting…</p>}
                       {item.status === 'done' && item.data && (
-                        <p className="text-sm font-semibold text-gray-900">
+                        <p className="text-sm font-semibold text-gray-900 flex items-center gap-2 flex-wrap">
                           {item.data.supplier_name}
-                          <span className="ml-2 text-[#1B5E20] font-bold">{fmt(item.data.gross_amount)}</span>
-                          <span className="ml-2 text-xs font-normal text-gray-400">{item.data.suggested_category}</span>
+                          <span className="text-[#1B5E20] font-bold">{fmt(item.data.gross_amount)}</span>
+                          <span className="text-xs font-normal text-gray-400">{item.data.suggested_category}</span>
                           {item.locationLabel && (
-                            <span className="ml-2 text-xs font-normal text-indigo-500">· {item.locationLabel}</span>
+                            <span className="text-xs font-normal text-indigo-500">· {item.locationLabel}</span>
+                          )}
+                          {!item.saved && isDuplicateInQueue(item) && (
+                            <span className="inline-flex items-center gap-1 text-xs font-semibold text-red-600 bg-red-50 border border-red-200 rounded-full px-2 py-0.5">
+                              <AlertTriangle size={10} /> Possible duplicate
+                            </span>
                           )}
                           {item.saved && <span className="ml-2 text-xs text-green-500">✓ Saved</span>}
                         </p>
@@ -884,6 +946,20 @@ export default function BillsPage() {
                 <option key={value} value={value}>{label}</option>
               ))}
             </select>
+            <button
+              onClick={() => setFilterDuplicates(v => !v)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-colors ${
+                filterDuplicates
+                  ? 'bg-red-50 border-red-300 text-red-700'
+                  : duplicateIds.size > 0
+                    ? 'bg-white border-red-200 text-red-500 hover:bg-red-50'
+                    : 'bg-white border-gray-200 text-gray-400 cursor-default'
+              }`}
+              disabled={duplicateIds.size === 0}
+            >
+              <AlertTriangle size={12} />
+              Duplicates {duplicateIds.size > 0 && `(${duplicateIds.size})`}
+            </button>
             <span className="text-xs text-gray-400 ml-auto">{filtered.length} bill{filtered.length !== 1 ? 's' : ''}</span>
           </div>
 
@@ -940,9 +1016,14 @@ export default function BillsPage() {
                     });
                     return (
                       <React.Fragment key={bill.id}>
-                      <tr className="hover:bg-gray-50 transition-colors">
+                      <tr className={`hover:bg-gray-50 transition-colors ${duplicateIds.has(bill.id) ? 'bg-red-50/40' : ''}`}>
                         <td className="px-3 py-1.5 font-semibold text-gray-900 text-xs">
                           <div className="flex items-center gap-1">
+                            {duplicateIds.has(bill.id) && (
+                              <span title="Possible duplicate bill" className="text-red-500 flex-shrink-0 cursor-default">
+                                <AlertTriangle size={11} />
+                              </span>
+                            )}
                             <span>{matchedCp ? matchedCp.name : bill.supplier_name}</span>
                             {matchedCp && (
                               <span title="Matched counterparty" className="text-green-500 flex-shrink-0 cursor-default">
