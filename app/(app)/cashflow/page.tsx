@@ -319,7 +319,7 @@ function TxRow({ tx, onSave, counterparties }: {
       <tr className={`border-b border-gray-100 text-sm transition-colors ${rowBg} ${locked ? '' : 'hover:bg-gray-50/50'}`}>
 
         {/* Date */}
-        <td className="py-2 px-3 text-gray-500 whitespace-nowrap font-mono text-xs">{fmtDate(tx.date)}</td>
+        <td className="py-2 px-2 text-gray-500 whitespace-nowrap font-mono text-xs">{fmtDate(tx.date)}</td>
 
         {/* Counterparty — shows matched short name with green tick, falls back to raw bank name */}
         {(() => {
@@ -327,7 +327,7 @@ function TxRow({ tx, onSave, counterparties }: {
           const autoMatch = pinned ? null : matchCounterparty(tx.counterparty, counterparties);
           const resolved  = pinned ?? autoMatch;
           return (
-            <td className="py-2 px-3 max-w-[220px]">
+            <td className="py-2 px-2 max-w-[160px]">
               {resolved ? (
                 <>
                   <div className="flex items-center gap-1">
@@ -347,11 +347,6 @@ function TxRow({ tx, onSave, counterparties }: {
               ) : (
                 <>
                   <div className="truncate text-gray-900">{tx.counterparty || '—'}</div>
-                  {tx.description && (
-                    <div className="truncate text-gray-400 text-xs mt-0.5" title={tx.description}>
-                      {tx.description.slice(0, 80)}
-                    </div>
-                  )}
                   {!locked && (
                     <select value="" onChange={e => e.target.value && onSave(tx.id, { counterparty_id: e.target.value })}
                       className="text-xs text-gray-400 border-0 outline-none cursor-pointer bg-transparent hover:text-gray-700 mt-0.5">
@@ -365,25 +360,42 @@ function TxRow({ tx, onSave, counterparties }: {
           );
         })()}
 
-        {/* Amount Brutto */}
-        <td className={`py-2 px-3 text-right whitespace-nowrap font-semibold tabular-nums ${isIn ? 'text-green-700' : 'text-red-700'}`}>
+        {/* Bill */}
+        <td className="py-2 px-2 whitespace-nowrap">
+          {tx.bill ? (
+            <button onClick={() => !locked && setShowModal(true)}
+              title={`${tx.bill.supplier_name} · ${tx.bill.invoice_number ?? 'no inv#'}`}
+              className={`flex items-center gap-1 text-xs font-medium text-green-700 bg-green-50 border border-green-200 rounded-full px-2 py-0.5 max-w-[110px] transition-colors ${locked ? 'cursor-default opacity-80' : 'hover:bg-green-100 cursor-pointer'}`}>
+              <Link2 size={10} className="flex-shrink-0" />
+              <span className="truncate">{tx.bill.invoice_number ?? tx.bill.supplier_name}</span>
+            </button>
+          ) : (
+            <button onClick={() => !locked && setShowModal(true)}
+              className={`flex items-center gap-1 text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5 transition-colors ${locked ? 'cursor-default opacity-50' : 'hover:bg-amber-100 cursor-pointer'}`}>
+              <Link2Off size={10} /> No Bill
+            </button>
+          )}
+        </td>
+
+        {/* Brutto */}
+        <td className={`py-2 px-2 text-right whitespace-nowrap font-semibold tabular-nums ${isIn ? 'text-green-700' : 'text-red-700'}`}>
           {isIn ? '+' : '−'} {eur(tx.amount_cents)}
         </td>
 
-        {/* VAT %, VAT €, Amount Netto */}
+        {/* VAT %, VAT €, Netto */}
         {(() => {
           const rate     = defaultVatRate(tx.category);
           const vatCents = rate === 0 ? 0 : Math.round(tx.amount_cents * rate / (100 + rate));
           const nettoCents = tx.amount_cents - vatCents;
           return (
             <>
-              <td className="py-2 px-3 text-right whitespace-nowrap text-xs text-gray-500 tabular-nums">
+              <td className="py-2 px-2 text-right whitespace-nowrap text-xs text-gray-500 tabular-nums">
                 {rate}%
               </td>
-              <td className="py-2 px-3 text-right whitespace-nowrap text-xs text-gray-500 tabular-nums">
+              <td className="py-2 px-2 text-right whitespace-nowrap text-xs text-gray-500 tabular-nums">
                 {rate === 0 ? '—' : eur(vatCents)}
               </td>
-              <td className={`py-2 px-3 text-right whitespace-nowrap text-xs tabular-nums font-medium ${isIn ? 'text-green-700' : 'text-red-700'}`}>
+              <td className={`py-2 px-2 text-right whitespace-nowrap text-xs tabular-nums font-medium ${isIn ? 'text-green-700' : 'text-red-700'}`}>
                 {isIn ? '+' : '−'} {eur(nettoCents)}
               </td>
             </>
@@ -391,7 +403,7 @@ function TxRow({ tx, onSave, counterparties }: {
         })()}
 
         {/* Category — unified for both in and out */}
-        <td className="py-2 px-3">
+        <td className="py-2 px-2">
           {locked ? (
             <span className={`text-xs font-medium px-1.5 py-0.5 rounded-full ${chipClass}`}>{tx.category}</span>
           ) : (
@@ -415,7 +427,7 @@ function TxRow({ tx, onSave, counterparties }: {
         </td>
 
         {/* Location */}
-        <td className="py-2 px-3">
+        <td className="py-2 px-2">
           {locked ? (
             <span className="text-xs text-gray-600 bg-white border border-gray-200 rounded px-1.5 py-0.5">{tx.location}</span>
           ) : (
@@ -427,7 +439,7 @@ function TxRow({ tx, onSave, counterparties }: {
         </td>
 
         {/* Notes */}
-        <td className="py-2 px-3">
+        <td className="py-2 px-2 w-full">
           {locked ? (
             <span className="text-xs text-gray-500">{tx.notes || '—'}</span>
           ) : (
@@ -437,25 +449,8 @@ function TxRow({ tx, onSave, counterparties }: {
           )}
         </td>
 
-        {/* Bill */}
-        <td className="py-2 px-3 min-w-[130px]">
-          {tx.bill ? (
-            <button onClick={() => !locked && setShowModal(true)}
-              title={`${tx.bill.supplier_name} · ${tx.bill.invoice_number ?? 'no inv#'}`}
-              className={`flex items-center gap-1 text-xs font-medium text-green-700 bg-green-50 border border-green-200 rounded-full px-2 py-0.5 max-w-[120px] transition-colors ${locked ? 'cursor-default opacity-80' : 'hover:bg-green-100 cursor-pointer'}`}>
-              <Link2 size={10} className="flex-shrink-0" />
-              <span className="truncate">{tx.bill.invoice_number ?? tx.bill.supplier_name}</span>
-            </button>
-          ) : (
-            <button onClick={() => !locked && setShowModal(true)}
-              className={`flex items-center gap-1 text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5 transition-colors ${locked ? 'cursor-default opacity-50' : 'hover:bg-amber-100 cursor-pointer'}`}>
-              <Link2Off size={10} /> No Bill
-            </button>
-          )}
-        </td>
-
         {/* Confirm */}
-        <td className="py-2 px-3">
+        <td className="py-2 px-2">
           <button onClick={() => patch('confirmed', !locked)}
             title={locked ? 'Click to unconfirm and unlock row' : 'Confirm this row'}
             className={`flex items-center justify-center w-7 h-7 rounded-full border-2 transition-all ${
@@ -1043,25 +1038,19 @@ export default function CashFlowPage() {
               <div className="py-12 text-center text-gray-400 text-sm">No transactions for this period.</div>
             )}
             {txs.length > 0 && (
-              <div className="overflow-x-auto">
+              <div>
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50 border-b border-gray-200">
                     <tr>
                       {([
-                        { col: 'date',        label: 'Date',               align: 'left'  },
-                        { col: 'counterparty',label: 'Counterparty',       align: 'left'  },
-                        { col: 'brutto',      label: 'Amount Brutto',      align: 'right' },
-                        { col: 'vatpct',      label: 'VAT %',         align: 'right' },
-                        { col: 'vateur',      label: 'VAT €',         align: 'right' },
-                        { col: 'netto',       label: 'Amount Netto',  align: 'right' },
-                        { col: 'category',    label: 'Category',      align: 'left'  },
-                        { col: 'location',    label: 'Location',      align: 'left'  },
+                        { col: 'date',        label: 'Date',        align: 'left'  },
+                        { col: 'counterparty',label: 'Counterparty',align: 'left'  },
                       ] as { col: string; label: string; align: 'left' | 'right' }[]).map(({ col, label, align }) => {
                         const active = sortCol === col;
                         return (
                           <th key={col}
                             onClick={() => handleSort(col)}
-                            className={`py-2.5 px-3 text-xs font-semibold uppercase tracking-wide cursor-pointer select-none transition-colors whitespace-nowrap
+                            className={`py-2.5 px-2 text-xs font-semibold uppercase tracking-wide cursor-pointer select-none transition-colors whitespace-nowrap
                               ${align === 'right' ? 'text-right' : 'text-left'}
                               ${active ? 'text-[#1B5E20]' : 'text-gray-500 hover:text-gray-800'}`}>
                             <span className={`inline-flex items-center gap-1 ${align === 'right' ? 'flex-row-reverse' : ''}`}>
@@ -1073,9 +1062,33 @@ export default function CashFlowPage() {
                           </th>
                         );
                       })}
-                      <th className="py-2.5 px-3 text-xs font-semibold text-gray-500 uppercase tracking-wide text-left">Notes</th>
-                      <th className="py-2.5 px-3 text-xs font-semibold text-gray-500 uppercase tracking-wide text-left">Bill</th>
-                      <th className="py-2.5 px-3 text-xs font-semibold text-gray-500 uppercase tracking-wide text-left">Confirm</th>
+                      <th className="py-2.5 px-2 text-xs font-semibold text-gray-500 uppercase tracking-wide text-left">Bill</th>
+                      {([
+                        { col: 'brutto',   label: 'Brutto',   align: 'right' },
+                        { col: 'vatpct',   label: 'VAT %',    align: 'right' },
+                        { col: 'vateur',   label: 'VAT €',    align: 'right' },
+                        { col: 'netto',    label: 'Netto',    align: 'right' },
+                        { col: 'category', label: 'Category', align: 'left'  },
+                        { col: 'location', label: 'Location', align: 'left'  },
+                      ] as { col: string; label: string; align: 'left' | 'right' }[]).map(({ col, label, align }) => {
+                        const active = sortCol === col;
+                        return (
+                          <th key={col}
+                            onClick={() => handleSort(col)}
+                            className={`py-2.5 px-2 text-xs font-semibold uppercase tracking-wide cursor-pointer select-none transition-colors whitespace-nowrap
+                              ${align === 'right' ? 'text-right' : 'text-left'}
+                              ${active ? 'text-[#1B5E20]' : 'text-gray-500 hover:text-gray-800'}`}>
+                            <span className={`inline-flex items-center gap-1 ${align === 'right' ? 'flex-row-reverse' : ''}`}>
+                              {label}
+                              <span className={`transition-opacity ${active ? 'opacity-100' : 'opacity-25'}`}>
+                                {active && sortDir === 'asc' ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
+                              </span>
+                            </span>
+                          </th>
+                        );
+                      })}
+                      <th className="py-2.5 px-2 text-xs font-semibold text-gray-500 uppercase tracking-wide text-left">Notes</th>
+                      <th className="py-2.5 px-2 text-xs font-semibold text-gray-500 uppercase tracking-wide text-left">Confirm</th>
                     </tr>
                   </thead>
                   <tbody>
