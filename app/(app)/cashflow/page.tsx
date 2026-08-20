@@ -288,6 +288,7 @@ function TxRow({ tx, onSave, counterparties }: {
 
   const [notes, setNotes] = useState(tx.notes ?? '');
   const [showModal, setShowModal] = useState(false);
+  const [showRaw, setShowRaw] = useState(false);
   const notesTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   useEffect(() => { setNotes(tx.notes ?? ''); }, [tx.notes]);
@@ -330,21 +331,37 @@ function TxRow({ tx, onSave, counterparties }: {
           return (
             <td className="py-2 px-2 max-w-[160px]">
               {resolved ? (
-                <>
-                  <div className="flex items-center gap-1">
-                    <span className="font-semibold text-gray-900 truncate">{resolved.name}</span>
-                    <span title="Matched counterparty"><CheckCircle2 size={11} className="text-green-500 flex-shrink-0" /></span>
-                    {pinned && !locked && (
-                      <button title="Remove assignment" onClick={() => onSave(tx.id, { counterparty_id: null })}
-                        className="text-gray-300 hover:text-red-400 flex-shrink-0">
-                        <X size={10} />
-                      </button>
+                <div className="flex items-center gap-1">
+                  <span className="font-semibold text-gray-900 truncate">{resolved.name}</span>
+                  <span title="Matched counterparty"><CheckCircle2 size={11} className="text-green-500 flex-shrink-0" /></span>
+                  <div className="relative flex-shrink-0">
+                    <button
+                      onClick={() => setShowRaw(v => !v)}
+                      title="Show raw bank details"
+                      className="text-gray-300 hover:text-gray-500 transition-colors">
+                      <Info size={11} />
+                    </button>
+                    {showRaw && (
+                      <div className="absolute left-0 top-5 z-50 bg-white border border-gray-200 rounded-lg shadow-lg p-2.5 min-w-[200px] max-w-[300px]"
+                        onClick={e => e.stopPropagation()}>
+                        <p className="text-xs font-semibold text-gray-500 mb-1">Raw bank name</p>
+                        <p className="text-xs text-gray-800 break-all">{tx.counterparty || '—'}</p>
+                        {tx.description && (
+                          <>
+                            <p className="text-xs font-semibold text-gray-500 mt-2 mb-1">Description</p>
+                            <p className="text-xs text-gray-800 break-all">{tx.description}</p>
+                          </>
+                        )}
+                      </div>
                     )}
                   </div>
-                  <div className="truncate text-gray-400 text-xs mt-0.5" title={tx.counterparty}>
-                    {tx.counterparty}
-                  </div>
-                </>
+                  {pinned && !locked && (
+                    <button title="Remove assignment" onClick={() => onSave(tx.id, { counterparty_id: null })}
+                      className="text-gray-300 hover:text-red-400 flex-shrink-0">
+                      <X size={10} />
+                    </button>
+                  )}
+                </div>
               ) : (
                 <>
                   <div className="truncate text-gray-900">{tx.counterparty || '—'}</div>
