@@ -1181,6 +1181,29 @@ export default function CashFlowPage() {
             </button>
           </div>
 
+          {/* Pagination — top */}
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between px-4 py-2.5 bg-white rounded-xl border border-gray-100 shadow-sm">
+              <span className="text-xs text-gray-500">Page {txPage} of {totalPages} · {totalCount.toLocaleString('de-DE')} transactions</span>
+              <div className="flex items-center gap-2">
+                <button onClick={() => setTxPage(p => Math.max(1, p - 1))} disabled={txPage === 1 || isFetching}
+                  className="flex items-center gap-1 px-3 py-1 text-xs font-medium border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-40 transition-colors">
+                  <ChevronUp size={12} className="rotate-[-90deg]" /> Previous
+                </button>
+                <div className="flex gap-1">
+                  {Array.from({ length: Math.min(totalPages, 7) }, (_, i) => {
+                    const p = totalPages <= 7 ? i + 1 : txPage <= 4 ? i + 1 : txPage >= totalPages - 3 ? totalPages - 6 + i : txPage - 3 + i;
+                    return <button key={p} onClick={() => setTxPage(p)} className={`w-7 h-7 text-xs rounded-lg font-medium transition-colors ${p === txPage ? 'bg-[#1B5E20] text-white' : 'border border-gray-200 text-gray-600 hover:bg-gray-50'}`}>{p}</button>;
+                  })}
+                </div>
+                <button onClick={() => setTxPage(p => Math.min(totalPages, p + 1))} disabled={txPage === totalPages || isFetching}
+                  className="flex items-center gap-1 px-3 py-1 text-xs font-medium border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-40 transition-colors">
+                  Next <ChevronDown size={12} className="rotate-[-90deg]" />
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Table */}
           <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
             {isFetching && (
