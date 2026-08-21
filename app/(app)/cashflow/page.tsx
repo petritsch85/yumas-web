@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Upload, Loader2, TrendingUp, TrendingDown, Minus,
   Link2, Link2Off, X, Search, CheckCircle2, Check, XCircle,
-  Download, ChevronDown, ChevronUp, FileText, Info,
+  Download, ChevronDown, ChevronUp, FileText, Info, Wand2,
 } from 'lucide-react';
 
 /* ── Types ─────────────────────────────────────────────────────────── */
@@ -520,6 +520,51 @@ export default function CashFlowPage() {
   const [catFilter, setCatFilter]   = useState('All');
   const [locFilter, setLocFilter]   = useState('All');
 
+  type AutoMatchRow = {
+    txId: string; txDate: string; txCounterparty: string; txAmountCents: number;
+    billId: string; billSupplier: string; billInvoiceNo: string | null;
+    billInvoiceDate: string | null; billGross: number; daysDiff: number;
+  };
+  const [autoMatching, setAutoMatching]     = useState(false);
+  const [autoMatchRows, setAutoMatchRows]   = useState<AutoMatchRow[] | null>(null);
+  const [applyingMatch, setApplyingMatch]   = useState(false);
+
+  const handleAutoMatch = async () => {
+    setAutoMatching(true);
+    try {
+      const res  = await fetch('/api/cashflow/auto-match', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ apply: false }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? 'Auto-match failed');
+      setAutoMatchRows(json.matches);
+    } catch (err: any) {
+      alert(err.message);
+    } finally {
+      setAutoMatching(false);
+    }
+  };
+
+  const handleApplyAutoMatch = async () => {
+    if (!autoMatchRows?.length) return;
+    setApplyingMatch(true);
+    try {
+      const res  = await fetch('/api/cashflow/auto-match', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ apply: true }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? 'Apply failed');
+      setAutoMatchRows(null);
+      qc.invalidateQueries({ queryKey: ['cashflow-tx'] });
+    } catch (err: any) {
+      alert(err.message);
+    } finally {
+      setApplyingMatch(false);
+    }
+  };
+
   const { dateFrom, dateTo } = periodDateRange(selectedYear, selectedPeriod);
 
   const { data: uploads = [] } = useQuery<CfUpload[]>({
@@ -819,6 +864,74 @@ export default function CashFlowPage() {
         </div>
       </div>
 
+      {/* Auto-match preview modal */}
+      {autoMatchRows !== null && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl mx-4 max-h-[80vh] flex flex-col">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+              <div>
+                <h2 className="text-base font-bold text-gray-900">Auto-match Preview</h2>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  {autoMatchRows.length === 0
+                    ? 'No matches found — all transactions already linked or no amount/date match in bills.'
+                    : `${autoMatchRows.length} bill${autoMatchRows.length !== 1 ? 's' : ''} matched by amount + supplier + date (≤45 days). Review then apply.`}
+                </p>
+              </div>
+              <button onClick={() => setAutoMatchRows(null)} className="text-gray-400 hover:text-gray-700">
+                <X size={18} />
+              </button>
+            </div>
+            {autoMatchRows.length > 0 && (
+              <div className="overflow-y-auto flex-1">
+                <table className="w-full text-xs">
+                  <thead className="bg-gray-50 border-b border-gray-100 sticky top-0">
+                    <tr>
+                      <th className="text-left px-4 py-2.5 font-semibold text-gray-500 uppercase tracking-wide">Tx Date</th>
+                      <th className="text-left px-4 py-2.5 font-semibold text-gray-500 uppercase tracking-wide">Counterparty</th>
+                      <th className="text-right px-4 py-2.5 font-semibold text-gray-500 uppercase tracking-wide">Amount</th>
+                      <th className="text-left px-4 py-2.5 font-semibold text-gray-500 uppercase tracking-wide">→ Bill Supplier</th>
+                      <th className="text-left px-4 py-2.5 font-semibold text-gray-500 uppercase tracking-wide">Invoice #</th>
+                      <th className="text-left px-4 py-2.5 font-semibold text-gray-500 uppercase tracking-wide">Invoice Date</th>
+                      <th className="text-right px-4 py-2.5 font-semibold text-gray-500 uppercase tracking-wide">Δ Days</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {autoMatchRows.map(r => (
+                      <tr key={r.txId} className="border-b border-gray-50 hover:bg-gray-50">
+                        <td className="px-4 py-2 text-gray-600">{r.txDate}</td>
+                        <td className="px-4 py-2 text-gray-700 font-medium max-w-[160px] truncate">{r.txCounterparty}</td>
+                        <td className="px-4 py-2 text-right font-semibold text-red-600 tabular-nums">
+                          {(Math.abs(r.txAmountCents) / 100).toLocaleString('de-DE', { minimumFractionDigits: 2 })} €
+                        </td>
+                        <td className="px-4 py-2 text-gray-700 font-medium">{r.billSupplier}</td>
+                        <td className="px-4 py-2 text-gray-500">{r.billInvoiceNo ?? '—'}</td>
+                        <td className="px-4 py-2 text-gray-500">{r.billInvoiceDate ?? '—'}</td>
+                        <td className={`px-4 py-2 text-right tabular-nums font-medium ${r.daysDiff <= 7 ? 'text-green-600' : r.daysDiff <= 20 ? 'text-amber-600' : 'text-orange-600'}`}>
+                          {r.daysDiff}d
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <div className="flex justify-end gap-3 px-6 py-4 border-t border-gray-100">
+              <button onClick={() => setAutoMatchRows(null)}
+                className="px-4 py-2 text-sm font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50">
+                Cancel
+              </button>
+              {autoMatchRows.length > 0 && (
+                <button onClick={handleApplyAutoMatch} disabled={applyingMatch}
+                  className="flex items-center gap-2 px-5 py-2 text-sm font-bold bg-[#1B5E20] text-white rounded-lg hover:bg-[#2E7D32] transition-colors disabled:opacity-50">
+                  {applyingMatch ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+                  {applyingMatch ? 'Applying…' : `Apply ${autoMatchRows.length} match${autoMatchRows.length !== 1 ? 'es' : ''}`}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Upload Log */}
       {uploads.length > 0 && (
         <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
@@ -1055,6 +1168,15 @@ export default function CashFlowPage() {
             </select>
 
             <span className="ml-auto text-xs text-gray-400">{totalCount} transactions</span>
+
+            <button
+              onClick={handleAutoMatch}
+              disabled={autoMatching}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-indigo-600 border border-indigo-200 rounded-lg bg-indigo-50 hover:bg-indigo-100 transition-colors disabled:opacity-50"
+            >
+              {autoMatching ? <Loader2 size={12} className="animate-spin" /> : <Wand2 size={12} />}
+              {autoMatching ? 'Scanning…' : 'Auto-match bills'}
+            </button>
           </div>
 
           {/* Table */}
