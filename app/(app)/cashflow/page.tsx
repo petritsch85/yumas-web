@@ -579,7 +579,18 @@ export default function CashFlowPage() {
 
   const { data: txPage, isFetching } = useQuery<TxPage>({
     queryKey: ['cashflow-tx', dateFrom, dateTo, dirFilter, catFilter, locFilter],
-    queryFn: () => fetch(`/api/cashflow/transactions?${params}`).then(r => r.json()),
+    queryFn: async () => {
+      const first: TxPage = await fetch(`/api/cashflow/transactions?${params}&page=1`).then(r => r.json());
+      if (first.count <= first.pageSize) return first;
+      // Supabase caps at 1000/page — fetch remaining pages in parallel
+      const totalPages = Math.ceil(first.count / first.pageSize);
+      const rest: TxPage[] = await Promise.all(
+        Array.from({ length: totalPages - 1 }, (_, i) =>
+          fetch(`/api/cashflow/transactions?${params}&page=${i + 2}`).then(r => r.json())
+        )
+      );
+      return { ...first, data: [...first.data, ...rest.flatMap(p => p.data)] };
+    },
     placeholderData: prev => prev,
   });
 
