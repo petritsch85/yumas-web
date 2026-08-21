@@ -572,7 +572,7 @@ export default function CashFlowPage() {
     queryFn: () => fetch('/api/cashflow/uploads').then(r => r.json()),
   });
 
-  const params = new URLSearchParams({ dateFrom, dateTo });
+  const params = new URLSearchParams({ dateFrom, dateTo, pageSize: '5000' });
   if (dirFilter !== 'all') params.set('direction', dirFilter);
   if (catFilter !== 'All') params.set('category', catFilter);
   if (locFilter !== 'All') params.set('location', locFilter);
