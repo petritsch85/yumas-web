@@ -11,7 +11,7 @@ export async function GET(req: NextRequest) {
   const location  = p.get('location');
   const salesType = p.get('salesType');
   const page      = Math.max(1, parseInt(p.get('page') ?? '1', 10));
-  const pageSize  = 1000;
+  const pageSize  = Math.min(10000, parseInt(p.get('pageSize') ?? '1000', 10));
 
   const admin = getSupabaseAdmin();
   let q = admin

@@ -157,6 +157,7 @@ export default function CounterpartyDetailPage({ params }: { params: Promise<{ i
   const txParams = useMemo(() => {
     const p = new URLSearchParams();
     if (dateRange) { p.set('dateFrom', dateRange.dateFrom); p.set('dateTo', dateRange.dateTo); }
+    p.set('pageSize', '5000'); // fetch enough to cover all transactions for keyword matching
     return p.toString();
   }, [dateRange]);
 
