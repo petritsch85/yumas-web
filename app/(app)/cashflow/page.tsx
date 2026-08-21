@@ -519,6 +519,7 @@ export default function CashFlowPage() {
   const [dirFilter, setDirFilter]   = useState<'all'|'in'|'out'>('all');
   const [catFilter, setCatFilter]   = useState('All');
   const [locFilter, setLocFilter]   = useState('All');
+  const [txPage,    setTxPage]      = useState(1);
 
   type AutoMatchRow = {
     txId: string; txDate: string; txCounterparty: string; txAmountCents: number;
@@ -572,31 +573,20 @@ export default function CashFlowPage() {
     queryFn: () => fetch('/api/cashflow/uploads').then(r => r.json()),
   });
 
-  const params = new URLSearchParams({ dateFrom, dateTo, pageSize: '5000' });
+  const params = new URLSearchParams({ dateFrom, dateTo, page: String(txPage) });
   if (dirFilter !== 'all') params.set('direction', dirFilter);
   if (catFilter !== 'All') params.set('category', catFilter);
   if (locFilter !== 'All') params.set('location', locFilter);
 
-  const { data: txPage, isFetching } = useQuery<TxPage>({
-    queryKey: ['cashflow-tx', dateFrom, dateTo, dirFilter, catFilter, locFilter],
-    queryFn: async () => {
-      const first: TxPage = await fetch(`/api/cashflow/transactions?${params}&page=1`).then(r => r.json());
-      // Use actual rows returned (not requested pageSize) to detect Supabase's row cap
-      const effectivePageSize = first.data.length;
-      if (effectivePageSize === 0 || first.data.length >= first.count) return first;
-      const totalPages = Math.ceil(first.count / effectivePageSize);
-      const rest: TxPage[] = await Promise.all(
-        Array.from({ length: totalPages - 1 }, (_, i) =>
-          fetch(`/api/cashflow/transactions?${params}&page=${i + 2}`).then(r => r.json())
-        )
-      );
-      return { ...first, data: [...first.data, ...rest.flatMap(p => p.data)] };
-    },
+  const { data: txData, isFetching } = useQuery<TxPage>({
+    queryKey: ['cashflow-tx', dateFrom, dateTo, dirFilter, catFilter, locFilter, txPage],
+    queryFn: () => fetch(`/api/cashflow/transactions?${params}`).then(r => r.json()),
     placeholderData: prev => prev,
   });
 
-  const txs        = txPage?.data ?? [];
-  const totalCount = txPage?.count ?? 0;
+  const txs        = txData?.data ?? [];
+  const totalCount = txData?.count ?? 0;
+  const totalPages = txData ? Math.ceil(txData.count / txData.pageSize) : 1;
 
   const { data: counterparties = [] } = useQuery<Counterparty[]>({
     queryKey: ['counterparties'],
@@ -734,7 +724,7 @@ export default function CashFlowPage() {
     }
   };
 
-  const resetFilters = () => { setDirFilter('all'); setCatFilter('All'); setLocFilter('All'); };
+  const resetFilters = () => { setDirFilter('all'); setCatFilter('All'); setLocFilter('All'); setTxPage(1); };
 
   const handleDownload = async (upload: CfUpload) => {
     if (!upload.file_path) { alert('Original file was not saved for this upload.'); return; }
@@ -1155,14 +1145,14 @@ export default function CashFlowPage() {
           <div className="bg-white rounded-xl border border-gray-100 shadow-sm px-4 py-3 flex flex-wrap items-center gap-3">
             <div className="flex rounded-lg border border-gray-200 overflow-hidden text-sm">
               {(['all','in','out'] as const).map(d => (
-                <button key={d} onClick={() => setDirFilter(d)}
+                <button key={d} onClick={() => { setDirFilter(d); setTxPage(1); }}
                   className={`px-3 py-1.5 font-medium capitalize transition-colors ${dirFilter === d ? 'bg-[#1B5E20] text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>
                   {d === 'all' ? 'All' : d === 'in' ? 'Incoming' : 'Outgoing'}
                 </button>
               ))}
             </div>
 
-            <select value={catFilter} onChange={e => setCatFilter(e.target.value)}
+            <select value={catFilter} onChange={e => { setCatFilter(e.target.value); setTxPage(1); }}
               className="text-sm border border-gray-200 rounded-lg px-2 py-1.5 outline-none focus:border-gray-400">
               <option value="All">All categories</option>
               <optgroup label="── Cost (C) ──">
@@ -1173,7 +1163,7 @@ export default function CashFlowPage() {
               </optgroup>
             </select>
 
-            <select value={locFilter} onChange={e => setLocFilter(e.target.value)}
+            <select value={locFilter} onChange={e => { setLocFilter(e.target.value); setTxPage(1); }}
               className="text-sm border border-gray-200 rounded-lg px-2 py-1.5 outline-none focus:border-gray-400">
               <option value="All">All locations</option>
               {[...new Set([...OUT_LOCATIONS, ...IN_LOCATIONS])].map(l => <option key={l} value={l}>{l}</option>)}
@@ -1262,6 +1252,45 @@ export default function CashFlowPage() {
               </div>
             )}
           </div>
+
+          {/* Pagination controls */}
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between px-4 py-3 bg-white rounded-xl border border-gray-100 shadow-sm">
+              <span className="text-xs text-gray-500">
+                Page {txPage} of {totalPages} · {totalCount.toLocaleString('de-DE')} transactions
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setTxPage(p => Math.max(1, p - 1))}
+                  disabled={txPage === 1 || isFetching}
+                  className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-40 transition-colors"
+                >
+                  <ChevronUp size={12} className="rotate-[-90deg]" /> Previous
+                </button>
+                <div className="flex gap-1">
+                  {Array.from({ length: Math.min(totalPages, 7) }, (_, i) => {
+                    const p = totalPages <= 7 ? i + 1
+                      : txPage <= 4 ? i + 1
+                      : txPage >= totalPages - 3 ? totalPages - 6 + i
+                      : txPage - 3 + i;
+                    return (
+                      <button key={p} onClick={() => setTxPage(p)}
+                        className={`w-7 h-7 text-xs rounded-lg font-medium transition-colors ${p === txPage ? 'bg-[#1B5E20] text-white' : 'border border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
+                        {p}
+                      </button>
+                    );
+                  })}
+                </div>
+                <button
+                  onClick={() => setTxPage(p => Math.min(totalPages, p + 1))}
+                  disabled={txPage === totalPages || isFetching}
+                  className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-40 transition-colors"
+                >
+                  Next <ChevronDown size={12} className="rotate-[-90deg]" />
+                </button>
+              </div>
+            </div>
+          )}
         </>
       )}
     </div>
