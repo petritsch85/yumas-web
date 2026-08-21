@@ -581,9 +581,10 @@ export default function CashFlowPage() {
     queryKey: ['cashflow-tx', dateFrom, dateTo, dirFilter, catFilter, locFilter],
     queryFn: async () => {
       const first: TxPage = await fetch(`/api/cashflow/transactions?${params}&page=1`).then(r => r.json());
-      if (first.count <= first.pageSize) return first;
-      // Supabase caps at 1000/page — fetch remaining pages in parallel
-      const totalPages = Math.ceil(first.count / first.pageSize);
+      // Use actual rows returned (not requested pageSize) to detect Supabase's row cap
+      const effectivePageSize = first.data.length;
+      if (effectivePageSize === 0 || first.data.length >= first.count) return first;
+      const totalPages = Math.ceil(first.count / effectivePageSize);
       const rest: TxPage[] = await Promise.all(
         Array.from({ length: totalPages - 1 }, (_, i) =>
           fetch(`/api/cashflow/transactions?${params}&page=${i + 2}`).then(r => r.json())
