@@ -391,7 +391,9 @@ function TxRow({ tx, onSave, counterparties }: {
                 <CheckCircle2 size={13} />
               </button>
               {!locked && (
-                <button title="Unlink bill" onClick={() => patch('bill_id', null)}
+                <button title="Unlink bill" onClick={() => {
+                  if (window.confirm('Remove bill link from this transaction?')) patch('bill_id', null);
+                }}
                   className="text-gray-300 hover:text-red-400 transition-colors">
                   <X size={10} />
                 </button>
