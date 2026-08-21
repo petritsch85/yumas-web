@@ -79,7 +79,7 @@ export async function POST(req: NextRequest) {
       } else {
         // No counterparty mapping — try direct partial match
         const txLower = tx.counterparty.toLowerCase();
-        if (!bLower.split(' ').some(w => w.length > 3 && txLower.includes(w))) return false;
+        if (!bLower.split(' ').some((w: string) => w.length > 3 && txLower.includes(w))) return false;
       }
       // Date within 45 days
       if (!b.invoice_date) return false;
