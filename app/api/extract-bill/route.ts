@@ -109,10 +109,22 @@ async function repairJSON(bad: string): Promise<string> {
 
 export async function POST(req: NextRequest) {
   try {
-    const { pdfBase64, fileName } = await req.json();
+    const body = await req.json();
+    const { fileName } = body;
+    let { pdfBase64, storagePath } = body;
 
-    if (!pdfBase64) {
-      return NextResponse.json({ error: 'No PDF data provided' }, { status: 400 });
+    if (!pdfBase64 && !storagePath) {
+      return NextResponse.json({ error: 'Provide pdfBase64 or storagePath' }, { status: 400 });
+    }
+
+    if (!pdfBase64 && storagePath) {
+      const { getSupabaseAdmin } = await import('@/lib/supabase-admin');
+      const admin = getSupabaseAdmin();
+      const { data: fileBlob, error: dlErr } = await admin.storage.from('bills').download(storagePath);
+      if (dlErr || !fileBlob) {
+        return NextResponse.json({ error: `Could not download PDF: ${dlErr?.message ?? 'unknown'}` }, { status: 500 });
+      }
+      pdfBase64 = Buffer.from(await fileBlob.arrayBuffer()).toString('base64');
     }
 
     const response = await client.messages.create({

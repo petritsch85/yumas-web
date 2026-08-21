@@ -52,6 +52,7 @@ type QueueItem = {
   id:             string;
   fileName:       string;
   base64:         string;
+  storagePath?:   string;   // set after pre-upload; used by saveBillToDB to skip re-upload
   status:         'waiting' | 'extracting' | 'done' | 'error';
   data?:          Extracted;
   error?:         string;
@@ -140,16 +141,22 @@ function uid() { return Math.random().toString(36).slice(2); }
 async function saveBillToDB(item: QueueItem, userId: string | null): Promise<void> {
   const d = item.data!;
 
-  const bytes = Uint8Array.from(atob(item.base64), (c) => c.charCodeAt(0));
-  const blob  = new Blob([bytes], { type: 'application/pdf' });
-  const safeName = item.fileName
-    .normalize('NFD').replace(/[̀-ͯ]/g, '')  // strip accents/umlauts
-    .replace(/[^a-zA-Z0-9._-]/g, '_')                 // spaces & special chars → _
-    .replace(/_+/g, '_');                              // collapse consecutive _
-  const path  = `bills/${Date.now()}_${safeName}`;
-  const { error: upErr } = await supabase.storage.from('bills').upload(path, blob);
-  if (upErr) throw new Error(`PDF upload failed: ${upErr.message}`);
-  const file_path = path;
+  let file_path: string;
+  if (item.storagePath) {
+    // PDF was already uploaded to storage during extraction — reuse it
+    file_path = item.storagePath;
+  } else {
+    const bytes = Uint8Array.from(atob(item.base64), (c) => c.charCodeAt(0));
+    const blob  = new Blob([bytes], { type: 'application/pdf' });
+    const safeName = item.fileName
+      .normalize('NFD').replace(/[̀-ͯ]/g, '')
+      .replace(/[^a-zA-Z0-9._-]/g, '_')
+      .replace(/_+/g, '_');
+    const path = `bills/${Date.now()}_${safeName}`;
+    const { error: upErr } = await supabase.storage.from('bills').upload(path, blob);
+    if (upErr) throw new Error(`PDF upload failed: ${upErr.message}`);
+    file_path = path;
+  }
 
   const isSpecial    = item.locationId === 'corporate' || item.locationId === 'other';
   const dbLocationId = isSpecial ? null : (item.locationId ?? null);
@@ -441,10 +448,25 @@ export default function BillsPage() {
   const extractItem = useCallback(async (item: QueueItem) => {
     setQueue((q) => q.map((i) => i.id === item.id ? { ...i, status: 'extracting' } : i));
     try {
-      const res  = await fetch('/api/extract-bill', {
+      // Upload to Supabase Storage first so the API downloads it server-side
+      // (avoids Vercel 4.5 MB request body limit on large PDFs)
+      const safeName = item.fileName
+        .normalize('NFD').replace(/[̀-ͯ]/g, '')
+        .replace(/[^a-zA-Z0-9._-]/g, '_')
+        .replace(/_+/g, '_');
+      const storagePath = `bills/${Date.now()}_${safeName}`;
+      const bytes = Uint8Array.from(atob(item.base64), (c) => c.charCodeAt(0));
+      const blob  = new Blob([bytes], { type: 'application/pdf' });
+      const { error: upErr } = await supabase.storage.from('bills').upload(storagePath, blob);
+      if (upErr) throw new Error(`PDF upload failed: ${upErr.message}`);
+
+      // Record the storage path so saveBillToDB can skip re-uploading
+      setQueue((q) => q.map((i) => i.id === item.id ? { ...i, storagePath } : i));
+
+      const res = await fetch('/api/extract-bill', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ pdfBase64: item.base64, fileName: item.fileName }),
+        body:    JSON.stringify({ storagePath, fileName: item.fileName }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? 'Extraction failed');
