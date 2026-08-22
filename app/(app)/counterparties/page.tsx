@@ -81,6 +81,7 @@ function LinkBillsModal({ tx, bills, onClose, onSave }: {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [note, setNote]         = useState('');
   const [saving, setSaving]     = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const txAmt = Math.abs(tx.amount_cents) / 100;
   const selectedTotal = bills.filter(b => selected.has(b.id)).reduce((s, b) => s + b.gross_amount, 0);
@@ -91,8 +92,14 @@ function LinkBillsModal({ tx, bills, onClose, onSave }: {
   const handleSave = async () => {
     if (selected.size === 0) return;
     setSaving(true);
-    await onSave([...selected], note);
-    setSaving(false);
+    setSaveError(null);
+    try {
+      await onSave([...selected], note);
+    } catch (e: any) {
+      setSaveError(e?.message ?? 'Unknown error');
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -136,6 +143,12 @@ function LinkBillsModal({ tx, bills, onClose, onSave }: {
 
         <textarea value={note} onChange={e => setNote(e.target.value)} rows={2} placeholder="Note (optional) — e.g. supplier combined two invoices into one payment"
           className="w-full border border-gray-200 rounded-lg px-3 py-2 text-xs resize-none focus:outline-none focus:ring-2 focus:ring-green-500 mb-4" />
+
+        {saveError && (
+          <div className="mb-3 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">
+            Save failed: {saveError}
+          </div>
+        )}
 
         <div className="flex justify-end gap-2">
           <button onClick={onClose} className="px-4 py-2 text-xs text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
@@ -195,11 +208,13 @@ function CpPanel({ cp }: { cp: Counterparty }) {
 
   const handleSaveLinks = async (billIds: string[], note: string) => {
     if (!activeLinkTx) return;
-    await fetch('/api/transaction-bill-links', {
+    const res = await fetch('/api/transaction-bill-links', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ transactionId: activeLinkTx.id, billIds, note }),
     });
+    const json = await res.json();
+    if (!res.ok || json.error) throw new Error(json.error ?? `HTTP ${res.status}`);
     setActiveLinkTx(null);
     qc.invalidateQueries({ queryKey: ['cp-txs-all', cp.id, kwParams] });
     qc.invalidateQueries({ queryKey: ['cp-bills-all'] });
