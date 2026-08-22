@@ -2,7 +2,7 @@
 
 import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Pencil, Trash2, X, Check, ChevronDown, ChevronUp, Tag, TrendingUp, TrendingDown, Minus } from 'lucide-react';
+import { Plus, Pencil, Trash2, X, Check, ChevronDown, ChevronUp, Tag, TrendingUp, TrendingDown, Minus, Link2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase-browser';
 
 type Counterparty = {
@@ -15,6 +15,12 @@ type Counterparty = {
   created_at: string;
 };
 
+type BillLink = {
+  id: string;
+  note: string | null;
+  bill: { id: string; supplier_name: string; invoice_number: string | null; gross_amount: number } | null;
+};
+
 type CfTx = {
   id: string;
   date: string;
@@ -25,6 +31,7 @@ type CfTx = {
   category: string;
   counterparty_id: string | null;
   bill: { id: string; supplier_name: string; invoice_number: string | null } | null;
+  transaction_bill_links: BillLink[];
 };
 
 type Bill = {
@@ -36,6 +43,7 @@ type Bill = {
   net_amount: number;
   status: string;
   cashflow_transactions: { id: string }[];
+  transaction_bill_links: { id: string }[];
 };
 
 const C_CATEGORIES = [
@@ -63,8 +71,89 @@ function kwMatch(raw: string | null, keywords: string[], name?: string): boolean
   return terms.some(kw => kw && lower.includes(kw.toLowerCase()));
 }
 
+/* ── Modal: link one transaction to multiple bills ── */
+function LinkBillsModal({ tx, bills, onClose, onSave }: {
+  tx: CfTx;
+  bills: Bill[];
+  onClose: () => void;
+  onSave: (billIds: string[], note: string) => Promise<void>;
+}) {
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [note, setNote]         = useState('');
+  const [saving, setSaving]     = useState(false);
+
+  const txAmt = Math.abs(tx.amount_cents) / 100;
+  const selectedTotal = bills.filter(b => selected.has(b.id)).reduce((s, b) => s + b.gross_amount, 0);
+  const diff = Math.abs(selectedTotal - txAmt);
+
+  const toggle = (id: string) => setSelected(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+
+  const handleSave = async () => {
+    if (selected.size === 0) return;
+    setSaving(true);
+    await onSave([...selected], note);
+    setSaving(false);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg mx-4 p-6" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-sm font-bold text-gray-900">Link bills to transaction</h2>
+          <button onClick={onClose}><X size={16} className="text-gray-400" /></button>
+        </div>
+        <div className="text-xs text-gray-500 mb-4 bg-gray-50 rounded-lg px-3 py-2">
+          {fmtDate(tx.date)} · <span className="font-semibold text-red-700">{eur(tx.amount_cents)}</span>
+          {tx.counterparty && <span className="ml-2 text-gray-400">· {tx.counterparty}</span>}
+        </div>
+
+        <div className="space-y-1.5 max-h-64 overflow-y-auto mb-3">
+          {bills.length === 0 && <div className="text-xs text-gray-400 italic py-2">No available bills for this counterparty.</div>}
+          {bills.map(bill => {
+            const alreadyLinked = bill.cashflow_transactions.length > 0 || bill.transaction_bill_links.length > 0;
+            return (
+              <label key={bill.id} className={`flex items-center gap-3 p-2.5 rounded-lg border cursor-pointer ${alreadyLinked ? 'opacity-50 border-gray-100 bg-gray-50' : 'border-gray-100 hover:bg-gray-50'}`}>
+                <input type="checkbox" checked={selected.has(bill.id)} onChange={() => !alreadyLinked && toggle(bill.id)}
+                  disabled={alreadyLinked} className="w-4 h-4 accent-green-600" />
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs font-medium text-gray-800 truncate">{bill.supplier_name}</div>
+                  <div className="text-xs text-gray-400">{bill.invoice_number ?? '—'} · {bill.invoice_date ? fmtDate(bill.invoice_date) : '—'}
+                    {alreadyLinked && <span className="ml-1 text-green-600">· already linked</span>}
+                  </div>
+                </div>
+                <div className="text-xs font-semibold text-red-700 whitespace-nowrap">{eurAmt(bill.gross_amount)}</div>
+              </label>
+            );
+          })}
+        </div>
+
+        {selected.size > 0 && (
+          <div className={`text-xs mb-3 px-3 py-2 rounded-lg ${diff <= 0.02 ? 'bg-green-50 text-green-700' : 'bg-amber-50 text-amber-700'}`}>
+            Selected: {eurAmt(selectedTotal)} · Transaction: {eurAmt(txAmt)}
+            {diff > 0.02 && ` · Difference: ${eurAmt(diff)}`}
+          </div>
+        )}
+
+        <textarea value={note} onChange={e => setNote(e.target.value)} rows={2} placeholder="Note (optional) — e.g. supplier combined two invoices into one payment"
+          className="w-full border border-gray-200 rounded-lg px-3 py-2 text-xs resize-none focus:outline-none focus:ring-2 focus:ring-green-500 mb-4" />
+
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} className="px-4 py-2 text-xs text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
+          <button onClick={handleSave} disabled={selected.size === 0 || saving}
+            className="px-4 py-2 text-xs font-medium bg-[#1B5E20] text-white rounded-lg hover:bg-[#2E7D32] disabled:opacity-60">
+            {saving ? 'Saving…' : `Link ${selected.size} bill${selected.size !== 1 ? 's' : ''}`}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ── Inline panel shown when a counterparty row is expanded ── */
 function CpPanel({ cp }: { cp: Counterparty }) {
+  const qc = useQueryClient();
+  const [activeLinkTx, setActiveLinkTx] = useState<CfTx | null>(null);
+
   const kwParams = useMemo(() => {
     const p = new URLSearchParams();
     for (const kw of (cp.keywords.length > 0 ? cp.keywords : [cp.name])) p.append('keyword', kw);
@@ -82,7 +171,7 @@ function CpPanel({ cp }: { cp: Counterparty }) {
     queryFn: async () => {
       const { data } = await supabase
         .from('bills')
-        .select('id,supplier_name,invoice_number,invoice_date,gross_amount,net_amount,status,cashflow_transactions(id)')
+        .select('id,supplier_name,invoice_number,invoice_date,gross_amount,net_amount,status,cashflow_transactions(id),transaction_bill_links(id)')
         .order('invoice_date', { ascending: false });
       return data ?? [];
     },
@@ -103,6 +192,18 @@ function CpPanel({ cp }: { cp: Counterparty }) {
     }
     return { totalIn, totalOut, net: totalIn - totalOut };
   }, [matchedTxs]);
+
+  const handleSaveLinks = async (billIds: string[], note: string) => {
+    if (!activeLinkTx) return;
+    await fetch('/api/transaction-bill-links', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ transactionId: activeLinkTx.id, billIds, note }),
+    });
+    setActiveLinkTx(null);
+    qc.invalidateQueries({ queryKey: ['cp-txs-all', cp.id, kwParams] });
+    qc.invalidateQueries({ queryKey: ['cp-bills-all'] });
+  };
 
   const loading = txLoading || billsLoading;
 
@@ -183,10 +284,21 @@ function CpPanel({ cp }: { cp: Counterparty }) {
                               </span>
                             </td>
                             <td className="py-1.5 px-3 text-center">
-                              {tx.bill
-                                ? <span title={tx.bill.supplier_name + (tx.bill.invoice_number ? ' · ' + tx.bill.invoice_number : '')} className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-green-100"><Check size={11} className="text-green-600" /></span>
-                                : <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-red-100"><X size={11} className="text-red-500" /></span>
-                              }
+                              {tx.bill ? (
+                                <span title={tx.bill.supplier_name + (tx.bill.invoice_number ? ' · ' + tx.bill.invoice_number : '')} className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-green-100"><Check size={11} className="text-green-600" /></span>
+                              ) : tx.transaction_bill_links?.length > 0 ? (
+                                <span className="inline-flex items-center justify-center gap-0.5 px-1.5 py-0.5 rounded-full bg-green-100 text-green-700 text-xs font-semibold whitespace-nowrap">
+                                  {tx.transaction_bill_links.length} bills <Check size={10} className="text-green-600" />
+                                </span>
+                              ) : (
+                                <div className="flex items-center justify-center gap-1">
+                                  <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-red-100"><X size={11} className="text-red-500" /></span>
+                                  <button onClick={() => setActiveLinkTx(tx)} title="Link to bill(s)"
+                                    className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-gray-100 hover:bg-blue-100 hover:text-blue-600 text-gray-400 transition-colors">
+                                    <Link2 size={10} />
+                                  </button>
+                                </div>
+                              )}
                             </td>
                           </tr>
                         );
@@ -222,7 +334,7 @@ function CpPanel({ cp }: { cp: Counterparty }) {
                     </thead>
                     <tbody>
                       {matchedBills.map(bill => {
-                        const linked = bill.cashflow_transactions?.length > 0;
+                        const linked = (bill.cashflow_transactions?.length ?? 0) > 0 || (bill.transaction_bill_links?.length ?? 0) > 0;
                         return (
                         <tr key={bill.id} className="border-b border-gray-50">
                           <td className="py-1.5 px-3 font-mono text-gray-500 whitespace-nowrap">
@@ -261,6 +373,15 @@ function CpPanel({ cp }: { cp: Counterparty }) {
             )}
           </div>
         </>
+      )}
+
+      {activeLinkTx && (
+        <LinkBillsModal
+          tx={activeLinkTx}
+          bills={matchedBills}
+          onClose={() => setActiveLinkTx(null)}
+          onSave={handleSaveLinks}
+        />
       )}
     </div>
   );
