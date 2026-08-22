@@ -157,7 +157,6 @@ export default function CounterpartyDetailPage({ params }: { params: Promise<{ i
   const txParams = useMemo(() => {
     const p = new URLSearchParams();
     if (dateRange) { p.set('dateFrom', dateRange.dateFrom); p.set('dateTo', dateRange.dateTo); }
-    p.set('pageSize', '5000'); // fetch enough to cover all transactions for keyword matching
     return p.toString();
   }, [dateRange]);
 
@@ -168,9 +167,10 @@ export default function CounterpartyDetailPage({ params }: { params: Promise<{ i
       const effectivePageSize = first.data?.length ?? 0;
       if (effectivePageSize === 0 || effectivePageSize >= first.count) return first;
       const totalPages = Math.ceil(first.count / effectivePageSize);
+      // Use effectivePageSize (actual rows Supabase returned) for subsequent page offsets
       const rest = await Promise.all(
         Array.from({ length: totalPages - 1 }, (_, i) =>
-          fetch(`/api/cashflow/transactions?${txParams}&page=${i + 2}`).then(r => r.json())
+          fetch(`/api/cashflow/transactions?${txParams}&page=${i + 2}&pageSize=${effectivePageSize}`).then(r => r.json())
         )
       );
       return { ...first, data: [...first.data, ...rest.flatMap((p: { data: CfTx[] }) => p.data)] };
