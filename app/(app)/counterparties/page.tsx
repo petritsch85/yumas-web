@@ -24,6 +24,7 @@ type CfTx = {
   direction: 'in' | 'out';
   category: string;
   counterparty_id: string | null;
+  bill: { id: string; supplier_name: string; invoice_number: string | null } | null;
 };
 
 type Bill = {
@@ -158,6 +159,7 @@ function CpPanel({ cp }: { cp: Counterparty }) {
                         <th className="py-2 px-3 text-right font-semibold text-gray-500 whitespace-nowrap">Amount</th>
                         <th className="py-2 px-3 text-left font-semibold text-gray-500">Category</th>
                         <th className="py-2 px-3 text-left font-semibold text-gray-500 whitespace-nowrap">Match</th>
+                        <th className="py-2 px-3 text-center font-semibold text-gray-500 whitespace-nowrap">Bill</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -178,6 +180,12 @@ function CpPanel({ cp }: { cp: Counterparty }) {
                               <span className={`px-1.5 py-0.5 rounded-full font-medium ${isPinned ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-500'}`}>
                                 {isPinned ? 'Manual' : 'Auto'}
                               </span>
+                            </td>
+                            <td className="py-1.5 px-3 text-center">
+                              {tx.bill
+                                ? <span title={tx.bill.supplier_name + (tx.bill.invoice_number ? ' · ' + tx.bill.invoice_number : '')} className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-green-100"><Check size={11} className="text-green-600" /></span>
+                                : <span className="text-gray-300 text-xs">—</span>
+                              }
                             </td>
                           </tr>
                         );
