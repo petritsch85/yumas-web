@@ -15,14 +15,13 @@ type Match = {
 };
 
 /** Fetch ALL rows from a query that may exceed Supabase's 1000-row cap */
-async function fetchAll(admin: ReturnType<typeof import('@/lib/supabase-admin').getSupabaseAdmin>, table: string, query: (q: any) => any): Promise<any[]> {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function fetchAll(buildQuery: (page: number, pageSize: number) => any): Promise<any[]> {
   const PAGE = 1000;
-  let page = 0;
   const all: any[] = [];
+  let page = 0;
   while (true) {
-    const { data, error } = await query(
-      admin.from(table).range(page * PAGE, (page + 1) * PAGE - 1)
-    );
+    const { data, error } = await buildQuery(page, PAGE);
     if (error) throw new Error(error.message);
     if (!data || data.length === 0) break;
     all.push(...data);
@@ -40,11 +39,13 @@ export async function POST(req: NextRequest) {
   // 1. Fetch ALL unlinked cost transactions (paginated to bypass 1000-row cap)
   let txs: any[];
   try {
-    txs = await fetchAll(admin, 'cashflow_transactions', (q) =>
-      q.select('id, date, counterparty, amount_cents, direction')
-       .is('bill_id', null)
-       .eq('direction', 'out')
-       .order('date', { ascending: false })
+    txs = await fetchAll((page, size) =>
+      admin.from('cashflow_transactions')
+        .select('id, date, counterparty, amount_cents, direction')
+        .is('bill_id', null)
+        .eq('direction', 'out')
+        .order('date', { ascending: false })
+        .range(page * size, (page + 1) * size - 1)
     );
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 });
@@ -54,12 +55,17 @@ export async function POST(req: NextRequest) {
   let linkedRows: any[];
   let bills: any[];
   try {
-    linkedRows = await fetchAll(admin, 'cashflow_transactions', (q) =>
-      q.select('bill_id').not('bill_id', 'is', null)
+    linkedRows = await fetchAll((page, size) =>
+      admin.from('cashflow_transactions')
+        .select('bill_id')
+        .not('bill_id', 'is', null)
+        .range(page * size, (page + 1) * size - 1)
     );
-    bills = await fetchAll(admin, 'bills', (q) =>
-      q.select('id, supplier_name, invoice_number, invoice_date, gross_amount')
-       .order('invoice_date', { ascending: false })
+    bills = await fetchAll((page, size) =>
+      admin.from('bills')
+        .select('id, supplier_name, invoice_number, invoice_date, gross_amount')
+        .order('invoice_date', { ascending: false })
+        .range(page * size, (page + 1) * size - 1)
     );
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 });
