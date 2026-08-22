@@ -35,6 +35,7 @@ type Bill = {
   gross_amount: number;
   net_amount: number;
   status: string;
+  cashflow_transactions: { id: string }[];
 };
 
 const C_CATEGORIES = [
@@ -81,7 +82,7 @@ function CpPanel({ cp }: { cp: Counterparty }) {
     queryFn: async () => {
       const { data } = await supabase
         .from('bills')
-        .select('id,supplier_name,invoice_number,invoice_date,gross_amount,net_amount,status')
+        .select('id,supplier_name,invoice_number,invoice_date,gross_amount,net_amount,status,cashflow_transactions(id)')
         .order('invoice_date', { ascending: false });
       return data ?? [];
     },
@@ -216,10 +217,13 @@ function CpPanel({ cp }: { cp: Counterparty }) {
                         <th className="py-2 px-3 text-right font-semibold text-gray-500">Gross</th>
                         <th className="py-2 px-3 text-right font-semibold text-gray-500">Net</th>
                         <th className="py-2 px-3 text-left font-semibold text-gray-500">Status</th>
+                        <th className="py-2 px-3 text-center font-semibold text-gray-500 whitespace-nowrap">Cash Flow</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {matchedBills.map(bill => (
+                      {matchedBills.map(bill => {
+                        const linked = bill.cashflow_transactions?.length > 0;
+                        return (
                         <tr key={bill.id} className="border-b border-gray-50">
                           <td className="py-1.5 px-3 font-mono text-gray-500 whitespace-nowrap">
                             {bill.invoice_date ? fmtDate(bill.invoice_date) : '—'}
@@ -241,8 +245,15 @@ function CpPanel({ cp }: { cp: Counterparty }) {
                               {bill.status}
                             </span>
                           </td>
+                          <td className="py-1.5 px-3 text-center">
+                            {linked
+                              ? <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-green-100"><Check size={11} className="text-green-600" /></span>
+                              : <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-red-100"><X size={11} className="text-red-500" /></span>
+                            }
+                          </td>
                         </tr>
-                      ))}
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
