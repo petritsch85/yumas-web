@@ -63,9 +63,15 @@ function kwMatch(raw: string | null, keywords: string[], name?: string): boolean
 
 /* ── Inline panel shown when a counterparty row is expanded ── */
 function CpPanel({ cp }: { cp: Counterparty }) {
+  const kwParams = useMemo(() => {
+    const p = new URLSearchParams();
+    for (const kw of (cp.keywords.length > 0 ? cp.keywords : [cp.name])) p.append('keyword', kw);
+    return p.toString();
+  }, [cp.keywords, cp.name]);
+
   const { data: txPage, isFetching: txLoading } = useQuery<{ data: CfTx[] }>({
-    queryKey: ['cp-txs-all', cp.id],
-    queryFn: () => fetch('/api/cashflow/transactions?page=1').then(r => r.json()),
+    queryKey: ['cp-txs-all', cp.id, kwParams],
+    queryFn: () => fetch(`/api/counterparties/${cp.id}/transactions?${kwParams}`).then(r => r.json()),
     staleTime: 60_000,
   });
 
@@ -81,12 +87,7 @@ function CpPanel({ cp }: { cp: Counterparty }) {
     staleTime: 60_000,
   });
 
-  const matchedTxs = useMemo(() => {
-    if (!txPage?.data) return [];
-    return txPage.data.filter(tx =>
-      tx.counterparty_id === cp.id || kwMatch(tx.counterparty, cp.keywords, cp.name)
-    ).sort((a, b) => b.date.localeCompare(a.date));
-  }, [txPage, cp]);
+  const matchedTxs = useMemo(() => (txPage?.data ?? []).sort((a, b) => b.date.localeCompare(a.date)), [txPage]);
 
   const matchedBills = useMemo(() =>
     bills.filter(b => kwMatch(b.supplier_name, cp.keywords, cp.name))

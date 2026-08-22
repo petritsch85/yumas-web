@@ -27,16 +27,14 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
   const seenIds = new Set((pinned ?? []).map((r: any) => r.id));
 
-  // Query 2: for each keyword, ilike search — no counterparty_id restriction
+  // Query 2: for each keyword, ilike search on raw counterparty bank name
   const keywordRows: any[] = [];
-  const kwDebug: Record<string, number> = {};
   for (const kw of keywords.filter(Boolean)) {
     const { data: kRows, error: e2 } = await applyDates(
       admin.from('cashflow_transactions').select(SELECT).ilike('counterparty', `%${kw}%`)
         .order('date', { ascending: false }).order('created_at', { ascending: false })
     );
     if (e2) return NextResponse.json({ error: e2.message }, { status: 500 });
-    kwDebug[kw] = (kRows ?? []).length;
     for (const row of kRows ?? []) {
       if (!seenIds.has(row.id)) {
         keywordRows.push(row);
@@ -49,24 +47,5 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     (a, b) => b.date.localeCompare(a.date) || b.created_at.localeCompare(a.created_at)
   );
 
-  // Debug: also fetch raw Jan 2026 transactions to inspect counterparty field values
-  const { data: jan } = await admin
-    .from('cashflow_transactions')
-    .select('id, date, counterparty, counterparty_id, amount_cents')
-    .gte('date', '2026-01-01')
-    .lte('date', '2026-01-31')
-    .lt('amount_cents', 0)
-    .order('date', { ascending: true });
-
-  return NextResponse.json({
-    data: combined,
-    count: combined.length,
-    _debug: {
-      counterpartyId: id,
-      keywords,
-      pinnedCount: (pinned ?? []).length,
-      kwDebug,
-      jan2026Txs: (jan ?? []).map((r: any) => ({ date: r.date, counterparty: r.counterparty, counterparty_id: r.counterparty_id, amount_cents: r.amount_cents })),
-    },
-  });
+  return NextResponse.json({ data: combined, count: combined.length });
 }

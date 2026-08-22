@@ -182,7 +182,6 @@ export default function CounterpartyDetailPage({ params }: { params: Promise<{ i
   });
 
   const matchedTxs = useMemo(() => txPage?.data ?? [], [txPage]);
-  const debugInfo  = (txPage as any)?._debug;
 
   const matchedBills = useMemo(() =>
     allBills.filter(b => kwMatch(b.supplier_name, currentKeywords, cp?.name)),
@@ -338,17 +337,6 @@ export default function CounterpartyDetailPage({ params }: { params: Promise<{ i
           <div className="text-xs text-gray-400 mt-0.5">{stats.net >= 0 ? 'Positive' : 'Negative'}</div>
         </div>
       </div>
-
-      {/* ── Temp debug panel ── */}
-      {debugInfo && (
-        <div className="bg-yellow-50 border border-yellow-300 rounded-xl p-4 mb-4 text-xs font-mono overflow-x-auto">
-          <div className="font-bold mb-1">DEBUG — Keywords sent: [{debugInfo.keywords?.join(', ')}] | Pinned: {debugInfo.pinnedCount} | Keyword matches: {JSON.stringify(debugInfo.kwDebug)}</div>
-          <div className="font-bold mb-1">Jan 2026 outgoing transactions in DB ({debugInfo.jan2026Txs?.length}):</div>
-          {debugInfo.jan2026Txs?.map((t: any, i: number) => (
-            <div key={i}>{t.date} | cp_id={t.counterparty_id ?? 'null'} | bank=&quot;{t.counterparty}&quot; | {t.amount_cents}</div>
-          ))}
-        </div>
-      )}
 
       {/* ── Tabs ── */}
       <div className="flex gap-1 mb-4 bg-gray-100 rounded-xl p-1 w-fit">
