@@ -12,7 +12,7 @@ export async function POST(req: NextRequest) {
     bill_id,
     note: note?.trim() || null,
   }));
-  const { error } = await admin.from('transaction_bill_links').insert(rows);
+  const { error } = await admin.from('transaction_bill_links').upsert(rows, { onConflict: 'transaction_id,bill_id', ignoreDuplicates: true });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ ok: true });
 }

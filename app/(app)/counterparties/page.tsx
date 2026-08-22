@@ -216,8 +216,10 @@ function CpPanel({ cp }: { cp: Counterparty }) {
     const json = await res.json();
     if (!res.ok || json.error) throw new Error(json.error ?? `HTTP ${res.status}`);
     setActiveLinkTx(null);
-    qc.invalidateQueries({ queryKey: ['cp-txs-all', cp.id, kwParams] });
-    qc.invalidateQueries({ queryKey: ['cp-bills-all'] });
+    await Promise.all([
+      qc.refetchQueries({ queryKey: ['cp-txs-all', cp.id, kwParams] }),
+      qc.refetchQueries({ queryKey: ['cp-bills-all'] }),
+    ]);
   };
 
   const loading = txLoading || billsLoading;
