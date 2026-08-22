@@ -157,25 +157,13 @@ export default function CounterpartyDetailPage({ params }: { params: Promise<{ i
   const txParams = useMemo(() => {
     const p = new URLSearchParams();
     if (dateRange) { p.set('dateFrom', dateRange.dateFrom); p.set('dateTo', dateRange.dateTo); }
-    p.set('counterpartyId', id);
     for (const kw of currentKeywords) p.append('keyword', kw);
     return p.toString();
-  }, [dateRange, id, currentKeywords]);
+  }, [dateRange, currentKeywords]);
 
   const { data: txPage, isFetching: txLoading } = useQuery<{ data: CfTx[] }>({
     queryKey: ['cp-txs', id, txParams],
-    queryFn: async () => {
-      const first = await fetch(`/api/cashflow/transactions?${txParams}&page=1`).then(r => r.json());
-      const effectivePageSize = first.data?.length ?? 0;
-      if (effectivePageSize === 0 || effectivePageSize >= first.count) return first;
-      const totalPages = Math.ceil(first.count / effectivePageSize);
-      const rest = await Promise.all(
-        Array.from({ length: totalPages - 1 }, (_, i) =>
-          fetch(`/api/cashflow/transactions?${txParams}&page=${i + 2}&pageSize=${effectivePageSize}`).then(r => r.json())
-        )
-      );
-      return { ...first, data: [...first.data, ...rest.flatMap((p: { data: CfTx[] }) => p.data)] };
-    },
+    queryFn: () => fetch(`/api/counterparties/${id}/transactions?${txParams}`).then(r => r.json()),
     staleTime: 30_000,
     enabled: !!cp,
   });
