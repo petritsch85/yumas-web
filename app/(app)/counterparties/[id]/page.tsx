@@ -163,7 +163,18 @@ export default function CounterpartyDetailPage({ params }: { params: Promise<{ i
 
   const { data: txPage, isFetching: txLoading } = useQuery<{ data: CfTx[] }>({
     queryKey: ['cp-txs', id, txParams],
-    queryFn: () => fetch(`/api/cashflow/transactions?${txParams}`).then(r => r.json()),
+    queryFn: async () => {
+      const first = await fetch(`/api/cashflow/transactions?${txParams}&page=1`).then(r => r.json());
+      const effectivePageSize = first.data?.length ?? 0;
+      if (effectivePageSize === 0 || effectivePageSize >= first.count) return first;
+      const totalPages = Math.ceil(first.count / effectivePageSize);
+      const rest = await Promise.all(
+        Array.from({ length: totalPages - 1 }, (_, i) =>
+          fetch(`/api/cashflow/transactions?${txParams}&page=${i + 2}`).then(r => r.json())
+        )
+      );
+      return { ...first, data: [...first.data, ...rest.flatMap((p: { data: CfTx[] }) => p.data)] };
+    },
     staleTime: 30_000,
     enabled: !!cp,
   });
