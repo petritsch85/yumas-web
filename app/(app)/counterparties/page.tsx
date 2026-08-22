@@ -193,6 +193,22 @@ function CpPanel({ cp }: { cp: Counterparty }) {
 
   const matchedTxs = useMemo(() => (txPage?.data ?? []).sort((a, b) => b.date.localeCompare(a.date)), [txPage]);
 
+  const txIds = useMemo(() => matchedTxs.map(t => t.id), [matchedTxs]);
+
+  const { data: billLinks = [] } = useQuery<{ id: string; transaction_id: string; bill_id: string; note: string | null }[]>({
+    queryKey: ['tx-bill-links', cp.id, kwParams],
+    queryFn: async () => {
+      if (txIds.length === 0) return [];
+      const { data } = await supabase
+        .from('transaction_bill_links')
+        .select('id, transaction_id, bill_id, note')
+        .in('transaction_id', txIds);
+      return data ?? [];
+    },
+    enabled: txIds.length > 0,
+    staleTime: 0,
+  });
+
   const matchedBills = useMemo(() =>
     bills.filter(b => kwMatch(b.supplier_name, cp.keywords, cp.name))
   , [bills, cp.keywords, cp.name]);
@@ -219,6 +235,7 @@ function CpPanel({ cp }: { cp: Counterparty }) {
     await Promise.all([
       qc.refetchQueries({ queryKey: ['cp-txs-all', cp.id, kwParams] }),
       qc.refetchQueries({ queryKey: ['cp-bills-all'] }),
+      qc.refetchQueries({ queryKey: ['tx-bill-links', cp.id, kwParams] }),
     ]);
   };
 
@@ -301,21 +318,26 @@ function CpPanel({ cp }: { cp: Counterparty }) {
                               </span>
                             </td>
                             <td className="py-1.5 px-3 text-center">
-                              {tx.bill ? (
-                                <span title={tx.bill.supplier_name + (tx.bill.invoice_number ? ' · ' + tx.bill.invoice_number : '')} className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-green-100"><Check size={11} className="text-green-600" /></span>
-                              ) : tx.transaction_bill_links?.length > 0 ? (
-                                <span className="inline-flex items-center justify-center gap-0.5 px-1.5 py-0.5 rounded-full bg-green-100 text-green-700 text-xs font-semibold whitespace-nowrap">
-                                  {tx.transaction_bill_links.length} bills <Check size={10} className="text-green-600" />
-                                </span>
-                              ) : (
-                                <div className="flex items-center justify-center gap-1">
-                                  <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-red-100"><X size={11} className="text-red-500" /></span>
-                                  <button onClick={() => setActiveLinkTx(tx)} title="Link to bill(s)"
-                                    className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-gray-100 hover:bg-blue-100 hover:text-blue-600 text-gray-400 transition-colors">
-                                    <Link2 size={10} />
-                                  </button>
-                                </div>
-                              )}
+                              {(() => {
+                                const txLinks = billLinks.filter(l => l.transaction_id === tx.id);
+                                if (tx.bill) return (
+                                  <span title={tx.bill.supplier_name + (tx.bill.invoice_number ? ' · ' + tx.bill.invoice_number : '')} className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-green-100"><Check size={11} className="text-green-600" /></span>
+                                );
+                                if (txLinks.length > 0) return (
+                                  <span className="inline-flex items-center justify-center gap-0.5 px-1.5 py-0.5 rounded-full bg-green-100 text-green-700 text-xs font-semibold whitespace-nowrap">
+                                    {txLinks.length} bills <Check size={10} className="text-green-600" />
+                                  </span>
+                                );
+                                return (
+                                  <div className="flex items-center justify-center gap-1">
+                                    <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-red-100"><X size={11} className="text-red-500" /></span>
+                                    <button onClick={() => setActiveLinkTx(tx)} title="Link to bill(s)"
+                                      className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-gray-100 hover:bg-blue-100 hover:text-blue-600 text-gray-400 transition-colors">
+                                      <Link2 size={10} />
+                                    </button>
+                                  </div>
+                                );
+                              })()}
                             </td>
                           </tr>
                         );
@@ -351,7 +373,7 @@ function CpPanel({ cp }: { cp: Counterparty }) {
                     </thead>
                     <tbody>
                       {matchedBills.map(bill => {
-                        const linked = (bill.cashflow_transactions?.length ?? 0) > 0 || (bill.transaction_bill_links?.length ?? 0) > 0;
+                        const linked = (bill.cashflow_transactions?.length ?? 0) > 0 || billLinks.some(l => l.bill_id === bill.id);
                         return (
                         <tr key={bill.id} className="border-b border-gray-50">
                           <td className="py-1.5 px-3 font-mono text-gray-500 whitespace-nowrap">
