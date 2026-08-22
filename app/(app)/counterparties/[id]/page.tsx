@@ -157,8 +157,10 @@ export default function CounterpartyDetailPage({ params }: { params: Promise<{ i
   const txParams = useMemo(() => {
     const p = new URLSearchParams();
     if (dateRange) { p.set('dateFrom', dateRange.dateFrom); p.set('dateTo', dateRange.dateTo); }
+    p.set('counterpartyId', id);
+    for (const kw of currentKeywords) p.append('keyword', kw);
     return p.toString();
-  }, [dateRange]);
+  }, [dateRange, id, currentKeywords]);
 
   const { data: txPage, isFetching: txLoading } = useQuery<{ data: CfTx[] }>({
     queryKey: ['cp-txs', id, txParams],
@@ -167,7 +169,6 @@ export default function CounterpartyDetailPage({ params }: { params: Promise<{ i
       const effectivePageSize = first.data?.length ?? 0;
       if (effectivePageSize === 0 || effectivePageSize >= first.count) return first;
       const totalPages = Math.ceil(first.count / effectivePageSize);
-      // Use effectivePageSize (actual rows Supabase returned) for subsequent page offsets
       const rest = await Promise.all(
         Array.from({ length: totalPages - 1 }, (_, i) =>
           fetch(`/api/cashflow/transactions?${txParams}&page=${i + 2}&pageSize=${effectivePageSize}`).then(r => r.json())
@@ -192,12 +193,7 @@ export default function CounterpartyDetailPage({ params }: { params: Promise<{ i
     enabled: activeTab === 'bills',
   });
 
-  const matchedTxs = useMemo(() => {
-    if (!txPage?.data) return [];
-    return txPage.data.filter(tx =>
-      tx.counterparty_id === id || kwMatch(tx.counterparty, currentKeywords, cp?.name)
-    );
-  }, [txPage, id, currentKeywords]);
+  const matchedTxs = useMemo(() => txPage?.data ?? [], [txPage]);
 
   const matchedBills = useMemo(() =>
     allBills.filter(b => kwMatch(b.supplier_name, currentKeywords, cp?.name)),
