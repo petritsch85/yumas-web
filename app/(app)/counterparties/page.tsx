@@ -184,7 +184,7 @@ function CpPanel({ cp }: { cp: Counterparty }) {
                             <td className="py-1.5 px-3 text-center">
                               {tx.bill
                                 ? <span title={tx.bill.supplier_name + (tx.bill.invoice_number ? ' · ' + tx.bill.invoice_number : '')} className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-green-100"><Check size={11} className="text-green-600" /></span>
-                                : <span className="text-gray-300 text-xs">—</span>
+                                : <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-red-100"><X size={11} className="text-red-500" /></span>
                               }
                             </td>
                           </tr>
