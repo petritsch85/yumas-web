@@ -172,8 +172,10 @@ const NAV_GROUPS: NavGroup[] = [
       {
         labelKey: 'sidebar.nav.bills', href: '/bills', icon: FilePlus, permKey: 'bills',
         children: [
-          { labelKey: 'sidebar.nav.incoming', href: '/bills',          icon: FilePlus,  permKey: 'bills' },
-          { labelKey: 'sidebar.nav.outgoing', href: '/bills/outgoing', icon: FileCheck, permKey: 'bills_create' },
+          { labelKey: 'sidebar.nav.staffCosts', href: '/bills/staff',   icon: Users },
+          { labelKey: 'sidebar.nav.incoming',   href: '/bills',          icon: FilePlus,  permKey: 'bills' },
+          { labelKey: 'sidebar.nav.outgoing',   href: '/bills/outgoing', icon: FileCheck, permKey: 'bills_create' },
+          { labelKey: 'sidebar.nav.costsOther', href: '/bills/other',   icon: FolderOpen },
         ],
       },
       { labelKey: 'sidebar.nav.cashFlowCheck', href: '/cashflow', icon: Banknote },
