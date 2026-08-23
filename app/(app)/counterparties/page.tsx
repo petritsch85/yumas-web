@@ -43,7 +43,7 @@ type Bill = {
   net_amount: number;
   status: string;
   cashflow_transactions: { id: string }[];
-  transaction_bill_links: { id: string }[];
+  transaction_bill_links: { id: string; transaction_id: string }[];
 };
 
 const C_CATEGORIES = [
@@ -78,7 +78,10 @@ function LinkBillsModal({ tx, bills, onClose, onSave }: {
   onClose: () => void;
   onSave: (billIds: string[], note: string) => Promise<void>;
 }) {
-  const [selected, setSelected] = useState<Set<string>>(new Set());
+  // Pre-populate with bills already linked to this specific transaction
+  const [selected, setSelected] = useState<Set<string>>(() =>
+    new Set(bills.filter(b => b.transaction_bill_links.some(l => l.transaction_id === tx.id)).map(b => b.id))
+  );
   const [note, setNote]         = useState('');
   const [saving, setSaving]     = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -117,7 +120,11 @@ function LinkBillsModal({ tx, bills, onClose, onSave }: {
         <div className="space-y-1.5 max-h-64 overflow-y-auto mb-3">
           {bills.length === 0 && <div className="text-xs text-gray-400 italic py-2">No available bills for this counterparty.</div>}
           {bills.map(bill => {
-            const alreadyLinked = bill.cashflow_transactions.length > 0 || bill.transaction_bill_links.length > 0;
+            // Block bills that are directly matched to another CF, or junction-linked to a different transaction
+            const linkedToThisTx  = bill.transaction_bill_links.some(l => l.transaction_id === tx.id);
+            const linkedElsewhere = bill.cashflow_transactions.length > 0 ||
+              bill.transaction_bill_links.some(l => l.transaction_id !== tx.id);
+            const alreadyLinked = !linkedToThisTx && linkedElsewhere;
             return (
               <label key={bill.id} className={`flex items-center gap-3 p-2.5 rounded-lg border cursor-pointer ${alreadyLinked ? 'opacity-50 border-gray-100 bg-gray-50' : 'border-gray-100 hover:bg-gray-50'}`}>
                 <input type="checkbox" checked={selected.has(bill.id)} onChange={() => !alreadyLinked && toggle(bill.id)}
@@ -314,7 +321,7 @@ function CpPanel({ cp }: { cp: Counterparty }) {
     queryFn: async () => {
       const { data } = await supabase
         .from('bills')
-        .select('id,supplier_name,invoice_number,invoice_date,gross_amount,net_amount,status,cashflow_transactions(id),transaction_bill_links(id)')
+        .select('id,supplier_name,invoice_number,invoice_date,gross_amount,net_amount,status,cashflow_transactions(id),transaction_bill_links(id,transaction_id)')
         .order('invoice_date', { ascending: false });
       return data ?? [];
     },
@@ -486,14 +493,18 @@ function CpPanel({ cp }: { cp: Counterparty }) {
                             </td>
                             <td className="py-1.5 px-3 text-center">
                               {(() => {
-                                const txLinks = billLinks.filter(l => l.transaction_id === tx.id);
+                                // Use embedded junction links from admin-fetched tx data (most reliable)
+                                const embeddedLinks = tx.transaction_bill_links ?? [];
+                                const queryLinks    = billLinks.filter(l => l.transaction_id === tx.id);
+                                const linkedCount   = embeddedLinks.length > 0 ? embeddedLinks.length : queryLinks.length;
                                 if (tx.bill) return (
                                   <span title={tx.bill.supplier_name + (tx.bill.invoice_number ? ' · ' + tx.bill.invoice_number : '')} className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-green-100"><Check size={11} className="text-green-600" /></span>
                                 );
-                                if (txLinks.length > 0) return (
-                                  <span className="inline-flex items-center justify-center gap-0.5 px-1.5 py-0.5 rounded-full bg-green-100 text-green-700 text-xs font-semibold whitespace-nowrap">
-                                    {txLinks.length} bills <Check size={10} className="text-green-600" />
-                                  </span>
+                                if (linkedCount > 0) return (
+                                  <button onClick={() => setActiveLinkTx(tx)} title="Edit bill links"
+                                    className="inline-flex items-center justify-center gap-0.5 px-1.5 py-0.5 rounded-full bg-green-100 text-green-700 text-xs font-semibold whitespace-nowrap hover:bg-green-200 transition-colors">
+                                    {linkedCount} bill{linkedCount !== 1 ? 's' : ''} <Check size={10} className="text-green-600" />
+                                  </button>
                                 );
                                 return (
                                   <div className="flex items-center justify-center gap-1">
