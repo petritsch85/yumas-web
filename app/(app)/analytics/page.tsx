@@ -23,7 +23,8 @@ type UnmatchedBill = {
   gross_amount: number;
   net_amount: number;
   status: string;
-  location: string | null;
+  location_label: string | null;
+  category: string | null;
 };
 
 type Analytics = {
@@ -248,7 +249,7 @@ export default function AnalyticsPage() {
                         : 'bg-gray-100 text-gray-500'
                       }`}>{bill.status}</span>
                     </td>
-                    <td className="py-2 px-3 text-gray-400">{bill.location ?? '—'}</td>
+                    <td className="py-2 px-3 text-gray-400">{bill.location_label ?? '—'}</td>
                   </tr>
                 ))}
               </tbody>
