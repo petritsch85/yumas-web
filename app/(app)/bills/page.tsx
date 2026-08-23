@@ -319,11 +319,13 @@ function BillPeriodPicker({ bill, onSave }: {
   };
 
   const label = bill.period_start
-    ? (bill.period_type === 'month'
+    ? bill.period_type === 'month'
         ? new Date(bill.period_start + 'T00:00:00').toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })
-        : bill.period_type === 'year' || bill.period_type === 'custom'
-          ? `${fmtDate(bill.period_start)} – ${fmtDate(bill.period_end)}`
-          : fmtDate(bill.period_start))
+      : bill.period_type === 'year'
+        ? new Date(bill.period_start + 'T00:00:00').getFullYear().toString()
+      : bill.period_type === 'custom'
+        ? `${fmtDate(bill.period_start)} – ${fmtDate(bill.period_end)}`
+      : fmtDate(bill.period_start)
     : '';
 
   const TYPES: { key: BPType; label: string }[] = [
