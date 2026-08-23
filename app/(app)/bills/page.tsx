@@ -457,7 +457,7 @@ export default function BillsPage() {
       const { data } = await supabase
         .from('bills')
         .select('id, created_at, supplier_name, invoice_number, invoice_date, due_date, gross_amount, net_amount, vat_amount, category, location_label, period_type, period_start, period_end, status, file_path')
-        .order('period_start', { ascending: false });
+        .order('invoice_date', { ascending: false, nullsFirst: false });
       return (data ?? []) as Bill[];
     },
   });
@@ -488,7 +488,7 @@ export default function BillsPage() {
   const uniqueMonths: { value: string; label: string }[] = Array.from(
     new Set(
       bills
-        .map((b) => b.invoice_date ?? b.period_start)
+        .map((b) => b.invoice_date)
         .filter(Boolean)
         .map((d) => d!.slice(0, 7)) // "YYYY-MM"
     )
