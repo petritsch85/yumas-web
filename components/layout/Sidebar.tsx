@@ -169,7 +169,13 @@ const NAV_GROUPS: NavGroup[] = [
       },
       { labelKey: 'sidebar.nav.cashFlowCheck', href: '/cashflow', icon: Banknote },
       { labelKey: 'sidebar.nav.purchasedGoods', href: '/items',    icon: Package },
-      { labelKey: 'sidebar.nav.analytics',      href: '/analytics', icon: SearchX },
+      {
+        labelKey: 'sidebar.nav.analytics', href: '/analytics', icon: SearchX,
+        children: [
+          { labelKey: 'sidebar.nav.unmatchedCFs', href: '/analytics',     icon: SearchX },
+          { labelKey: 'sidebar.nav.groupPnl',     href: '/analytics/pnl', icon: LineChart },
+        ],
+      },
     ],
   },
   {

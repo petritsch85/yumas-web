@@ -65,6 +65,8 @@
       "cashFlowCheck": "Cash Flow Check",
       "purchasedGoods": "Purchased Goods",
       "analytics": "Analytics",
+      "unmatchedCFs": "Unmatched CFs & Bills",
+      "groupPnl": "Group P&L and CFS",
       "counterparties": "Counterparties",
       "accounts": "Accounts",
       "bills": "Bills",

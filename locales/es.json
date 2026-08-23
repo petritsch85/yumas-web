@@ -63,6 +63,8 @@
       "cashFlowCheck": "Control de Caja",
       "purchasedGoods": "Bienes Comprados",
       "analytics": "Análisis",
+      "unmatchedCFs": "Unmatched CFs & Bills",
+      "groupPnl": "Group P&L and CFS",
       "accounts": "Cuentas",
       "bills": "Facturas",
       "incoming": "Entrantes",
