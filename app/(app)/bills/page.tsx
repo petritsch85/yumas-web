@@ -1309,7 +1309,7 @@ export default function BillsPage() {
                           )}
                         </td>
                         <td className="px-2 py-1.5 tabular-nums text-xs text-gray-900 whitespace-nowrap">{fmt(bill.net_amount)}</td>
-                        <td className="px-2 py-1.5 tabular-nums text-xs text-gray-500 whitespace-nowrap">{vatPct.toFixed(0)}%</td>
+                        <td className="px-2 py-1.5 tabular-nums text-xs text-gray-500 whitespace-nowrap">{vatPct.toFixed(1)}%</td>
                         <td className="px-2 py-1.5 tabular-nums text-xs text-gray-500 whitespace-nowrap">{fmt(vatAmount)}</td>
                         <td className="px-2 py-1.5 font-bold text-gray-900 tabular-nums text-xs whitespace-nowrap">{fmt(bill.gross_amount)}</td>
                         <td className="px-2 py-1.5">
