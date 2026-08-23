@@ -306,6 +306,28 @@ function periodLabel(raw: string | null): string {
   }
 }
 
+const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+function MonthSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [y, m] = value ? value.split('-') : ['', ''];
+  const selCls = 'border border-gray-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-[#1B5E20] bg-white';
+  const curYear = new Date().getFullYear();
+  const years = Array.from({ length: 10 }, (_, i) => curYear - 7 + i);
+  const set = (ny: string, nm: string) => { if (ny && nm) onChange(`${ny}-${nm}`); };
+  return (
+    <div className="flex gap-2">
+      <select value={m ?? ''} onChange={e => set(y, e.target.value)} className={`${selCls} flex-1`}>
+        <option value="">Month</option>
+        {MONTHS.map((mn, i) => <option key={i} value={String(i + 1).padStart(2, '0')}>{mn}</option>)}
+      </select>
+      <select value={y ?? ''} onChange={e => set(e.target.value, m)} className={`${selCls} w-24`}>
+        <option value="">Year</option>
+        {years.map(yr => <option key={yr} value={String(yr)}>{yr}</option>)}
+      </select>
+    </div>
+  );
+}
+
 function PeriodPicker({ value, onChange, locked }: {
   value: string | null;
   onChange: (v: string | null) => void;
@@ -328,7 +350,9 @@ function PeriodPicker({ value, onChange, locked }: {
     const rect = btnRef.current?.getBoundingClientRect();
     if (rect) {
       const spaceBelow = window.innerHeight - rect.bottom;
-      setPos({ top: spaceBelow < 280 ? rect.top : rect.bottom + 4, left: rect.left, flipUp: spaceBelow < 280 });
+      const popWidth = 288; // w-72
+      const left = Math.min(rect.left, window.innerWidth - popWidth - 8);
+      setPos({ top: spaceBelow < 280 ? rect.top : rect.bottom + 4, left: Math.max(8, left), flipUp: spaceBelow < 280 });
     }
     setOpen(true);
   };
@@ -412,18 +436,18 @@ function PeriodPicker({ value, onChange, locked }: {
             {type === 'monthly' && (
               <div>
                 <label className="text-xs text-gray-500 block mb-1">Month</label>
-                <input type="month" value={start} onChange={e => setStart(e.target.value)} className={inputCls} />
+                <MonthSelect value={start} onChange={setStart} />
               </div>
             )}
             {type === 'annual' && (
               <>
                 <div>
                   <label className="text-xs text-gray-500 block mb-1">Start month</label>
-                  <input type="month" value={start} onChange={e => setStart(e.target.value)} className={inputCls} />
+                  <MonthSelect value={start} onChange={setStart} />
                 </div>
                 <div>
                   <label className="text-xs text-gray-500 block mb-1">End month</label>
-                  <input type="month" value={end} onChange={e => setEnd(e.target.value)} className={inputCls} />
+                  <MonthSelect value={end} onChange={setEnd} />
                 </div>
               </>
             )}
