@@ -162,6 +162,121 @@ function LinkBillsModal({ tx, bills, onClose, onSave }: {
   );
 }
 
+/* ── Chart helpers ── */
+function niceNum(v: number) {
+  if (v <= 0) return 1;
+  const exp = Math.pow(10, Math.floor(Math.log10(v)));
+  const f = v / exp;
+  return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * exp;
+}
+function yTicks(maxVal: number, n = 5): number[] {
+  const step = niceNum(maxVal / n);
+  const ticks: number[] = [];
+  for (let v = 0; v <= maxVal + step * 0.01; v += step) ticks.push(Math.round(v));
+  return ticks;
+}
+function monthTicks(lo: Date, hi: Date): Date[] {
+  const ticks: Date[] = [];
+  let cur = new Date(lo.getFullYear(), lo.getMonth(), 1);
+  const end = new Date(hi.getFullYear(), hi.getMonth() + 1, 1);
+  while (cur < end) { ticks.push(new Date(cur)); cur = new Date(cur.getFullYear(), cur.getMonth() + 1, 1); }
+  return ticks;
+}
+function fmtAmt(v: number) {
+  return v >= 1000 ? `${(v / 1000).toFixed(v % 1000 === 0 ? 0 : 1)}k` : String(Math.round(v));
+}
+function fmtMo(d: Date) {
+  return d.toLocaleDateString('en-GB', { month: 'short', year: '2-digit' });
+}
+
+function CpChart({ txs, bills }: { txs: CfTx[]; bills: Bill[] }) {
+  const ML = 52, MR = 16, MT = 20, MB = 38;
+  const VW = 780, VH = 220;
+  const cW = VW - ML - MR, cH = VH - MT - MB;
+
+  const txPts = useMemo(() =>
+    txs.map(t => ({ d: new Date(t.date + 'T00:00:00'), v: t.amount_cents / 100, lbl: `${t.date}  €${(t.amount_cents/100).toFixed(2)}` }))
+      .sort((a, b) => a.d.getTime() - b.d.getTime())
+  , [txs]);
+
+  const billPts = useMemo(() =>
+    bills.filter(b => b.invoice_date)
+      .map(b => ({ d: new Date(b.invoice_date! + 'T00:00:00'), v: b.gross_amount, lbl: `${b.invoice_date}  €${b.gross_amount.toFixed(2)}` }))
+      .sort((a, b) => a.d.getTime() - b.d.getTime())
+  , [bills]);
+
+  const all = [...txPts, ...billPts];
+  if (all.length === 0) return null;
+
+  const allMs  = all.map(p => p.d.getTime());
+  const allVs  = all.map(p => p.v);
+  const loMs   = Math.min(...allMs), hiMs = Math.max(...allMs);
+  const span   = hiMs - loMs || 86400000;
+  const padMs  = span * 0.04;
+  const minMs  = loMs - padMs, maxMs = hiMs + padMs;
+  const maxVal = niceNum(Math.max(...allVs, 1) * 1.05);
+
+  const sx = (ms: number) => ((ms - minMs) / (maxMs - minMs)) * cW;
+  const sy = (v: number)  => cH - (v / maxVal) * cH;
+  const path = (pts: { d: Date; v: number }[]) =>
+    pts.map((p, i) => `${i ? 'L' : 'M'}${sx(p.d.getTime()).toFixed(1)},${sy(p.v).toFixed(1)}`).join(' ');
+
+  const lo = new Date(minMs), hi = new Date(maxMs);
+  let mTicks = monthTicks(lo, hi);
+  // Thin out x-ticks to avoid overlap (max ~10)
+  const step = Math.ceil(mTicks.length / 10);
+  if (step > 1) mTicks = mTicks.filter((_, i) => i % step === 0);
+
+  const yT = yTicks(maxVal);
+
+  return (
+    <div className="bg-white border border-gray-200 rounded-lg p-3 overflow-x-auto">
+      <div className="flex items-center gap-4 mb-2 px-1">
+        <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Timeline</span>
+        <span className="flex items-center gap-1.5 text-xs text-gray-500"><span className="w-3 h-0.5 bg-blue-500 inline-block rounded" /><span className="w-2 h-2 rounded-full bg-blue-500 inline-block" />Cash Flows</span>
+        <span className="flex items-center gap-1.5 text-xs text-gray-500"><span className="w-3 h-0.5 bg-red-500 inline-block rounded" /><span className="w-2 h-2 rounded-full bg-red-500 inline-block" />Bills</span>
+      </div>
+      <svg viewBox={`0 0 ${VW} ${VH}`} style={{ width: '100%', minWidth: 380, display: 'block' }}>
+        <g transform={`translate(${ML},${MT})`}>
+          {/* Horizontal grid + Y labels */}
+          {yT.map(v => (
+            <g key={v}>
+              <line x1={0} y1={sy(v)} x2={cW} y2={sy(v)} stroke="#f3f4f6" strokeWidth={1} />
+              <text x={-6} y={sy(v) + 4} textAnchor="end" fontSize={10} fill="#9ca3af">{fmtAmt(v)}</text>
+            </g>
+          ))}
+          {/* Axes */}
+          <line x1={0} y1={0} x2={0} y2={cH} stroke="#e5e7eb" strokeWidth={1} />
+          <line x1={0} y1={cH} x2={cW} y2={cH} stroke="#e5e7eb" strokeWidth={1} />
+          {/* X ticks */}
+          {mTicks.map((d, i) => (
+            <g key={i} transform={`translate(${sx(d.getTime()).toFixed(1)},${cH})`}>
+              <line y2={4} stroke="#e5e7eb" strokeWidth={1} />
+              <text y={16} textAnchor="middle" fontSize={10} fill="#9ca3af">{fmtMo(d)}</text>
+            </g>
+          ))}
+          {/* Bills line */}
+          {billPts.length > 1 && <path d={path(billPts)} fill="none" stroke="#ef4444" strokeWidth={2} strokeLinejoin="round" opacity={0.7} />}
+          {/* Tx line */}
+          {txPts.length > 1 && <path d={path(txPts)} fill="none" stroke="#3b82f6" strokeWidth={2} strokeLinejoin="round" opacity={0.7} />}
+          {/* Bill dots */}
+          {billPts.map((p, i) => (
+            <circle key={i} cx={sx(p.d.getTime())} cy={sy(p.v)} r={4.5} fill="#ef4444" stroke="white" strokeWidth={1.5}>
+              <title>{p.lbl}</title>
+            </circle>
+          ))}
+          {/* Tx dots */}
+          {txPts.map((p, i) => (
+            <circle key={i} cx={sx(p.d.getTime())} cy={sy(p.v)} r={4.5} fill="#3b82f6" stroke="white" strokeWidth={1.5}>
+              <title>{p.lbl}</title>
+            </circle>
+          ))}
+        </g>
+      </svg>
+    </div>
+  );
+}
+
 /* ── Sortable column header ── */
 type SortDir = 'asc' | 'desc';
 function SortTh({ col, label, active, dir, align = 'left', onSort }: {
@@ -469,6 +584,11 @@ function CpPanel({ cp }: { cp: Counterparty }) {
               </div>
             )}
           </div>
+
+          {/* Timeline chart */}
+          {(matchedTxs.length > 0 || matchedBills.length > 0) && (
+            <CpChart txs={matchedTxs} bills={matchedBills} />
+          )}
         </>
       )}
 
