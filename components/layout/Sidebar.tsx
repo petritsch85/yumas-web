@@ -146,16 +146,6 @@ const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
-    labelKey: 'sidebar.groups.staffing',
-    adminOnly: true,
-    items: [
-      { labelKey: 'sidebar.nav.holidays',     href: '/coming-soon/holidays',      icon: CalendarDays },
-      { labelKey: 'sidebar.nav.sickDays',     href: '/coming-soon/sick-days',     icon: CalendarDays },
-      { labelKey: 'sidebar.nav.training',     href: '/coming-soon/training',      icon: Users },
-      { labelKey: 'sidebar.nav.healthSafety', href: '/coming-soon/health-safety', icon: Users },
-    ],
-  },
-  {
     labelKey: 'sidebar.groups.analysis',
     adminOnly: true,
     items: [
@@ -189,16 +179,6 @@ const NAV_GROUPS: NavGroup[] = [
           { labelKey: 'sidebar.nav.shiftReports', href: '/analytics/shift-reports', icon: ClipboardList },
         ],
       },
-    ],
-  },
-  {
-    labelKey: 'sidebar.groups.documents',
-    adminOnly: true,
-    items: [
-      { labelKey: 'sidebar.nav.staff',     href: '/coming-soon/docs-staff',     icon: UserSquare },
-      { labelKey: 'sidebar.nav.locations', href: '/coming-soon/docs-locations', icon: MapPin },
-      { labelKey: 'sidebar.nav.suppliers', href: '/coming-soon/docs-suppliers', icon: Truck },
-      { labelKey: 'sidebar.nav.other',     href: '/coming-soon/docs-other',     icon: FolderOpen },
     ],
   },
   {
