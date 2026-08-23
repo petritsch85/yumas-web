@@ -476,7 +476,7 @@ export default function BillsPage() {
       const autoLocation = matchLocation(json.data?.delivery_address ?? null, locations);
 
       // Derive period type from extracted billing period
-      let periodType: string;
+      let periodType: PeriodType;
       let periodStart: string | null;
       let periodEnd: string | null;
       if (bpStart && bpEnd) {
