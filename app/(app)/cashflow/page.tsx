@@ -42,6 +42,7 @@ type CfTx = {
   bill: BillRef | null;
   confirmed: boolean;
   counterparty_id: string | null;
+  accounting_period: string | null; // YYYY-MM
 };
 
 type Counterparty = {
@@ -468,6 +469,24 @@ function TxRow({ tx, onSave, counterparties }: {
           )}
         </td>
 
+        {/* Accounting Period */}
+        <td className="py-2 px-2 whitespace-nowrap">
+          {locked ? (
+            <span className="text-xs text-gray-600 bg-white border border-gray-200 rounded px-1.5 py-0.5">
+              {tx.accounting_period
+                ? new Date(tx.accounting_period + '-01').toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })
+                : '—'}
+            </span>
+          ) : (
+            <input
+              type="month"
+              value={tx.accounting_period ?? ''}
+              onChange={e => patch('accounting_period', e.target.value || null)}
+              className="text-xs bg-white border border-gray-200 rounded px-1.5 py-0.5 text-gray-700 outline-none cursor-pointer hover:border-gray-400 focus:border-[#1B5E20] w-32"
+            />
+          )}
+        </td>
+
         {/* Notes */}
         <td className="py-2 px-2 w-full">
           {locked ? (
@@ -626,8 +645,9 @@ export default function CashFlowPage() {
           bv = (b.direction === 'in' ? 1 : -1) * (b.amount_cents - vb);
           break;
         }
-        case 'category': av = a.category ?? ''; bv = b.category ?? ''; break;
-        case 'location': av = a.location  ?? ''; bv = b.location  ?? ''; break;
+        case 'category':          av = a.category          ?? ''; bv = b.category          ?? ''; break;
+        case 'location':          av = a.location           ?? ''; bv = b.location           ?? ''; break;
+        case 'accounting_period': av = a.accounting_period  ?? ''; bv = b.accounting_period  ?? ''; break;
         default:         av = 0; bv = 0;
       }
       const cmp = typeof av === 'string' ? av.localeCompare(bv as string) : (av as number) - (bv as number);
@@ -1245,8 +1265,9 @@ export default function CashFlowPage() {
                         { col: 'vatpct',   label: 'VAT %',    align: 'right' },
                         { col: 'vateur',   label: 'VAT €',    align: 'right' },
                         { col: 'netto',    label: 'Netto',    align: 'right' },
-                        { col: 'category', label: 'Category', align: 'left'  },
-                        { col: 'location', label: 'Location', align: 'left'  },
+                        { col: 'category',          label: 'Category', align: 'left'  },
+                        { col: 'location',          label: 'Location', align: 'left'  },
+                        { col: 'accounting_period', label: 'Period',   align: 'left'  },
                       ] as { col: string; label: string; align: 'left' | 'right' }[]).map(({ col, label, align }) => {
                         const active = sortCol === col;
                         return (
