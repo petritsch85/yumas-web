@@ -162,10 +162,31 @@ function LinkBillsModal({ tx, bills, onClose, onSave }: {
   );
 }
 
+/* ── Sortable column header ── */
+type SortDir = 'asc' | 'desc';
+function SortTh({ col, label, active, dir, align = 'left', onSort }: {
+  col: string; label: string; active: boolean; dir: SortDir;
+  align?: 'left' | 'right' | 'center'; onSort: (col: string) => void;
+}) {
+  return (
+    <th onClick={() => onSort(col)}
+      className={`py-2 px-3 font-semibold text-gray-500 whitespace-nowrap cursor-pointer select-none hover:text-gray-700 text-${align}`}>
+      <span className={`inline-flex items-center gap-0.5 ${align === 'right' ? 'justify-end' : ''}`}>
+        {label}
+        {active
+          ? (dir === 'asc' ? <ChevronUp size={10} /> : <ChevronDown size={10} />)
+          : <ChevronDown size={10} className="opacity-20" />}
+      </span>
+    </th>
+  );
+}
+
 /* ── Inline panel shown when a counterparty row is expanded ── */
 function CpPanel({ cp }: { cp: Counterparty }) {
   const qc = useQueryClient();
   const [activeLinkTx, setActiveLinkTx] = useState<CfTx | null>(null);
+  const [txSort,   setTxSort]   = useState<{ col: string; dir: SortDir }>({ col: 'date', dir: 'desc' });
+  const [billSort, setBillSort] = useState<{ col: string; dir: SortDir }>({ col: 'date', dir: 'desc' });
 
   const kwParams = useMemo(() => {
     const p = new URLSearchParams();
@@ -191,7 +212,7 @@ function CpPanel({ cp }: { cp: Counterparty }) {
     staleTime: 60_000,
   });
 
-  const matchedTxs = useMemo(() => (txPage?.data ?? []).sort((a, b) => b.date.localeCompare(a.date)), [txPage]);
+  const matchedTxs = useMemo(() => txPage?.data ?? [], [txPage]);
 
   const txIds = useMemo(() => matchedTxs.map(t => t.id), [matchedTxs]);
 
@@ -212,6 +233,43 @@ function CpPanel({ cp }: { cp: Counterparty }) {
   const matchedBills = useMemo(() =>
     bills.filter(b => kwMatch(b.supplier_name, cp.keywords, cp.name))
   , [bills, cp.keywords, cp.name]);
+
+  const toggleTxSort   = (col: string) => setTxSort(s   => ({ col, dir: s.col === col && s.dir === 'asc' ? 'desc' : 'asc' }));
+  const toggleBillSort = (col: string) => setBillSort(s => ({ col, dir: s.col === col && s.dir === 'asc' ? 'desc' : 'asc' }));
+
+  const sortedTxs = useMemo(() => {
+    const arr = [...matchedTxs];
+    arr.sort((a, b) => {
+      let av: string | number, bv: string | number;
+      switch (txSort.col) {
+        case 'counterparty': av = a.counterparty ?? ''; bv = b.counterparty ?? ''; break;
+        case 'amount':       av = a.amount_cents;      bv = b.amount_cents;       break;
+        case 'category':     av = a.category ?? '';    bv = b.category ?? '';     break;
+        default:             av = a.date;              bv = b.date;               break;
+      }
+      const cmp = typeof av === 'string' ? av.localeCompare(bv as string) : (av as number) - (bv as number);
+      return txSort.dir === 'asc' ? cmp : -cmp;
+    });
+    return arr;
+  }, [matchedTxs, txSort]);
+
+  const sortedBills = useMemo(() => {
+    const arr = [...matchedBills];
+    arr.sort((a, b) => {
+      let av: string | number, bv: string | number;
+      switch (billSort.col) {
+        case 'supplier':        av = a.supplier_name;       bv = b.supplier_name;       break;
+        case 'invoice_number':  av = a.invoice_number ?? ''; bv = b.invoice_number ?? ''; break;
+        case 'gross':           av = a.gross_amount;         bv = b.gross_amount;         break;
+        case 'net':             av = a.net_amount;           bv = b.net_amount;           break;
+        case 'status':          av = a.status;               bv = b.status;               break;
+        default:                av = a.invoice_date ?? '';   bv = b.invoice_date ?? '';   break;
+      }
+      const cmp = typeof av === 'string' ? av.localeCompare(bv as string) : (av as number) - (bv as number);
+      return billSort.dir === 'asc' ? cmp : -cmp;
+    });
+    return arr;
+  }, [matchedBills, billSort]);
 
   const stats = useMemo(() => {
     let totalIn = 0, totalOut = 0;
@@ -290,16 +348,16 @@ function CpPanel({ cp }: { cp: Counterparty }) {
                   <table className="w-full text-xs">
                     <thead className="bg-gray-50 border-b border-gray-100 sticky top-0">
                       <tr>
-                        <th className="py-2 px-3 text-left font-semibold text-gray-500 whitespace-nowrap">Date</th>
-                        <th className="py-2 px-3 text-left font-semibold text-gray-500">Counterparty (Bank)</th>
-                        <th className="py-2 px-3 text-right font-semibold text-gray-500 whitespace-nowrap">Amount</th>
-                        <th className="py-2 px-3 text-left font-semibold text-gray-500">Category</th>
+                        <SortTh col="date"         label="Date"                 active={txSort.col==='date'}         dir={txSort.dir} onSort={toggleTxSort} />
+                        <SortTh col="counterparty" label="Counterparty (Bank)"  active={txSort.col==='counterparty'} dir={txSort.dir} onSort={toggleTxSort} />
+                        <SortTh col="amount"       label="Amount"               active={txSort.col==='amount'}       dir={txSort.dir} onSort={toggleTxSort} align="right" />
+                        <SortTh col="category"     label="Category"             active={txSort.col==='category'}     dir={txSort.dir} onSort={toggleTxSort} />
                         <th className="py-2 px-3 text-left font-semibold text-gray-500 whitespace-nowrap">Match</th>
                         <th className="py-2 px-3 text-center font-semibold text-gray-500 whitespace-nowrap">Bill</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {matchedTxs.map(tx => {
+                      {sortedTxs.map(tx => {
                         const isIn = tx.direction === 'in';
                         const isPinned = tx.counterparty_id === cp.id;
                         return (
@@ -362,17 +420,17 @@ function CpPanel({ cp }: { cp: Counterparty }) {
                   <table className="w-full text-xs">
                     <thead className="bg-gray-50 border-b border-gray-100 sticky top-0">
                       <tr>
-                        <th className="py-2 px-3 text-left font-semibold text-gray-500 whitespace-nowrap">Date</th>
-                        <th className="py-2 px-3 text-left font-semibold text-gray-500">Supplier (Bill)</th>
-                        <th className="py-2 px-3 text-left font-semibold text-gray-500">Invoice #</th>
-                        <th className="py-2 px-3 text-right font-semibold text-gray-500">Gross</th>
-                        <th className="py-2 px-3 text-right font-semibold text-gray-500">Net</th>
-                        <th className="py-2 px-3 text-left font-semibold text-gray-500">Status</th>
+                        <SortTh col="date"           label="Date"             active={billSort.col==='date'}           dir={billSort.dir} onSort={toggleBillSort} />
+                        <SortTh col="supplier"       label="Supplier (Bill)"  active={billSort.col==='supplier'}       dir={billSort.dir} onSort={toggleBillSort} />
+                        <SortTh col="invoice_number" label="Invoice #"        active={billSort.col==='invoice_number'} dir={billSort.dir} onSort={toggleBillSort} />
+                        <SortTh col="gross"          label="Gross"            active={billSort.col==='gross'}          dir={billSort.dir} onSort={toggleBillSort} align="right" />
+                        <SortTh col="net"            label="Net"              active={billSort.col==='net'}            dir={billSort.dir} onSort={toggleBillSort} align="right" />
+                        <SortTh col="status"         label="Status"           active={billSort.col==='status'}         dir={billSort.dir} onSort={toggleBillSort} />
                         <th className="py-2 px-3 text-center font-semibold text-gray-500 whitespace-nowrap">Cash Flow</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {matchedBills.map(bill => {
+                      {sortedBills.map(bill => {
                         const linked = (bill.cashflow_transactions?.length ?? 0) > 0 || billLinks.some(l => l.bill_id === bill.id);
                         return (
                         <tr key={bill.id} className="border-b border-gray-50">
