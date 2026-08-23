@@ -471,15 +471,36 @@ export default function BillsPage() {
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? 'Extraction failed');
       const invoiceDate = json.data?.invoice_date ?? null;
+      const bpStart = json.data?.billing_period_start ?? null;
+      const bpEnd   = json.data?.billing_period_end   ?? null;
       const autoLocation = matchLocation(json.data?.delivery_address ?? null, locations);
+
+      // Derive period type from extracted billing period
+      let periodType: string;
+      let periodStart: string | null;
+      let periodEnd: string | null;
+      if (bpStart && bpEnd) {
+        const s = new Date(bpStart + 'T00:00:00');
+        const e = new Date(bpEnd   + 'T00:00:00');
+        const sameMonthYear = s.getFullYear() === e.getFullYear() && s.getMonth() === e.getMonth();
+        const fullYear = s.getMonth() === 0 && e.getMonth() === 11 && s.getFullYear() === e.getFullYear();
+        periodType  = sameMonthYear ? 'month' : fullYear ? 'year' : 'custom';
+        periodStart = bpStart;
+        periodEnd   = bpEnd;
+      } else {
+        periodType  = 'single_date';
+        periodStart = invoiceDate;
+        periodEnd   = invoiceDate;
+      }
+
       setQueue((q) => q.map((i) => i.id === item.id
         ? {
             ...i,
             status: 'done',
             data: json.data,
-            periodType: 'single_date',
-            periodStart: invoiceDate,
-            periodEnd: invoiceDate,
+            periodType,
+            periodStart,
+            periodEnd,
             ...(autoLocation && !i.locationId ? autoLocation : {}),
           }
         : i

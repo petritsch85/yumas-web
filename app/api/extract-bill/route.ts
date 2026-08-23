@@ -19,6 +19,7 @@ The invoices may be in German or English. German terms to know:
 - Netto = Net
 - Brutto = Gross
 - Leergut = Deposit items (returnable packaging — include but flag)
+- Abrechnungszeitraum / Abrechnungsperiode / Leistungszeitraum / Billing period = the date range the invoice covers (distinct from the invoice date itself)
 
 Return this exact JSON structure:
 {
@@ -26,6 +27,8 @@ Return this exact JSON structure:
   "invoice_number": "string or null",
   "invoice_date": "YYYY-MM-DD or null",
   "due_date": "YYYY-MM-DD or null",
+  "billing_period_start": "YYYY-MM-DD or null",
+  "billing_period_end": "YYYY-MM-DD or null",
   "currency": "EUR",
   "payment_method": "string or null",
   "net_amount": number,
@@ -59,6 +62,7 @@ Rules:
 - If multiple VAT rates exist, use the dominant one for the header; capture per-line rates in lines
 - Suggest category based on supplier type and line item descriptions
 - If a discount is applied, reflect it in the net_amount (post-discount)
+- billing_period_start / billing_period_end: if the invoice shows a billing/service period (Abrechnungszeitraum, Leistungszeitraum, "period: X – Y", etc.), extract the start and end dates of that period in YYYY-MM-DD format. Set both to null if no billing period is stated.
 - delivery_address: extract the delivery/ship-to address from the invoice (Lieferadresse / Lieferanschrift / Warenempfänger). This is the address where goods were delivered TO, NOT the supplier's address. Set to null fields if not found`;
 
 /** Pull the outermost JSON object out of a string that may contain surrounding text */
@@ -90,7 +94,7 @@ function cleanResponse(text: string): string {
 async function repairJSON(bad: string): Promise<string> {
   const isTruncated = !bad.trimEnd().endsWith('}');
   const instruction = isTruncated
-    ? `The following JSON was cut off mid-response and is incomplete. Complete it so it is valid JSON matching this structure: { supplier_name, invoice_number, invoice_date, due_date, currency, payment_method, net_amount, vat_amount, gross_amount, suggested_category, lines[] }. Return only the completed valid JSON, no markdown, no explanation:`
+    ? `The following JSON was cut off mid-response and is incomplete. Complete it so it is valid JSON matching this structure: { supplier_name, invoice_number, invoice_date, due_date, billing_period_start, billing_period_end, currency, payment_method, net_amount, vat_amount, gross_amount, suggested_category, lines[] }. Return only the completed valid JSON, no markdown, no explanation:`
     : `The following text is supposed to be a JSON object but has syntax errors. Fix it and return only valid JSON, no markdown, no trailing commas, all property names in double quotes:`;
 
   const repair = await client.messages.create({
