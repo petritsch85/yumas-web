@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase-admin';
 
-const SELECT = '*, bill:bills(id, supplier_name, invoice_number, gross_amount, file_path)';
+const SELECT = '*, bill:bills(id, supplier_name, invoice_number, gross_amount, file_path), transaction_bill_links(id, note, bill:bills(id, supplier_name, invoice_number, gross_amount))';
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;

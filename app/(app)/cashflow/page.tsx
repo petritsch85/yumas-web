@@ -42,7 +42,7 @@ type CfTx = {
   bill: BillRef | null;
   confirmed: boolean;
   counterparty_id: string | null;
-  accounting_period: string | null; // YYYY-MM
+  accounting_period: string | null; // "type|start[|end]"
 };
 
 type Counterparty = {
@@ -277,6 +277,194 @@ function BillMatchModal({ tx, onLink, onUnlink, onClose }: {
   );
 }
 
+/* ── Period Picker ──────────────────────────────────────────────────── */
+type PeriodType = 'one-off' | 'monthly' | 'annual' | 'custom';
+
+function parsePeriod(raw: string | null): { type: PeriodType; start: string; end: string } | null {
+  if (!raw) return null;
+  const parts = raw.split('|');
+  if (parts.length < 2) return null;
+  return { type: parts[0] as PeriodType, start: parts[1], end: parts[2] ?? '' };
+}
+
+function periodLabel(raw: string | null): string {
+  if (!raw) return '';
+  const p = parsePeriod(raw);
+  if (!p) return raw;
+  const fmtYM = (ym: string) => {
+    const [y, m] = ym.split('-');
+    return new Date(+y, +m - 1, 1).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' });
+  };
+  const fmtD = (d: string) =>
+    new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  switch (p.type) {
+    case 'one-off': return fmtD(p.start);
+    case 'monthly':  return fmtYM(p.start);
+    case 'annual':   return `${fmtYM(p.start)} – ${fmtYM(p.end)}`;
+    case 'custom':   return `${fmtD(p.start)} – ${fmtD(p.end)}`;
+    default: return raw;
+  }
+}
+
+function PeriodPicker({ value, onChange, locked }: {
+  value: string | null;
+  onChange: (v: string | null) => void;
+  locked: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState({ top: 0, left: 0, flipUp: false });
+  const [type, setType] = useState<PeriodType>('monthly');
+  const [start, setStart] = useState('');
+  const [end, setEnd] = useState('');
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const popRef = useRef<HTMLDivElement>(null);
+
+  const openPicker = () => {
+    if (locked) return;
+    const p = parsePeriod(value);
+    setType(p?.type ?? 'monthly');
+    setStart(p?.start ?? '');
+    setEnd(p?.end ?? '');
+    const rect = btnRef.current?.getBoundingClientRect();
+    if (rect) {
+      const spaceBelow = window.innerHeight - rect.bottom;
+      setPos({ top: spaceBelow < 280 ? rect.top : rect.bottom + 4, left: rect.left, flipUp: spaceBelow < 280 });
+    }
+    setOpen(true);
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (!popRef.current?.contains(e.target as Node) && !btnRef.current?.contains(e.target as Node))
+        setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey); };
+  }, [open]);
+
+  const apply = () => {
+    let encoded: string | null = null;
+    if (type === 'one-off' && start) encoded = `one-off|${start}`;
+    else if (type === 'monthly' && start) encoded = `monthly|${start}`;
+    else if (type === 'annual' && start && end) encoded = `annual|${start}|${end}`;
+    else if (type === 'custom' && start && end) encoded = `custom|${start}|${end}`;
+    onChange(encoded);
+    setOpen(false);
+  };
+
+  const label = periodLabel(value);
+  const TYPES: { key: PeriodType; label: string }[] = [
+    { key: 'one-off', label: 'One-off' },
+    { key: 'monthly', label: 'Monthly' },
+    { key: 'annual',  label: 'Annual' },
+    { key: 'custom',  label: 'Other period' },
+  ];
+  const inputCls = 'w-full border border-gray-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-[#1B5E20]';
+
+  return (
+    <div className="relative inline-block">
+      <button ref={btnRef} onClick={openPicker} disabled={locked}
+        className={`text-xs rounded px-1.5 py-0.5 border whitespace-nowrap transition-colors ${
+          label
+            ? 'bg-blue-50 border-blue-200 text-blue-800 hover:bg-blue-100'
+            : locked
+            ? 'bg-white border-gray-200 text-gray-400 cursor-default'
+            : 'bg-white border-dashed border-gray-300 text-gray-400 hover:border-gray-500 hover:text-gray-600'
+        }`}>
+        {label || (locked ? '—' : '+ Set period')}
+      </button>
+
+      {open && (
+        <div
+          ref={popRef}
+          style={{
+            position: 'fixed',
+            top: pos.flipUp ? undefined : pos.top,
+            bottom: pos.flipUp ? (window.innerHeight - pos.top) : undefined,
+            left: pos.left,
+            zIndex: 9999,
+          }}
+          className="bg-white border border-gray-200 rounded-xl shadow-2xl p-4 w-72"
+        >
+          <div className="grid grid-cols-2 gap-1.5 mb-4">
+            {TYPES.map(t => (
+              <button key={t.key} onClick={() => setType(t.key)}
+                className={`py-1.5 px-2 text-xs rounded-lg font-medium border transition-colors ${
+                  type === t.key
+                    ? 'bg-[#1B5E20] text-white border-[#1B5E20]'
+                    : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'
+                }`}>
+                {t.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="space-y-2 mb-4">
+            {type === 'one-off' && (
+              <div>
+                <label className="text-xs text-gray-500 block mb-1">Date</label>
+                <input type="date" value={start} onChange={e => setStart(e.target.value)} className={inputCls} />
+              </div>
+            )}
+            {type === 'monthly' && (
+              <div>
+                <label className="text-xs text-gray-500 block mb-1">Month</label>
+                <input type="month" value={start} onChange={e => setStart(e.target.value)} className={inputCls} />
+              </div>
+            )}
+            {type === 'annual' && (
+              <>
+                <div>
+                  <label className="text-xs text-gray-500 block mb-1">Start month</label>
+                  <input type="month" value={start} onChange={e => setStart(e.target.value)} className={inputCls} />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500 block mb-1">End month</label>
+                  <input type="month" value={end} onChange={e => setEnd(e.target.value)} className={inputCls} />
+                </div>
+              </>
+            )}
+            {type === 'custom' && (
+              <>
+                <div>
+                  <label className="text-xs text-gray-500 block mb-1">Start date</label>
+                  <input type="date" value={start} onChange={e => setStart(e.target.value)} className={inputCls} />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500 block mb-1">End date</label>
+                  <input type="date" value={end} onChange={e => setEnd(e.target.value)} className={inputCls} />
+                </div>
+              </>
+            )}
+          </div>
+
+          <div className="flex gap-2 items-center">
+            {value && (
+              <button onClick={() => { onChange(null); setOpen(false); }}
+                className="px-3 py-1.5 text-xs text-red-600 hover:bg-red-50 rounded-lg border border-red-200">
+                Clear
+              </button>
+            )}
+            <div className="flex gap-2 ml-auto">
+              <button onClick={() => setOpen(false)}
+                className="px-3 py-1.5 text-xs text-gray-500 hover:bg-gray-50 rounded-lg border border-gray-200">
+                Cancel
+              </button>
+              <button onClick={apply}
+                className="px-3 py-1.5 text-xs font-medium bg-[#1B5E20] text-white rounded-lg hover:bg-[#2E7D32]">
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ── Row component ──────────────────────────────────────────────────── */
 function TxRow({ tx, onSave, counterparties }: {
   tx: CfTx;
@@ -471,20 +659,11 @@ function TxRow({ tx, onSave, counterparties }: {
 
         {/* Accounting Period */}
         <td className="py-2 px-2 whitespace-nowrap">
-          {locked ? (
-            <span className="text-xs text-gray-600 bg-white border border-gray-200 rounded px-1.5 py-0.5">
-              {tx.accounting_period
-                ? new Date(tx.accounting_period + '-01').toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })
-                : '—'}
-            </span>
-          ) : (
-            <input
-              type="month"
-              value={tx.accounting_period ?? ''}
-              onChange={e => patch('accounting_period', e.target.value || null)}
-              className="text-xs bg-white border border-gray-200 rounded px-1.5 py-0.5 text-gray-700 outline-none cursor-pointer hover:border-gray-400 focus:border-[#1B5E20] w-32"
-            />
-          )}
+          <PeriodPicker
+            value={tx.accounting_period}
+            onChange={v => patch('accounting_period', v)}
+            locked={locked}
+          />
         </td>
 
         {/* Notes */}
