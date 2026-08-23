@@ -545,7 +545,7 @@ export default function BillsPage() {
     if (filterCategory !== 'all' && b.category        !== filterCategory) return false;
     if (filterLocation !== 'all' && b.location_label  !== filterLocation) return false;
     if (filterMonth !== 'all') {
-      const dateStr = b.invoice_date ?? b.period_start ?? '';
+      const dateStr = b.invoice_date ?? '';
       if (!dateStr.startsWith(filterMonth)) return false;
     }
     if (filterDuplicates && !duplicateIds.has(b.id)) return false;
