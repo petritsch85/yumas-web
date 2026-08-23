@@ -1223,8 +1223,8 @@ export default function BillsPage() {
             </div>
           ) : (
             <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
-              <div className="overflow-x-auto">
-              <table className="w-full text-sm min-w-[1000px]">
+              <div>
+              <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-gray-50 border-b border-gray-200">
                     {([
@@ -1242,7 +1242,7 @@ export default function BillsPage() {
                       const active = sortCol === col;
                       return (
                         <th key={col} onClick={() => handleSort(col)}
-                          className={`px-3 py-2 text-xs font-semibold uppercase tracking-wide cursor-pointer select-none whitespace-nowrap transition-colors
+                          className={`px-2 py-2 text-xs font-semibold uppercase tracking-wide cursor-pointer select-none whitespace-nowrap transition-colors
                             ${align === 'right' ? 'text-right' : 'text-left'}
                             ${active ? 'text-[#1B5E20]' : 'text-gray-500 hover:text-gray-800'}`}>
                           <span className={`inline-flex items-center gap-1 ${align === 'right' ? 'flex-row-reverse' : ''}`}>
@@ -1254,8 +1254,8 @@ export default function BillsPage() {
                         </th>
                       );
                     })}
-                    <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Invoice #</th>
-                    <th className="px-3 py-2 w-20"></th>
+                    <th className="px-2 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">Invoice #</th>
+                    <th className="px-2 py-2 w-16"></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
@@ -1279,14 +1279,14 @@ export default function BillsPage() {
                     return (
                       <React.Fragment key={bill.id}>
                       <tr className={`hover:bg-gray-50 transition-colors ${duplicateIds.has(bill.id) ? 'bg-red-50/40' : ''}`}>
-                        <td className="px-3 py-1.5 font-semibold text-gray-900 text-xs">
-                          <div className="flex items-center gap-1">
+                        <td className="px-2 py-1.5 font-semibold text-gray-900 text-xs max-w-[160px]">
+                          <div className="flex items-center gap-1 min-w-0">
                             {duplicateIds.has(bill.id) && (
                               <span title="Possible duplicate bill" className="text-red-500 flex-shrink-0 cursor-default">
                                 <AlertTriangle size={11} />
                               </span>
                             )}
-                            <span>{matchedCp ? matchedCp.name : bill.supplier_name}</span>
+                            <span className="truncate">{matchedCp ? matchedCp.name : bill.supplier_name}</span>
                             {matchedCp && (
                               <span title="Matched counterparty" className="text-green-500 flex-shrink-0 cursor-default">
                                 <CheckCircle2 size={11} />
@@ -1294,35 +1294,35 @@ export default function BillsPage() {
                             )}
                           </div>
                         </td>
-                        <td className="px-3 py-1.5 text-gray-600 whitespace-nowrap text-xs">{fmtDate(bill.invoice_date)}</td>
-                        <td className="px-3 py-1.5 whitespace-nowrap">
+                        <td className="px-2 py-1.5 text-gray-600 whitespace-nowrap text-xs">{fmtDate(bill.invoice_date)}</td>
+                        <td className="px-2 py-1.5 whitespace-nowrap">
                           <BillPeriodPicker
                             bill={bill}
                             onSave={(pt, ps, pe) => patchBillPeriod(bill.id, pt, ps, pe)}
                           />
                         </td>
-                        <td className="px-3 py-1.5">
+                        <td className="px-2 py-1.5">
                           {bill.location_label && (
                             <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-indigo-50 text-indigo-700 text-xs rounded-full whitespace-nowrap">
                               <MapPin size={9} />{bill.location_label}
                             </span>
                           )}
                         </td>
-                        <td className="px-3 py-1.5">
+                        <td className="px-2 py-1.5">
                           {bill.category && (
                             <span className="inline-block px-1.5 py-0.5 bg-gray-100 text-gray-600 text-xs rounded-full whitespace-nowrap">
                               {bill.category}
                             </span>
                           )}
                         </td>
-                        <td className="px-3 py-1.5 text-right tabular-nums">
+                        <td className="px-2 py-1.5 text-right tabular-nums">
                           <span className="text-gray-900 text-xs">{fmt(monthlyNet)}</span>
                           {isSpread && <span className="block text-[10px] text-gray-400">÷ mo</span>}
                         </td>
-                        <td className="px-3 py-1.5 text-right tabular-nums text-xs text-gray-500">{vatPct.toFixed(0)}%</td>
-                        <td className="px-3 py-1.5 text-right tabular-nums text-xs text-gray-500">{fmt(vatAmount)}</td>
-                        <td className="px-3 py-1.5 text-right font-bold text-gray-900 tabular-nums text-xs">{fmt(bill.gross_amount)}</td>
-                        <td className="px-3 py-1.5">
+                        <td className="px-2 py-1.5 text-right tabular-nums text-xs text-gray-500">{vatPct.toFixed(0)}%</td>
+                        <td className="px-2 py-1.5 text-right tabular-nums text-xs text-gray-500">{fmt(vatAmount)}</td>
+                        <td className="px-2 py-1.5 text-right font-bold text-gray-900 tabular-nums text-xs">{fmt(bill.gross_amount)}</td>
+                        <td className="px-2 py-1.5">
                           <select value={bill.status} onChange={(e) => updateStatus(bill.id, e.target.value)}
                             className={`text-xs font-semibold px-2 py-0.5 rounded-full border cursor-pointer focus:outline-none ${STATUS_STYLES[bill.status]}`}>
                             <option value="pending">Pending</option>
@@ -1330,12 +1330,12 @@ export default function BillsPage() {
                             <option value="paid">Paid</option>
                           </select>
                         </td>
-                        <td className="px-3 py-1.5 text-xs">
+                        <td className="px-2 py-1.5 text-xs">
                           {bill.invoice_number
                             ? <span title={bill.invoice_number} className="text-gray-400 cursor-default underline decoration-dashed underline-offset-2">Show</span>
                             : <span className="text-gray-300">—</span>}
                         </td>
-                        <td className="px-3 py-1.5">
+                        <td className="px-2 py-1.5">
                           <div className="flex items-center gap-1.5">
                             {bill.file_path && (
                               <a href={`${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/bills/${bill.file_path}`}
