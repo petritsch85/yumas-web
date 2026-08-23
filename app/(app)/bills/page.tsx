@@ -1254,8 +1254,7 @@ export default function BillsPage() {
                         </th>
                       );
                     })}
-                    <th className="px-2 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">Invoice #</th>
-                    <th className="px-2 py-2 w-16"></th>
+                    <th className="px-2 py-2 w-20"></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
@@ -1330,13 +1329,11 @@ export default function BillsPage() {
                             <option value="paid">Paid</option>
                           </select>
                         </td>
-                        <td className="px-2 py-1.5 text-xs">
-                          {bill.invoice_number
-                            ? <span title={bill.invoice_number} className="text-gray-400 cursor-default underline decoration-dashed underline-offset-2">Show</span>
-                            : <span className="text-gray-300">—</span>}
-                        </td>
                         <td className="px-2 py-1.5">
                           <div className="flex items-center gap-1.5">
+                            {bill.invoice_number && (
+                              <span title={`Invoice #${bill.invoice_number}`} className="text-gray-300 cursor-default text-[10px] font-mono leading-none">#</span>
+                            )}
                             {bill.file_path && (
                               <a href={`${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/bills/${bill.file_path}`}
                                 target="_blank" rel="noopener noreferrer"
@@ -1367,7 +1364,7 @@ export default function BillsPage() {
                       {/* Inline edit row */}
                       {editingBillId === bill.id && editDraft && (
                         <tr className="bg-indigo-50/60">
-                          <td colSpan={12} className="px-4 py-4">
+                          <td colSpan={11} className="px-4 py-4">
                             <div className="grid grid-cols-5 gap-3 items-end">
                               {/* Location */}
                               <div>
