@@ -2,47 +2,11 @@
 
 import { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { CheckCircle2, XCircle } from 'lucide-react';
 
-/* ── Period helpers (copied from cashflow page) ─────────────────────── */
-type Period = 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'H1' | 'H2' |
-  'Jan' | 'Feb' | 'Mar' | 'Apr' | 'May' | 'Jun' |
-  'Jul' | 'Aug' | 'Sep' | 'Oct' | 'Nov' | 'Dec';
+type AggRow = { category: string | null; direction: 'in' | 'out'; total_cents: number };
 
-const QUARTER_PERIODS: Record<string, Period[]> = {
-  Q1: ['Jan','Feb','Mar'], Q2: ['Apr','May','Jun'],
-  Q3: ['Jul','Aug','Sep'], Q4: ['Oct','Nov','Dec'],
-  H1: ['Jan','Feb','Mar','Apr','May','Jun'],
-  H2: ['Jul','Aug','Sep','Oct','Nov','Dec'],
-};
-
-const MONTH_NUM: Record<string, number> = {
-  Jan:1,Feb:2,Mar:3,Apr:4,May:5,Jun:6,
-  Jul:7,Aug:8,Sep:9,Oct:10,Nov:11,Dec:12,
-};
-
-const ALL_MONTHS: Period[] = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-const QUARTERS: Period[]   = ['Q1','Q2','Q3','Q4'];
-
-function periodDateRange(year: number, period: Period) {
-  if (period in QUARTER_PERIODS) {
-    const months = QUARTER_PERIODS[period];
-    const first  = MONTH_NUM[months[0]];
-    const last   = MONTH_NUM[months[months.length - 1]];
-    return {
-      dateFrom: `${year}-${String(first).padStart(2,'0')}-01`,
-      dateTo:   `${year}-${String(last).padStart(2,'0')}-${new Date(year, last, 0).getDate()}`,
-    };
-  }
-  const m = MONTH_NUM[period];
-  return {
-    dateFrom: `${year}-${String(m).padStart(2,'0')}-01`,
-    dateTo:   `${year}-${String(m).padStart(2,'0')}-${new Date(year, m, 0).getDate()}`,
-  };
-}
-
-/* ── VAT helpers ──────────────────────────────────────────────────────── */
-function defaultVatRate(cat: string | null): number {
+/* ── VAT / bucketing helpers ───────────────────────────────────────── */
+function vatRate(cat: string | null): number {
   if (!cat) return 0;
   if (cat === 'C - Personnel' || cat === 'C - Financing') return 0;
   if (cat.startsWith('C - ')) return 19;
@@ -50,262 +14,312 @@ function defaultVatRate(cat: string | null): number {
   return 0;
 }
 
-function bucketVat(rows: { category: string | null; total_cents: number }[]) {
-  let bruttoAbs = 0, mwstAbs = 0;
+function bucketVat(rows: AggRow[]) {
+  let brutto = 0, mwst = 0;
   for (const r of rows) {
-    const rate = defaultVatRate(r.category);
-    mwstAbs   += rate === 0 ? 0 : Math.round(r.total_cents * rate / (100 + rate));
-    bruttoAbs += r.total_cents;
+    const rate = vatRate(r.category);
+    mwst   += rate === 0 ? 0 : Math.round(r.total_cents * rate / (100 + rate));
+    brutto += r.total_cents;
   }
-  const nettoAbs   = bruttoAbs - mwstAbs;
-  const blendedPct = nettoAbs > 0 ? (mwstAbs / nettoAbs * 100) : 0;
-  return { bruttoAbs, mwstAbs, nettoAbs, blendedPct };
+  return { brutto, mwst, netto: brutto - mwst };
 }
 
-/* ── Formatters ───────────────────────────────────────────────────────── */
-function eur(cents: number) {
-  return new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(cents / 100);
+function mergeMonths(monthData: AggRow[][], indices: number[]): AggRow[] {
+  const map = new Map<string, AggRow>();
+  for (const i of indices) {
+    for (const r of (monthData[i] ?? [])) {
+      const key = `${r.category ?? ''}|${r.direction}`;
+      const ex  = map.get(key);
+      if (ex) ex.total_cents += r.total_cents;
+      else    map.set(key, { ...r });
+    }
+  }
+  return [...map.values()];
 }
 
-/* ── Main page ─────────────────────────────────────────────────────────── */
+type PL = {
+  salesBrutto: number; mwst: number; mwstPct: number | null; salesNetto: number;
+  cogsNetto: number; cogsPct: number | null; grossMarginPct: number | null;
+  staff: number; staffPct: number | null;
+  rent: number;  rentPct: number | null;
+  other: number; otherPct: number | null;
+  fcf: number;   fcfPct: number | null;
+};
+
+function computePL(rows: AggRow[]): PL {
+  const signed = (t: AggRow) => t.direction === 'in' ? t.total_cents : -t.total_cents;
+  const catSum = (cat: string) =>
+    rows.filter(t => t.category === cat).reduce((s, t) => s + signed(t), 0);
+
+  const sv = bucketVat(rows.filter(t => (t.category ?? '').startsWith('S - ')));
+  const cv = bucketVat(rows.filter(t => t.category === 'C - Suppliers'));
+  const otherRows = rows.filter(t =>
+    (t.category ?? '').startsWith('C - ') &&
+    !['C - Suppliers','C - Personnel','C - Rent','C - Financing'].includes(t.category ?? ''),
+  );
+
+  const plSales = sv.brutto;   // "Value" = brutto (signed)
+  const plStaff = catSum('C - Personnel');
+  const plRent  = catSum('C - Rent');
+  const plOther = otherRows.reduce((s, t) => s + signed(t), 0);
+  const fcf     = plSales + catSum('C - Suppliers') + plStaff + plRent + plOther;
+
+  const pctB = (v: number) => plSales > 0 ? Math.abs(v) / plSales * 100 : null;
+  const pctN = (v: number) => sv.netto > 0 ? Math.abs(v) / sv.netto * 100 : null;
+
+  return {
+    salesBrutto:    sv.brutto,
+    mwst:           sv.mwst,
+    mwstPct:        sv.netto > 0 ? sv.mwst / sv.netto * 100 : null,
+    salesNetto:     sv.netto,
+    cogsNetto:      cv.netto,
+    cogsPct:        pctN(cv.netto),
+    grossMarginPct: sv.netto > 0 ? (sv.netto - cv.netto) / sv.netto * 100 : null,
+    staff:    Math.abs(plStaff),   staffPct: pctB(plStaff),
+    rent:     Math.abs(plRent),    rentPct:  pctB(plRent),
+    other:    Math.abs(plOther),   otherPct: pctB(plOther),
+    fcf,                           fcfPct:   pctB(fcf),
+  };
+}
+
+/* ── Formatters ────────────────────────────────────────────────────── */
+const fmtAmt = (cents: number) =>
+  (cents / 100).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmtPct = (v: number | null) =>
+  v === null ? '—' : v.toLocaleString('de-DE', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + '%';
+
+/* ── Column definitions ────────────────────────────────────────────── */
+type ColDef = { label: string; indices: number[]; summary: boolean };
+const COLS: ColDef[] = [
+  { label: 'Jan', indices: [0],              summary: false },
+  { label: 'Feb', indices: [1],              summary: false },
+  { label: 'Mar', indices: [2],              summary: false },
+  { label: 'Q1',  indices: [0,1,2],          summary: true  },
+  { label: 'Apr', indices: [3],              summary: false },
+  { label: 'May', indices: [4],              summary: false },
+  { label: 'Jun', indices: [5],              summary: false },
+  { label: 'Q2',  indices: [3,4,5],          summary: true  },
+  { label: 'H1',  indices: [0,1,2,3,4,5],   summary: true  },
+  { label: 'Jul', indices: [6],              summary: false },
+  { label: 'Aug', indices: [7],              summary: false },
+  { label: 'Sep', indices: [8],              summary: false },
+  { label: 'Q3',  indices: [6,7,8],          summary: true  },
+  { label: 'Oct', indices: [9],              summary: false },
+  { label: 'Nov', indices: [10],             summary: false },
+  { label: 'Dec', indices: [11],             summary: false },
+  { label: 'Q4',  indices: [9,10,11],        summary: true  },
+  { label: 'H2',  indices: [6,7,8,9,10,11], summary: true  },
+  { label: 'FY',  indices: [0,1,2,3,4,5,6,7,8,9,10,11], summary: true },
+];
+
+function monthRange(year: number, monthIdx: number) {
+  const m = monthIdx + 1;
+  return {
+    dateFrom: `${year}-${String(m).padStart(2,'0')}-01`,
+    dateTo:   `${year}-${String(m).padStart(2,'0')}-${new Date(year, m, 0).getDate()}`,
+  };
+}
+
+/* ── Page ──────────────────────────────────────────────────────────── */
 export default function GroupPnlPage() {
-  const [selectedYear,   setSelectedYear]   = useState(2026);
-  const [selectedPeriod, setSelectedPeriod] = useState<Period>('Q1');
-  const availableYears = [2025, 2026];
+  const [year, setYear] = useState(2026);
+  const availableYears  = [2025, 2026];
 
-  const { dateFrom, dateTo } = periodDateRange(selectedYear, selectedPeriod);
-
-  const activeQuarterMonths: Period[] = selectedPeriod in QUARTER_PERIODS
-    ? QUARTER_PERIODS[selectedPeriod]
-    : (Object.entries(QUARTER_PERIODS).find(([, ms]) => ms.includes(selectedPeriod as Period))?.[1] ?? []);
-
-  type AggRow = { category: string | null; direction: 'in' | 'out'; total_cents: number };
-
-  const { data: aggRows = [], isFetching } = useQuery<AggRow[]>({
-    queryKey: ['cashflow-agg', dateFrom, dateTo],
+  const { data: monthData = [], isFetching } = useQuery<AggRow[][]>({
+    queryKey: ['pnl-monthly', year],
     queryFn: async () => {
-      const res = await fetch(`/api/cashflow/aggregate?dateFrom=${dateFrom}&dateTo=${dateTo}`);
-      const json = await res.json();
-      return Array.isArray(json) ? json : [];
+      return Promise.all(
+        Array.from({ length: 12 }, (_, i) => {
+          const { dateFrom, dateTo } = monthRange(year, i);
+          return fetch(`/api/cashflow/aggregate?dateFrom=${dateFrom}&dateTo=${dateTo}`)
+            .then(r => r.json())
+            .then(j => (Array.isArray(j) ? j : []) as AggRow[]);
+        }),
+      );
     },
+    staleTime: 60_000,
   });
 
-  /* ── P&L derivations ──────────────────────────────────────────────── */
-  const signed = (t: AggRow) => t.direction === 'in' ? t.total_cents : -t.total_cents;
-  const catNetSum = (cat: string) =>
-    aggRows.filter(t => t.category === cat).reduce((s, t) => s + signed(t), 0);
+  const colPLs = useMemo(() =>
+    COLS.map(col => computePL(mergeMonths(monthData, col.indices))),
+  [monthData]);
 
-  const totalIn  = aggRows.filter(t => t.direction === 'in').reduce((s,t)  => s + t.total_cents, 0);
-  const totalOut = aggRows.filter(t => t.direction === 'out').reduce((s,t) => s + t.total_cents, 0);
-  const net      = totalIn - totalOut;
+  /* ── Cell renderers ─────────────────────────────────────────────── */
+  const th = (label: string, summary: boolean) => (
+    <th className={`px-2 py-2 text-right text-[11px] font-bold uppercase tracking-wide whitespace-nowrap sticky top-0 z-10
+      ${summary ? 'bg-gray-100 text-gray-700' : 'bg-gray-50 text-gray-500'}`}>
+      {label}
+    </th>
+  );
 
-  const plSales     = aggRows.filter(t => (t.category ?? '').startsWith('S - ')).reduce((s,t) => s + signed(t), 0);
-  const plCogs      = catNetSum('C - Suppliers');
-  const plStaff     = catNetSum('C - Personnel');
-  const plRent      = catNetSum('C - Rent');
-  const plFinancing = catNetSum('C - Financing');
-  const plOther     = aggRows.filter(t =>
-    (t.category ?? '').startsWith('C - ') &&
-    !['C - Suppliers','C - Personnel','C - Rent','C - Financing'].includes(t.category ?? '')
-  ).reduce((s,t) => s + signed(t), 0);
-  const plFcf          = plSales + plCogs + plStaff + plRent + plOther;
-  const plChangeInCash = plFcf + plFinancing;
-  const checkOk        = Math.abs(plChangeInCash - net) < 1;
-
-  const salesVat = bucketVat(aggRows.filter(t => (t.category ?? '').startsWith('S - ')));
-  const cogsVat  = bucketVat(aggRows.filter(t => t.category === 'C - Suppliers'));
-  const staffVat = bucketVat(aggRows.filter(t => t.category === 'C - Personnel'));
-  const rentVat  = bucketVat(aggRows.filter(t => t.category === 'C - Rent'));
-  const otherVat = bucketVat(aggRows.filter(t =>
-    (t.category ?? '').startsWith('C - ') &&
-    !['C - Suppliers','C - Personnel','C - Rent','C - Financing'].includes(t.category ?? '')
-  ));
-
-  /* ── Table cell helpers ───────────────────────────────────────────── */
-  const salesAbs = Math.abs(plSales);
-  const pctSales = (v: number) =>
-    salesAbs > 0
-      ? (Math.abs(v) / salesAbs * 100).toLocaleString('de-DE', { maximumFractionDigits: 1 }) + '%'
-      : '—';
-  const fmtPct = (p: number, hasData: boolean) =>
-    !hasData ? '—' : p.toLocaleString('de-DE', { maximumFractionDigits: 1 }) + '%';
-
-  const valCell = (v: number, bold = false, large = false) => (
-    <td className={`px-5 py-3 text-right tabular-nums ${bold ? 'font-bold' : 'font-semibold'} ${large ? 'text-base' : ''} ${v >= 0 ? 'text-green-700' : 'text-red-700'}`}>
-      {v < 0 ? '– ' : ''}{eur(Math.abs(v))}
+  const amtCell = (cents: number, bold = false, summary = false, color?: string) => (
+    <td className={`px-2 py-1.5 text-right text-xs tabular-nums whitespace-nowrap
+      ${summary ? 'bg-gray-50 font-semibold' : ''}
+      ${bold ? 'font-bold' : ''}
+      ${color ?? 'text-gray-700'}`}>
+      {fmtAmt(cents)}
     </td>
   );
-  const euroCell = (cents: number) => (
-    <td className="px-4 py-3 text-right tabular-nums text-gray-600 text-xs">{eur(cents)}</td>
+
+  const pctCell = (v: number | null, summary = false) => (
+    <td className={`px-2 py-1.5 text-right text-xs tabular-nums text-gray-500 whitespace-nowrap
+      ${summary ? 'bg-gray-50' : ''}`}>
+      {fmtPct(v)}
+    </td>
   );
-  const dashCell = () => (
-    <td className="px-4 py-3 text-right text-gray-300 text-xs">—</td>
+
+  const blankCell = (summary = false) => (
+    <td className={`px-2 py-1 ${summary ? 'bg-gray-50' : ''}`} />
   );
-  const pctRow = (label: string, val: number) => (
-    <tr className="bg-gray-50/60 border-b border-gray-100">
-      <td className="px-5 py-1.5 text-xs text-gray-400 italic pl-9">{label}</td>
-      {dashCell()}{dashCell()}{dashCell()}{dashCell()}
-      <td className="px-5 py-1.5 text-right text-xs tabular-nums text-gray-500 font-medium">{pctSales(val)}</td>
+
+  const fcfColor = (pl: PL) => pl.fcf >= 0 ? 'text-green-700' : 'text-red-700';
+
+  const rowLabel   = (label: string, bold = false, indent = false) => (
+    <td className={`px-3 py-1.5 text-xs whitespace-nowrap sticky left-0 z-20 bg-white border-r border-gray-200
+      ${bold ? 'font-bold text-gray-900' : 'text-gray-500'}
+      ${indent ? 'pl-6 italic' : ''}`}>
+      {label}
+    </td>
+  );
+
+  const spacerRow = (
+    <tr key="spacer" className="h-2">
+      <td className="sticky left-0 z-20 bg-white border-r border-gray-200" />
+      {COLS.map(c => <td key={c.label} className={c.summary ? 'bg-gray-50' : ''} />)}
     </tr>
   );
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900">Group P&amp;L and CFS</h1>
-        <p className="text-sm text-gray-500 mt-1">
-          {dateFrom} → {dateTo}
-          {isFetching && <span className="ml-2 text-gray-400 text-xs">Loading…</span>}
-        </p>
-      </div>
-
-      {/* Year + Period selector */}
-      <div className="bg-white rounded-xl border border-gray-100 shadow-sm px-5 py-4 space-y-3">
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-semibold text-gray-400 uppercase tracking-wide w-12">Year</span>
-          <div className="flex gap-2">
-            {availableYears.map(y => (
-              <button key={y} onClick={() => setSelectedYear(y)}
-                className={`px-4 py-1.5 rounded-lg text-sm font-bold border transition-colors ${
-                  selectedYear === y ? 'bg-[#1B5E20] text-white border-[#1B5E20]' : 'bg-white text-gray-700 border-gray-200 hover:border-gray-400'
-                }`}>{y}</button>
-            ))}
-          </div>
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Group P&amp;L and CFS</h1>
+          {isFetching && <p className="text-xs text-gray-400 mt-1">Loading…</p>}
         </div>
-        <div className="flex items-start gap-2 flex-wrap">
-          <span className="text-xs font-semibold text-gray-400 uppercase tracking-wide w-12 pt-1.5">Period</span>
-          <div className="flex flex-col gap-2">
-            <div className="flex gap-2 flex-wrap">
-              {QUARTERS.map(q => (
-                <button key={q} onClick={() => setSelectedPeriod(q)}
-                  className={`px-4 py-1.5 rounded-lg text-sm font-semibold border transition-colors ${
-                    selectedPeriod === q ? 'bg-[#1B5E20] text-white border-[#1B5E20]' : 'bg-white text-gray-700 border-gray-200 hover:border-gray-400'
-                  }`}>{q}</button>
-              ))}
-              <div className="w-px bg-gray-200 self-stretch mx-1" />
-              {(['H1','H2'] as Period[]).map(h => (
-                <button key={h} onClick={() => setSelectedPeriod(h)}
-                  className={`px-4 py-1.5 rounded-lg text-sm font-semibold border transition-colors ${
-                    selectedPeriod === h ? 'bg-[#1B5E20] text-white border-[#1B5E20]' : 'bg-white text-gray-700 border-gray-200 hover:border-gray-400'
-                  }`}>{h}</button>
-              ))}
-            </div>
-            <div className="flex gap-1.5 flex-wrap">
-              {ALL_MONTHS.map(m => {
-                const isSel = selectedPeriod === m;
-                const inQ   = activeQuarterMonths.includes(m);
-                return (
-                  <button key={m} onClick={() => setSelectedPeriod(m)}
-                    className={`px-3 py-1 rounded-lg text-xs font-medium border transition-colors ${
-                      isSel ? 'bg-[#2E7D32] text-white border-[#2E7D32]'
-                      : inQ  ? 'bg-green-50 text-green-800 border-green-200 hover:border-green-400'
-                             : 'bg-white text-gray-500 border-gray-200 hover:border-gray-400'
-                    }`}>{m}</button>
-                );
-              })}
-            </div>
-          </div>
+        {/* Year selector */}
+        <div className="flex gap-2">
+          {availableYears.map(y => (
+            <button key={y} onClick={() => setYear(y)}
+              className={`px-4 py-1.5 rounded-lg text-sm font-bold border transition-colors ${
+                year === y ? 'bg-[#1B5E20] text-white border-[#1B5E20]' : 'bg-white text-gray-700 border-gray-200 hover:border-gray-400'
+              }`}>{y}</button>
+          ))}
         </div>
       </div>
 
-      {/* P&L summary table */}
-      <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+      {/* Table */}
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[700px]">
-            <thead className="bg-gray-50 border-b border-gray-200">
+          <table className="text-sm border-collapse" style={{ minWidth: '2000px' }}>
+            <thead>
               <tr>
-                <th className="text-left px-5 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide w-36">Row</th>
-                <th className="text-right px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">Brutto Sales (€)</th>
-                <th className="text-right px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">MwSt (€)</th>
-                <th className="text-right px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">MwSt (%)</th>
-                <th className="text-right px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">Netto Sales (€)</th>
-                <th className="text-right px-5 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">Value (€)</th>
+                {/* Sticky row-label column header */}
+                <th className="px-3 py-2 text-left text-[11px] font-bold uppercase tracking-wide text-gray-500
+                  bg-gray-50 sticky left-0 z-30 border-r border-b border-gray-200 w-36">
+                  P&amp;L
+                </th>
+                {COLS.map(c => (
+                  <th key={c.label}
+                    className={`px-2 py-2 text-right text-[11px] font-bold uppercase tracking-wide whitespace-nowrap border-b border-gray-200
+                      ${c.summary ? 'bg-gray-100 text-gray-700' : 'bg-gray-50 text-gray-500'}`}>
+                    {c.label}
+                  </th>
+                ))}
               </tr>
             </thead>
-            <tbody>
-              {/* Sales */}
-              <tr className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
-                <td className="px-5 py-3 font-medium text-gray-700">Sales</td>
-                {euroCell(salesVat.bruttoAbs)}
-                {euroCell(salesVat.mwstAbs)}
-                <td className="px-4 py-3 text-right tabular-nums text-gray-500 text-xs">{fmtPct(salesVat.blendedPct, salesVat.bruttoAbs > 0)}</td>
-                {euroCell(salesVat.nettoAbs)}
-                {valCell(plSales)}
+            <tbody className="divide-y divide-gray-100">
+
+              {/* Sales (Brutto) */}
+              <tr className="hover:bg-gray-50/40">
+                {rowLabel('Sales (Brutto)', true)}
+                {colPLs.map((pl, i) => amtCell(pl.salesBrutto, true, COLS[i].summary, 'text-green-700'))}
               </tr>
+
+              {/* MwSt */}
+              <tr className="hover:bg-gray-50/40">
+                {rowLabel('MwSt', false, true)}
+                {colPLs.map((pl, i) => amtCell(pl.mwst, false, COLS[i].summary))}
+              </tr>
+
+              {/* MwSt (%) */}
+              <tr className="hover:bg-gray-50/40">
+                {rowLabel('MwSt (%)', false, true)}
+                {colPLs.map((pl, i) => pctCell(pl.mwstPct, COLS[i].summary))}
+              </tr>
+
+              {/* Sales (Netto) */}
+              <tr className="hover:bg-gray-50/40">
+                {rowLabel('Sales (Netto)', true)}
+                {colPLs.map((pl, i) => amtCell(pl.salesNetto, true, COLS[i].summary, 'text-green-700'))}
+              </tr>
+
+              {spacerRow}
 
               {/* COGS */}
-              <tr className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
-                <td className="px-5 py-3 font-medium text-gray-700">COGS</td>
-                {euroCell(cogsVat.bruttoAbs)}
-                {euroCell(cogsVat.mwstAbs)}
-                <td className="px-4 py-3 text-right tabular-nums text-gray-500 text-xs">{fmtPct(cogsVat.blendedPct, cogsVat.bruttoAbs > 0)}</td>
-                {euroCell(cogsVat.nettoAbs)}
-                {valCell(plCogs)}
+              <tr className="hover:bg-gray-50/40">
+                {rowLabel('COGS', true)}
+                {colPLs.map((pl, i) => amtCell(pl.cogsNetto, true, COLS[i].summary, 'text-red-700'))}
               </tr>
-              {pctRow('as % of sales', plCogs)}
+
+              {/* COGS % */}
+              <tr className="hover:bg-gray-50/40">
+                {rowLabel('COGS %', false, true)}
+                {colPLs.map((pl, i) => pctCell(pl.cogsPct, COLS[i].summary))}
+              </tr>
+
+              {/* Gross margin % */}
+              <tr className="hover:bg-gray-50/40">
+                {rowLabel('Gross margin %', false, true)}
+                {colPLs.map((pl, i) => pctCell(pl.grossMarginPct, COLS[i].summary))}
+              </tr>
+
+              {spacerRow}
 
               {/* Staff */}
-              <tr className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
-                <td className="px-5 py-3 font-medium text-gray-700">Staff</td>
-                {euroCell(staffVat.bruttoAbs)}
-                {euroCell(staffVat.mwstAbs)}
-                <td className="px-4 py-3 text-right tabular-nums text-gray-500 text-xs">{fmtPct(staffVat.blendedPct, staffVat.bruttoAbs > 0)}</td>
-                {euroCell(staffVat.nettoAbs)}
-                {valCell(plStaff)}
+              <tr className="hover:bg-gray-50/40">
+                {rowLabel('Staff', true)}
+                {colPLs.map((pl, i) => amtCell(pl.staff, true, COLS[i].summary, 'text-red-700'))}
               </tr>
-              {pctRow('as % of sales', plStaff)}
+
+              {/* Staff % */}
+              <tr className="hover:bg-gray-50/40">
+                {rowLabel('as % of sales', false, true)}
+                {colPLs.map((pl, i) => pctCell(pl.staffPct, COLS[i].summary))}
+              </tr>
 
               {/* Rent */}
-              <tr className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
-                <td className="px-5 py-3 font-medium text-gray-700">Rent</td>
-                {euroCell(rentVat.bruttoAbs)}
-                {euroCell(rentVat.mwstAbs)}
-                <td className="px-4 py-3 text-right tabular-nums text-gray-500 text-xs">{fmtPct(rentVat.blendedPct, rentVat.bruttoAbs > 0)}</td>
-                {euroCell(rentVat.nettoAbs)}
-                {valCell(plRent)}
+              <tr className="hover:bg-gray-50/40">
+                {rowLabel('Rent', true)}
+                {colPLs.map((pl, i) => amtCell(pl.rent, true, COLS[i].summary, 'text-red-700'))}
               </tr>
-              {pctRow('as % of sales', plRent)}
+
+              {/* Rent % */}
+              <tr className="hover:bg-gray-50/40">
+                {rowLabel('as % of sales', false, true)}
+                {colPLs.map((pl, i) => pctCell(pl.rentPct, COLS[i].summary))}
+              </tr>
 
               {/* Other */}
-              <tr className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
-                <td className="px-5 py-3 font-medium text-gray-700">Other</td>
-                {euroCell(otherVat.bruttoAbs)}
-                {euroCell(otherVat.mwstAbs)}
-                <td className="px-4 py-3 text-right tabular-nums text-gray-500 text-xs">{fmtPct(otherVat.blendedPct, otherVat.bruttoAbs > 0)}</td>
-                {euroCell(otherVat.nettoAbs)}
-                {valCell(plOther)}
+              <tr className="hover:bg-gray-50/40">
+                {rowLabel('Other', true)}
+                {colPLs.map((pl, i) => amtCell(pl.other, true, COLS[i].summary, 'text-red-700'))}
               </tr>
-              {pctRow('as % of sales', plOther)}
+
+              {/* Other % */}
+              <tr className="hover:bg-gray-50/40">
+                {rowLabel('as % of sales', false, true)}
+                {colPLs.map((pl, i) => pctCell(pl.otherPct, COLS[i].summary))}
+              </tr>
+
+              {spacerRow}
 
               {/* FCF */}
-              <tr className="bg-gray-50 border-t-2 border-gray-200">
-                <td className="px-5 py-3.5 font-bold text-gray-900">FCF</td>
-                {dashCell()}{dashCell()}{dashCell()}{dashCell()}
-                {valCell(plFcf, true, true)}
-              </tr>
-              {pctRow('as % of sales', plFcf)}
-
-              {/* Financing */}
-              <tr className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
-                <td className="px-5 py-3 font-medium text-gray-700">Financing</td>
-                {dashCell()}{dashCell()}{dashCell()}{dashCell()}
-                {valCell(plFinancing)}
+              <tr className="bg-gray-50 border-t-2 border-gray-300">
+                {rowLabel('FCF', true)}
+                {colPLs.map((pl, i) => amtCell(pl.fcf, true, COLS[i].summary, fcfColor(pl)))}
               </tr>
 
-              {/* Change in Cash */}
-              <tr className="bg-gray-50 border-t-2 border-gray-200">
-                <td className="px-5 py-3.5 font-bold text-gray-900">
-                  <span className="flex items-center gap-2">
-                    Change in Cash
-                    {checkOk
-                      ? <CheckCircle2 size={15} className="text-green-600 flex-shrink-0" />
-                      : <XCircle size={15} className="text-red-500 flex-shrink-0" />}
-                  </span>
-                </td>
-                {dashCell()}{dashCell()}{dashCell()}{dashCell()}
-                {valCell(plChangeInCash, true, true)}
-              </tr>
             </tbody>
           </table>
         </div>
