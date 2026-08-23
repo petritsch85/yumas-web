@@ -159,7 +159,16 @@ const NAV_GROUPS: NavGroup[] = [
     labelKey: 'sidebar.groups.analysis',
     adminOnly: true,
     items: [
-      { labelKey: 'sidebar.nav.counterparties', href: '/counterparties',              icon: Building2 },
+      { labelKey: 'sidebar.nav.counterparties', href: '/counterparties', icon: Building2 },
+      {
+        labelKey: 'sidebar.nav.sales', href: '/sales', icon: TrendingUp,
+        children: [
+          { labelKey: 'sidebar.nav.salesOrderbird',   href: '/sales/orderbird',   icon: Store },
+          { labelKey: 'sidebar.nav.salesWolt',        href: '/sales/wolt',        icon: Store },
+          { labelKey: 'sidebar.nav.salesLieferando',  href: '/sales/lieferando',  icon: Store },
+          { labelKey: 'sidebar.nav.salesWebshop',     href: '/sales/webshop',     icon: ShoppingBag },
+        ],
+      },
       {
         labelKey: 'sidebar.nav.bills', href: '/bills', icon: FilePlus, permKey: 'bills',
         children: [
