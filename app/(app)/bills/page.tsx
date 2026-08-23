@@ -307,10 +307,14 @@ function BillPeriodPicker({ bill, onSave }: {
       pt = 'month';
       ps = `${start}-01`;
       pe = bpLastDay(start);
-    } else if (type === 'annual' && start && end) {
+    } else if (type === 'annual' && start) {
       pt = 'year';
       ps = `${start}-01`;
-      pe = bpLastDay(end);
+      // end = last day of the month 11 months later (start + 12 months − 1 day)
+      const [sy, sm] = start.split('-').map(Number);
+      const endMonth = ((sm - 1 + 11) % 12) + 1;
+      const endYear  = sy + Math.floor((sm - 1 + 11) / 12);
+      pe = bpLastDay(`${String(endYear)}-${String(endMonth).padStart(2,'0')}`);
     } else if (type === 'custom') {
       pt = 'custom'; ps = start || null; pe = end || null;
     } else return;
@@ -368,12 +372,10 @@ function BillPeriodPicker({ bill, onSave }: {
               <div><label className="text-xs text-gray-500 block mb-1">Month</label>
                 <BPMonthSelect value={start} onChange={setStart} /></div>
             )}
-            {type === 'annual' && (<>
+            {type === 'annual' && (
               <div><label className="text-xs text-gray-500 block mb-1">Start month</label>
                 <BPMonthSelect value={start} onChange={setStart} /></div>
-              <div><label className="text-xs text-gray-500 block mb-1">End month</label>
-                <BPMonthSelect value={end} onChange={setEnd} /></div>
-            </>)}
+            )}
             {type === 'custom' && (<>
               <div><label className="text-xs text-gray-500 block mb-1">Start date</label>
                 <input type="date" value={start} onChange={e => setStart(e.target.value)} className={inputCls} /></div>
