@@ -1237,7 +1237,7 @@ export default function BillsPage() {
                       { col: 'period_start', label: 'Period',       align: 'left'  },
                       { col: 'location',     label: 'Location',    align: 'left'  },
                       { col: 'category',     label: 'Category',    align: 'left'  },
-                      { col: 'net',          label: 'Net / Mo',    align: 'left' },
+                      { col: 'net',          label: 'Net',         align: 'left' },
                       { col: 'vat_pct',      label: 'VAT %',       align: 'left' },
                       { col: 'vat_eur',      label: 'VAT €',       align: 'left' },
                       { col: 'gross',        label: 'Gross',       align: 'left' },
@@ -1262,15 +1262,6 @@ export default function BillsPage() {
                 </thead>
                 <tbody className="divide-y divide-gray-100">
                   {sortedFiltered.map((bill) => {
-                    // Compute monthly amount for display
-                    let monthlyNet = bill.net_amount;
-                    if (bill.period_start && bill.period_end && bill.period_type !== 'single_date') {
-                      const s  = new Date(bill.period_start + 'T00:00:00');
-                      const e2 = new Date(bill.period_end   + 'T00:00:00');
-                      const months = (e2.getFullYear() - s.getFullYear()) * 12 + (e2.getMonth() - s.getMonth()) + 1;
-                      if (months > 1) monthlyNet = bill.net_amount / months;
-                    }
-                    const isSpread = bill.period_type === 'year' || bill.period_type === 'custom';
                     const vatAmount = bill.vat_amount;
                     const vatPct    = bill.net_amount > 0 ? (vatAmount / bill.net_amount * 100) : 0;
                     const matchedCp = counterparties.find(cp => {
@@ -1317,10 +1308,7 @@ export default function BillsPage() {
                             </span>
                           )}
                         </td>
-                        <td className="px-2 py-1.5 tabular-nums whitespace-nowrap">
-                          <span className="text-gray-900 text-xs">{fmt(monthlyNet)}</span>
-                          {isSpread && <span className="text-[10px] text-gray-400 ml-1">÷mo</span>}
-                        </td>
+                        <td className="px-2 py-1.5 tabular-nums text-xs text-gray-900 whitespace-nowrap">{fmt(bill.net_amount)}</td>
                         <td className="px-2 py-1.5 tabular-nums text-xs text-gray-500 whitespace-nowrap">{vatPct.toFixed(0)}%</td>
                         <td className="px-2 py-1.5 tabular-nums text-xs text-gray-500 whitespace-nowrap">{fmt(vatAmount)}</td>
                         <td className="px-2 py-1.5 font-bold text-gray-900 tabular-nums text-xs whitespace-nowrap">{fmt(bill.gross_amount)}</td>
