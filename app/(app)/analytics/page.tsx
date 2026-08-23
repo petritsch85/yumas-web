@@ -2,7 +2,7 @@
 
 import { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { AlertCircle, RefreshCw } from 'lucide-react';
+import { AlertCircle, RefreshCw, ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-react';
 
 type UnmatchedTx = {
   id: string;
@@ -32,6 +32,8 @@ type Analytics = {
   unmatchedBills: UnmatchedBill[];
 };
 
+type SortDir = 'asc' | 'desc';
+
 function eur(cents: number) {
   return new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(cents / 100);
 }
@@ -43,6 +45,27 @@ function fmtDate(iso: string) {
   return `${d}.${m}.${y}`;
 }
 
+function SortIcon({ col, sortCol, sortDir }: { col: string; sortCol: string; sortDir: SortDir }) {
+  if (col !== sortCol) return <ChevronsUpDown size={11} className="ml-1 opacity-30 inline" />;
+  return sortDir === 'asc'
+    ? <ChevronUp size={11} className="ml-1 text-gray-700 inline" />
+    : <ChevronDown size={11} className="ml-1 text-gray-700 inline" />;
+}
+
+function SortableTh({ label, col, sortCol, sortDir, onSort, className }: {
+  label: string; col: string; sortCol: string; sortDir: SortDir;
+  onSort: (col: string) => void; className?: string;
+}) {
+  return (
+    <th
+      className={`py-2.5 px-3 font-semibold text-gray-500 whitespace-nowrap cursor-pointer select-none hover:text-gray-800 transition-colors ${className ?? 'text-left'}`}
+      onClick={() => onSort(col)}
+    >
+      {label}<SortIcon col={col} sortCol={sortCol} sortDir={sortDir} />
+    </th>
+  );
+}
+
 const DIRECTIONS = ['All', 'in', 'out'] as const;
 
 export default function AnalyticsPage() {
@@ -52,10 +75,24 @@ export default function AnalyticsPage() {
     staleTime: 0,
   });
 
-  const [txDir, setTxDir]         = useState<'All' | 'in' | 'out'>('All');
-  const [txSearch, setTxSearch]   = useState('');
+  const [txDir, setTxDir]           = useState<'All' | 'in' | 'out'>('All');
+  const [txSearch, setTxSearch]     = useState('');
+  const [txSortCol, setTxSortCol]   = useState('date');
+  const [txSortDir, setTxSortDir]   = useState<SortDir>('desc');
+
   const [billSearch, setBillSearch] = useState('');
   const [billStatus, setBillStatus] = useState('All');
+  const [bSortCol, setBSortCol]     = useState('invoice_date');
+  const [bSortDir, setBSortDir]     = useState<SortDir>('desc');
+
+  const handleTxSort = (col: string) => {
+    if (col === txSortCol) setTxSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setTxSortCol(col); setTxSortDir('asc'); }
+  };
+  const handleBSort = (col: string) => {
+    if (col === bSortCol) setBSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setBSortCol(col); setBSortDir('asc'); }
+  };
 
   const txs = useMemo(() => {
     let rows = data?.unmatchedCashFlows ?? [];
@@ -68,8 +105,19 @@ export default function AnalyticsPage() {
         r.category?.toLowerCase().includes(q)
       );
     }
-    return rows;
-  }, [data, txDir, txSearch]);
+    const mul = txSortDir === 'asc' ? 1 : -1;
+    return [...rows].sort((a, b) => {
+      switch (txSortCol) {
+        case 'date':         return mul * a.date.localeCompare(b.date);
+        case 'counterparty': return mul * (a.counterparty ?? '').localeCompare(b.counterparty ?? '');
+        case 'description':  return mul * (a.description ?? '').localeCompare(b.description ?? '');
+        case 'amount':       return mul * (a.amount_cents - b.amount_cents);
+        case 'category':     return mul * (a.category ?? '').localeCompare(b.category ?? '');
+        case 'location':     return mul * (a.location ?? '').localeCompare(b.location ?? '');
+        default: return 0;
+      }
+    });
+  }, [data, txDir, txSearch, txSortCol, txSortDir]);
 
   const bills = useMemo(() => {
     let rows = data?.unmatchedBills ?? [];
@@ -81,8 +129,20 @@ export default function AnalyticsPage() {
         r.invoice_number?.toLowerCase().includes(q)
       );
     }
-    return rows;
-  }, [data, billStatus, billSearch]);
+    const mul = bSortDir === 'asc' ? 1 : -1;
+    return [...rows].sort((a, b) => {
+      switch (bSortCol) {
+        case 'invoice_date':   return mul * (a.invoice_date ?? '').localeCompare(b.invoice_date ?? '');
+        case 'supplier_name':  return mul * a.supplier_name.localeCompare(b.supplier_name);
+        case 'invoice_number': return mul * (a.invoice_number ?? '').localeCompare(b.invoice_number ?? '');
+        case 'gross_amount':   return mul * (a.gross_amount - b.gross_amount);
+        case 'net_amount':     return mul * (a.net_amount - b.net_amount);
+        case 'status':         return mul * a.status.localeCompare(b.status);
+        case 'location_label': return mul * (a.location_label ?? '').localeCompare(b.location_label ?? '');
+        default: return 0;
+      }
+    });
+  }, [data, billStatus, billSearch, bSortCol, bSortDir]);
 
   const txTotalOut = useMemo(() => txs.filter(r => r.direction === 'out').reduce((s, r) => s + r.amount_cents, 0), [txs]);
   const txTotalIn  = useMemo(() => txs.filter(r => r.direction === 'in').reduce((s, r) => s + r.amount_cents, 0), [txs]);
@@ -95,7 +155,7 @@ export default function AnalyticsPage() {
 
   if (isLoading) {
     return (
-      <div className="max-w-6xl mx-auto px-4 py-8 flex items-center justify-center py-24">
+      <div className="max-w-6xl mx-auto px-4 py-24 flex items-center justify-center">
         <div className="text-gray-400 text-sm">Loading analytics…</div>
       </div>
     );
@@ -120,13 +180,11 @@ export default function AnalyticsPage() {
       {/* ── Unmatched Cash Flows ── */}
       <section>
         <div className="flex items-center gap-3 mb-3 flex-wrap">
-          <div>
-            <h2 className="text-base font-bold text-gray-800 flex items-center gap-2">
-              <AlertCircle size={16} className="text-amber-500" />
-              Unmatched Cash Flows
-              <span className="text-sm font-normal text-gray-400">({txs.length} of {data?.unmatchedCashFlows.length ?? 0})</span>
-            </h2>
-          </div>
+          <h2 className="text-base font-bold text-gray-800 flex items-center gap-2">
+            <AlertCircle size={16} className="text-amber-500" />
+            Unmatched Cash Flows
+            <span className="text-sm font-normal text-gray-400">({txs.length} of {data?.unmatchedCashFlows.length ?? 0})</span>
+          </h2>
           <div className="ml-auto flex items-center gap-2 flex-wrap">
             <div className="flex rounded-lg border border-gray-200 overflow-hidden text-xs">
               {DIRECTIONS.map(d => (
@@ -165,12 +223,12 @@ export default function AnalyticsPage() {
             <table className="w-full text-xs">
               <thead className="bg-gray-50 border-b border-gray-100 sticky top-0 z-10">
                 <tr>
-                  <th className="py-2.5 px-3 text-left font-semibold text-gray-500 whitespace-nowrap">Date</th>
-                  <th className="py-2.5 px-3 text-left font-semibold text-gray-500">Counterparty</th>
-                  <th className="py-2.5 px-3 text-left font-semibold text-gray-500">Description</th>
-                  <th className="py-2.5 px-3 text-right font-semibold text-gray-500 whitespace-nowrap">Amount</th>
-                  <th className="py-2.5 px-3 text-left font-semibold text-gray-500">Category</th>
-                  <th className="py-2.5 px-3 text-left font-semibold text-gray-500">Location</th>
+                  <SortableTh label="Date"         col="date"         sortCol={txSortCol} sortDir={txSortDir} onSort={handleTxSort} />
+                  <SortableTh label="Counterparty"  col="counterparty" sortCol={txSortCol} sortDir={txSortDir} onSort={handleTxSort} />
+                  <SortableTh label="Description"   col="description"  sortCol={txSortCol} sortDir={txSortDir} onSort={handleTxSort} />
+                  <SortableTh label="Amount"        col="amount"       sortCol={txSortCol} sortDir={txSortDir} onSort={handleTxSort} className="text-right" />
+                  <SortableTh label="Category"      col="category"     sortCol={txSortCol} sortDir={txSortDir} onSort={handleTxSort} />
+                  <SortableTh label="Location"      col="location"     sortCol={txSortCol} sortDir={txSortDir} onSort={handleTxSort} />
                 </tr>
               </thead>
               <tbody>
@@ -221,13 +279,13 @@ export default function AnalyticsPage() {
             <table className="w-full text-xs">
               <thead className="bg-gray-50 border-b border-gray-100 sticky top-0 z-10">
                 <tr>
-                  <th className="py-2.5 px-3 text-left font-semibold text-gray-500 whitespace-nowrap">Date</th>
-                  <th className="py-2.5 px-3 text-left font-semibold text-gray-500">Supplier</th>
-                  <th className="py-2.5 px-3 text-left font-semibold text-gray-500">Invoice #</th>
-                  <th className="py-2.5 px-3 text-right font-semibold text-gray-500">Gross</th>
-                  <th className="py-2.5 px-3 text-right font-semibold text-gray-500">Net</th>
-                  <th className="py-2.5 px-3 text-left font-semibold text-gray-500">Status</th>
-                  <th className="py-2.5 px-3 text-left font-semibold text-gray-500">Location</th>
+                  <SortableTh label="Date"       col="invoice_date"   sortCol={bSortCol} sortDir={bSortDir} onSort={handleBSort} />
+                  <SortableTh label="Supplier"   col="supplier_name"  sortCol={bSortCol} sortDir={bSortDir} onSort={handleBSort} />
+                  <SortableTh label="Invoice #"  col="invoice_number" sortCol={bSortCol} sortDir={bSortDir} onSort={handleBSort} />
+                  <SortableTh label="Gross"      col="gross_amount"   sortCol={bSortCol} sortDir={bSortDir} onSort={handleBSort} className="text-right" />
+                  <SortableTh label="Net"        col="net_amount"     sortCol={bSortCol} sortDir={bSortDir} onSort={handleBSort} className="text-right" />
+                  <SortableTh label="Status"     col="status"         sortCol={bSortCol} sortDir={bSortDir} onSort={handleBSort} />
+                  <SortableTh label="Location"   col="location_label" sortCol={bSortCol} sortDir={bSortDir} onSort={handleBSort} />
                 </tr>
               </thead>
               <tbody>
