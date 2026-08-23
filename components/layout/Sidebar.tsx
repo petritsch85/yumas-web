@@ -185,7 +185,8 @@ const NAV_GROUPS: NavGroup[] = [
         children: [
           { labelKey: 'sidebar.nav.unmatchedCFs', href: '/analytics',          icon: SearchX },
           { labelKey: 'sidebar.nav.groupPnl',     href: '/analytics/pnl',      icon: LineChart },
-          { labelKey: 'sidebar.nav.storePnls',    href: '/analytics/store-pnl', icon: Store },
+          { labelKey: 'sidebar.nav.storePnls',    href: '/analytics/store-pnl',    icon: Store },
+          { labelKey: 'sidebar.nav.shiftReports', href: '/analytics/shift-reports', icon: ClipboardList },
         ],
       },
     ],
