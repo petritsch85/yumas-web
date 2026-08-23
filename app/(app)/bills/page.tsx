@@ -1233,19 +1233,18 @@ export default function BillsPage() {
                       { col: 'period_start', label: 'Period',       align: 'left'  },
                       { col: 'location',     label: 'Location',    align: 'left'  },
                       { col: 'category',     label: 'Category',    align: 'left'  },
-                      { col: 'net',          label: 'Net / Mo',    align: 'right' },
-                      { col: 'vat_pct',      label: 'VAT %',       align: 'right' },
-                      { col: 'vat_eur',      label: 'VAT €',       align: 'right' },
-                      { col: 'gross',        label: 'Gross',       align: 'right' },
+                      { col: 'net',          label: 'Net / Mo',    align: 'left' },
+                      { col: 'vat_pct',      label: 'VAT %',       align: 'left' },
+                      { col: 'vat_eur',      label: 'VAT €',       align: 'left' },
+                      { col: 'gross',        label: 'Gross',       align: 'left' },
                       { col: 'status',       label: 'Status',      align: 'left'  },
                     ] as { col: string; label: string; align: 'left' | 'right' }[]).map(({ col, label, align }) => {
                       const active = sortCol === col;
                       return (
                         <th key={col} onClick={() => handleSort(col)}
-                          className={`px-2 py-2 text-xs font-semibold uppercase tracking-wide cursor-pointer select-none whitespace-nowrap transition-colors
-                            ${align === 'right' ? 'text-right' : 'text-left'}
+                          className={`px-2 py-2 text-xs font-semibold uppercase tracking-wide cursor-pointer select-none whitespace-nowrap transition-colors text-left
                             ${active ? 'text-[#1B5E20]' : 'text-gray-500 hover:text-gray-800'}`}>
-                          <span className={`inline-flex items-center gap-1 ${align === 'right' ? 'flex-row-reverse' : ''}`}>
+                          <span className="inline-flex items-center gap-1">
                             {label}
                             <span className={`transition-opacity ${active ? 'opacity-100' : 'opacity-20'}`}>
                               {active && sortDir === 'asc' ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
@@ -1307,20 +1306,20 @@ export default function BillsPage() {
                             </span>
                           )}
                         </td>
-                        <td className="px-2 py-1.5">
+                        <td className="px-2 py-1.5 max-w-[110px]">
                           {bill.category && (
-                            <span className="inline-block px-1.5 py-0.5 bg-gray-100 text-gray-600 text-xs rounded-full whitespace-nowrap">
+                            <span className="inline-block px-1.5 py-0.5 bg-gray-100 text-gray-600 text-xs rounded-full whitespace-nowrap truncate max-w-full">
                               {bill.category}
                             </span>
                           )}
                         </td>
-                        <td className="px-2 py-1.5 text-right tabular-nums">
+                        <td className="px-2 py-1.5 tabular-nums whitespace-nowrap">
                           <span className="text-gray-900 text-xs">{fmt(monthlyNet)}</span>
-                          {isSpread && <span className="block text-[10px] text-gray-400">÷ mo</span>}
+                          {isSpread && <span className="text-[10px] text-gray-400 ml-1">÷mo</span>}
                         </td>
-                        <td className="px-2 py-1.5 text-right tabular-nums text-xs text-gray-500">{vatPct.toFixed(0)}%</td>
-                        <td className="px-2 py-1.5 text-right tabular-nums text-xs text-gray-500">{fmt(vatAmount)}</td>
-                        <td className="px-2 py-1.5 text-right font-bold text-gray-900 tabular-nums text-xs">{fmt(bill.gross_amount)}</td>
+                        <td className="px-2 py-1.5 tabular-nums text-xs text-gray-500 whitespace-nowrap">{vatPct.toFixed(0)}%</td>
+                        <td className="px-2 py-1.5 tabular-nums text-xs text-gray-500 whitespace-nowrap">{fmt(vatAmount)}</td>
+                        <td className="px-2 py-1.5 font-bold text-gray-900 tabular-nums text-xs whitespace-nowrap">{fmt(bill.gross_amount)}</td>
                         <td className="px-2 py-1.5">
                           <select value={bill.status} onChange={(e) => updateStatus(bill.id, e.target.value)}
                             className={`text-xs font-semibold px-2 py-0.5 rounded-full border cursor-pointer focus:outline-none ${STATUS_STYLES[bill.status]}`}>
