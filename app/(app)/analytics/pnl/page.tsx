@@ -84,7 +84,7 @@ function computePL(rows: AggRow[]): PL {
 
 /* ── Formatters ────────────────────────────────────────────────────── */
 const fmtAmt = (cents: number) =>
-  (cents / 100).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  (cents / 100).toLocaleString('de-DE', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
 const fmtPct = (v: number | null) =>
   v === null ? '—' : v.toLocaleString('de-DE', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + '%';
 
