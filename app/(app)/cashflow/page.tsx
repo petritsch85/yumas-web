@@ -969,7 +969,7 @@ export default function CashFlowPage() {
 
   const activeQuarterMonths: Period[] = selectedPeriod in QUARTER_PERIODS
     ? QUARTER_PERIODS[selectedPeriod]
-    : (Object.entries(QUARTER_PERIODS).find(([, ms]) => ms.includes(selectedPeriod as Period))?.[1] ?? []);
+    : [];
 
   return (
     <div className="space-y-6">
