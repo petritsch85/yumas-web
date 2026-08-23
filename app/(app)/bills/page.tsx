@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useCallback, useRef, useMemo } from 'react';
+import React, { useState, useCallback, useRef, useMemo, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
 import {
@@ -221,6 +221,182 @@ async function saveBillToDB(item: QueueItem, userId: string | null): Promise<voi
   }
 }
 
+// ── Bill Period Picker ────────────────────────────────────────────────────────
+const BP_MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+function BPMonthSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [y, m] = value ? value.split('-') : ['', ''];
+  const cls = 'border border-gray-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-[#1B5E20] bg-white';
+  const curYear = new Date().getFullYear();
+  const years = Array.from({ length: 10 }, (_, i) => curYear - 7 + i);
+  const set = (ny: string, nm: string) => { if (ny && nm) onChange(`${ny}-${nm}`); };
+  return (
+    <div className="flex gap-2">
+      <select value={m ?? ''} onChange={e => set(y, e.target.value)} className={`${cls} flex-1`}>
+        <option value="">Month</option>
+        {BP_MONTHS.map((mn, i) => <option key={i} value={String(i+1).padStart(2,'0')}>{mn}</option>)}
+      </select>
+      <select value={y ?? ''} onChange={e => set(e.target.value, m)} className={`${cls} w-24`}>
+        <option value="">Year</option>
+        {years.map(yr => <option key={yr} value={String(yr)}>{yr}</option>)}
+      </select>
+    </div>
+  );
+}
+
+function bpLastDay(ym: string): string {
+  const [y, m] = ym.split('-').map(Number);
+  const d = new Date(y, m, 0).getDate();
+  return `${String(y)}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+}
+
+type BPType = 'one-off' | 'monthly' | 'annual' | 'custom';
+
+function BillPeriodPicker({ bill, onSave }: {
+  bill: Bill;
+  onSave: (periodType: string, periodStart: string | null, periodEnd: string | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [pos, setPos]   = useState({ top: 0, left: 0, flipUp: false });
+  const [type, setType] = useState<BPType>('monthly');
+  const [start, setStart] = useState('');
+  const [end,   setEnd]   = useState('');
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const popRef = useRef<HTMLDivElement>(null);
+
+  const initFromBill = () => {
+    const pt = bill.period_type;
+    const ps = bill.period_start ?? '';
+    const pe = bill.period_end   ?? '';
+    if (pt === 'single_date') { setType('one-off');  setStart(ps); setEnd(''); }
+    else if (pt === 'month')  { setType('monthly');  setStart(ps.slice(0,7)); setEnd(''); }
+    else if (pt === 'year')   { setType('annual');   setStart(ps.slice(0,7)); setEnd(pe.slice(0,7)); }
+    else if (pt === 'custom') { setType('custom');   setStart(ps); setEnd(pe); }
+    else                      { setType('monthly');  setStart(''); setEnd(''); }
+  };
+
+  const openPicker = () => {
+    initFromBill();
+    const rect = btnRef.current?.getBoundingClientRect();
+    if (rect) {
+      const spaceBelow = window.innerHeight - rect.bottom;
+      const popWidth = 288;
+      const left = Math.min(rect.left, window.innerWidth - popWidth - 8);
+      setPos({ top: spaceBelow < 280 ? rect.top : rect.bottom + 4, left: Math.max(8, left), flipUp: spaceBelow < 280 });
+    }
+    setOpen(true);
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (!popRef.current?.contains(e.target as Node) && !btnRef.current?.contains(e.target as Node))
+        setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey); };
+  }, [open]);
+
+  const apply = () => {
+    let pt: string, ps: string | null, pe: string | null;
+    if (type === 'one-off') {
+      pt = 'single_date'; ps = start || null; pe = ps;
+    } else if (type === 'monthly' && start) {
+      pt = 'month';
+      ps = `${start}-01`;
+      pe = bpLastDay(start);
+    } else if (type === 'annual' && start && end) {
+      pt = 'year';
+      ps = `${start}-01`;
+      pe = bpLastDay(end);
+    } else if (type === 'custom') {
+      pt = 'custom'; ps = start || null; pe = end || null;
+    } else return;
+    onSave(pt, ps, pe);
+    setOpen(false);
+  };
+
+  const label = bill.period_start
+    ? (bill.period_type === 'month'
+        ? new Date(bill.period_start + 'T00:00:00').toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })
+        : bill.period_type === 'year' || bill.period_type === 'custom'
+          ? `${fmtDate(bill.period_start)} – ${fmtDate(bill.period_end)}`
+          : fmtDate(bill.period_start))
+    : '';
+
+  const TYPES: { key: BPType; label: string }[] = [
+    { key: 'one-off',  label: 'One-off' },
+    { key: 'monthly',  label: 'Monthly' },
+    { key: 'annual',   label: 'Annual' },
+    { key: 'custom',   label: 'Other period' },
+  ];
+  const inputCls = 'w-full border border-gray-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-[#1B5E20]';
+
+  return (
+    <div className="relative inline-block">
+      <button ref={btnRef} onClick={openPicker}
+        className={`text-xs rounded px-1.5 py-0.5 border whitespace-nowrap transition-colors ${
+          label
+            ? 'bg-blue-50 border-blue-200 text-blue-800 hover:bg-blue-100'
+            : 'bg-white border-dashed border-gray-300 text-gray-400 hover:border-gray-500 hover:text-gray-600'
+        }`}>
+        {label || '+ Set period'}
+      </button>
+
+      {open && (
+        <div ref={popRef}
+          style={{ position: 'fixed', top: pos.flipUp ? undefined : pos.top, bottom: pos.flipUp ? (window.innerHeight - pos.top) : undefined, left: pos.left, zIndex: 9999 }}
+          className="bg-white border border-gray-200 rounded-xl shadow-2xl p-4 w-72">
+          <div className="grid grid-cols-2 gap-1.5 mb-4">
+            {TYPES.map(t => (
+              <button key={t.key} onClick={() => setType(t.key)}
+                className={`py-1.5 px-2 text-xs rounded-lg font-medium border transition-colors ${
+                  type === t.key ? 'bg-[#1B5E20] text-white border-[#1B5E20]' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'
+                }`}>{t.label}</button>
+            ))}
+          </div>
+          <div className="space-y-2 mb-4">
+            {type === 'one-off' && (
+              <div><label className="text-xs text-gray-500 block mb-1">Date</label>
+                <input type="date" value={start} onChange={e => setStart(e.target.value)} className={inputCls} /></div>
+            )}
+            {type === 'monthly' && (
+              <div><label className="text-xs text-gray-500 block mb-1">Month</label>
+                <BPMonthSelect value={start} onChange={setStart} /></div>
+            )}
+            {type === 'annual' && (<>
+              <div><label className="text-xs text-gray-500 block mb-1">Start month</label>
+                <BPMonthSelect value={start} onChange={setStart} /></div>
+              <div><label className="text-xs text-gray-500 block mb-1">End month</label>
+                <BPMonthSelect value={end} onChange={setEnd} /></div>
+            </>)}
+            {type === 'custom' && (<>
+              <div><label className="text-xs text-gray-500 block mb-1">Start date</label>
+                <input type="date" value={start} onChange={e => setStart(e.target.value)} className={inputCls} /></div>
+              <div><label className="text-xs text-gray-500 block mb-1">End date</label>
+                <input type="date" value={end} onChange={e => setEnd(e.target.value)} className={inputCls} /></div>
+            </>)}
+          </div>
+          <div className="flex gap-2 items-center">
+            {bill.period_start && (
+              <button onClick={() => { onSave('', null, null); setOpen(false); }}
+                className="px-3 py-1.5 text-xs text-red-600 hover:bg-red-50 rounded-lg border border-red-200">Clear</button>
+            )}
+            <div className="flex gap-2 ml-auto">
+              <button onClick={() => setOpen(false)}
+                className="px-3 py-1.5 text-xs text-gray-500 hover:bg-gray-50 rounded-lg border border-gray-200">Cancel</button>
+              <button onClick={apply}
+                className="px-3 py-1.5 text-xs font-medium bg-[#1B5E20] text-white rounded-lg hover:bg-[#2E7D32]">Apply</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default function BillsPage() {
   const queryClient  = useQueryClient();
@@ -376,7 +552,8 @@ export default function BillsPage() {
     let av: string | number, bv: string | number;
     switch (sortCol) {
       case 'supplier':     av = a.supplier_name ?? '';              bv = b.supplier_name ?? '';              break;
-      case 'invoice_date': av = a.invoice_date ?? a.period_start ?? ''; bv = b.invoice_date ?? b.period_start ?? ''; break;
+      case 'invoice_date': av = a.invoice_date ?? ''; bv = b.invoice_date ?? ''; break;
+      case 'period_start': av = a.period_start ?? a.invoice_date ?? ''; bv = b.period_start ?? b.invoice_date ?? ''; break;
       case 'location':     av = a.location_label ?? '';             bv = b.location_label ?? '';             break;
       case 'category':     av = a.category ?? '';                   bv = b.category ?? '';                   break;
       case 'net':          av = a.net_amount;                       bv = b.net_amount;                       break;
@@ -560,6 +737,15 @@ export default function BillsPage() {
   }, [queue, queryClient]);
 
   const removeFromQueue = (id: string) => setQueue((q) => q.filter((i) => i.id !== id));
+
+  const patchBillPeriod = async (billId: string, periodType: string, periodStart: string | null, periodEnd: string | null) => {
+    await fetch(`/api/bills/${billId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ period_type: periodType || null, period_start: periodStart, period_end: periodEnd }),
+    });
+    queryClient.invalidateQueries({ queryKey: ['bills'] });
+  };
 
   const updateStatus = async (id: string, status: string) => {
     await supabase.from('bills').update({ status }).eq('id', id);
@@ -1044,6 +1230,7 @@ export default function BillsPage() {
                     {([
                       { col: 'supplier',     label: 'Supplier',    align: 'left'  },
                       { col: 'invoice_date', label: 'Issue Date',  align: 'left'  },
+                      { col: 'period_start', label: 'Period',       align: 'left'  },
                       { col: 'location',     label: 'Location',    align: 'left'  },
                       { col: 'category',     label: 'Category',    align: 'left'  },
                       { col: 'net',          label: 'Net / Mo',    align: 'right' },
@@ -1107,7 +1294,13 @@ export default function BillsPage() {
                             )}
                           </div>
                         </td>
-                        <td className="px-3 py-1.5 text-gray-600 whitespace-nowrap text-xs">{fmtPeriod(bill)}</td>
+                        <td className="px-3 py-1.5 text-gray-600 whitespace-nowrap text-xs">{fmtDate(bill.invoice_date)}</td>
+                        <td className="px-3 py-1.5 whitespace-nowrap">
+                          <BillPeriodPicker
+                            bill={bill}
+                            onSave={(pt, ps, pe) => patchBillPeriod(bill.id, pt, ps, pe)}
+                          />
+                        </td>
                         <td className="px-3 py-1.5">
                           {bill.location_label && (
                             <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-indigo-50 text-indigo-700 text-xs rounded-full whitespace-nowrap">
@@ -1174,7 +1367,7 @@ export default function BillsPage() {
                       {/* Inline edit row */}
                       {editingBillId === bill.id && editDraft && (
                         <tr className="bg-indigo-50/60">
-                          <td colSpan={11} className="px-4 py-4">
+                          <td colSpan={12} className="px-4 py-4">
                             <div className="grid grid-cols-5 gap-3 items-end">
                               {/* Location */}
                               <div>
@@ -1295,7 +1488,7 @@ export default function BillsPage() {
                 </tbody>
                 <tfoot>
                   <tr className="bg-gray-50 border-t-2 border-gray-200">
-                    <td colSpan={5} className="px-3 py-2 text-xs font-semibold text-gray-500">{filtered.length} bills</td>
+                    <td colSpan={6} className="px-3 py-2 text-xs font-semibold text-gray-500">{filtered.length} bills</td>
                     <td className="px-3 py-2 text-right font-bold text-gray-700 tabular-nums text-xs">{fmt(totals.net)}</td>
                     <td className="px-3 py-2 text-right text-xs text-gray-400 tabular-nums">
                       {totals.net > 0 ? (totals.vat / totals.net * 100).toFixed(0) + '%' : '—'}
