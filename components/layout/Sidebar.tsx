@@ -157,6 +157,7 @@ const NAV_GROUPS: NavGroup[] = [
           { labelKey: 'sidebar.nav.salesWolt',        href: '/sales/wolt',        icon: Store },
           { labelKey: 'sidebar.nav.salesLieferando',  href: '/sales/lieferando',  icon: Store },
           { labelKey: 'sidebar.nav.salesWebshop',     href: '/sales/webshop',     icon: ShoppingBag },
+          { labelKey: 'sidebar.nav.salesTooGoodToGo', href: '/sales/too-good-to-go', icon: Store },
         ],
       },
       {
