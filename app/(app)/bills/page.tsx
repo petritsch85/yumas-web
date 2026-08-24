@@ -540,6 +540,26 @@ export default function BillsPage() {
       });
   }, [bills, queue]);
 
+  // Effective supplier name = matched counterparty name (if any), else raw supplier_name.
+  // Used for BOTH display and sorting so the table sorts by what the user actually sees.
+  const matchedCpByBill = useMemo(() => {
+    const map = new Map<string, Counterparty>();
+    for (const b of bills) {
+      const lower = (b.supplier_name ?? '').toLowerCase();
+      const cp = counterparties.find(cp => {
+        const terms = cp.keywords.length > 0 ? cp.keywords : [cp.name];
+        return terms.some(kw => kw && lower.includes(kw.toLowerCase()));
+      });
+      if (cp) map.set(b.id, cp);
+    }
+    return map;
+  }, [bills, counterparties]);
+
+  const displayName = useCallback(
+    (b: Bill) => matchedCpByBill.get(b.id)?.name ?? b.supplier_name ?? '',
+    [matchedCpByBill],
+  );
+
   const filtered = bills.filter((b) => {
     if (filterStatus   !== 'all' && b.status         !== filterStatus)   return false;
     if (filterCategory !== 'all' && b.category        !== filterCategory) return false;
@@ -555,7 +575,7 @@ export default function BillsPage() {
   const sortedFiltered = useMemo(() => [...filtered].sort((a, b) => {
     let av: string | number, bv: string | number;
     switch (sortCol) {
-      case 'supplier':     av = a.supplier_name ?? '';              bv = b.supplier_name ?? '';              break;
+      case 'supplier':     av = displayName(a);                     bv = displayName(b);                     break;
       case 'invoice_date': av = a.invoice_date ?? ''; bv = b.invoice_date ?? ''; break;
       case 'period_start': av = a.period_start ?? a.invoice_date ?? ''; bv = b.period_start ?? b.invoice_date ?? ''; break;
       case 'location':     av = a.location_label ?? '';             bv = b.location_label ?? '';             break;
@@ -570,7 +590,7 @@ export default function BillsPage() {
     }
     const cmp = typeof av === 'string' ? av.localeCompare(bv as string) : (av as number) - (bv as number);
     return sortDir === 'asc' ? cmp : -cmp;
-  }), [filtered, sortCol, sortDir]);
+  }), [filtered, sortCol, sortDir, displayName]);
 
   const totals = {
     gross: filtered.reduce((s, b) => s + b.gross_amount, 0),
@@ -1264,11 +1284,7 @@ export default function BillsPage() {
                   {sortedFiltered.map((bill) => {
                     const vatAmount = bill.vat_amount;
                     const vatPct    = bill.net_amount > 0 ? (vatAmount / bill.net_amount * 100) : 0;
-                    const matchedCp = counterparties.find(cp => {
-                      const terms = cp.keywords.length > 0 ? cp.keywords : [cp.name];
-                      const lower  = bill.supplier_name.toLowerCase();
-                      return terms.some(kw => kw && lower.includes(kw.toLowerCase()));
-                    });
+                    const matchedCp = matchedCpByBill.get(bill.id);
                     return (
                       <React.Fragment key={bill.id}>
                       <tr className={`hover:bg-gray-50 transition-colors ${duplicateIds.has(bill.id) ? 'bg-red-50/40' : ''}`}>
