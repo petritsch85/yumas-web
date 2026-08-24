@@ -332,6 +332,20 @@ function CpPanel({ cp }: { cp: Counterparty }) {
 
   const txIds = useMemo(() => matchedTxs.map(t => t.id), [matchedTxs]);
 
+  // Bill ids that have a cash flow linked, taken from the admin-fetched transaction
+  // data. The browser-side queries below go through RLS and can come back empty,
+  // so this is the source the Cash Flow column trusts first.
+  const linkedBillIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const tx of matchedTxs) {
+      if (tx.bill?.id) ids.add(tx.bill.id);
+      for (const l of tx.transaction_bill_links ?? []) {
+        if (l.bill?.id) ids.add(l.bill.id);
+      }
+    }
+    return ids;
+  }, [matchedTxs]);
+
   const { data: billLinks = [] } = useQuery<{ id: string; transaction_id: string; bill_id: string; note: string | null }[]>({
     queryKey: ['tx-bill-links', cp.id, kwParams],
     queryFn: async () => {
@@ -551,7 +565,11 @@ function CpPanel({ cp }: { cp: Counterparty }) {
                     </thead>
                     <tbody>
                       {sortedBills.map(bill => {
-                        const linked = (bill.cashflow_transactions?.length ?? 0) > 0 || billLinks.some(l => l.bill_id === bill.id);
+                        const linked =
+                          linkedBillIds.has(bill.id) ||
+                          (bill.cashflow_transactions?.length ?? 0) > 0 ||
+                          (bill.transaction_bill_links?.length ?? 0) > 0 ||
+                          billLinks.some(l => l.bill_id === bill.id);
                         return (
                         <tr key={bill.id} className="border-b border-gray-50">
                           <td className="py-1.5 px-3 font-mono text-gray-500 whitespace-nowrap">
