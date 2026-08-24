@@ -835,7 +835,7 @@ export default function OutgoingBillsPage() {
     };
   }, [invoiceNumber, billDate, billEventDate, billIssuingLoc, billType, company, extra,
        contactName, street, postcode, city, poNumber, att, showLeist, leistStreet, leistPostcode, leistCity, introText, lineItems,
-       essenBruttoN, getraenkeBruttoN, essenN, getraenkeN, mwstEssen, mwstGetraenke, trinkgeldN,
+       essenBruttoN, getraenkeBruttoN, essenN, getraenkeN, mwstEssen, mwstGetraenke, trinkgeldN, compactTotals,
        anzahlungBruttoN, anzahlungNettoN, anzahlungBill, ermaessigungN,
        includeReceipt, receiptDataUrl, stornoSourceBill,
        inputMode, cateringNettoN, cateringBruttoN, cateringDesc, cateringLines, adHocLines,
