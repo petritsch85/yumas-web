@@ -424,6 +424,10 @@ function CpPanel({ cp }: { cp: Counterparty }) {
       qc.refetchQueries({ queryKey: ['cp-txs-all', cp.id, kwParams] }),
       qc.refetchQueries({ queryKey: ['cp-bills-all'] }),
       qc.refetchQueries({ queryKey: ['tx-bill-links', cp.id, kwParams] }),
+      // The cash flow page renders the same links — drop its cache too, or it
+      // keeps showing "No Bill" until that query happens to go stale.
+      qc.invalidateQueries({ queryKey: ['cashflow-tx'] }),
+      qc.invalidateQueries({ queryKey: ['bills'] }),
     ]);
   };
 

@@ -40,6 +40,8 @@ type CfTx = {
   notes: string;
   bill_id: string | null;
   bill: BillRef | null;
+  /** Many-to-many links — set when one cash flow covers several bills. */
+  transaction_bill_links: { id: string; note: string | null; bill: BillRef | null }[] | null;
   confirmed: boolean;
   counterparty_id: string | null;
   accounting_period: string | null; // "type|start[|end]"
@@ -593,31 +595,56 @@ function TxRow({ tx, onSave, counterparties }: {
 
         {/* Bill */}
         <td className="py-2 px-2 whitespace-nowrap">
-          {tx.bill ? (
-            <div className="flex items-center gap-1">
-              <button
-                title={`${tx.bill.supplier_name}${tx.bill.invoice_number ? ' · ' + tx.bill.invoice_number : ''}`}
-                onClick={() => tx.bill?.file_path
-                  ? window.open(`/api/bills/${tx.bill.id}/pdf`, '_blank')
-                  : setShowModal(true)}
-                className="flex items-center justify-center w-6 h-6 rounded-full bg-green-50 border border-green-200 text-green-600 hover:bg-green-100 transition-colors cursor-pointer">
-                <CheckCircle2 size={13} />
-              </button>
-              {!locked && (
-                <button title="Unlink bill" onClick={() => {
-                  if (window.confirm('Remove bill link from this transaction?')) patch('bill_id', null);
-                }}
-                  className="text-gray-300 hover:text-red-400 transition-colors">
-                  <X size={10} />
+          {(() => {
+            // A cash flow can cover several bills via transaction_bill_links. Those
+            // links carry no bill_id, so tx.bill stays null — without this branch the
+            // row would still read "No Bill" after a multi-bill link was saved.
+            const multi = (tx.transaction_bill_links ?? []).filter(l => l.bill);
+
+            if (tx.bill) {
+              return (
+                <div className="flex items-center gap-1">
+                  <button
+                    title={`${tx.bill.supplier_name}${tx.bill.invoice_number ? ' · ' + tx.bill.invoice_number : ''}`}
+                    onClick={() => tx.bill?.file_path
+                      ? window.open(`/api/bills/${tx.bill.id}/pdf`, '_blank')
+                      : setShowModal(true)}
+                    className="flex items-center justify-center w-6 h-6 rounded-full bg-green-50 border border-green-200 text-green-600 hover:bg-green-100 transition-colors cursor-pointer">
+                    <CheckCircle2 size={13} />
+                  </button>
+                  {!locked && (
+                    <button title="Unlink bill" onClick={() => {
+                      if (window.confirm('Remove bill link from this transaction?')) patch('bill_id', null);
+                    }}
+                      className="text-gray-300 hover:text-red-400 transition-colors">
+                      <X size={10} />
+                    </button>
+                  )}
+                </div>
+              );
+            }
+
+            if (multi.length > 0) {
+              const names = multi
+                .map(l => `${l.bill!.supplier_name}${l.bill!.invoice_number ? ' · ' + l.bill!.invoice_number : ''}`)
+                .join('\n');
+              return (
+                <button
+                  title={names}
+                  onClick={() => !locked && setShowModal(true)}
+                  className={`flex items-center gap-1 text-xs font-semibold text-green-700 bg-green-50 border border-green-200 rounded-full px-2 py-0.5 transition-colors ${locked ? 'cursor-default opacity-50' : 'hover:bg-green-100 cursor-pointer'}`}>
+                  <CheckCircle2 size={11} /> {multi.length} bills
                 </button>
-              )}
-            </div>
-          ) : (
-            <button onClick={() => !locked && setShowModal(true)}
-              className={`flex items-center gap-1 text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5 transition-colors ${locked ? 'cursor-default opacity-50' : 'hover:bg-amber-100 cursor-pointer'}`}>
-              <Link2Off size={10} /> No Bill
-            </button>
-          )}
+              );
+            }
+
+            return (
+              <button onClick={() => !locked && setShowModal(true)}
+                className={`flex items-center gap-1 text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5 transition-colors ${locked ? 'cursor-default opacity-50' : 'hover:bg-amber-100 cursor-pointer'}`}>
+                <Link2Off size={10} /> No Bill
+              </button>
+            );
+          })()}
         </td>
 
         {/* Brutto */}
