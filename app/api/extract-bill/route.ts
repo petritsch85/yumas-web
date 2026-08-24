@@ -1,5 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { NextRequest, NextResponse } from 'next/server';
+import { canonicalizeSupplierName, getKnownTerms } from '@/lib/canonical-supplier';
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -63,7 +64,14 @@ Rules:
 - Suggest category based on supplier type and line item descriptions
 - If a discount is applied, reflect it in the net_amount (post-discount)
 - billing_period_start / billing_period_end: if the invoice shows a billing/service period (Abrechnungszeitraum, Leistungszeitraum, "period: X – Y", etc.), extract the start and end dates of that period in YYYY-MM-DD format. Set both to null if no billing period is stated.
-- delivery_address: extract the delivery/ship-to address from the invoice (Lieferadresse / Lieferanschrift / Warenempfänger). This is the address where goods were delivered TO, NOT the supplier's address. Set to null fields if not found`;
+- delivery_address: extract the delivery/ship-to address from the invoice (Lieferadresse / Lieferanschrift / Warenempfänger). This is the address where goods were delivered TO, NOT the supplier's address. Set to null fields if not found
+
+supplier_name accuracy (important — this field is frequently misread):
+- Read the supplier's name from PLAIN TEXT, not from the stylised logo. Logos use decorative fonts that are easy to misread. The reliable sources, in order of preference: the letterhead address block, the footer / Impressum, the line next to the USt-IdNr / Steuernummer, and the bank-details block ("Kontoinhaber" / account holder)
+- Cross-check the spelling against at least two of those places before deciding. If the logo and the footer disagree, trust the footer
+- Transcribe the name character-for-character. Do not guess at, "correct", or normalise unusual German surnames — names like "Leleithner" contain letter sequences that look like typos but are not
+- Include the legal form (GmbH, AG, KG, e.K. …) if it is printed, but do NOT append trailing descriptive taglines such as "Getränkegroßhandel und Gastronomiepartner"
+- If the document is a self-billing invoice or credit note, supplier_name is the party issuing the goods/services, not the recipient`;
 
 /** Pull the outermost JSON object out of a string that may contain surrounding text */
 function extractJSONObject(text: string): string {
@@ -173,6 +181,22 @@ export async function POST(req: NextRequest) {
           { status: 422 }
         );
       }
+    }
+
+    // Snap OCR near-misses in the supplier name to the canonical spelling we
+    // already have on file (e.g. "BIER-ZENTRALE LEIEITHNER GMBH" -> "…Leleithner…").
+    try {
+      const rec = extracted as Record<string, unknown>;
+      if (typeof rec?.supplier_name === 'string') {
+        const known = await getKnownTerms();
+        const fixed = canonicalizeSupplierName(rec.supplier_name, known);
+        if (fixed !== rec.supplier_name) {
+          console.log(`[extract-bill] supplier corrected: ${rec.supplier_name} -> ${fixed}`);
+          rec.supplier_name = fixed;
+        }
+      }
+    } catch (e) {
+      console.error('[extract-bill] supplier canonicalisation failed (non-fatal):', e);
     }
 
     return NextResponse.json({ data: extracted });

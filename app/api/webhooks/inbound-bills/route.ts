@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
 import { getSupabaseAdmin } from '@/lib/supabase-admin';
+import { canonicalizeSupplierName, getKnownTerms } from '@/lib/canonical-supplier';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const SECRET = process.env.INBOUND_BILLS_WEBHOOK_SECRET ?? '';
@@ -54,7 +55,14 @@ Rules:
 - For deposit/Leergut items: include them with is_deposit: true
 - If multiple VAT rates exist, use the dominant one for the header; capture per-line rates in lines
 - Suggest category based on supplier type and line item descriptions
-- If a discount is applied, reflect it in the net_amount (post-discount)`;
+- If a discount is applied, reflect it in the net_amount (post-discount)
+
+supplier_name accuracy (important — this field is frequently misread):
+- Read the supplier's name from PLAIN TEXT, not from the stylised logo. Logos use decorative fonts that are easy to misread. The reliable sources, in order of preference: the letterhead address block, the footer / Impressum, the line next to the USt-IdNr / Steuernummer, and the bank-details block ("Kontoinhaber" / account holder)
+- Cross-check the spelling against at least two of those places before deciding. If the logo and the footer disagree, trust the footer
+- Transcribe the name character-for-character. Do not guess at, "correct", or normalise unusual German surnames — names like "Leleithner" contain letter sequences that look like typos but are not
+- Include the legal form (GmbH, AG, KG, e.K. …) if it is printed, but do NOT append trailing descriptive taglines such as "Getränkegroßhandel und Gastronomiepartner"
+- If the document is a self-billing invoice or credit note, supplier_name is the party issuing the goods/services, not the recipient`;
 
 function extractJSONObject(text: string): string {
   const start = text.indexOf('{');
@@ -109,7 +117,23 @@ async function extractFromAttachment(attachment: Attachment): Promise<Record<str
 
   const raw = response.content[0].type === 'text' ? response.content[0].text : '';
   const jsonStr = cleanResponse(raw);
-  return JSON.parse(jsonStr) as Record<string, unknown>;
+  const extracted = JSON.parse(jsonStr) as Record<string, unknown>;
+
+  // Snap OCR near-misses in the supplier name to the canonical spelling on file.
+  try {
+    if (typeof extracted.supplier_name === 'string') {
+      const known = await getKnownTerms();
+      const fixed = canonicalizeSupplierName(extracted.supplier_name, known);
+      if (fixed !== extracted.supplier_name) {
+        console.log(`[inbound-bills] supplier corrected: ${extracted.supplier_name} -> ${fixed}`);
+        extracted.supplier_name = fixed;
+      }
+    }
+  } catch (e) {
+    console.error('[inbound-bills] supplier canonicalisation failed (non-fatal):', e);
+  }
+
+  return extracted;
 }
 
 async function saveBillToDB(attachment: Attachment, extracted: Record<string, unknown>): Promise<string> {
