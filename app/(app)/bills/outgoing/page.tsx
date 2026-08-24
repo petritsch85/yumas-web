@@ -6,7 +6,7 @@ import { supabase } from '@/lib/supabase-browser';
 import {
   Upload, FileCheck, AlertCircle, Loader2,
   CheckCircle2, Clock, Banknote, Trash2,
-  ChevronDown, Eye, X, Save, Pencil, Download, BookOpen, Send,
+  ChevronDown, Eye, EyeOff, X, Save, Pencil, Download, BookOpen, Send,
   FilePlus, Plus, FileDown, Camera, FileUp,
 } from 'lucide-react';
 import type { BillData, LineItem } from '@/components/bills/BillDocument';
@@ -192,6 +192,8 @@ export default function OutgoingBillsPage() {
   const [mwstEssen,         setMwstEssen]         = useState('7');
   const [mwstGetraenke,     setMwstGetraenke]     = useState('19');
   const [trinkgeld,         setTrinkgeld]         = useState('');
+  /** Hide the Essen/Getränke split rows — show only the Gesamt lines on the bill. */
+  const [compactTotals,     setCompactTotals]     = useState(false);
   const [cateringLines,     setCateringLines]     = useState<{ id: string; description: string; amount: string }[]>([{ id: uid(), description: '', amount: '' }]);
   const [adHocLines,        setAdHocLines]        = useState<{ id: string; description: string; amount: string; vat: 7 | 19 }[]>([{ id: uid(), description: '', amount: '', vat: 7 }]);
   const [cateringDesc,      setCateringDesc]      = useState('');
@@ -809,6 +811,7 @@ export default function OutgoingBillsPage() {
       essenNetto:          isDinnerLike && inputMode !== 'catering' ? essenN           : undefined,
       getraenkeNetto:      isDinnerLike && inputMode !== 'catering' ? getraenkeN       : undefined,
       trinkgeld:           isDinnerLike && inputMode !== 'catering' ? trinkgeldN       : undefined,
+      compactTotals:       compactTotals || undefined,
       cateringNetto:       inputMode === 'catering' ? cateringNettoN  : undefined,
       cateringBrutto:      inputMode === 'catering' ? cateringBruttoN : undefined,
       cateringDescription: inputMode === 'catering' && cateringDesc ? cateringDesc : undefined,
@@ -2220,50 +2223,77 @@ export default function OutgoingBillsPage() {
 
           {/* Live totals */}
           <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
-            <p className="text-sm font-bold text-gray-800 mb-4 pb-3 border-b border-gray-100">Totals Preview</p>
+            <div className="flex items-center justify-between gap-3 mb-4 pb-3 border-b border-gray-100">
+              <p className="text-sm font-bold text-gray-800">Totals Preview</p>
+              {(billType === 'dinner' || billType === 'storno') && (
+                <button
+                  type="button"
+                  onClick={() => setCompactTotals(v => !v)}
+                  title={compactTotals
+                    ? 'Show the Essen / Getränke breakdown on the bill'
+                    : 'Hide the Essen / Getränke rows — show only Gesamt lines on the bill'}
+                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold rounded-lg border transition-colors ${
+                    compactTotals
+                      ? 'bg-[#1B5E20] border-[#1B5E20] text-white hover:bg-[#2E7D32]'
+                      : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                  }`}
+                >
+                  {compactTotals ? <EyeOff size={13} /> : <Eye size={13} />}
+                  {compactTotals ? 'Split hidden' : 'Hide split'}
+                </button>
+              )}
+            </div>
             <table className="w-full text-sm border-collapse">
               <tbody>
                 {/* ── Brutto block ── */}
                 {(billType === 'dinner' || billType === 'storno') && (<>
-                  <tr className="border-b border-gray-100">
-                    <td className="py-2 px-3 text-gray-600 bg-gray-50 border border-gray-200 rounded-tl">Essen Brutto (€)</td>
-                    <td className="py-2 px-3 text-right tabular-nums text-gray-800 bg-gray-50 border border-gray-200 rounded-tr">{fmtEur(essenBruttoN)}</td>
-                  </tr>
-                  <tr className="border-b border-gray-100">
-                    <td className="py-2 px-3 text-gray-600 border border-gray-200 border-t-0">Getränke Brutto (€)</td>
-                    <td className="py-2 px-3 text-right tabular-nums text-gray-800 border border-gray-200 border-t-0">{fmtEur(getraenkeBruttoN)}</td>
-                  </tr>
+                  {/* When the split is hidden the Gesamt row becomes the first row of
+                      its block, so it must keep its own top border. */}
+                  {!compactTotals && (<>
+                    <tr className="border-b border-gray-100">
+                      <td className="py-2 px-3 text-gray-600 bg-gray-50 border border-gray-200 rounded-tl">Essen Brutto (€)</td>
+                      <td className="py-2 px-3 text-right tabular-nums text-gray-800 bg-gray-50 border border-gray-200 rounded-tr">{fmtEur(essenBruttoN)}</td>
+                    </tr>
+                    <tr className="border-b border-gray-100">
+                      <td className="py-2 px-3 text-gray-600 border border-gray-200 border-t-0">Getränke Brutto (€)</td>
+                      <td className="py-2 px-3 text-right tabular-nums text-gray-800 border border-gray-200 border-t-0">{fmtEur(getraenkeBruttoN)}</td>
+                    </tr>
+                  </>)}
                   <tr>
-                    <td className="py-2 px-3 font-semibold text-gray-700 bg-gray-50 border border-gray-200 border-t-0">Gesamt Brutto (€)</td>
-                    <td className="py-2 px-3 text-right tabular-nums font-semibold text-gray-900 bg-gray-50 border border-gray-200 border-t-0">{fmtEur(bruttoGesamt)}</td>
+                    <td className={`py-2 px-3 font-semibold text-gray-700 bg-gray-50 border border-gray-200 ${compactTotals ? 'rounded-tl' : 'border-t-0'}`}>Gesamt Brutto (€)</td>
+                    <td className={`py-2 px-3 text-right tabular-nums font-semibold text-gray-900 bg-gray-50 border border-gray-200 ${compactTotals ? 'rounded-tr' : 'border-t-0'}`}>{fmtEur(bruttoGesamt)}</td>
                   </tr>
 
                   {/* ── MwSt block ── */}
-                  <tr className="border-t-2 border-gray-300">
-                    <td className="py-2 px-3 text-gray-600 bg-gray-50 border border-gray-200">MwSt Essen ({mwstEssen || 7}%)</td>
-                    <td className="py-2 px-3 text-right tabular-nums text-gray-800 bg-gray-50 border border-gray-200">{fmtEur(mwstVatEssen)}</td>
-                  </tr>
-                  <tr>
-                    <td className="py-2 px-3 text-gray-600 border border-gray-200 border-t-0">MwSt Getränke ({mwstGetraenke || 19}%)</td>
-                    <td className="py-2 px-3 text-right tabular-nums text-gray-800 border border-gray-200 border-t-0">{fmtEur(mwstVatGetraenke)}</td>
-                  </tr>
-                  <tr>
-                    <td className="py-2 px-3 font-semibold text-gray-700 bg-gray-50 border border-gray-200 border-t-0">MwSt Gesamt</td>
-                    <td className="py-2 px-3 text-right tabular-nums font-semibold text-gray-900 bg-gray-50 border border-gray-200 border-t-0">{fmtEur(mwstVatEssen + mwstVatGetraenke)}</td>
+                  {!compactTotals && (<>
+                    <tr className="border-t-2 border-gray-300">
+                      <td className="py-2 px-3 text-gray-600 bg-gray-50 border border-gray-200">MwSt Essen ({mwstEssen || 7}%)</td>
+                      <td className="py-2 px-3 text-right tabular-nums text-gray-800 bg-gray-50 border border-gray-200">{fmtEur(mwstVatEssen)}</td>
+                    </tr>
+                    <tr>
+                      <td className="py-2 px-3 text-gray-600 border border-gray-200 border-t-0">MwSt Getränke ({mwstGetraenke || 19}%)</td>
+                      <td className="py-2 px-3 text-right tabular-nums text-gray-800 border border-gray-200 border-t-0">{fmtEur(mwstVatGetraenke)}</td>
+                    </tr>
+                  </>)}
+                  <tr className={compactTotals ? 'border-t-2 border-gray-300' : ''}>
+                    <td className={`py-2 px-3 font-semibold text-gray-700 bg-gray-50 border border-gray-200 ${compactTotals ? '' : 'border-t-0'}`}>MwSt Gesamt</td>
+                    <td className={`py-2 px-3 text-right tabular-nums font-semibold text-gray-900 bg-gray-50 border border-gray-200 ${compactTotals ? '' : 'border-t-0'}`}>{fmtEur(mwstVatEssen + mwstVatGetraenke)}</td>
                   </tr>
 
                   {/* ── Netto block ── */}
-                  <tr className="border-t-2 border-gray-300">
-                    <td className="py-2 px-3 text-gray-600 bg-gray-50 border border-gray-200">Essen Netto (€)</td>
-                    <td className="py-2 px-3 text-right tabular-nums text-gray-800 bg-gray-50 border border-gray-200">{fmtEur(essenN)}</td>
-                  </tr>
-                  <tr>
-                    <td className="py-2 px-3 text-gray-600 border border-gray-200 border-t-0">Getränke Netto (€)</td>
-                    <td className="py-2 px-3 text-right tabular-nums text-gray-800 border border-gray-200 border-t-0">{fmtEur(getraenkeN)}</td>
-                  </tr>
-                  <tr>
-                    <td className="py-2 px-3 font-semibold text-gray-700 bg-gray-50 border border-gray-200 border-t-0">Gesamt Netto (€)</td>
-                    <td className="py-2 px-3 text-right tabular-nums font-semibold text-gray-900 bg-gray-50 border border-gray-200 border-t-0">{fmtEur(netto)}</td>
+                  {!compactTotals && (<>
+                    <tr className="border-t-2 border-gray-300">
+                      <td className="py-2 px-3 text-gray-600 bg-gray-50 border border-gray-200">Essen Netto (€)</td>
+                      <td className="py-2 px-3 text-right tabular-nums text-gray-800 bg-gray-50 border border-gray-200">{fmtEur(essenN)}</td>
+                    </tr>
+                    <tr>
+                      <td className="py-2 px-3 text-gray-600 border border-gray-200 border-t-0">Getränke Netto (€)</td>
+                      <td className="py-2 px-3 text-right tabular-nums text-gray-800 border border-gray-200 border-t-0">{fmtEur(getraenkeN)}</td>
+                    </tr>
+                  </>)}
+                  <tr className={compactTotals ? 'border-t-2 border-gray-300' : ''}>
+                    <td className={`py-2 px-3 font-semibold text-gray-700 bg-gray-50 border border-gray-200 ${compactTotals ? '' : 'border-t-0'}`}>Gesamt Netto (€)</td>
+                    <td className={`py-2 px-3 text-right tabular-nums font-semibold text-gray-900 bg-gray-50 border border-gray-200 ${compactTotals ? '' : 'border-t-0'}`}>{fmtEur(netto)}</td>
                   </tr>
 
                   {/* ── Trinkgeld ── */}

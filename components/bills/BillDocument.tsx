@@ -48,6 +48,8 @@ export type BillData = {
   essenNetto?     : number;
   getraenkeNetto? : number;
   trinkgeld?           : number;
+  /** Hide the Essen/Getränke split rows and show only the Gesamt lines. */
+  compactTotals?  : boolean;
   receiptImageDataUrl? : string;  // base64 data URL — appended as page 2 when set
   // Deductions
   anzahlungBrutto? : number;   // deposit brutto — deducted from total payable
@@ -188,6 +190,9 @@ export function BillDocument({ data }: { data: BillData }) {
   const ahBrutto19    = ahNetto19 * 1.19;
   const ahTotalNetto  = ahNetto7  + ahNetto19;
   const ahTotalBrutto = ahBrutto7 + ahBrutto19;
+
+  // Hide the Essen/Getränke split lines, leaving only the Gesamt rows
+  const compact = data.compactTotals === true;
 
   // Dinner – use passed-in values; fall back to deriving from netto if brutto not provided
   const mwstEssenRate     = (data.mwstEssenPct    ?? 7)  / 100;
@@ -394,22 +399,22 @@ export function BillDocument({ data }: { data: BillData }) {
           <View>
             {/* Group 1: Netto split */}
             <View style={s.groupGap}>
-              {essenNetto > 0      && <AmtRow label="Essen Netto"    value={essenNetto} />}
-              {getraenkeNetto > 0  && <AmtRow label="Getränke Netto" value={getraenkeNetto} />}
+              {!compact && essenNetto > 0      && <AmtRow label="Essen Netto"    value={essenNetto} />}
+              {!compact && getraenkeNetto > 0  && <AmtRow label="Getränke Netto" value={getraenkeNetto} />}
               <AmtRowBold label="Gesamt Netto" value={gesamtNettoD} />
             </View>
 
             {/* Group 2: MwSt */}
             <View style={s.groupGap}>
-              {mwstEssenAmt > 0     && <AmtRow label={`MwSt Essen (${data.mwstEssenPct ?? 7}%)`}         value={mwstEssenAmt} />}
-              {mwstGetraenkeAmt > 0 && <AmtRow label={`MwSt Getränke (${data.mwstGetraenkePct ?? 19}%)`} value={mwstGetraenkeAmt} />}
+              {!compact && mwstEssenAmt > 0     && <AmtRow label={`MwSt Essen (${data.mwstEssenPct ?? 7}%)`}         value={mwstEssenAmt} />}
+              {!compact && mwstGetraenkeAmt > 0 && <AmtRow label={`MwSt Getränke (${data.mwstGetraenkePct ?? 19}%)`} value={mwstGetraenkeAmt} />}
               <AmtRow label="MwSt Gesamt" value={mwstGesamtAmt} />
             </View>
 
             {/* Group 3: Brutto split */}
             <View style={s.groupGap}>
-              {essenBrutto > 0     && <AmtRow label={`Essen Brutto (${data.mwstEssenPct ?? 7}% MwSt)`}         value={essenBrutto} />}
-              {getraenkeBrutto > 0 && <AmtRow label={`Getränke Brutto (${data.mwstGetraenkePct ?? 19}% MwSt)`} value={getraenkeBrutto} />}
+              {!compact && essenBrutto > 0     && <AmtRow label={`Essen Brutto (${data.mwstEssenPct ?? 7}% MwSt)`}         value={essenBrutto} />}
+              {!compact && getraenkeBrutto > 0 && <AmtRow label={`Getränke Brutto (${data.mwstGetraenkePct ?? 19}% MwSt)`} value={getraenkeBrutto} />}
               <AmtRowBold label="Gesamt Brutto" value={gesamtBrutto} />
             </View>
 
