@@ -122,6 +122,19 @@ const fmt = (n: number) =>
 const fmtDate = (d: string | null) =>
   d ? new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
 
+/** Page buttons to show: always first/last and the neighbours of the current page. */
+function pageNumbers(current: number, total: number): (number | '…')[] {
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+  const out: (number | '…')[] = [1];
+  const from = Math.max(2, current - 1);
+  const to   = Math.min(total - 1, current + 1);
+  if (from > 2) out.push('…');
+  for (let i = from; i <= to; i++) out.push(i);
+  if (to < total - 1) out.push('…');
+  out.push(total);
+  return out;
+}
+
 function fmtPeriod(bill: Bill): string {
   const start = bill.period_start;
   if (!start) return fmtDate(bill.invoice_date);
@@ -422,6 +435,9 @@ export default function BillsPage() {
   const [sortCol, setSortCol] = useState<string>('invoice_date');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
 
+  const [page, setPage]         = useState(1);
+  const [pageSize, setPageSize] = useState(100);
+
   const handleSort = (col: string) => {
     if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
     else { setSortCol(col); setSortDir('desc'); }
@@ -454,11 +470,24 @@ export default function BillsPage() {
   const { data: bills = [], isLoading } = useQuery({
     queryKey: ['bills'],
     queryFn: async () => {
-      const { data } = await supabase
-        .from('bills')
-        .select('id, created_at, supplier_name, invoice_number, invoice_date, due_date, gross_amount, net_amount, vat_amount, category, location_label, period_type, period_start, period_end, status, file_path')
-        .order('invoice_date', { ascending: false, nullsFirst: false });
-      return (data ?? []) as Bill[];
+      // PostgREST caps a single response at 1000 rows, so page through the full
+      // table — otherwise older bills silently vanish and the totals under-report.
+      const COLS = 'id, created_at, supplier_name, invoice_number, invoice_date, due_date, gross_amount, net_amount, vat_amount, category, location_label, period_type, period_start, period_end, status, file_path';
+      const PAGE = 1000;
+      const all: Bill[] = [];
+      for (let page = 0; ; page++) {
+        const { data, error } = await supabase
+          .from('bills')
+          .select(COLS)
+          .order('invoice_date', { ascending: false, nullsFirst: false })
+          .order('id', { ascending: false }) // stable tiebreak so pages don't overlap
+          .range(page * PAGE, (page + 1) * PAGE - 1);
+        if (error) throw error;
+        if (!data?.length) break;
+        all.push(...(data as unknown as Bill[]));
+        if (data.length < PAGE) break;
+      }
+      return all;
     },
   });
 
@@ -597,6 +626,15 @@ export default function BillsPage() {
     net:   filtered.reduce((s, b) => s + b.net_amount,   0),
     vat:   filtered.reduce((s, b) => s + b.vat_amount,   0),
   };
+
+  // ── Pagination (display only — totals and filters always span every bill) ─────
+  const totalPages = Math.max(1, Math.ceil(sortedFiltered.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const pageStart = (currentPage - 1) * pageSize;
+  const pageRows = sortedFiltered.slice(pageStart, pageStart + pageSize);
+
+  // Snap back to page 1 whenever the result set changes underneath us
+  useEffect(() => { setPage(1); }, [filterStatus, filterCategory, filterLocation, filterMonth, filterDuplicates, sortCol, sortDir, pageSize]);
 
   // ── Match delivery address to a known location ────────────────────────────────
   const matchLocation = useCallback((addr: DeliveryAddress | null, locs: Location[]): { locationId: string; locationLabel: string } | null => {
@@ -1228,7 +1266,23 @@ export default function BillsPage() {
               <AlertTriangle size={12} />
               Duplicates {duplicateIds.size > 0 && `(${duplicateIds.size})`}
             </button>
-            <span className="text-xs text-gray-400 ml-auto">{filtered.length} bill{filtered.length !== 1 ? 's' : ''}</span>
+            <div className="ml-auto flex items-center gap-3">
+              <label className="flex items-center gap-1.5 text-xs text-gray-400">
+                Rows
+                <select
+                  value={pageSize}
+                  onChange={(e) => setPageSize(Number(e.target.value))}
+                  className="border border-gray-200 rounded-md px-1.5 py-0.5 text-xs text-gray-600 bg-white focus:outline-none"
+                >
+                  {[50, 100, 250, 500, 1000].map(n => <option key={n} value={n}>{n}</option>)}
+                </select>
+              </label>
+              <span className="text-xs text-gray-400">
+                {filtered.length === 0
+                  ? '0 bills'
+                  : `${pageStart + 1}–${Math.min(pageStart + pageSize, sortedFiltered.length)} of ${filtered.length} bill${filtered.length !== 1 ? 's' : ''}`}
+              </span>
+            </div>
           </div>
 
           {/* Table */}
@@ -1281,7 +1335,7 @@ export default function BillsPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                  {sortedFiltered.map((bill) => {
+                  {pageRows.map((bill) => {
                     const vatAmount = bill.vat_amount;
                     const vatPct    = bill.net_amount > 0 ? (vatAmount / bill.net_amount * 100) : 0;
                     const matchedCp = matchedCpByBill.get(bill.id);
@@ -1504,6 +1558,47 @@ export default function BillsPage() {
                 </tfoot>
               </table>
               </div>
+
+              {totalPages > 1 && (
+                <div className="flex items-center justify-between gap-3 px-3 py-2 border-t border-gray-200 bg-white">
+                  <span className="text-xs text-gray-400">
+                    Page {currentPage} of {totalPages}
+                  </span>
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => setPage(p => Math.max(1, p - 1))}
+                      disabled={currentPage === 1}
+                      className="px-2 py-1 text-xs font-semibold rounded-md border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:hover:bg-white disabled:cursor-default"
+                    >
+                      Prev
+                    </button>
+                    {pageNumbers(currentPage, totalPages).map((n, i) =>
+                      n === '…' ? (
+                        <span key={`gap-${i}`} className="px-1 text-xs text-gray-300">…</span>
+                      ) : (
+                        <button
+                          key={n}
+                          onClick={() => setPage(n as number)}
+                          className={`min-w-[28px] px-2 py-1 text-xs font-semibold rounded-md border transition-colors ${
+                            n === currentPage
+                              ? 'bg-[#1B5E20] border-[#1B5E20] text-white'
+                              : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                          }`}
+                        >
+                          {n}
+                        </button>
+                      ),
+                    )}
+                    <button
+                      onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                      disabled={currentPage === totalPages}
+                      className="px-2 py-1 text-xs font-semibold rounded-md border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:hover:bg-white disabled:cursor-default"
+                    >
+                      Next
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
