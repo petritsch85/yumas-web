@@ -435,7 +435,8 @@ export default function BillsPage() {
   const [sortCol, setSortCol] = useState<string>('invoice_date');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
 
-  const [page, setPage]         = useState(1);
+  const [page, setPage]         = useState(1);   // pending table
+  const [page2, setPage2]       = useState(1);   // approved / paid table
   const [pageSize, setPageSize] = useState(100);
 
   const handleSort = (col: string) => {
@@ -627,14 +628,31 @@ export default function BillsPage() {
     vat:   filtered.reduce((s, b) => s + b.vat_amount,   0),
   };
 
-  // ── Pagination (display only — totals and filters always span every bill) ─────
-  const totalPages = Math.max(1, Math.ceil(sortedFiltered.length / pageSize));
-  const currentPage = Math.min(page, totalPages);
-  const pageStart = (currentPage - 1) * pageSize;
-  const pageRows = sortedFiltered.slice(pageStart, pageStart + pageSize);
+  // ── Pending vs settled ────────────────────────────────────────────────────────
+  // New bills land as "pending" and stay in the top table until they are checked
+  // off; approving (or paying) one moves it down. Changing the status back moves
+  // it straight back up, since both lists derive from the same sorted array.
+  const pendingRows = useMemo(() => sortedFiltered.filter(b => b.status === 'pending'), [sortedFiltered]);
+  const settledRows = useMemo(() => sortedFiltered.filter(b => b.status !== 'pending'), [sortedFiltered]);
+
+  const sumRows = (rows: Bill[]) => ({
+    count: rows.length,
+    gross: rows.reduce((s, b) => s + b.gross_amount, 0),
+    net:   rows.reduce((s, b) => s + b.net_amount,   0),
+    vat:   rows.reduce((s, b) => s + b.vat_amount,   0),
+  });
+
+  // Each table pages independently
+  const pendingTotalPages = Math.max(1, Math.ceil(pendingRows.length / pageSize));
+  const pendingPage       = Math.min(page, pendingTotalPages);
+  const pendingPageRows   = pendingRows.slice((pendingPage - 1) * pageSize, pendingPage * pageSize);
+
+  const settledTotalPages = Math.max(1, Math.ceil(settledRows.length / pageSize));
+  const settledPage       = Math.min(page2, settledTotalPages);
+  const settledPageRows   = settledRows.slice((settledPage - 1) * pageSize, settledPage * pageSize);
 
   // Snap back to page 1 whenever the result set changes underneath us
-  useEffect(() => { setPage(1); }, [filterStatus, filterCategory, filterLocation, filterMonth, filterDuplicates, sortCol, sortDir, pageSize]);
+  useEffect(() => { setPage(1); setPage2(1); }, [filterStatus, filterCategory, filterLocation, filterMonth, filterDuplicates, sortCol, sortDir, pageSize]);
 
   // ── Match delivery address to a known location ────────────────────────────────
   const matchLocation = useCallback((addr: DeliveryAddress | null, locs: Location[]): { locationId: string; locationLabel: string } | null => {
@@ -888,6 +906,322 @@ export default function BillsPage() {
   const activeCount = queue.filter((i) => !i.saved).length;
 
   // ── Render ────────────────────────────────────────────────────────────────────
+  /**
+   * One bills table. Rendered twice — pending on top, approved/paid below — so
+   * the markup and every row handler stay in a single place.
+   */
+  const renderBillsTable = (
+    rows: Bill[],
+    cp: number,
+    tp: number,
+    setPg: React.Dispatch<React.SetStateAction<number>>,
+  ) => {
+    const t = sumRows(rows);
+    return (
+              <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+                <div>
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-gray-50 border-b border-gray-200">
+                      {([
+                        { col: 'supplier',     label: 'Supplier',    align: 'left'  },
+                        { col: 'invoice_date', label: 'Issue Date',  align: 'left'  },
+                        { col: 'period_start', label: 'Period',       align: 'left'  },
+                        { col: 'location',     label: 'Location',    align: 'left'  },
+                        { col: 'category',     label: 'Category',    align: 'left'  },
+                        { col: 'net',          label: 'Net',         align: 'left' },
+                        { col: 'vat_pct',      label: 'VAT %',       align: 'left' },
+                        { col: 'vat_eur',      label: 'VAT €',       align: 'left' },
+                        { col: 'gross',        label: 'Gross',       align: 'left' },
+                        { col: 'status',       label: 'Status',      align: 'left'  },
+                      ] as { col: string; label: string; align: 'left' | 'right' }[]).map(({ col, label, align }) => {
+                        const active = sortCol === col;
+                        return (
+                          <th key={col} onClick={() => handleSort(col)}
+                            className={`px-2 py-2 text-xs font-semibold uppercase tracking-wide cursor-pointer select-none whitespace-nowrap transition-colors text-left
+                              ${active ? 'text-[#1B5E20]' : 'text-gray-500 hover:text-gray-800'}`}>
+                            <span className="inline-flex items-center gap-1">
+                              {label}
+                              <span className={`transition-opacity ${active ? 'opacity-100' : 'opacity-20'}`}>
+                                {active && sortDir === 'asc' ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
+                              </span>
+                            </span>
+                          </th>
+                        );
+                      })}
+                      <th className="px-2 py-2 w-20"></th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {rows.map((bill) => {
+                      const vatAmount = bill.vat_amount;
+                      const vatPct    = bill.net_amount > 0 ? (vatAmount / bill.net_amount * 100) : 0;
+                      const matchedCp = matchedCpByBill.get(bill.id);
+                      return (
+                        <React.Fragment key={bill.id}>
+                        <tr className={`hover:bg-gray-50 transition-colors ${duplicateIds.has(bill.id) ? 'bg-red-50/40' : ''}`}>
+                          <td className="px-2 py-1.5 font-semibold text-gray-900 text-xs max-w-[160px]">
+                            <div className="flex items-center gap-1 min-w-0">
+                              {duplicateIds.has(bill.id) && (
+                                <span title="Possible duplicate bill" className="text-red-500 flex-shrink-0 cursor-default">
+                                  <AlertTriangle size={11} />
+                                </span>
+                              )}
+                              <span className="truncate">{matchedCp ? matchedCp.name : bill.supplier_name}</span>
+                              {matchedCp && (
+                                <span title="Matched counterparty" className="text-green-500 flex-shrink-0 cursor-default">
+                                  <CheckCircle2 size={11} />
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-2 py-1.5 text-gray-600 whitespace-nowrap text-xs">{fmtDate(bill.invoice_date)}</td>
+                          <td className="px-2 py-1.5 whitespace-nowrap">
+                            <BillPeriodPicker
+                              bill={bill}
+                              onSave={(pt, ps, pe) => patchBillPeriod(bill.id, pt, ps, pe)}
+                            />
+                          </td>
+                          <td className="px-2 py-1.5">
+                            {bill.location_label && (
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-indigo-50 text-indigo-700 text-xs rounded-full whitespace-nowrap">
+                                <MapPin size={9} />{bill.location_label}
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-2 py-1.5 max-w-[110px]">
+                            {bill.category && (
+                              <span className="inline-block px-1.5 py-0.5 bg-gray-100 text-gray-600 text-xs rounded-full whitespace-nowrap truncate max-w-full">
+                                {bill.category}
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-2 py-1.5 tabular-nums text-xs text-gray-900 whitespace-nowrap">{fmt(bill.net_amount)}</td>
+                          <td className="px-2 py-1.5 tabular-nums text-xs text-gray-500 whitespace-nowrap">{vatPct.toFixed(1)}%</td>
+                          <td className="px-2 py-1.5 tabular-nums text-xs text-gray-500 whitespace-nowrap">{fmt(vatAmount)}</td>
+                          <td className="px-2 py-1.5 font-bold text-gray-900 tabular-nums text-xs whitespace-nowrap">{fmt(bill.gross_amount)}</td>
+                          <td className="px-2 py-1.5">
+                            <select value={bill.status} onChange={(e) => updateStatus(bill.id, e.target.value)}
+                              className={`text-xs font-semibold px-2 py-0.5 rounded-full border cursor-pointer focus:outline-none ${STATUS_STYLES[bill.status]}`}>
+                              <option value="pending">Pending</option>
+                              <option value="approved">Approved</option>
+                              <option value="paid">Paid</option>
+                            </select>
+                          </td>
+                          <td className="px-2 py-1.5">
+                            <div className="flex items-center gap-1.5">
+                              {bill.invoice_number && (
+                                <span title={`Invoice #${bill.invoice_number}`} className="text-gray-300 cursor-default text-[10px] font-mono leading-none">#</span>
+                              )}
+                              {bill.file_path && (
+                                <a href={`${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/bills/${bill.file_path}`}
+                                  target="_blank" rel="noopener noreferrer"
+                                  className="text-gray-300 hover:text-blue-500 transition-colors" title="View PDF">
+                                  <Eye size={14} />
+                                </a>
+                              )}
+                              <button
+                                onClick={() => setLinesBillId(linesBillId === bill.id ? null : bill.id)}
+                                className={`transition-colors ${linesBillId === bill.id ? 'text-green-600' : 'text-gray-300 hover:text-green-600'}`}
+                                title="View line items"
+                              >
+                                <LayoutList size={14} />
+                              </button>
+                              <button
+                                onClick={() => editingBillId === bill.id ? setEditingBillId(null) : startEdit(bill)}
+                                className={`transition-colors ${editingBillId === bill.id ? 'text-indigo-500' : 'text-gray-300 hover:text-indigo-500'}`}
+                                title="Edit"
+                              >
+                                <Pencil size={14} />
+                              </button>
+                              <button onClick={() => deleteBill(bill.id)} className="text-gray-300 hover:text-red-500 transition-colors">
+                                <Trash2 size={14} />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                        {/* Inline edit row */}
+                        {editingBillId === bill.id && editDraft && (
+                          <tr className="bg-indigo-50/60">
+                            <td colSpan={11} className="px-4 py-4">
+                              <div className="grid grid-cols-5 gap-3 items-end">
+                                {/* Location */}
+                                <div>
+                                  <label className="flex items-center gap-1 text-xs font-semibold text-gray-500 mb-1">
+                                    <MapPin size={10} />Location
+                                  </label>
+                                  <div className="relative">
+                                    <select
+                                      value={editDraft.locationId}
+                                      onChange={(e) => {
+                                        const opt = allLocationOptions.find((l) => l.id === e.target.value);
+                                        setEditDraft((d) => d ? { ...d, locationId: e.target.value, locationLabel: opt?.name ?? '' } : d);
+                                      }}
+                                      className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300 appearance-none pr-6"
+                                    >
+                                      <option value="">— Select location —</option>
+                                      {locations.length > 0 && (
+                                        <optgroup label="Restaurants / Sites">
+                                          {locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+                                        </optgroup>
+                                      )}
+                                      <optgroup label="Other">
+                                        {SPECIAL_LOCATIONS.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+                                      </optgroup>
+                                    </select>
+                                    <ChevronDown size={12} className="absolute right-2 top-2 text-gray-400 pointer-events-none" />
+                                  </div>
+                                </div>
+
+                                {/* Category */}
+                                <div>
+                                  <label className="block text-xs font-semibold text-gray-500 mb-1">Category</label>
+                                  <div className="relative">
+                                    <select
+                                      value={editDraft.category}
+                                      onChange={(e) => setEditDraft((d) => d ? { ...d, category: e.target.value } : d)}
+                                      className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300 appearance-none pr-6"
+                                    >
+                                      {CATEGORIES.map((c) => <option key={c}>{c}</option>)}
+                                    </select>
+                                    <ChevronDown size={12} className="absolute right-2 top-2 text-gray-400 pointer-events-none" />
+                                  </div>
+                                </div>
+
+                                {/* Period type */}
+                                <div>
+                                  <label className="flex items-center gap-1 text-xs font-semibold text-gray-500 mb-1">
+                                    <Calendar size={10} />Period Type
+                                  </label>
+                                  <div className="relative">
+                                    <select
+                                      value={editDraft.periodType}
+                                      onChange={(e) => setEditDraft((d) => d ? { ...d, periodType: e.target.value as PeriodType } : d)}
+                                      className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300 appearance-none pr-6"
+                                    >
+                                      {(Object.entries(PERIOD_LABELS) as [PeriodType, string][]).map(([v, l]) => (
+                                        <option key={v} value={v}>{l}</option>
+                                      ))}
+                                    </select>
+                                    <ChevronDown size={12} className="absolute right-2 top-2 text-gray-400 pointer-events-none" />
+                                  </div>
+                                </div>
+
+                                {/* Period start */}
+                                <div>
+                                  <label className="block text-xs font-semibold text-gray-500 mb-1">
+                                    {editDraft.periodType === 'single_date' ? 'Date' :
+                                     editDraft.periodType === 'month'       ? 'Month (any day)' :
+                                     editDraft.periodType === 'year'        ? 'Year (any day)' : 'Start Date'}
+                                  </label>
+                                  <input
+                                    type="date"
+                                    value={editDraft.periodStart}
+                                    onChange={(e) => setEditDraft((d) => d ? { ...d, periodStart: e.target.value } : d)}
+                                    className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                                  />
+                                </div>
+
+                                {/* End date (custom only) or save/cancel */}
+                                {editDraft.periodType === 'custom' ? (
+                                  <div>
+                                    <label className="block text-xs font-semibold text-gray-500 mb-1">End Date</label>
+                                    <input
+                                      type="date"
+                                      value={editDraft.periodEnd}
+                                      onChange={(e) => setEditDraft((d) => d ? { ...d, periodEnd: e.target.value } : d)}
+                                      className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                                    />
+                                  </div>
+                                ) : (
+                                  <div />
+                                )}
+                              </div>
+
+                              {/* Save / Cancel buttons */}
+                              <div className="flex items-center gap-2 mt-3">
+                                <button
+                                  onClick={saveEdit}
+                                  disabled={savingEdit}
+                                  className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white text-xs font-bold rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+                                >
+                                  {savingEdit ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+                                  {savingEdit ? 'Saving…' : 'Save Changes'}
+                                </button>
+                                <button
+                                  onClick={() => { setEditingBillId(null); setEditDraft(null); }}
+                                  className="px-3 py-1.5 text-xs font-semibold text-gray-500 hover:text-gray-700 border border-gray-200 rounded-lg bg-white transition-colors"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                        </React.Fragment>
+                      );
+                    })}
+                  </tbody>
+                  <tfoot>
+                    <tr className="bg-gray-50 border-t-2 border-gray-200">
+                      <td colSpan={6} className="px-3 py-2 text-xs font-semibold text-gray-500">{t.count} bills</td>
+                      <td className="px-3 py-2 text-right font-bold text-gray-700 tabular-nums text-xs">{fmt(t.net)}</td>
+                      <td className="px-3 py-2 text-right text-xs text-gray-400 tabular-nums">
+                        {t.net > 0 ? (t.vat / t.net * 100).toFixed(0) + '%' : '—'}
+                      </td>
+                      <td className="px-3 py-2 text-right font-bold text-amber-700 tabular-nums text-xs">{fmt(t.vat)}</td>
+                      <td className="px-3 py-2 text-right font-bold text-[#1B5E20] tabular-nums text-xs">{fmt(t.gross)}</td>
+                      <td colSpan={2} />
+                    </tr>
+                  </tfoot>
+                </table>
+                </div>
+
+                {tp > 1 && (
+                  <div className="flex items-center justify-between gap-3 px-3 py-2 border-t border-gray-200 bg-white">
+                    <span className="text-xs text-gray-400">
+                      Page {cp} of {tp}
+                    </span>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => setPg(p => Math.max(1, p - 1))}
+                        disabled={cp === 1}
+                        className="px-2 py-1 text-xs font-semibold rounded-md border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:hover:bg-white disabled:cursor-default"
+                      >
+                        Prev
+                      </button>
+                      {pageNumbers(cp, tp).map((n, i) =>
+                        n === '…' ? (
+                          <span key={`gap-${i}`} className="px-1 text-xs text-gray-300">…</span>
+                        ) : (
+                          <button
+                            key={n}
+                            onClick={() => setPg(n as number)}
+                            className={`min-w-[28px] px-2 py-1 text-xs font-semibold rounded-md border transition-colors ${
+                              n === cp
+                                ? 'bg-[#1B5E20] border-[#1B5E20] text-white'
+                                : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                            }`}
+                          >
+                            {n}
+                          </button>
+                        ),
+                      )}
+                      <button
+                        onClick={() => setPg(p => Math.min(tp, p + 1))}
+                        disabled={cp === tp}
+                        className="px-2 py-1 text-xs font-semibold rounded-md border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:hover:bg-white disabled:cursor-default"
+                      >
+                        Next
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+    );
+  };
+
+
   return (
     <div>
       {/* Header */}
@@ -1278,9 +1612,7 @@ export default function BillsPage() {
                 </select>
               </label>
               <span className="text-xs text-gray-400">
-                {filtered.length === 0
-                  ? '0 bills'
-                  : `${pageStart + 1}–${Math.min(pageStart + pageSize, sortedFiltered.length)} of ${filtered.length} bill${filtered.length !== 1 ? 's' : ''}`}
+                {pendingRows.length} pending · {settledRows.length} approved
               </span>
             </div>
           </div>
@@ -1300,305 +1632,35 @@ export default function BillsPage() {
               </button>
             </div>
           ) : (
-            <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
-              <div>
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="bg-gray-50 border-b border-gray-200">
-                    {([
-                      { col: 'supplier',     label: 'Supplier',    align: 'left'  },
-                      { col: 'invoice_date', label: 'Issue Date',  align: 'left'  },
-                      { col: 'period_start', label: 'Period',       align: 'left'  },
-                      { col: 'location',     label: 'Location',    align: 'left'  },
-                      { col: 'category',     label: 'Category',    align: 'left'  },
-                      { col: 'net',          label: 'Net',         align: 'left' },
-                      { col: 'vat_pct',      label: 'VAT %',       align: 'left' },
-                      { col: 'vat_eur',      label: 'VAT €',       align: 'left' },
-                      { col: 'gross',        label: 'Gross',       align: 'left' },
-                      { col: 'status',       label: 'Status',      align: 'left'  },
-                    ] as { col: string; label: string; align: 'left' | 'right' }[]).map(({ col, label, align }) => {
-                      const active = sortCol === col;
-                      return (
-                        <th key={col} onClick={() => handleSort(col)}
-                          className={`px-2 py-2 text-xs font-semibold uppercase tracking-wide cursor-pointer select-none whitespace-nowrap transition-colors text-left
-                            ${active ? 'text-[#1B5E20]' : 'text-gray-500 hover:text-gray-800'}`}>
-                          <span className="inline-flex items-center gap-1">
-                            {label}
-                            <span className={`transition-opacity ${active ? 'opacity-100' : 'opacity-20'}`}>
-                              {active && sortDir === 'asc' ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
-                            </span>
-                          </span>
-                        </th>
-                      );
-                    })}
-                    <th className="px-2 py-2 w-20"></th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {pageRows.map((bill) => {
-                    const vatAmount = bill.vat_amount;
-                    const vatPct    = bill.net_amount > 0 ? (vatAmount / bill.net_amount * 100) : 0;
-                    const matchedCp = matchedCpByBill.get(bill.id);
-                    return (
-                      <React.Fragment key={bill.id}>
-                      <tr className={`hover:bg-gray-50 transition-colors ${duplicateIds.has(bill.id) ? 'bg-red-50/40' : ''}`}>
-                        <td className="px-2 py-1.5 font-semibold text-gray-900 text-xs max-w-[160px]">
-                          <div className="flex items-center gap-1 min-w-0">
-                            {duplicateIds.has(bill.id) && (
-                              <span title="Possible duplicate bill" className="text-red-500 flex-shrink-0 cursor-default">
-                                <AlertTriangle size={11} />
-                              </span>
-                            )}
-                            <span className="truncate">{matchedCp ? matchedCp.name : bill.supplier_name}</span>
-                            {matchedCp && (
-                              <span title="Matched counterparty" className="text-green-500 flex-shrink-0 cursor-default">
-                                <CheckCircle2 size={11} />
-                              </span>
-                            )}
-                          </div>
-                        </td>
-                        <td className="px-2 py-1.5 text-gray-600 whitespace-nowrap text-xs">{fmtDate(bill.invoice_date)}</td>
-                        <td className="px-2 py-1.5 whitespace-nowrap">
-                          <BillPeriodPicker
-                            bill={bill}
-                            onSave={(pt, ps, pe) => patchBillPeriod(bill.id, pt, ps, pe)}
-                          />
-                        </td>
-                        <td className="px-2 py-1.5">
-                          {bill.location_label && (
-                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-indigo-50 text-indigo-700 text-xs rounded-full whitespace-nowrap">
-                              <MapPin size={9} />{bill.location_label}
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-2 py-1.5 max-w-[110px]">
-                          {bill.category && (
-                            <span className="inline-block px-1.5 py-0.5 bg-gray-100 text-gray-600 text-xs rounded-full whitespace-nowrap truncate max-w-full">
-                              {bill.category}
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-2 py-1.5 tabular-nums text-xs text-gray-900 whitespace-nowrap">{fmt(bill.net_amount)}</td>
-                        <td className="px-2 py-1.5 tabular-nums text-xs text-gray-500 whitespace-nowrap">{vatPct.toFixed(1)}%</td>
-                        <td className="px-2 py-1.5 tabular-nums text-xs text-gray-500 whitespace-nowrap">{fmt(vatAmount)}</td>
-                        <td className="px-2 py-1.5 font-bold text-gray-900 tabular-nums text-xs whitespace-nowrap">{fmt(bill.gross_amount)}</td>
-                        <td className="px-2 py-1.5">
-                          <select value={bill.status} onChange={(e) => updateStatus(bill.id, e.target.value)}
-                            className={`text-xs font-semibold px-2 py-0.5 rounded-full border cursor-pointer focus:outline-none ${STATUS_STYLES[bill.status]}`}>
-                            <option value="pending">Pending</option>
-                            <option value="approved">Approved</option>
-                            <option value="paid">Paid</option>
-                          </select>
-                        </td>
-                        <td className="px-2 py-1.5">
-                          <div className="flex items-center gap-1.5">
-                            {bill.invoice_number && (
-                              <span title={`Invoice #${bill.invoice_number}`} className="text-gray-300 cursor-default text-[10px] font-mono leading-none">#</span>
-                            )}
-                            {bill.file_path && (
-                              <a href={`${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/bills/${bill.file_path}`}
-                                target="_blank" rel="noopener noreferrer"
-                                className="text-gray-300 hover:text-blue-500 transition-colors" title="View PDF">
-                                <Eye size={14} />
-                              </a>
-                            )}
-                            <button
-                              onClick={() => setLinesBillId(linesBillId === bill.id ? null : bill.id)}
-                              className={`transition-colors ${linesBillId === bill.id ? 'text-green-600' : 'text-gray-300 hover:text-green-600'}`}
-                              title="View line items"
-                            >
-                              <LayoutList size={14} />
-                            </button>
-                            <button
-                              onClick={() => editingBillId === bill.id ? setEditingBillId(null) : startEdit(bill)}
-                              className={`transition-colors ${editingBillId === bill.id ? 'text-indigo-500' : 'text-gray-300 hover:text-indigo-500'}`}
-                              title="Edit"
-                            >
-                              <Pencil size={14} />
-                            </button>
-                            <button onClick={() => deleteBill(bill.id)} className="text-gray-300 hover:text-red-500 transition-colors">
-                              <Trash2 size={14} />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                      {/* Inline edit row */}
-                      {editingBillId === bill.id && editDraft && (
-                        <tr className="bg-indigo-50/60">
-                          <td colSpan={11} className="px-4 py-4">
-                            <div className="grid grid-cols-5 gap-3 items-end">
-                              {/* Location */}
-                              <div>
-                                <label className="flex items-center gap-1 text-xs font-semibold text-gray-500 mb-1">
-                                  <MapPin size={10} />Location
-                                </label>
-                                <div className="relative">
-                                  <select
-                                    value={editDraft.locationId}
-                                    onChange={(e) => {
-                                      const opt = allLocationOptions.find((l) => l.id === e.target.value);
-                                      setEditDraft((d) => d ? { ...d, locationId: e.target.value, locationLabel: opt?.name ?? '' } : d);
-                                    }}
-                                    className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300 appearance-none pr-6"
-                                  >
-                                    <option value="">— Select location —</option>
-                                    {locations.length > 0 && (
-                                      <optgroup label="Restaurants / Sites">
-                                        {locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
-                                      </optgroup>
-                                    )}
-                                    <optgroup label="Other">
-                                      {SPECIAL_LOCATIONS.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
-                                    </optgroup>
-                                  </select>
-                                  <ChevronDown size={12} className="absolute right-2 top-2 text-gray-400 pointer-events-none" />
-                                </div>
-                              </div>
-
-                              {/* Category */}
-                              <div>
-                                <label className="block text-xs font-semibold text-gray-500 mb-1">Category</label>
-                                <div className="relative">
-                                  <select
-                                    value={editDraft.category}
-                                    onChange={(e) => setEditDraft((d) => d ? { ...d, category: e.target.value } : d)}
-                                    className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300 appearance-none pr-6"
-                                  >
-                                    {CATEGORIES.map((c) => <option key={c}>{c}</option>)}
-                                  </select>
-                                  <ChevronDown size={12} className="absolute right-2 top-2 text-gray-400 pointer-events-none" />
-                                </div>
-                              </div>
-
-                              {/* Period type */}
-                              <div>
-                                <label className="flex items-center gap-1 text-xs font-semibold text-gray-500 mb-1">
-                                  <Calendar size={10} />Period Type
-                                </label>
-                                <div className="relative">
-                                  <select
-                                    value={editDraft.periodType}
-                                    onChange={(e) => setEditDraft((d) => d ? { ...d, periodType: e.target.value as PeriodType } : d)}
-                                    className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300 appearance-none pr-6"
-                                  >
-                                    {(Object.entries(PERIOD_LABELS) as [PeriodType, string][]).map(([v, l]) => (
-                                      <option key={v} value={v}>{l}</option>
-                                    ))}
-                                  </select>
-                                  <ChevronDown size={12} className="absolute right-2 top-2 text-gray-400 pointer-events-none" />
-                                </div>
-                              </div>
-
-                              {/* Period start */}
-                              <div>
-                                <label className="block text-xs font-semibold text-gray-500 mb-1">
-                                  {editDraft.periodType === 'single_date' ? 'Date' :
-                                   editDraft.periodType === 'month'       ? 'Month (any day)' :
-                                   editDraft.periodType === 'year'        ? 'Year (any day)' : 'Start Date'}
-                                </label>
-                                <input
-                                  type="date"
-                                  value={editDraft.periodStart}
-                                  onChange={(e) => setEditDraft((d) => d ? { ...d, periodStart: e.target.value } : d)}
-                                  className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300"
-                                />
-                              </div>
-
-                              {/* End date (custom only) or save/cancel */}
-                              {editDraft.periodType === 'custom' ? (
-                                <div>
-                                  <label className="block text-xs font-semibold text-gray-500 mb-1">End Date</label>
-                                  <input
-                                    type="date"
-                                    value={editDraft.periodEnd}
-                                    onChange={(e) => setEditDraft((d) => d ? { ...d, periodEnd: e.target.value } : d)}
-                                    className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300"
-                                  />
-                                </div>
-                              ) : (
-                                <div />
-                              )}
-                            </div>
-
-                            {/* Save / Cancel buttons */}
-                            <div className="flex items-center gap-2 mt-3">
-                              <button
-                                onClick={saveEdit}
-                                disabled={savingEdit}
-                                className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white text-xs font-bold rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors"
-                              >
-                                {savingEdit ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
-                                {savingEdit ? 'Saving…' : 'Save Changes'}
-                              </button>
-                              <button
-                                onClick={() => { setEditingBillId(null); setEditDraft(null); }}
-                                className="px-3 py-1.5 text-xs font-semibold text-gray-500 hover:text-gray-700 border border-gray-200 rounded-lg bg-white transition-colors"
-                              >
-                                Cancel
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      )}
-                      </React.Fragment>
-                    );
-                  })}
-                </tbody>
-                <tfoot>
-                  <tr className="bg-gray-50 border-t-2 border-gray-200">
-                    <td colSpan={6} className="px-3 py-2 text-xs font-semibold text-gray-500">{filtered.length} bills</td>
-                    <td className="px-3 py-2 text-right font-bold text-gray-700 tabular-nums text-xs">{fmt(totals.net)}</td>
-                    <td className="px-3 py-2 text-right text-xs text-gray-400 tabular-nums">
-                      {totals.net > 0 ? (totals.vat / totals.net * 100).toFixed(0) + '%' : '—'}
-                    </td>
-                    <td className="px-3 py-2 text-right font-bold text-amber-700 tabular-nums text-xs">{fmt(totals.vat)}</td>
-                    <td className="px-3 py-2 text-right font-bold text-[#1B5E20] tabular-nums text-xs">{fmt(totals.gross)}</td>
-                    <td colSpan={2} />
-                  </tr>
-                </tfoot>
-              </table>
-              </div>
-
-              {totalPages > 1 && (
-                <div className="flex items-center justify-between gap-3 px-3 py-2 border-t border-gray-200 bg-white">
-                  <span className="text-xs text-gray-400">
-                    Page {currentPage} of {totalPages}
+            <div className="space-y-6">
+              <section>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <h2 className="text-sm font-bold text-gray-900">Pending</h2>
+                  <span className="text-xs font-semibold text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5">
+                    {pendingRows.length}
                   </span>
-                  <div className="flex items-center gap-1">
-                    <button
-                      onClick={() => setPage(p => Math.max(1, p - 1))}
-                      disabled={currentPage === 1}
-                      className="px-2 py-1 text-xs font-semibold rounded-md border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:hover:bg-white disabled:cursor-default"
-                    >
-                      Prev
-                    </button>
-                    {pageNumbers(currentPage, totalPages).map((n, i) =>
-                      n === '…' ? (
-                        <span key={`gap-${i}`} className="px-1 text-xs text-gray-300">…</span>
-                      ) : (
-                        <button
-                          key={n}
-                          onClick={() => setPage(n as number)}
-                          className={`min-w-[28px] px-2 py-1 text-xs font-semibold rounded-md border transition-colors ${
-                            n === currentPage
-                              ? 'bg-[#1B5E20] border-[#1B5E20] text-white'
-                              : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
-                          }`}
-                        >
-                          {n}
-                        </button>
-                      ),
-                    )}
-                    <button
-                      onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-                      disabled={currentPage === totalPages}
-                      className="px-2 py-1 text-xs font-semibold rounded-md border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:hover:bg-white disabled:cursor-default"
-                    >
-                      Next
-                    </button>
-                  </div>
+                  <span className="text-xs text-gray-400">awaiting review</span>
                 </div>
-              )}
+                {pendingRows.length === 0 ? (
+                  <div className="flex items-center justify-center h-20 border border-dashed border-gray-200 rounded-xl">
+                    <p className="text-xs text-gray-400">Nothing pending — all bills have been approved</p>
+                  </div>
+                ) : renderBillsTable(pendingPageRows, pendingPage, pendingTotalPages, setPage)}
+              </section>
+
+              <section>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <h2 className="text-sm font-bold text-gray-900">Approved</h2>
+                  <span className="text-xs font-semibold text-green-700 bg-green-50 border border-green-200 rounded-full px-2 py-0.5">
+                    {settledRows.length}
+                  </span>
+                </div>
+                {settledRows.length === 0 ? (
+                  <div className="flex items-center justify-center h-20 border border-dashed border-gray-200 rounded-xl">
+                    <p className="text-xs text-gray-400">No approved bills yet</p>
+                  </div>
+                ) : renderBillsTable(settledPageRows, settledPage, settledTotalPages, setPage2)}
+              </section>
             </div>
           )}
         </div>
