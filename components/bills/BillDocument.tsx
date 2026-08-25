@@ -50,6 +50,10 @@ export type BillData = {
   trinkgeld?           : number;
   /** Hide the Essen/Getränke split rows and show only the Gesamt lines. */
   compactTotals?  : boolean;
+  /** Metadata, never rendered: ISO timestamp of the last PDF rebuild. Used to
+   *  cache-bust the public storage URL, which otherwise serves the stale file
+   *  after the object is overwritten in place. */
+  regeneratedAt?  : string;
   receiptImageDataUrl? : string;  // base64 data URL — appended as page 2 when set
   // Deductions
   anzahlungBrutto? : number;   // deposit brutto — deducted from total payable

@@ -119,6 +119,19 @@ const fmt = (n: number) =>
 const fmtDate = (d: string | null) =>
   d ? new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
 
+/**
+ * Public URL of a bill's stored PDF.
+ *
+ * A regenerated bill keeps the same storage path, so the CDN and the browser
+ * would otherwise keep serving the pre-edit file. Appending the rebuild
+ * timestamp gives the corrected document a distinct URL.
+ */
+const billPdfUrl = (bill: OutgoingBill) => {
+  const base = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/bills/${bill.file_path}`;
+  const v    = bill.bill_data?.regeneratedAt;
+  return v ? `${base}?v=${encodeURIComponent(v)}` : base;
+};
+
 const today = () => {
   const d = new Date();
   return `${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')}.${d.getFullYear()}`;
@@ -1129,6 +1142,7 @@ export default function OutgoingBillsPage() {
     try {
       const nextData: BillData = {
         ...bill.bill_data,
+        regeneratedAt: new Date().toISOString(),
         recipient: {
           ...bill.bill_data.recipient,
           company:  editRecipient.company.trim(),
@@ -1146,13 +1160,12 @@ export default function OutgoingBillsPage() {
       ]);
       const blob = await pdf(<BillDoc data={nextData} />).toBlob();
 
-      // Overwrite the existing object so the bill keeps one stable path
-      const { error: upErr } = await supabase.storage
-        .from('bills')
-        .upload(bill.file_path, blob, { contentType: 'application/pdf', upsert: true });
-      if (upErr) throw new Error(`PDF upload failed: ${upErr.message}`);
-
-      const { error: dbErr } = await supabase.from('outgoing_bills').update({
+      // Overwriting the stored object has to happen server-side: the bucket's RLS
+      // policy allows inserting a new object but not replacing one, so a
+      // browser-side upsert is rejected.
+      const form = new FormData();
+      form.append('file', blob, 'bill.pdf');
+      form.append('payload', JSON.stringify({
         customer_name:    nextData.recipient.company,
         customer_address: [editRecipient.street, editRecipient.postcode, editRecipient.city]
           .map(s => s.trim()).filter(Boolean).join(', ') || null,
@@ -1170,8 +1183,11 @@ export default function OutgoingBillsPage() {
         tips:             editDraft.tips             ?? 0,
         total_payable:    editDraft.total_payable    ?? 0,
         bill_data:        nextData,
-      }).eq('id', editingId);
-      if (dbErr) throw dbErr;
+      }));
+
+      const res  = await fetch(`/api/outgoing-bills/${editingId}/regenerate`, { method: 'POST', body: form });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || json.error) throw new Error(json.error ?? `HTTP ${res.status}`);
 
       queryClient.invalidateQueries({ queryKey: ['outgoing-bills'] });
       setEditingId(null);
@@ -2607,12 +2623,12 @@ export default function OutgoingBillsPage() {
                         <div className="flex items-center gap-3">
                           {bill.file_path && (
                             <>
-                              <a href={`${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/bills/${bill.file_path}`}
+                              <a href={billPdfUrl(bill)}
                                 target="_blank" rel="noopener noreferrer"
                                 className="text-gray-400 hover:text-blue-500 transition-colors" title="View PDF">
                                 <Eye size={16} />
                               </a>
-                              <a href={`${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/bills/${bill.file_path}`}
+                              <a href={billPdfUrl(bill)}
                                 download
                                 className="text-gray-400 hover:text-green-500 transition-colors" title="Download PDF">
                                 <Download size={16} />
@@ -2745,12 +2761,12 @@ export default function OutgoingBillsPage() {
                             <div className="flex items-center gap-2">
                               {bill.file_path && (
                                 <>
-                                  <a href={`${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/bills/${bill.file_path}`}
+                                  <a href={billPdfUrl(bill)}
                                     target="_blank" rel="noopener noreferrer"
                                     className="text-gray-300 hover:text-blue-500 transition-colors" title="View PDF">
                                     <Eye size={14} />
                                   </a>
-                                  <a href={`${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/bills/${bill.file_path}`}
+                                  <a href={billPdfUrl(bill)}
                                     download
                                     className="text-gray-300 hover:text-green-500 transition-colors" title="Download PDF">
                                     <Download size={14} />
