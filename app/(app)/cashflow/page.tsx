@@ -160,21 +160,6 @@ function matchCounterparty(rawName: string | null, counterparties: Counterparty[
   }) ?? null;
 }
 
-// Compute VAT breakdown for a set of aggRows using the per-category defaultVatRate.
-// All amounts in cents; brutto/mwst/netto are absolute (unsigned).
-function bucketVat(rows: { category: string | null; total_cents: number }[]) {
-  let bruttoAbs = 0, mwstAbs = 0;
-  for (const row of rows) {
-    const rate = defaultVatRate(row.category);
-    const m = rate === 0 ? 0 : Math.round(row.total_cents * rate / (100 + rate));
-    bruttoAbs += row.total_cents;
-    mwstAbs   += m;
-  }
-  const nettoAbs    = bruttoAbs - mwstAbs;
-  // German convention: MwSt % = VAT / netto (not / brutto), so 10% VAT on 100€ net → 10%, not 9.09%
-  const blendedPct  = nettoAbs > 0 ? (mwstAbs / nettoAbs * 100) : 0;
-  return { bruttoAbs, mwstAbs, nettoAbs, blendedPct };
-}
 
 /* ── Bill Match Modal ───────────────────────────────────────────────── */
 /**
@@ -1019,50 +1004,6 @@ export default function CashFlowPage() {
     });
   }, [txs, sortCol, sortDir]);
 
-  type AggRow = { category: string | null; direction: 'in' | 'out'; total_cents: number };
-  const { data: aggRows = [] } = useQuery<AggRow[]>({
-    queryKey: ['cashflow-agg', dateFrom, dateTo],
-    queryFn: async () => {
-      const res = await fetch(`/api/cashflow/aggregate?dateFrom=${dateFrom}&dateTo=${dateTo}`);
-      const json = await res.json();
-      return Array.isArray(json) ? json : [];
-    },
-  });
-  const totalIn  = aggRows.filter(t => t.direction === 'in').reduce((s,t) => s + t.total_cents, 0);
-  const totalOut = aggRows.filter(t => t.direction === 'out').reduce((s,t) => s + t.total_cents, 0);
-  const net      = totalIn - totalOut;
-
-  // P&L buckets — signed: incoming = +, outgoing = −
-  const signed = (t: AggRow) => t.direction === 'in' ? t.total_cents : -t.total_cents;
-  const catNetSum = (cat: string) =>
-    aggRows.filter(t => t.category === cat).reduce((s: number, t: AggRow) => s + signed(t), 0);
-  const plSales     = aggRows.filter(t => (t.category ?? '').startsWith('S - ')).reduce((s: number, t: AggRow) => s + signed(t), 0);
-  const plCogs      = catNetSum('C - Suppliers');
-  const plStaff     = catNetSum('C - Personnel');
-  const plRent      = catNetSum('C - Rent');
-  const plFinancing = catNetSum('C - Financing');
-  const plOther     = aggRows.filter(t =>
-    (t.category ?? '').startsWith('C - ') &&
-    !['C - Suppliers', 'C - Personnel', 'C - Rent', 'C - Financing'].includes(t.category ?? '')
-  ).reduce((s: number, t: AggRow) => s + signed(t), 0);
-  const plFcf          = plSales + plCogs + plStaff + plRent + plOther;
-  const plChangeInCash = plFcf + plFinancing;
-  const checkOk = Math.abs(plChangeInCash - net) < 1;
-
-  // VAT breakdowns — summed from individual category rows, not applied as a flat rate to the bucket total
-  const salesVatRows  = aggRows.filter(t => (t.category ?? '').startsWith('S - '));
-  const cogsVatRows   = aggRows.filter(t => t.category === 'C - Suppliers');
-  const staffVatRows  = aggRows.filter(t => t.category === 'C - Personnel');
-  const rentVatRows   = aggRows.filter(t => t.category === 'C - Rent');
-  const otherVatRows  = aggRows.filter(t =>
-    (t.category ?? '').startsWith('C - ') &&
-    !['C - Suppliers', 'C - Personnel', 'C - Rent', 'C - Financing'].includes(t.category ?? ''),
-  );
-  const salesVat  = bucketVat(salesVatRows);
-  const cogsVat   = bucketVat(cogsVatRows);
-  const staffVat  = bucketVat(staffVatRows);
-  const rentVat   = bucketVat(rentVatRows);
-  const otherVat  = bucketVat(otherVatRows);
 
   const patchMut = useMutation({
     mutationFn: ({ id, patch }: { id: string; patch: Record<string, string | boolean | null> }) =>
@@ -1077,8 +1018,9 @@ export default function CashFlowPage() {
         { queryKey: ['cashflow-tx'] },
         old => old ? { ...old, data: old.data.map(tx => tx.id === id ? { ...tx, ...patch } as CfTx : tx) } : old,
       );
-      // Recalculate P&L totals since category/direction may have changed
-      qc.invalidateQueries({ queryKey: ['cashflow-agg'] });
+      // The Group P&L page aggregates these rows, so a category/direction change
+      // has to invalidate it — this page no longer shows those totals itself.
+      qc.invalidateQueries({ queryKey: ['pnl-monthly'] });
     },
   });
 
@@ -1099,7 +1041,7 @@ export default function CashFlowPage() {
       setUploadMsg(`✓ ${json.count} transactions imported`);
       qc.invalidateQueries({ queryKey: ['cashflow-uploads'] });
       qc.invalidateQueries({ queryKey: ['cashflow-tx'] });
-      qc.invalidateQueries({ queryKey: ['cashflow-agg'] });
+      qc.invalidateQueries({ queryKey: ['pnl-monthly'] });
     } catch (err: unknown) {
       setUploadMsg(`Error: ${err instanceof Error ? err.message : 'Upload error'}`);
     } finally {
@@ -1392,138 +1334,6 @@ export default function CashFlowPage() {
 
       {uploads.length > 0 && (
         <>
-          {/* P&L summary table */}
-          {(() => {
-            const salesAbs = Math.abs(plSales);
-            const pctSales = (v: number) =>
-              salesAbs > 0
-                ? (Math.abs(v) / salesAbs * 100).toLocaleString('de-DE', { maximumFractionDigits: 1 }) + '%'
-                : '—';
-            const fmtPct = (p: number, hasData: boolean) =>
-              !hasData ? '—' : p.toLocaleString('de-DE', { maximumFractionDigits: 1 }) + '%';
-
-            const valCell = (v: number, bold = false, large = false) => (
-              <td className={`px-5 py-3 text-right tabular-nums ${bold ? 'font-bold' : 'font-semibold'} ${large ? 'text-base' : ''} ${v >= 0 ? 'text-green-700' : 'text-red-700'}`}>
-                {v < 0 ? '– ' : ''}{eur(Math.abs(v))}
-              </td>
-            );
-            const euroCell = (cents: number) => (
-              <td className="px-4 py-3 text-right tabular-nums text-gray-600 text-xs">{eur(cents)}</td>
-            );
-            const dashCell = () => (
-              <td className="px-4 py-3 text-right text-gray-300 text-xs">—</td>
-            );
-            const pctRow = (label: string, val: number) => (
-              <tr className="bg-gray-50/60 border-b border-gray-100">
-                <td className="px-5 py-1.5 text-xs text-gray-400 italic pl-9">{label}</td>
-                {dashCell()}{dashCell()}{dashCell()}{dashCell()}
-                <td className="px-5 py-1.5 text-right text-xs tabular-nums text-gray-500 font-medium">{pctSales(val)}</td>
-              </tr>
-            );
-
-            return (
-              <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm min-w-[700px]">
-                    <thead className="bg-gray-50 border-b border-gray-200">
-                      <tr>
-                        <th className="text-left px-5 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide w-36">Row</th>
-                        <th className="text-right px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">Brutto Sales (€)</th>
-                        <th className="text-right px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">MwSt (€)</th>
-                        <th className="text-right px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">MwSt (%)</th>
-                        <th className="text-right px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">Netto Sales (€)</th>
-                        <th className="text-right px-5 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide">Value (€)</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {/* Sales */}
-                      <tr className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
-                        <td className="px-5 py-3 font-medium text-gray-700">Sales</td>
-                        {euroCell(salesVat.bruttoAbs)}
-                        {euroCell(salesVat.mwstAbs)}
-                        <td className="px-4 py-3 text-right tabular-nums text-gray-500 text-xs">{fmtPct(salesVat.blendedPct, salesVat.bruttoAbs > 0)}</td>
-                        {euroCell(salesVat.nettoAbs)}
-                        {valCell(plSales)}
-                      </tr>
-
-                      {/* COGS */}
-                      <tr className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
-                        <td className="px-5 py-3 font-medium text-gray-700">COGS</td>
-                        {euroCell(cogsVat.bruttoAbs)}
-                        {euroCell(cogsVat.mwstAbs)}
-                        <td className="px-4 py-3 text-right tabular-nums text-gray-500 text-xs">{fmtPct(cogsVat.blendedPct, cogsVat.bruttoAbs > 0)}</td>
-                        {euroCell(cogsVat.nettoAbs)}
-                        {valCell(plCogs)}
-                      </tr>
-                      {pctRow('as % of sales', plCogs)}
-
-                      {/* Staff */}
-                      <tr className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
-                        <td className="px-5 py-3 font-medium text-gray-700">Staff</td>
-                        {euroCell(staffVat.bruttoAbs)}
-                        {euroCell(staffVat.mwstAbs)}
-                        <td className="px-4 py-3 text-right tabular-nums text-gray-500 text-xs">{fmtPct(staffVat.blendedPct, staffVat.bruttoAbs > 0)}</td>
-                        {euroCell(staffVat.nettoAbs)}
-                        {valCell(plStaff)}
-                      </tr>
-                      {pctRow('as % of sales', plStaff)}
-
-                      {/* Rent */}
-                      <tr className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
-                        <td className="px-5 py-3 font-medium text-gray-700">Rent</td>
-                        {euroCell(rentVat.bruttoAbs)}
-                        {euroCell(rentVat.mwstAbs)}
-                        <td className="px-4 py-3 text-right tabular-nums text-gray-500 text-xs">{fmtPct(rentVat.blendedPct, rentVat.bruttoAbs > 0)}</td>
-                        {euroCell(rentVat.nettoAbs)}
-                        {valCell(plRent)}
-                      </tr>
-                      {pctRow('as % of sales', plRent)}
-
-                      {/* Other */}
-                      <tr className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
-                        <td className="px-5 py-3 font-medium text-gray-700">Other</td>
-                        {euroCell(otherVat.bruttoAbs)}
-                        {euroCell(otherVat.mwstAbs)}
-                        <td className="px-4 py-3 text-right tabular-nums text-gray-500 text-xs">{fmtPct(otherVat.blendedPct, otherVat.bruttoAbs > 0)}</td>
-                        {euroCell(otherVat.nettoAbs)}
-                        {valCell(plOther)}
-                      </tr>
-                      {pctRow('as % of sales', plOther)}
-
-                      {/* FCF */}
-                      <tr className="bg-gray-50 border-t-2 border-gray-200">
-                        <td className="px-5 py-3.5 font-bold text-gray-900">FCF</td>
-                        {dashCell()}{dashCell()}{dashCell()}{dashCell()}
-                        {valCell(plFcf, true, true)}
-                      </tr>
-                      {pctRow('as % of sales', plFcf)}
-
-                      {/* Financing */}
-                      <tr className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
-                        <td className="px-5 py-3 font-medium text-gray-700">Financing</td>
-                        {dashCell()}{dashCell()}{dashCell()}{dashCell()}
-                        {valCell(plFinancing)}
-                      </tr>
-
-                      {/* Change in Cash */}
-                      <tr className="bg-gray-50 border-t-2 border-gray-200">
-                        <td className="px-5 py-3.5 font-bold text-gray-900">
-                          <span className="flex items-center gap-2">
-                            Change in Cash
-                            {checkOk
-                              ? <CheckCircle2 size={15} className="text-green-600 flex-shrink-0" />
-                              : <XCircle size={15} className="text-red-500 flex-shrink-0" />}
-                          </span>
-                        </td>
-                        {dashCell()}{dashCell()}{dashCell()}{dashCell()}
-                        {valCell(plChangeInCash, true, true)}
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            );
-          })()}
 
           {/* Filter bar */}
           <div className="bg-white rounded-xl border border-gray-100 shadow-sm px-4 py-3 flex flex-wrap items-center gap-3">
