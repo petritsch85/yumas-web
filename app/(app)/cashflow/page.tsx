@@ -177,6 +177,144 @@ function bucketVat(rows: { category: string | null; total_cents: number }[]) {
 }
 
 /* ── Bill Match Modal ───────────────────────────────────────────────── */
+/**
+ * Every stored field for one transaction, plus any other transaction that looks
+ * like the same charge. The table only has room for a handful of columns, so the
+ * bank's own description — usually the thing that explains why a supplier billed
+ * twice — was previously only visible in a cramped tooltip.
+ */
+function TxDetailsModal({ tx, all, uploads, counterparties, onClose }: {
+  tx: CfTx;
+  all: CfTx[];
+  uploads: { id: string; filename: string; period_label: string }[];
+  counterparties: Counterparty[];
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const upload   = uploads.find(u => u.id === tx.upload_id);
+  const resolved = matchCounterparty(tx.counterparty, counterparties);
+  const vatRate  = defaultVatRate(tx.category);
+  const gross    = tx.amount_cents;
+  const vat      = Math.round(gross - gross / (1 + vatRate / 100));
+  const net      = gross - vat;
+
+  // Same counterparty and same amount, within ±31 days — i.e. the charge the
+  // user is trying to explain.
+  const siblings = all.filter(o =>
+    o.id !== tx.id &&
+    o.amount_cents === tx.amount_cents &&
+    (o.counterparty ?? '') === (tx.counterparty ?? '') &&
+    Math.abs(new Date(o.date).getTime() - new Date(tx.date).getTime()) <= 31 * 864e5,
+  );
+
+  const Row = ({ label, children }: { label: string; children: React.ReactNode }) => (
+    <div className="grid grid-cols-[150px_1fr] gap-3 py-1.5 border-b border-gray-50 last:border-0">
+      <span className="text-xs font-semibold text-gray-500">{label}</span>
+      <span className="text-xs text-gray-900 break-words">{children}</span>
+    </div>
+  );
+  const dash = <span className="text-gray-300">—</span>;
+
+  return (
+    <div className="fixed inset-0 z-[60] bg-black/40 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[85vh] overflow-y-auto"
+        onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100 sticky top-0 bg-white">
+          <div>
+            <p className="text-sm font-bold text-gray-900">Transaction details</p>
+            <p className="text-xs text-gray-400">{fmtDate(tx.date)} · {resolved?.name ?? tx.counterparty ?? '—'}</p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-700 transition-colors">
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="px-5 py-4">
+          {/* The bank's raw text — the reason this modal exists */}
+          <p className="text-xs font-bold text-gray-700 mb-1">Description (raw from bank)</p>
+          <p className="text-xs text-gray-900 bg-gray-50 border border-gray-200 rounded-lg p-3 whitespace-pre-wrap break-words mb-4">
+            {tx.description || 'No description on this transaction'}
+          </p>
+
+          <p className="text-xs font-bold text-gray-700 mb-1">Fields</p>
+          <div className="mb-4">
+            <Row label="Date">{fmtDate(tx.date)}</Row>
+            <Row label="Counterparty (raw)">{tx.counterparty || dash}</Row>
+            <Row label="Matched to">{resolved ? resolved.name : <span className="text-amber-600">Not matched</span>}</Row>
+            <Row label="Direction">{tx.direction === 'in' ? 'Incoming' : 'Outgoing'}</Row>
+            <Row label="Amount (brutto)">{eur(gross)}</Row>
+            <Row label={`VAT (${vatRate}%)`}>{eur(vat)}</Row>
+            <Row label="Amount (netto)">{eur(net)}</Row>
+            <Row label="Category">{tx.category || dash}</Row>
+            <Row label="Location">{tx.location || dash}</Row>
+            <Row label="Sales type">{tx.sales_type || dash}</Row>
+            <Row label="Accounting period">{tx.accounting_period ? periodLabel(tx.accounting_period) : dash}</Row>
+            <Row label="Note">{tx.notes || dash}</Row>
+            <Row label="Confirmed">{tx.confirmed ? 'Yes' : 'No'}</Row>
+          </div>
+
+          <p className="text-xs font-bold text-gray-700 mb-1">Linked bills</p>
+          <div className="mb-4">
+            {tx.bill ? (
+              <Row label="Bill">
+                {tx.bill.supplier_name}{tx.bill.invoice_number ? ` · ${tx.bill.invoice_number}` : ''} · {eurAmt(tx.bill.gross_amount)}
+              </Row>
+            ) : (tx.transaction_bill_links ?? []).filter(l => l.bill).length > 0 ? (
+              (tx.transaction_bill_links ?? []).filter(l => l.bill).map(l => (
+                <Row key={l.id} label="Bill">
+                  {l.bill!.supplier_name}{l.bill!.invoice_number ? ` · ${l.bill!.invoice_number}` : ''} · {eurAmt(l.bill!.gross_amount)}
+                  {l.note ? <span className="text-gray-400"> · {l.note}</span> : null}
+                </Row>
+              ))
+            ) : (
+              <p className="text-xs text-gray-400">No bill linked</p>
+            )}
+          </div>
+
+          <p className="text-xs font-bold text-gray-700 mb-1">
+            Same amount &amp; counterparty within 31 days
+            {siblings.length > 0 && <span className="ml-1 text-amber-600">({siblings.length})</span>}
+          </p>
+          {siblings.length === 0 ? (
+            <p className="text-xs text-gray-400 mb-4">No other matching transaction — this charge appears only once.</p>
+          ) : (
+            <div className="mb-4 border border-amber-200 bg-amber-50/50 rounded-lg divide-y divide-amber-100">
+              {siblings.map(o => (
+                <div key={o.id} className="p-2.5">
+                  <div className="flex items-center justify-between gap-3 mb-1">
+                    <span className="text-xs font-semibold text-gray-800">{fmtDate(o.date)}</span>
+                    <span className="text-xs font-bold text-gray-900 tabular-nums">{eur(o.amount_cents)}</span>
+                  </div>
+                  <p className="text-xs text-gray-600 whitespace-pre-wrap break-words">
+                    {o.description || 'No description'}
+                  </p>
+                  {o.description && tx.description && o.description === tx.description && (
+                    <p className="text-xs text-amber-700 font-semibold mt-1">
+                      Identical description — likely a genuine duplicate charge
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          <p className="text-xs font-bold text-gray-700 mb-1">Source</p>
+          <div>
+            <Row label="Imported from">{upload ? upload.filename : dash}</Row>
+            <Row label="Statement period">{upload ? upload.period_label : dash}</Row>
+            <Row label="Transaction ID"><span className="font-mono text-[11px] text-gray-500">{tx.id}</span></Row>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function BillMatchModal({ tx, onLink, onUnlink, onClose }: {
   tx: CfTx;
   onLink: (id: string) => void;
@@ -492,10 +630,11 @@ function PeriodPicker({ value, onChange, locked }: {
 }
 
 /* ── Row component ──────────────────────────────────────────────────── */
-function TxRow({ tx, onSave, counterparties }: {
+function TxRow({ tx, onSave, counterparties, onShowDetails }: {
   tx: CfTx;
   onSave: (id: string, patch: Record<string, string | boolean | null>) => void;
   counterparties: Counterparty[];
+  onShowDetails: () => void;
 }) {
   const isIn = tx.direction === 'in';
   const locations = isIn ? IN_LOCATIONS : OUT_LOCATIONS;
@@ -503,7 +642,6 @@ function TxRow({ tx, onSave, counterparties }: {
 
   const [notes, setNotes] = useState(tx.notes ?? '');
   const [showModal, setShowModal] = useState(false);
-  const [showRaw, setShowRaw] = useState(false);
   const notesTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   useEffect(() => { setNotes(tx.notes ?? ''); }, [tx.notes]);
@@ -549,27 +687,12 @@ function TxRow({ tx, onSave, counterparties }: {
                 <div className="flex items-center gap-1">
                   <span className="font-semibold text-gray-900 truncate">{resolved.name}</span>
                   <span title="Matched counterparty"><CheckCircle2 size={11} className="text-green-500 flex-shrink-0" /></span>
-                  <div className="relative flex-shrink-0">
-                    <button
-                      onClick={() => setShowRaw(v => !v)}
-                      title="Show raw bank details"
-                      className="text-gray-300 hover:text-gray-500 transition-colors">
-                      <Info size={11} />
-                    </button>
-                    {showRaw && (
-                      <div className="absolute left-0 top-5 z-50 bg-white border border-gray-200 rounded-lg shadow-lg p-2.5 min-w-[200px] max-w-[300px]"
-                        onClick={e => e.stopPropagation()}>
-                        <p className="text-xs font-semibold text-gray-500 mb-1">Raw bank name</p>
-                        <p className="text-xs text-gray-800 break-all">{tx.counterparty || '—'}</p>
-                        {tx.description && (
-                          <>
-                            <p className="text-xs font-semibold text-gray-500 mt-2 mb-1">Description</p>
-                            <p className="text-xs text-gray-800 break-all">{tx.description}</p>
-                          </>
-                        )}
-                      </div>
-                    )}
-                  </div>
+                  <button
+                    onClick={onShowDetails}
+                    title="Show full transaction details"
+                    className="text-gray-300 hover:text-gray-600 transition-colors flex-shrink-0">
+                    <Info size={11} />
+                  </button>
                   {pinned && !locked && (
                     <button title="Remove assignment" onClick={() => onSave(tx.id, { counterparty_id: null })}
                       className="text-gray-300 hover:text-red-400 flex-shrink-0">
@@ -579,7 +702,15 @@ function TxRow({ tx, onSave, counterparties }: {
                 </div>
               ) : (
                 <>
-                  <div className="truncate text-gray-900">{tx.counterparty || '—'}</div>
+                  <div className="flex items-center gap-1">
+                    <span className="truncate text-gray-900">{tx.counterparty || '—'}</span>
+                    <button
+                      onClick={onShowDetails}
+                      title="Show full transaction details"
+                      className="text-gray-300 hover:text-gray-600 transition-colors flex-shrink-0">
+                      <Info size={11} />
+                    </button>
+                  </div>
                   {!locked && (
                     <select value="" onChange={e => e.target.value && onSave(tx.id, { counterparty_id: e.target.value })}
                       className="text-xs text-gray-400 border-0 outline-none cursor-pointer bg-transparent hover:text-gray-700 mt-0.5">
@@ -816,6 +947,9 @@ export default function CashFlowPage() {
   };
 
   const { dateFrom, dateTo } = periodDateRange(selectedYear, selectedPeriod);
+
+  /** Transaction whose full details are open, or null. */
+  const [detailTx, setDetailTx] = useState<CfTx | null>(null);
 
   const { data: uploads = [] } = useQuery<CfUpload[]>({
     queryKey: ['cashflow-uploads'],
@@ -1520,7 +1654,10 @@ export default function CashFlowPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {sortedTxs.map(tx => <TxRow key={tx.id} tx={tx} onSave={handleSave} counterparties={counterparties} />)}
+                    {sortedTxs.map(tx => (
+                      <TxRow key={tx.id} tx={tx} onSave={handleSave} counterparties={counterparties}
+                        onShowDetails={() => setDetailTx(tx)} />
+                    ))}
                   </tbody>
                 </table>
               </div>
@@ -1566,6 +1703,16 @@ export default function CashFlowPage() {
             </div>
           )}
         </>
+      )}
+
+      {detailTx && (
+        <TxDetailsModal
+          tx={detailTx}
+          all={sortedTxs}
+          uploads={uploads}
+          counterparties={counterparties}
+          onClose={() => setDetailTx(null)}
+        />
       )}
     </div>
   );
