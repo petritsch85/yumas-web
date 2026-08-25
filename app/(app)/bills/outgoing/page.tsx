@@ -6,7 +6,7 @@ import { supabase } from '@/lib/supabase-browser';
 import {
   Upload, FileCheck, AlertCircle, Loader2,
   CheckCircle2, Clock, Banknote, Trash2,
-  ChevronDown, Eye, EyeOff, X, Save, Pencil, Download, BookOpen, Send,
+  ChevronDown, Eye, EyeOff, X, Save, Pencil, Download, BookOpen, Send, FileText,
   FilePlus, Plus, FileDown, Camera, FileUp,
 } from 'lucide-react';
 import type { BillData, LineItem } from '@/components/bills/BillDocument';
@@ -62,6 +62,9 @@ type OutgoingBill = {
   total_payable:    number;
   status:           'pending' | 'paid' | 'cancelled';
   file_path:        string | null;
+  /** Full BillData used to render the stored PDF. Null on bills created before
+   *  the column existed — those cannot be regenerated. */
+  bill_data?:       BillData | null;
 };
 
 type Customer = {
@@ -160,6 +163,11 @@ export default function OutgoingBillsPage() {
   // Inline edit
   const [editingId,  setEditingId]  = useState<string | null>(null);
   const [editDraft,  setEditDraft]  = useState<Partial<OutgoingBill> | null>(null);
+  /** Recipient block for the bill being edited — only populated when the bill has
+   *  stored bill_data, i.e. when its PDF can actually be regenerated. */
+  type RecipientDraft = { company: string; extra: string; contact: string; street: string; postcode: string; city: string };
+  const [editRecipient, setEditRecipient] = useState<RecipientDraft | null>(null);
+  const [regenerating,  setRegenerating]  = useState(false);
   const [savingEdit, setSavingEdit] = useState(false);
 
   // ── Create Bill state ─────────────────────────────────────────────────────
@@ -668,7 +676,7 @@ export default function OutgoingBillsPage() {
     const storagePath = `outgoing-bills/${Date.now()}_${safeInv}.pdf`;
     const { error: upErr } = await supabase.storage.from('bills').upload(storagePath, pendingBlob, { contentType: 'application/pdf' });
     if (upErr) throw new Error(`PDF storage failed: ${upErr.message}`);
-    const { error: dbErr } = await supabase.from('outgoing_bills').insert({
+    const { data: inserted, error: dbErr } = await supabase.from('outgoing_bills').insert({
       invoice_number:   invoiceNumber || null,
       invoice_date:     toIsoDate(billDate),
       event_date:       billEventDate ? toIsoDate(billEventDate) : null,
@@ -687,8 +695,20 @@ export default function OutgoingBillsPage() {
       status:           'pending',
       file_path:        storagePath,
       uploaded_by:      user?.id ?? null,
-    });
+    }).select('id').single();
     if (dbErr) throw dbErr;
+
+    // Persist the exact payload the PDF was rendered from, so the recipient
+    // details can be corrected and the PDF rebuilt later. Kept as a separate,
+    // non-fatal update: if supabase/add_outgoing_bill_data.sql has not been run
+    // yet the column is missing and bill creation must still succeed.
+    if (inserted?.id) {
+      const { error: bdErr } = await supabase
+        .from('outgoing_bills')
+        .update({ bill_data: buildBillData() })
+        .eq('id', inserted.id);
+      if (bdErr) console.warn('bill_data not stored (run add_outgoing_bill_data.sql):', bdErr.message);
+    }
     return storagePath;
   };
 
@@ -1044,6 +1064,17 @@ export default function OutgoingBillsPage() {
   const startEdit = (bill: OutgoingBill) => {
     setEditDraft({ ...bill });
     setEditingId(bill.id);
+    const r = bill.bill_data?.recipient;
+    setEditRecipient(r
+      ? {
+          company:  r.company  ?? '',
+          extra:    r.extra    ?? '',
+          contact:  r.contact  ?? '',
+          street:   r.street   ?? '',
+          postcode: r.postcode ?? '',
+          city:     r.city     ?? '',
+        }
+      : null);
   };
 
   const saveEdit = async () => {
@@ -1069,10 +1100,87 @@ export default function OutgoingBillsPage() {
       queryClient.invalidateQueries({ queryKey: ['outgoing-bills'] });
       setEditingId(null);
       setEditDraft(null);
+      setEditRecipient(null);
     } catch (err: any) {
       alert(`Save failed: ${err.message}`);
     } finally {
       setSavingEdit(false);
+    }
+  };
+
+  /**
+   * Save the edit form AND rebuild the stored PDF with the corrected recipient
+   * details. Only possible for bills that carry bill_data — without it the
+   * document's intro text, contact lines and any catering/ad-hoc line items are
+   * unknown and a rebuild would silently drop them.
+   */
+  const saveEditAndUpdatePdf = async () => {
+    if (!editingId || !editDraft || !editRecipient) return;
+    const bill = bills.find(b => b.id === editingId);
+    if (!bill?.bill_data || !bill.file_path) {
+      alert('This bill has no stored layout data, so its PDF cannot be rebuilt.');
+      return;
+    }
+    if (!window.confirm(
+      'This replaces the stored PDF for this invoice. The previous version cannot be recovered.\n\nContinue?'
+    )) return;
+
+    setRegenerating(true);
+    try {
+      const nextData: BillData = {
+        ...bill.bill_data,
+        recipient: {
+          ...bill.bill_data.recipient,
+          company:  editRecipient.company.trim(),
+          extra:    editRecipient.extra.trim()   || undefined,
+          contact:  editRecipient.contact.trim() || undefined,
+          street:   editRecipient.street.trim(),
+          postcode: editRecipient.postcode.trim(),
+          city:     editRecipient.city.trim(),
+        },
+      };
+
+      const [{ pdf }, { BillDocument: BillDoc }] = await Promise.all([
+        import('@react-pdf/renderer'),
+        import('@/components/bills/BillDocument'),
+      ]);
+      const blob = await pdf(<BillDoc data={nextData} />).toBlob();
+
+      // Overwrite the existing object so the bill keeps one stable path
+      const { error: upErr } = await supabase.storage
+        .from('bills')
+        .upload(bill.file_path, blob, { contentType: 'application/pdf', upsert: true });
+      if (upErr) throw new Error(`PDF upload failed: ${upErr.message}`);
+
+      const { error: dbErr } = await supabase.from('outgoing_bills').update({
+        customer_name:    nextData.recipient.company,
+        customer_address: [editRecipient.street, editRecipient.postcode, editRecipient.city]
+          .map(s => s.trim()).filter(Boolean).join(', ') || null,
+        invoice_number:   editDraft.invoice_number   ?? null,
+        invoice_date:     editDraft.invoice_date     ?? null,
+        event_date:       editDraft.event_date       ?? null,
+        issuing_location: editDraft.issuing_location ?? null,
+        shift_type:       editDraft.shift_type       ?? null,
+        net_food:         editDraft.net_food         ?? 0,
+        net_drinks:       editDraft.net_drinks       ?? 0,
+        net_total:        editDraft.net_total        ?? 0,
+        vat_7:            editDraft.vat_7            ?? 0,
+        vat_19:           editDraft.vat_19           ?? 0,
+        gross_total:      editDraft.gross_total      ?? 0,
+        tips:             editDraft.tips             ?? 0,
+        total_payable:    editDraft.total_payable    ?? 0,
+        bill_data:        nextData,
+      }).eq('id', editingId);
+      if (dbErr) throw dbErr;
+
+      queryClient.invalidateQueries({ queryKey: ['outgoing-bills'] });
+      setEditingId(null);
+      setEditDraft(null);
+      setEditRecipient(null);
+    } catch (err: any) {
+      alert(`Could not update the PDF: ${err?.message ?? 'Unknown error'}`);
+    } finally {
+      setRegenerating(false);
     }
   };
 
@@ -2742,13 +2850,51 @@ export default function OutgoingBillsPage() {
                                   </div>
                                 </div>
                               </div>
+                              {/* Recipient block as it appears on the PDF — editable
+                                  only when the bill stores the data needed to rebuild it. */}
+                              {editRecipient ? (
+                                <div className="mb-3 pt-3 border-t border-indigo-200">
+                                  <p className="text-xs font-bold text-gray-600 mb-2">Recipient (as printed on the PDF)</p>
+                                  <div className="grid grid-cols-3 gap-3">
+                                    {([
+                                      { label: 'Company',          key: 'company'  as const, ph: 'Valantic STI' },
+                                      { label: 'Extra line',       key: 'extra'    as const, ph: 'optional' },
+                                      { label: 'Contact',          key: 'contact'  as const, ph: 'e.g. Holzwarth' },
+                                      { label: 'Street',           key: 'street'   as const, ph: 'Kölner Str. 5' },
+                                      { label: 'Postcode',         key: 'postcode' as const, ph: '65760' },
+                                      { label: 'City',             key: 'city'     as const, ph: 'Eschborn' },
+                                    ]).map(({ label, key, ph }) => (
+                                      <div key={key}>
+                                        <label className="block text-xs font-semibold text-gray-500 mb-1">{label}</label>
+                                        <input type="text" value={editRecipient[key]} placeholder={ph}
+                                          onChange={(e) => setEditRecipient(r => r ? { ...r, [key]: e.target.value } : r)}
+                                          className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300" />
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              ) : (
+                                <p className="mb-3 pt-3 border-t border-indigo-200 text-xs text-gray-500">
+                                  This invoice was created before the PDF layout was stored, so its PDF cannot be
+                                  rebuilt. Edits here update the table only.
+                                </p>
+                              )}
+
                               <div className="flex items-center gap-2">
-                                <button onClick={saveEdit} disabled={savingEdit}
+                                <button onClick={saveEdit} disabled={savingEdit || regenerating}
                                   className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white text-xs font-bold rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors">
                                   {savingEdit ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
                                   {savingEdit ? 'Saving…' : 'Save Changes'}
                                 </button>
-                                <button onClick={() => { setEditingId(null); setEditDraft(null); }}
+                                {editRecipient && (
+                                  <button onClick={saveEditAndUpdatePdf} disabled={savingEdit || regenerating}
+                                    title="Rebuild the stored PDF with these recipient details, replacing the current file"
+                                    className="flex items-center gap-1.5 px-3 py-1.5 bg-[#1B5E20] text-white text-xs font-bold rounded-lg hover:bg-[#2E7D32] disabled:opacity-50 transition-colors">
+                                    {regenerating ? <Loader2 size={12} className="animate-spin" /> : <FileText size={12} />}
+                                    {regenerating ? 'Updating PDF…' : 'Save changes & update PDF'}
+                                  </button>
+                                )}
+                                <button onClick={() => { setEditingId(null); setEditDraft(null); setEditRecipient(null); }}
                                   className="px-3 py-1.5 text-xs font-semibold text-gray-500 hover:text-gray-700 border border-gray-200 rounded-lg bg-white transition-colors">
                                   Cancel
                                 </button>
