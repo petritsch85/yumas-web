@@ -55,12 +55,35 @@ function parseUnitKg(description: string, fallback = 1): number {
   return fallback;
 }
 
+/**
+ * Split match terms into include / exclude. A keyword prefixed with "-" is an
+ * exclusion.
+ *
+ * Matching is substring-based, which German compound nouns break badly: the item
+ * "Reis" matches Palettenp**reis**, Aktionsp**reis**, Grundp**reis** and
+ * k**reis**mattiert. A whole-word rule cannot fix it either — LANGKORN**REIS**
+ * is a genuine match with exactly the same shape — so exclusions are the way to
+ * cut the false positives out.
+ */
+function splitTerms(item: Item): { include: string[]; exclude: string[] } {
+  const raw = [item.name, ...item.keywords].filter(Boolean);
+  const include: string[] = [];
+  const exclude: string[] = [];
+  for (const term of raw) {
+    const t = term.trim();
+    if (t.startsWith('-') && t.length > 1) exclude.push(t.slice(1).trim().toLowerCase());
+    else if (t) include.push(t.toLowerCase());
+  }
+  return { include, exclude: exclude.filter(Boolean) };
+}
+
 function matchLines(item: Item, allLines: BillLine[]): BillLine[] {
-  const terms = [item.name, ...item.keywords].filter(Boolean);
+  const { include, exclude } = splitTerms(item);
   return allLines
     .filter(bl => {
       const desc = (bl.description ?? '').toLowerCase();
-      return terms.some(t => t && desc.includes(t.toLowerCase()));
+      if (exclude.some(t => desc.includes(t))) return false;
+      return include.some(t => desc.includes(t));
     })
     .sort((a, b) =>
       (b.bill?.invoice_date ?? '').localeCompare(a.bill?.invoice_date ?? '')
@@ -146,7 +169,7 @@ function ItemForm({
         </div>
         <div>
           <label className="text-xs font-medium text-gray-600 block mb-1">
-            Keywords <span className="font-normal text-gray-400">(comma-separated — for auto-matching bill lines)</span>
+            Keywords <span className="font-normal text-gray-400">(comma-separated — prefix with &quot;-&quot; to exclude, e.g. -preis)</span>
           </label>
           <input value={form.keywordsRaw} onChange={e => set('keywordsRaw', e.target.value)}
             placeholder="saure sahne, sour cream, ..."
