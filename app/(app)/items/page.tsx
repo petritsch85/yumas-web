@@ -303,14 +303,14 @@ function PurchaseHistoryModal({
             <table className="w-full text-sm">
               <thead className="bg-gray-50 sticky top-0 border-b border-gray-200">
                 <tr>
-                  <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">Date</th>
-                  <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase">Supplier</th>
-                  <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase">Description</th>
-                  <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase">Qty</th>
-                  <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase">Unit</th>
-                  <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">Price / Unit</th>
-                  <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">Price / KG or L</th>
-                  <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">Total (net)</th>
+                  <th className="px-2 py-1.5 text-left text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">Date</th>
+                  <th className="px-2 py-1.5 text-left text-xs font-semibold text-gray-500 uppercase">Supplier</th>
+                  <th className="px-2 py-1.5 text-left text-xs font-semibold text-gray-500 uppercase">Description</th>
+                  <th className="px-2 py-1.5 text-right text-xs font-semibold text-gray-500 uppercase">Qty</th>
+                  <th className="px-2 py-1.5 text-right text-xs font-semibold text-gray-500 uppercase">Unit</th>
+                  <th className="px-2 py-1.5 text-right text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">Price / Unit</th>
+                  <th className="px-2 py-1.5 text-right text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">Price / KG or L</th>
+                  <th className="px-2 py-1.5 text-right text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">Total (net)</th>
                 </tr>
               </thead>
               <tbody>
@@ -320,26 +320,26 @@ function PurchaseHistoryModal({
                   const pricePerKg = line.unit_price / unitKg;
                   return (
                     <tr key={line.id} className="border-t border-gray-100 hover:bg-gray-50">
-                      <td className="px-4 py-2.5 text-gray-600 whitespace-nowrap font-mono text-xs">
+                      <td className="px-2 py-1.5 text-gray-600 whitespace-nowrap font-mono text-xs">
                         {fmtDate(bill?.invoice_date ?? null)}
                       </td>
-                      <td className="px-4 py-2.5 text-gray-800 text-sm whitespace-nowrap">
+                      <td className="px-2 py-1.5 text-gray-800 text-sm whitespace-nowrap">
                         {bill?.supplier_name
                           ? resolveSupplierName(bill.supplier_name, counterparties)
                           : '—'}
                       </td>
-                      <td className="px-4 py-2.5 text-gray-500 text-xs max-w-[220px] truncate" title={line.description}>
+                      <td className="px-2 py-1.5 text-gray-500 text-xs max-w-[220px] truncate" title={line.description}>
                         {line.description}
                       </td>
-                      <td className="px-4 py-2.5 text-right text-gray-700 tabular-nums">{line.quantity}</td>
-                      <td className="px-4 py-2.5 text-right text-gray-500 text-xs whitespace-nowrap">
+                      <td className="px-2 py-1.5 text-right text-gray-700 tabular-nums">{line.quantity}</td>
+                      <td className="px-2 py-1.5 text-right text-gray-500 text-xs whitespace-nowrap">
                         {unitKg === 1 ? '1 kg' : `${unitKg} kg`}
                       </td>
-                      <td className="px-4 py-2.5 text-right text-gray-900 font-medium tabular-nums">{fmt(line.unit_price)}</td>
-                      <td className="px-4 py-2.5 text-right text-[#1B5E20] font-semibold tabular-nums">
+                      <td className="px-2 py-1.5 text-right text-gray-900 font-medium tabular-nums">{fmt(line.unit_price)}</td>
+                      <td className="px-2 py-1.5 text-right text-[#1B5E20] font-semibold tabular-nums">
                         {fmt(pricePerKg)}
                       </td>
-                      <td className="px-4 py-2.5 text-right font-semibold text-gray-900 tabular-nums">{fmt(line.line_total)}</td>
+                      <td className="px-2 py-1.5 text-right font-semibold text-gray-900 tabular-nums">{fmt(line.line_total)}</td>
                     </tr>
                   );
                 })}
@@ -477,17 +477,18 @@ export default function ItemsPage() {
               <table className="w-full text-sm min-w-[1000px]">
                 <thead className="bg-gray-50 border-b border-gray-200">
                   <tr>
-                    <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Name</th>
-                    <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">Primary Supplier</th>
-                    <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">Secondary Suppliers</th>
-                    <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap"
+                    <th className="px-2 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Name</th>
+                  <th className="px-2 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">Category</th>
+                    <th className="px-2 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">Primary Supplier</th>
+                    <th className="px-2 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">Secondary Suppliers</th>
+                    <th className="px-2 py-2 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap"
                       title={`Net spend on this item since ${YTD_START.split('-').reverse().join('.')}`}>
                       Total YTD
                     </th>
-                    <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">Price / Unit</th>
-                    <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">Price / kg·L</th>
-                    <th className="px-4 py-2.5 text-center text-xs font-semibold text-gray-500 uppercase tracking-wide">History</th>
-                    <th className="px-4 py-2.5 w-16"></th>
+                    <th className="px-2 py-2 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">Price / Unit</th>
+                    <th className="px-2 py-2 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">Price / kg·L</th>
+                    <th className="px-2 py-2 text-center text-xs font-semibold text-gray-500 uppercase tracking-wide">History</th>
+                    <th className="px-2 py-2 w-16"></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
@@ -495,7 +496,7 @@ export default function ItemsPage() {
                     if (editingId === item.id) {
                       return (
                         <tr key={item.id} className="bg-indigo-50/40">
-                          <td colSpan={8} className="px-4 py-4">
+                          <td colSpan={9} className="px-4 py-4">
                             <ItemForm
                               initial={item}
                               counterparties={counterparties}
@@ -521,13 +522,8 @@ export default function ItemsPage() {
 
                     return (
                       <tr key={item.id} className="hover:bg-gray-50 transition-colors">
-                        <td className="px-4 py-2.5">
-                          <div className="flex items-center gap-1.5">
-                            <span className="font-semibold text-gray-900">{item.name}</span>
-                            <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full whitespace-nowrap ${CAT_CHIP[item.category ?? 'Other'] ?? CAT_CHIP.Other}`}>
-                              {item.category ?? 'Other'}
-                            </span>
-                          </div>
+                        <td className="px-2 py-1.5">
+                          <div className="font-semibold text-gray-900 text-xs">{item.name}</div>
                           {item.keywords.length > 0 && (
                             <div className="flex items-center gap-1 mt-0.5 flex-wrap">
                               <Tag size={9} className="text-gray-400 flex-shrink-0" />
@@ -540,14 +536,19 @@ export default function ItemsPage() {
                             <div className="text-[10px] text-gray-400 mt-0.5">1 unit = {item.kg_per_unit} kg / L</div>
                           ) : null}
                         </td>
-                        <td className="px-4 py-2.5">
+                        <td className="px-2 py-1.5 whitespace-nowrap">
+                          <span className={`text-xs font-medium px-1.5 py-0.5 rounded-full ${CAT_CHIP[item.category ?? 'Other'] ?? CAT_CHIP.Other}`}>
+                            {item.category ?? 'Other'}
+                          </span>
+                        </td>
+                        <td className="px-2 py-1.5">
                           {primaryCp ? (
                             <span className="inline-block px-2 py-0.5 bg-green-50 text-green-800 text-xs rounded-full border border-green-200">
                               {primaryCp.name}
                             </span>
                           ) : <span className="text-gray-300 text-xs">—</span>}
                         </td>
-                        <td className="px-4 py-2.5">
+                        <td className="px-2 py-1.5">
                           <div className="flex flex-wrap gap-1">
                             {secondaryCps.length > 0
                               ? secondaryCps.map(cp => (
@@ -558,22 +559,22 @@ export default function ItemsPage() {
                               : <span className="text-gray-300 text-xs">—</span>}
                           </div>
                         </td>
-                        <td className="px-4 py-2.5 text-right tabular-nums">
+                        <td className="px-2 py-1.5 text-right tabular-nums">
                           {totalYtd > 0
                             ? <span className="font-bold text-gray-900">{fmt(totalYtd)}</span>
                             : <span className="text-gray-300 text-xs">—</span>}
                         </td>
-                        <td className="px-4 py-2.5 text-right tabular-nums">
+                        <td className="px-2 py-1.5 text-right tabular-nums">
                           {pricePerUnit != null
                             ? <span className="font-semibold text-gray-900">{fmt(pricePerUnit)}</span>
                             : <span className="text-gray-300 text-xs">—</span>}
                         </td>
-                        <td className="px-4 py-2.5 text-right tabular-nums">
+                        <td className="px-2 py-1.5 text-right tabular-nums">
                           {pricePerKg != null
                             ? <span className="font-semibold text-[#1B5E20]">{fmt(pricePerKg)}</span>
                             : <span className="text-gray-300 text-xs">—</span>}
                         </td>
-                        <td className="px-4 py-2.5 text-center">
+                        <td className="px-2 py-1.5 text-center">
                           <button onClick={() => setHistoryItem(item)}
                             title="View purchase history"
                             className="inline-flex items-center gap-1 text-indigo-600 hover:text-indigo-800 transition-colors">
@@ -581,7 +582,7 @@ export default function ItemsPage() {
                             <span className="text-[10px] text-gray-400">{matched.length}</span>
                           </button>
                         </td>
-                        <td className="px-4 py-2.5">
+                        <td className="px-2 py-1.5">
                           <div className="flex items-center gap-1">
                             <button onClick={() => setEditingId(item.id)}
                               className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded transition-colors">
