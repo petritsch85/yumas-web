@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
 import { fetchAllRows } from '@/lib/fetch-all';
@@ -21,6 +21,8 @@ type BillLine = {
     category:       string | null;
   };
 };
+
+type PurchasedGood = { id: string; name: string; keywords: string[] };
 
 /* ─── Constants ──────────────────────────────────────────────────────────── */
 const PRIMARY_CATEGORIES = ['Food Cost'] as const;
@@ -127,6 +129,8 @@ export default function COGSPage() {
   const [primaryCat]  = useState<string>('Food Cost');
   const [subCat, setSubCat]     = useState<SubCategory>('All');
   const [timeMode, setTimeMode] = useState<'week' | 'month'>('month');
+  /** Off: one row per item across all stores (matches the Items page). */
+  const [splitByLocation, setSplitByLocation] = useState(false);
   const [sortKey, setSortKey]   = useState<string>('total');   // 'total' | period key
   const [sortDir, setSortDir]   = useState<'desc' | 'asc'>('desc');
 
@@ -156,13 +160,48 @@ export default function COGSPage() {
     },
   });
 
+  /* ─ Purchased goods: the canonical item names bill lines roll up into ─ */
+  const { data: goods = [] } = useQuery<PurchasedGood[]>({
+    queryKey: ['purchased-goods'],
+    queryFn: async () => {
+      const r = await fetch('/api/items');
+      if (!r.ok) throw new Error('Could not load purchased goods');
+      const j = await r.json();
+      return (Array.isArray(j) ? j : []) as PurchasedGood[];
+    },
+  });
+
+  /** Include / exclude terms per good — mirrors the Items page matcher. */
+  const goodTerms = useMemo(() => goods.map((g) => {
+    const raw = [g.name, ...(Array.isArray(g.keywords) ? g.keywords : [])];
+    const inc: string[] = [];
+    const exc: string[] = [];
+    for (const term of raw) {
+      const t = String(term ?? '').trim();
+      if (t.startsWith('-') && t.length > 1) exc.push(t.slice(1).trim().toLowerCase());
+      else if (t) inc.push(t.toLowerCase());
+    }
+    return { name: g.name, inc, exc };
+  }), [goods]);
+
+  /** The purchased good a description belongs to, or null when nothing matches. */
+  const goodFor = useCallback((description: string): string | null => {
+    const d = (description ?? '').toLowerCase();
+    for (const g of goodTerms) {
+      if (g.exc.some((e) => d.includes(e))) continue;
+      if (g.inc.some((i) => d.includes(i))) return g.name;
+    }
+    return null;
+  }, [goodTerms]);
+
   /* ─ Classify and filter ─ */
   const lines = useMemo(() => {
     return rawLines.map((l) => ({
       ...l,
       subCategory: classifyLine(l.description),
+      good:        goodFor(l.description),
     }));
-  }, [rawLines]);
+  }, [rawLines, goodFor]);
 
   const filtered = useMemo(() => {
     if (subCat === 'All') return lines;
@@ -178,36 +217,53 @@ export default function COGSPage() {
     }
     const periods = Array.from(periodSet).sort();
 
-    // Group by (description, location)
+    // A line rolls up into its purchased good when one matches, so the same
+    // ingredient bought under many supplier descriptions lands on one row.
+    // Unmatched lines keep grouping by their raw description — dropping them
+    // would hide ~87% of Food Cost value.
+    //
+    // Location is part of the key only when "Split by location" is on; otherwise
+    // an item's spend is summed across every store, matching the Items page.
     type RowKey = string;
     const rowMap = new Map<RowKey, {
       description: string;
       location:    string;
+      locations:   Set<string>;
       subCategory: string;
+      isGood:      boolean;
       totals:      Record<string, number>;
       rowTotal:    number;
     }>();
 
     for (const l of filtered) {
       if (!l.bill.invoice_date) continue;
-      const pk  = periodKey(l.bill.invoice_date, timeMode);
-      const loc = l.bill.location_label ?? '—';
-      const key = `${l.description}||${loc}`;
+      const pk    = periodKey(l.bill.invoice_date, timeMode);
+      const loc   = l.bill.location_label ?? '—';
+      const label = l.good ?? l.description;
+      const key   = splitByLocation ? `${label}||${loc}` : label;
       if (!rowMap.has(key)) {
-        rowMap.set(key, { description: l.description, location: loc, subCategory: l.subCategory, totals: {}, rowTotal: 0 });
+        rowMap.set(key, {
+          description: label,
+          location:    loc,
+          locations:   new Set(),
+          subCategory: l.subCategory,
+          isGood:      Boolean(l.good),
+          totals:      {},
+          rowTotal:    0,
+        });
       }
       const row = rowMap.get(key)!;
+      row.locations.add(loc);
       row.totals[pk] = (row.totals[pk] ?? 0) + l.line_total;
       row.rowTotal  += l.line_total;
     }
 
-    // Sort rows by description then location
     const rows = Array.from(rowMap.values()).sort((a, b) =>
       a.description.localeCompare(b.description) || a.location.localeCompare(b.location)
     );
 
     return { periods, rows };
-  }, [filtered, timeMode]);
+  }, [filtered, timeMode, splitByLocation]);
 
   /* ─ Sorted rows ─ */
   const sortedRows = useMemo(() => {
@@ -323,9 +379,21 @@ export default function COGSPage() {
             <CalendarDays size={12} /> {t('analysis.byWeek')}
           </button>
         </div>
+        <button
+          onClick={() => setSplitByLocation(v => !v)}
+          title="Off: an item's spend is summed across every store, matching the Items page"
+          className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border transition-colors ${
+            splitByLocation
+              ? 'bg-[#1B5E20] border-[#1B5E20] text-white'
+              : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+          }`}>
+          Split by location
+        </button>
+
         {!isLoading && (
-          <div className="text-xs text-gray-500">
-            <span className="font-semibold text-gray-900">{rows.length}</span> item-location combinations ·{' '}
+          <div className="text-xs text-gray-500 ml-auto">
+            <span className="font-semibold text-gray-900">{rows.length}</span> rows ·{' '}
+            <span className="font-semibold text-[#1B5E20]">{rows.filter(r => r.isGood).length}</span> from Purchased Goods ·{' '}
             Total: <span className="font-semibold text-[#1B5E20]">{fmtEur(grandTotal)} €</span>
           </div>
         )}
@@ -389,10 +457,18 @@ export default function COGSPage() {
                 {sortedRows.map((row, i) => (
                   <tr key={i} className="border-t border-gray-50 hover:bg-gray-50/40">
                     <td className="sticky left-0 z-10 bg-white px-4 py-2.5 text-sm text-gray-800 border-r border-gray-100 hover:bg-gray-50/40 min-w-[220px]">
-                      {row.description}
+                      <span className={row.isGood ? 'font-semibold text-gray-900' : ''}>{row.description}</span>
+                      {row.isGood && (
+                        <span title="Rolled up from Purchased Goods — every supplier description for this item"
+                          className="ml-1.5 align-middle text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-[#1B5E20]/10 text-[#1B5E20]">
+                          item
+                        </span>
+                      )}
                     </td>
                     <td className="sticky left-[220px] z-10 bg-white px-3 py-2.5 text-xs text-gray-500 border-r border-gray-200 hover:bg-gray-50/40 min-w-[110px]">
-                      {row.location}
+                      {row.locations.size > 1
+                        ? <span title={[...row.locations].sort().join(', ')}>{row.locations.size} stores</span>
+                        : row.location}
                     </td>
                     {subCat === 'All' && (
                       <td className="px-3 py-2.5 text-xs border-r border-gray-100">
