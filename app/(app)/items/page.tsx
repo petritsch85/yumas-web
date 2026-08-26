@@ -67,6 +67,23 @@ function matchLines(item: Item, allLines: BillLine[]): BillLine[] {
     );
 }
 
+/** Start of the year-to-date window for the Total YTD column. */
+const YTD_START = '2026-01-01';
+
+/**
+ * Net spend across the given bill lines from `since` onward.
+ *
+ * line_total is the net figure on the invoice line, so this sums netto — lines
+ * on bills with no invoice_date are skipped rather than assumed to be in range.
+ */
+function sumNetSince(lines: BillLine[], since: string): number {
+  return lines.reduce((sum, l) => {
+    const d = l.bill?.invoice_date;
+    if (!d || d < since) return sum;
+    return sum + (l.line_total ?? 0);
+  }, 0);
+}
+
 function resolveSupplierName(supplierName: string, counterparties: Counterparty[]): string {
   const cp = counterparties.find(c => {
     const terms = c.keywords.length > 0 ? c.keywords : [c.name];
@@ -443,12 +460,16 @@ export default function ItemsPage() {
       ) : (
         <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
           <div className="overflow-x-auto">
-            <table className="w-full text-sm min-w-[900px]">
+            <table className="w-full text-sm min-w-[1000px]">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
                   <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Name</th>
                   <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">Primary Supplier</th>
                   <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">Secondary Suppliers</th>
+                  <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap"
+                    title={`Net spend on this item since ${YTD_START.split('-').reverse().join('.')}`}>
+                    Total YTD
+                  </th>
                   <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">Price / Unit</th>
                   <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">Price / kg·L</th>
                   <th className="px-4 py-2.5 text-center text-xs font-semibold text-gray-500 uppercase tracking-wide">History</th>
@@ -460,7 +481,7 @@ export default function ItemsPage() {
                   if (editingId === item.id) {
                     return (
                       <tr key={item.id} className="bg-indigo-50/40">
-                        <td colSpan={7} className="px-4 py-4">
+                        <td colSpan={8} className="px-4 py-4">
                           <ItemForm
                             initial={item}
                             counterparties={counterparties}
@@ -475,6 +496,7 @@ export default function ItemsPage() {
 
                   const matched      = matchLines(item, billLines);
                   const latest       = matched[0] ?? null;
+                  const totalYtd     = sumNetSince(matched, YTD_START);
                   const kgPerUnit    = item.kg_per_unit ?? 1;
                   const pricePerUnit = latest?.unit_price ?? null;
                   const pricePerKg   = pricePerUnit != null ? pricePerUnit / kgPerUnit : null;
@@ -516,6 +538,11 @@ export default function ItemsPage() {
                             ))
                             : <span className="text-gray-300 text-xs">—</span>}
                         </div>
+                      </td>
+                      <td className="px-4 py-2.5 text-right tabular-nums">
+                        {totalYtd > 0
+                          ? <span className="font-bold text-gray-900">{fmt(totalYtd)}</span>
+                          : <span className="text-gray-300 text-xs">—</span>}
                       </td>
                       <td className="px-4 py-2.5 text-right tabular-nums">
                         {pricePerUnit != null
