@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, Fragment } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Pencil, Trash2, X, Check, ChevronDown, ChevronUp, Tag, TrendingUp, TrendingDown, Minus, Link2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase-browser';
@@ -792,81 +792,119 @@ export default function CounterpartiesPage() {
     setExpandedId(prev => prev === id ? null : id);
 
   /** One counterparty card. Rendered by both the Suppliers and Other sections. */
+  const CP_COLS = 6;
+
+  /** One counterparty as a compact table row, plus its edit form / detail panel. */
   const renderCounterparty = (cp: Counterparty) => {
-            const isExpanded = expandedId === cp.id;
-            return (
-              <div key={cp.id} className={`bg-white border rounded-xl overflow-hidden transition-colors ${isExpanded ? 'border-[#1B5E20]/40' : 'border-gray-200 hover:border-gray-300'}`}>
-                {editingId === cp.id ? (
-                  <div className="p-4">
-                    <CounterpartyForm
-                      initial={cp}
-                      onSave={data => updateMut.mutate({ id: cp.id, body: data })}
-                      onCancel={() => setEditingId(null)}
-                      saving={updateMut.isPending}
-                    />
-                  </div>
-                ) : (
-                  <>
-                    {/* Header row */}
-                    <div className="px-4 py-3 flex items-start gap-3">
-                      {/* Expand toggle */}
-                      <button
-                        onClick={() => toggleExpand(cp.id)}
-                        className="flex-shrink-0 mt-0.5 text-gray-400 hover:text-[#1B5E20] transition-colors"
-                      >
-                        {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-                      </button>
+    const isExpanded = expandedId === cp.id;
 
-                      {/* Info */}
-                      <div className="flex-1 min-w-0 cursor-pointer" onClick={() => toggleExpand(cp.id)}>
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-semibold text-gray-900">{cp.name}</span>
-                          {cp.category && (
-                            <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${
-                              cp.category.startsWith('C - ') ? 'bg-red-100 text-gray-700' : 'bg-green-100 text-gray-700'
-                            }`}>{cp.category}</span>
-                          )}
-                          {cp.default_vat_rate != null && (
-                            <span className="text-xs px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700 font-medium">
-                              {cp.default_vat_rate}% VAT
-                            </span>
-                          )}
-                        </div>
-                        {cp.keywords.length > 0 && (
-                          <div className="flex items-center gap-1 mt-1.5 flex-wrap">
-                            <Tag size={11} className="text-gray-400 flex-shrink-0" />
-                            {cp.keywords.map(kw => (
-                              <span key={kw} className="text-xs bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">{kw}</span>
-                            ))}
-                          </div>
-                        )}
-                        {cp.notes && <div className="text-xs text-gray-400 mt-1 truncate">{cp.notes}</div>}
-                      </div>
+    // Editing swaps the row for a full-width form row
+    if (editingId === cp.id) {
+      return (
+        <Fragment key={cp.id}>
+          <tr className="bg-indigo-50/60">
+            <td colSpan={CP_COLS} className="px-4 py-4">
+              <CounterpartyForm
+                initial={cp}
+                onSave={data => updateMut.mutate({ id: cp.id, body: data })}
+                onCancel={() => setEditingId(null)}
+                saving={updateMut.isPending}
+              />
+            </td>
+          </tr>
+        </Fragment>
+      );
+    }
 
-                      {/* Actions */}
-                      <div className="flex items-center gap-1 flex-shrink-0">
-                        <button onClick={() => { setEditingId(cp.id); setExpandedId(null); }}
-                          className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded transition-colors">
-                          <Pencil size={14} />
-                        </button>
-                        <button onClick={() => handleDelete(cp)} disabled={deleteMut.isPending}
-                          className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded transition-colors">
-                          <Trash2 size={14} />
-                        </button>
-                      </div>
-                    </div>
+    return (
+      <Fragment key={cp.id}>
+        <tr className={`border-b border-gray-100 hover:bg-gray-50 transition-colors ${isExpanded ? 'bg-gray-50' : ''}`}>
+          <td className="px-2 py-1.5 w-6">
+            <button onClick={() => toggleExpand(cp.id)}
+              className="text-gray-400 hover:text-[#1B5E20] transition-colors align-middle">
+              {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+            </button>
+          </td>
 
-                    {/* Expandable panel */}
-                    {isExpanded && <CpPanel cp={cp} />}
-                  </>
-                )}
+          <td className="px-2 py-1.5 font-semibold text-gray-900 text-xs cursor-pointer whitespace-nowrap"
+            onClick={() => toggleExpand(cp.id)}>
+            {cp.name}
+          </td>
+
+          <td className="px-2 py-1.5">
+            {cp.category && (
+              <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium whitespace-nowrap ${
+                cp.category.startsWith('C - ') ? 'bg-red-100 text-gray-700' : 'bg-green-100 text-gray-700'
+              }`}>{cp.category}</span>
+            )}
+          </td>
+
+          <td className="px-2 py-1.5 whitespace-nowrap">
+            {cp.default_vat_rate != null && (
+              <span className="text-xs px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700 font-medium">
+                {cp.default_vat_rate}% VAT
+              </span>
+            )}
+          </td>
+
+          <td className="px-2 py-1.5 max-w-[260px]">
+            {cp.keywords.length > 0 && (
+              <div className="flex items-center gap-1 flex-wrap">
+                <Tag size={10} className="text-gray-400 flex-shrink-0" />
+                {cp.keywords.map(kw => (
+                  <span key={kw} className="text-xs bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">{kw}</span>
+                ))}
               </div>
-            );
+            )}
+            {cp.notes && <div className="text-xs text-gray-400 truncate mt-0.5">{cp.notes}</div>}
+          </td>
+
+          <td className="px-2 py-1.5 text-right whitespace-nowrap">
+            <button onClick={() => { setEditingId(cp.id); setExpandedId(null); }}
+              className="p-1 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded transition-colors">
+              <Pencil size={13} />
+            </button>
+            <button onClick={() => handleDelete(cp)} disabled={deleteMut.isPending}
+              className="p-1 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded transition-colors">
+              <Trash2 size={13} />
+            </button>
+          </td>
+        </tr>
+
+        {isExpanded && (
+          <tr className="border-b border-gray-100">
+            <td colSpan={CP_COLS} className="p-0 bg-gray-50/60">
+              <CpPanel cp={cp} />
+            </td>
+          </tr>
+        )}
+      </Fragment>
+    );
   };
+
+  /** Shared header + wrapper for both counterparty tables. */
+  const cpTable = (rows: Counterparty[]) => (
+    <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="bg-gray-50 border-b border-gray-200">
+            <th className="px-2 py-2 w-6" />
+            {['Name', 'Category', 'VAT', 'Keywords'].map(h => (
+              <th key={h} className="px-2 py-2 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 whitespace-nowrap">
+                {h}
+              </th>
+            ))}
+            <th className="px-2 py-2" />
+          </tr>
+        </thead>
+        <tbody>{rows.map(renderCounterparty)}</tbody>
+      </table>
+    </div>
+  );
 
 
   return (
-    <div className="max-w-5xl mx-auto px-4 py-8">
+    <div className="max-w-7xl mx-auto px-4 py-8">
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Counterparties</h1>
@@ -920,7 +958,7 @@ export default function CounterpartiesPage() {
                 <p className="text-xs text-gray-400">No counterparties categorised as C - Suppliers</p>
               </div>
             ) : (
-              <div className="space-y-2">{supplierCps.map(renderCounterparty)}</div>
+              cpTable(supplierCps)
             )}
           </section>
 
@@ -936,7 +974,7 @@ export default function CounterpartiesPage() {
                 <p className="text-xs text-gray-400">Nothing here — every counterparty is a supplier</p>
               </div>
             ) : (
-              <div className="space-y-2">{otherCps.map(renderCounterparty)}</div>
+              cpTable(otherCps)
             )}
           </section>
         </div>
