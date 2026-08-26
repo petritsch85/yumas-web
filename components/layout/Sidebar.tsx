@@ -16,9 +16,7 @@ import {
   ClipboardList,
   LayoutList,
   Factory,
-  ShoppingCart,
   TrendingUp,
-  Trash2,
   CalendarDays,
   BarChart3,
   Banknote,
@@ -133,15 +131,7 @@ const NAV_GROUPS: NavGroup[] = [
       { labelKey: 'sidebar.nav.packing',  href: '/delivery?view=packer', icon: Package, staffOnly: true, permKey: 'packer' },
       { labelKey: 'sidebar.nav.delivery', href: '/delivery?view=driver', icon: Truck,   staffOnly: true, permKey: 'driver' },
       { labelKey: 'sidebar.nav.recipes', href: '/products/semi-finished', icon: FlaskConical, permKey: 'production' },
-      { labelKey: 'sidebar.nav.buying',      href: '/purchase-orders',         icon: ShoppingCart, permKey: 'buying' },
       { labelKey: 'sidebar.nav.controlling', href: '/coming-soon/controlling', icon: TrendingUp,   adminOnly: true },
-      { labelKey: 'sidebar.nav.wasteLog',    href: '/waste',                   icon: Trash2,       permKey: 'waste_log' },
-      {
-        labelKey: 'sidebar.nav.analysis', href: '/analysis', icon: BarChart3, permKey: 'analysis',
-        children: [
-          { labelKey: 'sidebar.nav.storeYield', href: '/analysis/store-yield', icon: BarChart3 },
-        ],
-      },
     ],
   },
   {
