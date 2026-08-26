@@ -3,6 +3,7 @@
 import React, { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
+import { fetchAllRows } from '@/lib/fetch-all';
 import { TrendingDown, Calendar, CalendarDays, ChevronUp, ChevronDown as ChevronDownIcon } from 'lucide-react';
 import { useT } from '@/lib/i18n';
 
@@ -142,12 +143,16 @@ export default function COGSPage() {
   const { data: rawLines = [], isLoading } = useQuery<BillLine[]>({
     queryKey: ['cogs-lines', primaryCat],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('bill_lines')
-        .select('id, description, quantity, unit_price, line_total, vat_rate, bill:bills!inner(invoice_date, location_label, category)')
-        .eq('bills.category', primaryCat);
-      if (error) throw error;
-      return (data ?? []) as unknown as BillLine[];
+      // Paginated: this exceeds PostgREST's 1000-row cap, which would silently
+      // drop most of the lines and under-report COGS.
+      return await fetchAllRows<BillLine>((from, to) =>
+        supabase
+          .from('bill_lines')
+          .select('id, description, quantity, unit_price, line_total, vat_rate, bill:bills!inner(invoice_date, location_label, category)')
+          .eq('bills.category', primaryCat)
+          .order('id')
+          .range(from, to) as unknown as PromiseLike<{ data: BillLine[] | null; error: { message: string } | null }>,
+      );
     },
   });
 

@@ -3,6 +3,7 @@
 import React, { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
+import { fetchAllRows } from '@/lib/fetch-all';
 import {
   BarChart3, Plus, Trash2, AlertTriangle, CheckCircle2, Info,
 } from 'lucide-react';
@@ -94,12 +95,16 @@ export default function StoreYieldPage() {
   const { data: billLines = [], isLoading: loadingBills } = useQuery<BillLine[]>({
     queryKey: ['yield-bills', store],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('bill_lines')
-        .select('description, quantity, unit_price, line_total, bill:bills!inner(invoice_date, location_label)')
-        .eq('bills.location_label', store);
-      if (error) throw error;
-      return (data ?? []) as unknown as BillLine[];
+      // Paginated: every store is past PostgREST's 1000-row cap, which would
+      // silently drop lines and under-report yield.
+      return await fetchAllRows<BillLine>((from, to) =>
+        supabase
+          .from('bill_lines')
+          .select('id, description, quantity, unit_price, line_total, bill:bills!inner(invoice_date, location_label)')
+          .eq('bills.location_label', store)
+          .order('id')
+          .range(from, to) as unknown as PromiseLike<{ data: BillLine[] | null; error: { message: string } | null }>,
+      );
     },
   });
 
