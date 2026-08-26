@@ -15,7 +15,29 @@ type Item = {
   primary_supplier_id: string | null;
   secondary_supplier_ids: string[];
   kg_per_unit: number | null;
+  /** Grouping for the Items page. Null is treated as "Other". */
+  category: string | null;
   created_at: string;
+};
+
+/** Mirrors the COGS sub-categories so the two pages speak the same language. */
+const ITEM_CATEGORIES = ['Meat', 'Fruit & Veg', 'Spices', 'Dairy', 'Leergut', 'Other'] as const;
+type ItemCategory = typeof ITEM_CATEGORIES[number];
+
+/** The three tables. Anything not Meat or Fruit & Veg falls into Other. */
+const ITEM_SECTIONS: { label: string; match: (c: string | null) => boolean; tone: string }[] = [
+  { label: 'Meat',        match: c => c === 'Meat',        tone: 'text-red-700 bg-red-50 border-red-200' },
+  { label: 'Fruit & Veg', match: c => c === 'Fruit & Veg', tone: 'text-green-700 bg-green-50 border-green-200' },
+  { label: 'Other',       match: c => c !== 'Meat' && c !== 'Fruit & Veg', tone: 'text-gray-600 bg-gray-100 border-gray-200' },
+];
+
+const CAT_CHIP: Record<string, string> = {
+  'Meat':        'bg-red-100 text-red-800',
+  'Fruit & Veg': 'bg-green-100 text-green-800',
+  'Spices':      'bg-amber-100 text-amber-800',
+  'Dairy':       'bg-blue-100 text-blue-800',
+  'Leergut':     'bg-yellow-100 text-yellow-800',
+  'Other':       'bg-gray-100 text-gray-600',
 };
 
 type Bill = { id: string; invoice_date: string | null; supplier_name: string };
@@ -31,6 +53,7 @@ type BillLine = {
 
 type FormState = {
   name: string;
+  category: string;
   keywordsRaw: string;
   primary_supplier_id: string;
   secondary_supplier_ids: string[];
@@ -131,6 +154,7 @@ function ItemForm({
 }) {
   const [form, setForm] = useState<FormState>({
     name:                   initial?.name ?? '',
+    category:               initial?.category ?? 'Other',
     keywordsRaw:            (initial?.keywords ?? []).join(', '),
     primary_supplier_id:    initial?.primary_supplier_id ?? '',
     secondary_supplier_ids: initial?.secondary_supplier_ids ?? [],
@@ -174,6 +198,14 @@ function ItemForm({
           <input value={form.keywordsRaw} onChange={e => set('keywordsRaw', e.target.value)}
             placeholder="saure sahne, sour cream, ..."
             className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
+        </div>
+        <div>
+          <label className="text-xs font-medium text-gray-600 block mb-1">Category</label>
+          <select value={form.category}
+            onChange={e => set('category', e.target.value)}
+            className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-green-500">
+            {ITEM_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
         </div>
         <div>
           <label className="text-xs font-medium text-gray-600 block mb-1">Primary Supplier</label>
@@ -411,6 +443,7 @@ export default function ItemsPage() {
     primary_supplier_id:    data.primary_supplier_id || null,
     secondary_supplier_ids: data.secondary_supplier_ids,
     kg_per_unit:            data.kg_per_unit !== '' ? Number(data.kg_per_unit) : null,
+    category:               data.category || 'Other',
   });
 
   const createMut = useMutation({
@@ -436,6 +469,143 @@ export default function ItemsPage() {
     () => (historyItem ? matchLines(historyItem, billLines) : []),
     [historyItem, billLines]
   );
+
+  /** One items table. Rendered once per category section. */
+  const itemsTable = (rows: Item[]) => (
+          <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm min-w-[1000px]">
+                <thead className="bg-gray-50 border-b border-gray-200">
+                  <tr>
+                    <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Name</th>
+                    <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">Primary Supplier</th>
+                    <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">Secondary Suppliers</th>
+                    <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap"
+                      title={`Net spend on this item since ${YTD_START.split('-').reverse().join('.')}`}>
+                      Total YTD
+                    </th>
+                    <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">Price / Unit</th>
+                    <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">Price / kg·L</th>
+                    <th className="px-4 py-2.5 text-center text-xs font-semibold text-gray-500 uppercase tracking-wide">History</th>
+                    <th className="px-4 py-2.5 w-16"></th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {rows.map(item => {
+                    if (editingId === item.id) {
+                      return (
+                        <tr key={item.id} className="bg-indigo-50/40">
+                          <td colSpan={8} className="px-4 py-4">
+                            <ItemForm
+                              initial={item}
+                              counterparties={counterparties}
+                              onSave={data => updateMut.mutate({ id: item.id, body: buildPayload(data) })}
+                              onCancel={() => setEditingId(null)}
+                              saving={updateMut.isPending}
+                            />
+                          </td>
+                        </tr>
+                      );
+                    }
+
+                    const matched      = matchLines(item, billLines);
+                    const latest       = matched[0] ?? null;
+                    const totalYtd     = sumNetSince(matched, YTD_START);
+                    const kgPerUnit    = item.kg_per_unit ?? 1;
+                    const pricePerUnit = latest?.unit_price ?? null;
+                    const pricePerKg   = pricePerUnit != null ? pricePerUnit / kgPerUnit : null;
+                    const primaryCp    = counterparties.find(c => c.id === item.primary_supplier_id);
+                    const secondaryCps = item.secondary_supplier_ids
+                      .map(id => counterparties.find(c => c.id === id))
+                      .filter((c): c is Counterparty => Boolean(c));
+
+                    return (
+                      <tr key={item.id} className="hover:bg-gray-50 transition-colors">
+                        <td className="px-4 py-2.5">
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-semibold text-gray-900">{item.name}</span>
+                            <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full whitespace-nowrap ${CAT_CHIP[item.category ?? 'Other'] ?? CAT_CHIP.Other}`}>
+                              {item.category ?? 'Other'}
+                            </span>
+                          </div>
+                          {item.keywords.length > 0 && (
+                            <div className="flex items-center gap-1 mt-0.5 flex-wrap">
+                              <Tag size={9} className="text-gray-400 flex-shrink-0" />
+                              {item.keywords.map(kw => (
+                                <span key={kw} className="text-[10px] bg-gray-100 text-gray-500 px-1 rounded">{kw}</span>
+                              ))}
+                            </div>
+                          )}
+                          {item.kg_per_unit ? (
+                            <div className="text-[10px] text-gray-400 mt-0.5">1 unit = {item.kg_per_unit} kg / L</div>
+                          ) : null}
+                        </td>
+                        <td className="px-4 py-2.5">
+                          {primaryCp ? (
+                            <span className="inline-block px-2 py-0.5 bg-green-50 text-green-800 text-xs rounded-full border border-green-200">
+                              {primaryCp.name}
+                            </span>
+                          ) : <span className="text-gray-300 text-xs">—</span>}
+                        </td>
+                        <td className="px-4 py-2.5">
+                          <div className="flex flex-wrap gap-1">
+                            {secondaryCps.length > 0
+                              ? secondaryCps.map(cp => (
+                                <span key={cp.id} className="inline-block px-2 py-0.5 bg-gray-100 text-gray-600 text-xs rounded-full">
+                                  {cp.name}
+                                </span>
+                              ))
+                              : <span className="text-gray-300 text-xs">—</span>}
+                          </div>
+                        </td>
+                        <td className="px-4 py-2.5 text-right tabular-nums">
+                          {totalYtd > 0
+                            ? <span className="font-bold text-gray-900">{fmt(totalYtd)}</span>
+                            : <span className="text-gray-300 text-xs">—</span>}
+                        </td>
+                        <td className="px-4 py-2.5 text-right tabular-nums">
+                          {pricePerUnit != null
+                            ? <span className="font-semibold text-gray-900">{fmt(pricePerUnit)}</span>
+                            : <span className="text-gray-300 text-xs">—</span>}
+                        </td>
+                        <td className="px-4 py-2.5 text-right tabular-nums">
+                          {pricePerKg != null
+                            ? <span className="font-semibold text-[#1B5E20]">{fmt(pricePerKg)}</span>
+                            : <span className="text-gray-300 text-xs">—</span>}
+                        </td>
+                        <td className="px-4 py-2.5 text-center">
+                          <button onClick={() => setHistoryItem(item)}
+                            title="View purchase history"
+                            className="inline-flex items-center gap-1 text-indigo-600 hover:text-indigo-800 transition-colors">
+                            <History size={15} />
+                            <span className="text-[10px] text-gray-400">{matched.length}</span>
+                          </button>
+                        </td>
+                        <td className="px-4 py-2.5">
+                          <div className="flex items-center gap-1">
+                            <button onClick={() => setEditingId(item.id)}
+                              className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded transition-colors">
+                              <Pencil size={13} />
+                            </button>
+                            <button
+                              onClick={() => {
+                                if (!confirm(`Delete "${item.name}"?`)) return;
+                                deleteMut.mutate(item.id);
+                              }}
+                              className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded transition-colors">
+                              <Trash2 size={13} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+  );
+
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-8">
@@ -481,132 +651,25 @@ export default function ItemsPage() {
           <div className="text-gray-400 text-sm mt-1">Add your first item to start tracking prices.</div>
         </div>
       ) : (
-        <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm min-w-[1000px]">
-              <thead className="bg-gray-50 border-b border-gray-200">
-                <tr>
-                  <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Name</th>
-                  <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">Primary Supplier</th>
-                  <th className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">Secondary Suppliers</th>
-                  <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap"
-                    title={`Net spend on this item since ${YTD_START.split('-').reverse().join('.')}`}>
-                    Total YTD
-                  </th>
-                  <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">Price / Unit</th>
-                  <th className="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">Price / kg·L</th>
-                  <th className="px-4 py-2.5 text-center text-xs font-semibold text-gray-500 uppercase tracking-wide">History</th>
-                  <th className="px-4 py-2.5 w-16"></th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {items.map(item => {
-                  if (editingId === item.id) {
-                    return (
-                      <tr key={item.id} className="bg-indigo-50/40">
-                        <td colSpan={8} className="px-4 py-4">
-                          <ItemForm
-                            initial={item}
-                            counterparties={counterparties}
-                            onSave={data => updateMut.mutate({ id: item.id, body: buildPayload(data) })}
-                            onCancel={() => setEditingId(null)}
-                            saving={updateMut.isPending}
-                          />
-                        </td>
-                      </tr>
-                    );
-                  }
-
-                  const matched      = matchLines(item, billLines);
-                  const latest       = matched[0] ?? null;
-                  const totalYtd     = sumNetSince(matched, YTD_START);
-                  const kgPerUnit    = item.kg_per_unit ?? 1;
-                  const pricePerUnit = latest?.unit_price ?? null;
-                  const pricePerKg   = pricePerUnit != null ? pricePerUnit / kgPerUnit : null;
-                  const primaryCp    = counterparties.find(c => c.id === item.primary_supplier_id);
-                  const secondaryCps = item.secondary_supplier_ids
-                    .map(id => counterparties.find(c => c.id === id))
-                    .filter((c): c is Counterparty => Boolean(c));
-
-                  return (
-                    <tr key={item.id} className="hover:bg-gray-50 transition-colors">
-                      <td className="px-4 py-2.5">
-                        <div className="font-semibold text-gray-900">{item.name}</div>
-                        {item.keywords.length > 0 && (
-                          <div className="flex items-center gap-1 mt-0.5 flex-wrap">
-                            <Tag size={9} className="text-gray-400 flex-shrink-0" />
-                            {item.keywords.map(kw => (
-                              <span key={kw} className="text-[10px] bg-gray-100 text-gray-500 px-1 rounded">{kw}</span>
-                            ))}
-                          </div>
-                        )}
-                        {item.kg_per_unit ? (
-                          <div className="text-[10px] text-gray-400 mt-0.5">1 unit = {item.kg_per_unit} kg / L</div>
-                        ) : null}
-                      </td>
-                      <td className="px-4 py-2.5">
-                        {primaryCp ? (
-                          <span className="inline-block px-2 py-0.5 bg-green-50 text-green-800 text-xs rounded-full border border-green-200">
-                            {primaryCp.name}
-                          </span>
-                        ) : <span className="text-gray-300 text-xs">—</span>}
-                      </td>
-                      <td className="px-4 py-2.5">
-                        <div className="flex flex-wrap gap-1">
-                          {secondaryCps.length > 0
-                            ? secondaryCps.map(cp => (
-                              <span key={cp.id} className="inline-block px-2 py-0.5 bg-gray-100 text-gray-600 text-xs rounded-full">
-                                {cp.name}
-                              </span>
-                            ))
-                            : <span className="text-gray-300 text-xs">—</span>}
-                        </div>
-                      </td>
-                      <td className="px-4 py-2.5 text-right tabular-nums">
-                        {totalYtd > 0
-                          ? <span className="font-bold text-gray-900">{fmt(totalYtd)}</span>
-                          : <span className="text-gray-300 text-xs">—</span>}
-                      </td>
-                      <td className="px-4 py-2.5 text-right tabular-nums">
-                        {pricePerUnit != null
-                          ? <span className="font-semibold text-gray-900">{fmt(pricePerUnit)}</span>
-                          : <span className="text-gray-300 text-xs">—</span>}
-                      </td>
-                      <td className="px-4 py-2.5 text-right tabular-nums">
-                        {pricePerKg != null
-                          ? <span className="font-semibold text-[#1B5E20]">{fmt(pricePerKg)}</span>
-                          : <span className="text-gray-300 text-xs">—</span>}
-                      </td>
-                      <td className="px-4 py-2.5 text-center">
-                        <button onClick={() => setHistoryItem(item)}
-                          title="View purchase history"
-                          className="inline-flex items-center gap-1 text-indigo-600 hover:text-indigo-800 transition-colors">
-                          <History size={15} />
-                          <span className="text-[10px] text-gray-400">{matched.length}</span>
-                        </button>
-                      </td>
-                      <td className="px-4 py-2.5">
-                        <div className="flex items-center gap-1">
-                          <button onClick={() => setEditingId(item.id)}
-                            className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded transition-colors">
-                            <Pencil size={13} />
-                          </button>
-                          <button
-                            onClick={() => {
-                              if (!confirm(`Delete "${item.name}"?`)) return;
-                              deleteMut.mutate(item.id);
-                            }}
-                            className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded transition-colors">
-                            <Trash2 size={13} />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+        <div className="space-y-6">
+          {ITEM_SECTIONS.map(section => {
+            const rows = items.filter(i => section.match(i.category));
+            return (
+              <section key={section.label}>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <h2 className="text-sm font-bold text-gray-900">{section.label}</h2>
+                  <span className={`text-xs font-semibold border rounded-full px-2 py-0.5 ${section.tone}`}>
+                    {rows.length}
+                  </span>
+                </div>
+                {rows.length === 0 ? (
+                  <div className="flex items-center justify-center h-16 border border-dashed border-gray-200 rounded-xl">
+                    <p className="text-xs text-gray-400">No items in {section.label}</p>
+                  </div>
+                ) : itemsTable(rows)}
+              </section>
+            );
+          })}
         </div>
       )}
 
