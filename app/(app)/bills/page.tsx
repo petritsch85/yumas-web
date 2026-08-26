@@ -915,10 +915,58 @@ export default function BillsPage() {
     cp: number,
     tp: number,
     setPg: React.Dispatch<React.SetStateAction<number>>,
+    total: number,
   ) => {
     const t = sumRows(rows);
+
+    // Rendered above AND below the table: with 100+ rows a pager only at the
+    // bottom is a full screen of scrolling away and reads as "cut off".
+    const pager = (position: 'top' | 'bottom') => tp <= 1 ? null : (
+      <div className={`flex items-center justify-between gap-3 px-3 py-2 bg-white ${
+        position === 'top' ? 'border-b border-gray-200' : 'border-t border-gray-200'
+      }`}>
+        <span className="text-xs text-gray-400">
+          Page {cp} of {tp} · showing {rows.length} of {total} bills
+        </span>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => setPg(p => Math.max(1, p - 1))}
+            disabled={cp === 1}
+            className="px-2 py-1 text-xs font-semibold rounded-md border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:hover:bg-white disabled:cursor-default"
+          >
+            Prev
+          </button>
+          {pageNumbers(cp, tp).map((n, i) =>
+            n === '…' ? (
+              <span key={`gap-${i}`} className="px-1 text-xs text-gray-300">…</span>
+            ) : (
+              <button
+                key={n}
+                onClick={() => setPg(n as number)}
+                className={`min-w-[28px] px-2 py-1 text-xs font-semibold rounded-md border transition-colors ${
+                  n === cp
+                    ? 'bg-[#1B5E20] border-[#1B5E20] text-white'
+                    : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                }`}
+              >
+                {n}
+              </button>
+            ),
+          )}
+          <button
+            onClick={() => setPg(p => Math.min(tp, p + 1))}
+            disabled={cp === tp}
+            className="px-2 py-1 text-xs font-semibold rounded-md border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:hover:bg-white disabled:cursor-default"
+          >
+            Next
+          </button>
+        </div>
+      </div>
+    );
+
     return (
               <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+                {pager('top')}
                 <div>
                 <table className="w-full text-sm">
                   <thead>
@@ -1177,46 +1225,7 @@ export default function BillsPage() {
                 </table>
                 </div>
 
-                {tp > 1 && (
-                  <div className="flex items-center justify-between gap-3 px-3 py-2 border-t border-gray-200 bg-white">
-                    <span className="text-xs text-gray-400">
-                      Page {cp} of {tp}
-                    </span>
-                    <div className="flex items-center gap-1">
-                      <button
-                        onClick={() => setPg(p => Math.max(1, p - 1))}
-                        disabled={cp === 1}
-                        className="px-2 py-1 text-xs font-semibold rounded-md border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:hover:bg-white disabled:cursor-default"
-                      >
-                        Prev
-                      </button>
-                      {pageNumbers(cp, tp).map((n, i) =>
-                        n === '…' ? (
-                          <span key={`gap-${i}`} className="px-1 text-xs text-gray-300">…</span>
-                        ) : (
-                          <button
-                            key={n}
-                            onClick={() => setPg(n as number)}
-                            className={`min-w-[28px] px-2 py-1 text-xs font-semibold rounded-md border transition-colors ${
-                              n === cp
-                                ? 'bg-[#1B5E20] border-[#1B5E20] text-white'
-                                : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
-                            }`}
-                          >
-                            {n}
-                          </button>
-                        ),
-                      )}
-                      <button
-                        onClick={() => setPg(p => Math.min(tp, p + 1))}
-                        disabled={cp === tp}
-                        className="px-2 py-1 text-xs font-semibold rounded-md border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:hover:bg-white disabled:cursor-default"
-                      >
-                        Next
-                      </button>
-                    </div>
-                  </div>
-                )}
+                {pager('bottom')}
               </div>
     );
   };
@@ -1645,7 +1654,7 @@ export default function BillsPage() {
                   <div className="flex items-center justify-center h-20 border border-dashed border-gray-200 rounded-xl">
                     <p className="text-xs text-gray-400">Nothing pending — all bills have been approved</p>
                   </div>
-                ) : renderBillsTable(pendingPageRows, pendingPage, pendingTotalPages, setPage)}
+                ) : renderBillsTable(pendingPageRows, pendingPage, pendingTotalPages, setPage, pendingRows.length)}
               </section>
 
               <section>
@@ -1659,7 +1668,7 @@ export default function BillsPage() {
                   <div className="flex items-center justify-center h-20 border border-dashed border-gray-200 rounded-xl">
                     <p className="text-xs text-gray-400">No approved bills yet</p>
                   </div>
-                ) : renderBillsTable(settledPageRows, settledPage, settledTotalPages, setPage2)}
+                ) : renderBillsTable(settledPageRows, settledPage, settledTotalPages, setPage2, settledRows.length)}
               </section>
             </div>
           )}
