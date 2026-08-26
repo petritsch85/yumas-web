@@ -139,7 +139,6 @@ const NAV_GROUPS: NavGroup[] = [
       {
         labelKey: 'sidebar.nav.analysis', href: '/analysis', icon: BarChart3, permKey: 'analysis',
         children: [
-          { labelKey: 'sidebar.nav.cogs',       href: '/analysis/cogs',        icon: TrendingDown },
           { labelKey: 'sidebar.nav.storeYield', href: '/analysis/store-yield', icon: BarChart3 },
         ],
       },
@@ -178,6 +177,7 @@ const NAV_GROUPS: NavGroup[] = [
           { labelKey: 'sidebar.nav.groupPnl',     href: '/analytics/pnl',      icon: LineChart },
           { labelKey: 'sidebar.nav.storePnls',    href: '/analytics/store-pnl',    icon: Store },
           { labelKey: 'sidebar.nav.shiftReports', href: '/analytics/shift-reports', icon: ClipboardList },
+          { labelKey: 'sidebar.nav.cogs',         href: '/analysis/cogs',           icon: TrendingDown },
         ],
       },
     ],
