@@ -57,10 +57,35 @@ const CLASSIFICATION_ORDER: Array<Exclude<SubCategory, 'All' | 'Other'>> = [
   'Leergut', 'Fruit & Veg', 'Meat', 'Spices', 'Dairy',
 ];
 
+/**
+ * Keywords this short must begin a word rather than match anywhere.
+ *
+ * German and Spanish compounds make bare substring matching unsafe for short
+ * terms: 'ei' (egg) sits inside Seitan, Bleichsellerie and LANGKORNREIS; 'res'
+ * (beef) inside Espresso and Speisereste; 'ham' inside CHAMPIGNON; 'sal' (salt)
+ * inside HYGIENEUNIVERSAL; 'ajo' (garlic) inside Majoran. Together those
+ * miscategorised 250 of 5433 Food Cost lines.
+ *
+ * Longer keywords keep plain substring matching, because there the compound is
+ * usually the point — Hackfleisch, Mischsalat, Buttermilch, Frischkäse.
+ */
+const MIN_SUBSTRING_KEYWORD = 4;
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** Does `kw` match `lower` (already lowercased)? */
+function keywordMatches(lower: string, kw: string): boolean {
+  if (kw.length >= MIN_SUBSTRING_KEYWORD) return lower.includes(kw);
+  // Word-initial only: matches "ei", "eier", "eiweiss" — not "seitan" or "reis".
+  return new RegExp(`\\b${escapeRegExp(kw)}`).test(lower);
+}
+
 export function classifyLine(description: string): Exclude<SubCategory, 'All'> {
   const lower = description.toLowerCase();
   for (const cat of CLASSIFICATION_ORDER) {
-    if (SUB_CATEGORY_KEYWORDS[cat].some((kw) => lower.includes(kw))) {
+    if (SUB_CATEGORY_KEYWORDS[cat].some((kw) => keywordMatches(lower, kw))) {
       return cat;
     }
   }
