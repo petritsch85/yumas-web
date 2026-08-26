@@ -734,6 +734,17 @@ export default function CounterpartiesPage() {
     staleTime: 30_000,
   });
 
+  // Split the list the same way the Bills page splits pending vs approved:
+  // trade suppliers in their own section, everything else below.
+  const supplierCps = useMemo(
+    () => counterparties.filter(cp => cp.category === 'C - Suppliers'),
+    [counterparties],
+  );
+  const otherCps = useMemo(
+    () => counterparties.filter(cp => cp.category !== 'C - Suppliers'),
+    [counterparties],
+  );
+
   const showAssigned = (count: number) => {
     if (count > 0) {
       setAssignedMsg(`✓ ${count} cash flow transaction${count === 1 ? '' : 's'} auto-assigned`);
@@ -780,50 +791,8 @@ export default function CounterpartiesPage() {
   const toggleExpand = (id: string) =>
     setExpandedId(prev => prev === id ? null : id);
 
-  return (
-    <div className="max-w-5xl mx-auto px-4 py-8">
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Counterparties</h1>
-          <p className="text-sm text-gray-500 mt-0.5">
-            Define named counterparties with keywords for auto-matching against Cash Flow and Bills.
-          </p>
-        </div>
-        {!adding && (
-          <button onClick={() => setAdding(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-[#1B5E20] text-white text-sm font-medium rounded-lg hover:bg-[#2E7D32] transition-colors">
-            <Plus size={16} /> Add Counterparty
-          </button>
-        )}
-      </div>
-
-      {assignedMsg && (
-        <div className="mb-4 px-4 py-2.5 bg-green-50 border border-green-200 rounded-lg text-sm font-medium text-green-800">
-          {assignedMsg}
-        </div>
-      )}
-
-      {adding && (
-        <div className="mb-4">
-          <CounterpartyForm
-            onSave={data => createMut.mutate(data)}
-            onCancel={() => setAdding(false)}
-            saving={createMut.isPending}
-          />
-        </div>
-      )}
-
-      {isLoading ? (
-        <div className="py-12 text-center text-gray-400 text-sm">Loading…</div>
-      ) : counterparties.length === 0 && !adding ? (
-        <div className="py-16 text-center">
-          <div className="text-gray-300 mb-3"><Tag size={40} className="mx-auto" /></div>
-          <div className="text-gray-500 font-medium">No counterparties yet</div>
-          <div className="text-gray-400 text-sm mt-1">Add your first one to start matching Cash Flow transactions.</div>
-        </div>
-      ) : (
-        <div className="space-y-2">
-          {counterparties.map(cp => {
+  /** One counterparty card. Rendered by both the Suppliers and Other sections. */
+  const renderCounterparty = (cp: Counterparty) => {
             const isExpanded = expandedId === cp.id;
             return (
               <div key={cp.id} className={`bg-white border rounded-xl overflow-hidden transition-colors ${isExpanded ? 'border-[#1B5E20]/40' : 'border-gray-200 hover:border-gray-300'}`}>
@@ -893,7 +862,83 @@ export default function CounterpartiesPage() {
                 )}
               </div>
             );
-          })}
+  };
+
+
+  return (
+    <div className="max-w-5xl mx-auto px-4 py-8">
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Counterparties</h1>
+          <p className="text-sm text-gray-500 mt-0.5">
+            Define named counterparties with keywords for auto-matching against Cash Flow and Bills.
+          </p>
+        </div>
+        {!adding && (
+          <button onClick={() => setAdding(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-[#1B5E20] text-white text-sm font-medium rounded-lg hover:bg-[#2E7D32] transition-colors">
+            <Plus size={16} /> Add Counterparty
+          </button>
+        )}
+      </div>
+
+      {assignedMsg && (
+        <div className="mb-4 px-4 py-2.5 bg-green-50 border border-green-200 rounded-lg text-sm font-medium text-green-800">
+          {assignedMsg}
+        </div>
+      )}
+
+      {adding && (
+        <div className="mb-4">
+          <CounterpartyForm
+            onSave={data => createMut.mutate(data)}
+            onCancel={() => setAdding(false)}
+            saving={createMut.isPending}
+          />
+        </div>
+      )}
+
+      {isLoading ? (
+        <div className="py-12 text-center text-gray-400 text-sm">Loading…</div>
+      ) : counterparties.length === 0 && !adding ? (
+        <div className="py-16 text-center">
+          <div className="text-gray-300 mb-3"><Tag size={40} className="mx-auto" /></div>
+          <div className="text-gray-500 font-medium">No counterparties yet</div>
+          <div className="text-gray-400 text-sm mt-1">Add your first one to start matching Cash Flow transactions.</div>
+        </div>
+      ) : (
+        <div className="space-y-6">
+          <section>
+            <div className="flex items-baseline gap-2 mb-2">
+              <h2 className="text-sm font-bold text-gray-900">Suppliers</h2>
+              <span className="text-xs font-semibold text-red-700 bg-red-50 border border-red-200 rounded-full px-2 py-0.5">
+                {supplierCps.length}
+              </span>
+            </div>
+            {supplierCps.length === 0 ? (
+              <div className="flex items-center justify-center h-16 border border-dashed border-gray-200 rounded-xl">
+                <p className="text-xs text-gray-400">No counterparties categorised as C - Suppliers</p>
+              </div>
+            ) : (
+              <div className="space-y-2">{supplierCps.map(renderCounterparty)}</div>
+            )}
+          </section>
+
+          <section>
+            <div className="flex items-baseline gap-2 mb-2">
+              <h2 className="text-sm font-bold text-gray-900">Other</h2>
+              <span className="text-xs font-semibold text-gray-600 bg-gray-100 border border-gray-200 rounded-full px-2 py-0.5">
+                {otherCps.length}
+              </span>
+            </div>
+            {otherCps.length === 0 ? (
+              <div className="flex items-center justify-center h-16 border border-dashed border-gray-200 rounded-xl">
+                <p className="text-xs text-gray-400">Nothing here — every counterparty is a supplier</p>
+              </div>
+            ) : (
+              <div className="space-y-2">{otherCps.map(renderCounterparty)}</div>
+            )}
+          </section>
         </div>
       )}
     </div>
