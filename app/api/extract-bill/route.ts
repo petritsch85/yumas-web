@@ -73,6 +73,24 @@ supplier_name accuracy (important — this field is frequently misread):
 - Include the legal form (GmbH, AG, KG, e.K. …) if it is printed, but do NOT append trailing descriptive taglines such as "Getränkegroßhandel und Gastronomiepartner"
 - If the document is a self-billing invoice or credit note, supplier_name is the party issuing the goods/services, not the recipient`;
 
+/**
+ * Every invoice satisfies net + VAT = gross. Extraction is a model reading a
+ * PDF, so it is non-deterministic — the same file has been read twice with
+ * different numbers, once with the columns shifted so the net landed in the VAT
+ * field. Checking this identity costs nothing and catches exactly that.
+ */
+class ParseError extends Error {}
+
+function arithmeticOk(d: Record<string, unknown>): boolean {
+  const net   = Number(d.net_amount);
+  const vat   = Number(d.vat_amount);
+  const gross = Number(d.gross_amount);
+  if (![net, vat, gross].every(Number.isFinite)) return false;
+  // A gross of 0 with nothing else is an empty extraction, not a valid bill.
+  if (net === 0 && vat === 0 && gross === 0) return false;
+  return Math.abs(net + vat - gross) <= 0.02;
+}
+
 /** Pull the outermost JSON object out of a string that may contain surrounding text */
 function extractJSONObject(text: string): string {
   const start = text.indexOf('{');
@@ -139,6 +157,7 @@ export async function POST(req: NextRequest) {
       pdfBase64 = Buffer.from(await fileBlob.arrayBuffer()).toString('base64');
     }
 
+    const runExtraction = async (): Promise<Record<string, unknown>> => {
     const response = await client.messages.create({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 8192,
@@ -176,11 +195,30 @@ export async function POST(req: NextRequest) {
         jsonStr = await repairJSON(jsonStr);
         extracted = JSON.parse(jsonStr);
       } catch (repairErr: any) {
-        return NextResponse.json(
-          { error: `Could not parse invoice data: ${repairErr.message}` },
-          { status: 422 }
-        );
+        throw new ParseError(`Could not parse invoice data: ${repairErr.message}`);
       }
+    }
+      return extracted as Record<string, unknown>;
+    };
+
+    // Extract, then verify net + VAT = gross. A failure means the model misread
+    // the totals (most often a column shift), so try once more before accepting.
+    let extracted = await runExtraction();
+    let retried = false;
+    if (!arithmeticOk(extracted)) {
+      console.warn('[extract-bill] arithmetic failed, retrying once:', {
+        net: extracted.net_amount, vat: extracted.vat_amount, gross: extracted.gross_amount,
+      });
+      retried = true;
+      const second = await runExtraction();
+      // Keep whichever run is self-consistent; prefer the retry if both fail.
+      extracted = arithmeticOk(second) ? second : (arithmeticOk(extracted) ? extracted : second);
+    }
+    const ok = arithmeticOk(extracted);
+    if (!ok) {
+      console.error('[extract-bill] totals still inconsistent after retry:', {
+        net: extracted.net_amount, vat: extracted.vat_amount, gross: extracted.gross_amount,
+      });
     }
 
     // Snap OCR near-misses in the supplier name to the canonical spelling we
@@ -199,8 +237,19 @@ export async function POST(req: NextRequest) {
       console.error('[extract-bill] supplier canonicalisation failed (non-fatal):', e);
     }
 
-    return NextResponse.json({ data: extracted });
+    return NextResponse.json({
+      data: extracted,
+      validation: {
+        arithmeticOk: ok,
+        retried,
+        message: ok ? null
+          : `net (${extracted.net_amount}) + VAT (${extracted.vat_amount}) does not equal gross (${extracted.gross_amount}) — check this bill against the PDF`,
+      },
+    });
   } catch (err: any) {
+    if (err instanceof ParseError) {
+      return NextResponse.json({ error: err.message }, { status: 422 });
+    }
     console.error('Bill extraction error:', err);
     return NextResponse.json({ error: err.message ?? 'Extraction failed' }, { status: 500 });
   }

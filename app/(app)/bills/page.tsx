@@ -57,6 +57,8 @@ type QueueItem = {
   data?:          Extracted;
   error?:         string;
   saved?:         boolean;
+  /** Set when net + VAT != gross after a retry — the totals need checking. */
+  warning?:       string;
   locationId?:    string | null;
   locationLabel?: string;
   periodType?:    PeriodType;
@@ -155,6 +157,25 @@ async function saveBillToDB(item: QueueItem, userId: string | null): Promise<voi
   const d = item.data!;
 
   let file_path: string;
+  // Refuse to store the same invoice twice. The same PDF has been uploaded
+  // under two filenames before, and because extraction is non-deterministic the
+  // two rows disagreed on the net — which also hid them from duplicate
+  // detection. Supplier + invoice number identifies the invoice regardless.
+  if (d.invoice_number?.trim()) {
+    const { data: clash } = await supabase
+      .from('bills')
+      .select('id, invoice_date, gross_amount')
+      .eq('supplier_name', d.supplier_name)
+      .eq('invoice_number', d.invoice_number.trim())
+      .limit(1);
+    if (clash && clash.length > 0) {
+      throw new Error(
+        `Already saved: ${d.supplier_name} invoice ${d.invoice_number} ` +
+        `(${clash[0].invoice_date ?? 'no date'}, ${clash[0].gross_amount} €). Not saved again.`
+      );
+    }
+  }
+
   if (item.storagePath) {
     // PDF was already uploaded to storage during extraction — reuse it
     file_path = item.storagePath;
@@ -538,10 +559,12 @@ export default function BillsPage() {
     const byKey = new Map<string, string[]>();
     for (const b of bills) {
       if (!b.invoice_number) continue;
+      // Supplier + invoice number identifies an invoice. net_amount is
+      // deliberately NOT in the key: it is the field extraction most often
+      // misreads, and including it let genuine duplicates through whenever the
+      // two uploads of the same PDF disagreed on the net.
       const key = [
         b.supplier_name.toLowerCase().trim(),
-        Math.round(b.gross_amount * 100),
-        Math.round(b.net_amount * 100),
         b.invoice_number.toLowerCase().trim(),
       ].join('|');
       if (!byKey.has(key)) byKey.set(key, []);
@@ -755,6 +778,7 @@ export default function BillsPage() {
             ...i,
             status: 'done',
             data: json.data,
+            warning: json.validation?.arithmeticOk === false ? json.validation.message : undefined,
             periodType,
             periodStart,
             periodEnd,
@@ -1352,6 +1376,12 @@ export default function BillsPage() {
                         </p>
                       )}
                       {item.status === 'error' && <p className="text-sm text-red-500">{item.error}</p>}
+                      {item.warning && (
+                        <p className="mt-1 flex items-start gap-1.5 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1">
+                          <AlertTriangle size={12} className="flex-shrink-0 mt-0.5" />
+                          <span>{item.warning}</span>
+                        </p>
+                      )}
                     </div>
                     <div className="flex items-center gap-2 flex-shrink-0">
                       {item.status === 'done' && !item.saved && (
