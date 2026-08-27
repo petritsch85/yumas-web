@@ -162,16 +162,21 @@ async function saveBillToDB(item: QueueItem, userId: string | null): Promise<voi
   // two rows disagreed on the net — which also hid them from duplicate
   // detection. Supplier + invoice number identifies the invoice regardless.
   if (d.invoice_number?.trim()) {
+    // Match on invoice number alone, then compare gross. Supplier names are
+    // stored under many spellings for the same company (Hills appears six
+    // ways), so an equality check on supplier_name lets duplicates straight
+    // through — that is how 20 invoices were stored twice.
     const { data: clash } = await supabase
       .from('bills')
-      .select('id, invoice_date, gross_amount')
-      .eq('supplier_name', d.supplier_name)
-      .eq('invoice_number', d.invoice_number.trim())
-      .limit(1);
-    if (clash && clash.length > 0) {
+      .select('id, supplier_name, invoice_date, gross_amount')
+      .eq('invoice_number', d.invoice_number.trim());
+    const sameAmount = (clash ?? []).find(
+      c => Math.abs((c.gross_amount ?? 0) - (d.gross_amount ?? 0)) < 0.02,
+    );
+    if (sameAmount) {
       throw new Error(
-        `Already saved: ${d.supplier_name} invoice ${d.invoice_number} ` +
-        `(${clash[0].invoice_date ?? 'no date'}, ${clash[0].gross_amount} €). Not saved again.`
+        `Already saved as "${sameAmount.supplier_name}" — invoice ${d.invoice_number} ` +
+        `(${sameAmount.invoice_date ?? 'no date'}, ${sameAmount.gross_amount} €). Not saved again.`
       );
     }
   }
@@ -554,45 +559,6 @@ export default function BillsPage() {
 
   // ── Duplicate detection ───────────────────────────────────────────────────────
   // A duplicate requires ALL THREE: same supplier + same gross + same net + same invoice number
-  const duplicateIds = useMemo(() => {
-    const ids = new Set<string>();
-    const byKey = new Map<string, string[]>();
-    for (const b of bills) {
-      if (!b.invoice_number) continue;
-      // Supplier + invoice number identifies an invoice. net_amount is
-      // deliberately NOT in the key: it is the field extraction most often
-      // misreads, and including it let genuine duplicates through whenever the
-      // two uploads of the same PDF disagreed on the net.
-      const key = [
-        b.supplier_name.toLowerCase().trim(),
-        b.invoice_number.toLowerCase().trim(),
-      ].join('|');
-      if (!byKey.has(key)) byKey.set(key, []);
-      byKey.get(key)!.push(b.id);
-    }
-    for (const group of byKey.values()) {
-      if (group.length > 1) group.forEach(id => ids.add(id));
-    }
-    return ids;
-  }, [bills]);
-
-  const isDuplicateInQueue = useCallback((item: QueueItem): boolean => {
-    if (item.status !== 'done' || !item.data) return false;
-    const d = item.data;
-    if (!d.invoice_number) return false;
-    const norm = (s: string) => s.toLowerCase().trim();
-    const isMatch = (supplier: string, gross: number, net: number, inv: string) =>
-      norm(supplier) === norm(d.supplier_name) &&
-      Math.abs(gross - d.gross_amount) < 0.01 &&
-      Math.abs(net - d.net_amount) < 0.01 &&
-      norm(inv) === norm(d.invoice_number!);
-    return bills.some(b => b.invoice_number && isMatch(b.supplier_name, b.gross_amount, b.net_amount, b.invoice_number))
-      || queue.some(other => {
-        if (other.id === item.id || other.status !== 'done' || !other.data?.invoice_number) return false;
-        return isMatch(other.data.supplier_name, other.data.gross_amount, other.data.net_amount, other.data.invoice_number);
-      });
-  }, [bills, queue]);
-
   // Effective supplier name = matched counterparty name (if any), else raw supplier_name.
   // Used for BOTH display and sorting so the table sorts by what the user actually sees.
   const matchedCpByBill = useMemo(() => {
@@ -612,6 +578,48 @@ export default function BillsPage() {
     (b: Bill) => matchedCpByBill.get(b.id)?.name ?? b.supplier_name ?? '',
     [matchedCpByBill],
   );
+
+  const duplicateIds = useMemo(() => {
+    const ids = new Set<string>();
+    const byKey = new Map<string, string[]>();
+    for (const b of bills) {
+      if (!b.invoice_number) continue;
+      // Key on the RESOLVED counterparty, not the raw supplier string: the same
+      // supplier is stored under many spellings (Hills appears six ways), so a
+      // raw-name key sees three copies of one invoice as three different bills.
+      // net_amount is deliberately excluded — it is the field extraction most
+      // often misreads, and including it hid duplicates whenever two uploads of
+      // the same PDF disagreed on the net.
+      const key = [
+        displayName(b).toLowerCase().trim(),
+        b.invoice_number.toLowerCase().trim(),
+      ].join('|');
+      if (!byKey.has(key)) byKey.set(key, []);
+      byKey.get(key)!.push(b.id);
+    }
+    for (const group of byKey.values()) {
+      if (group.length > 1) group.forEach(id => ids.add(id));
+    }
+    return ids;
+  }, [bills, displayName]);
+
+  const isDuplicateInQueue = useCallback((item: QueueItem): boolean => {
+    if (item.status !== 'done' || !item.data) return false;
+    const d = item.data;
+    if (!d.invoice_number) return false;
+    const norm = (s: string) => s.toLowerCase().trim();
+    const isMatch = (supplier: string, gross: number, net: number, inv: string) =>
+      norm(supplier) === norm(d.supplier_name) &&
+      Math.abs(gross - d.gross_amount) < 0.01 &&
+      Math.abs(net - d.net_amount) < 0.01 &&
+      norm(inv) === norm(d.invoice_number!);
+    return bills.some(b => b.invoice_number && isMatch(b.supplier_name, b.gross_amount, b.net_amount, b.invoice_number))
+      || queue.some(other => {
+        if (other.id === item.id || other.status !== 'done' || !other.data?.invoice_number) return false;
+        return isMatch(other.data.supplier_name, other.data.gross_amount, other.data.net_amount, other.data.invoice_number);
+      });
+  }, [bills, queue]);
+
 
   const filtered = bills.filter((b) => {
     if (filterStatus   !== 'all' && b.status         !== filterStatus)   return false;
