@@ -884,7 +884,8 @@ export default function CashFlowPage() {
   const [dirFilter, setDirFilter]   = useState<'all'|'in'|'out'>('all');
   const [catFilter, setCatFilter]   = useState('All');
   const [locFilter, setLocFilter]   = useState('All');
-  const [txPage,    setTxPage]      = useState(1);
+  const [txPage,    setTxPage]      = useState(1);   // confirmed table
+  const [uncPage,   setUncPage]     = useState(1);   // unconfirmed review queue
 
   type AutoMatchRow = {
     txId: string; txDate: string; txCounterparty: string; txAmountCents: number;
@@ -941,20 +942,36 @@ export default function CashFlowPage() {
     queryFn: () => fetch('/api/cashflow/uploads').then(r => r.json()),
   });
 
-  const params = new URLSearchParams({ dateFrom, dateTo, page: String(txPage) });
-  if (dirFilter !== 'all') params.set('direction', dirFilter);
-  if (catFilter !== 'All') params.set('category', catFilter);
-  if (locFilter !== 'All') params.set('location', locFilter);
+  // Confirmed and unconfirmed are fetched separately rather than split client
+  // side: pagination is server side, so a single page could hold a mix and the
+  // review queue would only ever show what happened to land on that page.
+  const buildParams = (page: number, confirmed: 'true' | 'false') => {
+    const q = new URLSearchParams({ dateFrom, dateTo, page: String(page), confirmed });
+    if (dirFilter !== 'all') q.set('direction', dirFilter);
+    if (catFilter !== 'All') q.set('category', catFilter);
+    if (locFilter !== 'All') q.set('location', locFilter);
+    return q;
+  };
+
+  const { data: uncData, isFetching: uncFetching } = useQuery<TxPage>({
+    queryKey: ['cashflow-tx', 'unconfirmed', dateFrom, dateTo, dirFilter, catFilter, locFilter, uncPage],
+    queryFn: () => fetch(`/api/cashflow/transactions?${buildParams(uncPage, 'false')}`).then(r => r.json()),
+    placeholderData: prev => prev,
+  });
 
   const { data: txData, isFetching } = useQuery<TxPage>({
-    queryKey: ['cashflow-tx', dateFrom, dateTo, dirFilter, catFilter, locFilter, txPage],
-    queryFn: () => fetch(`/api/cashflow/transactions?${params}`).then(r => r.json()),
+    queryKey: ['cashflow-tx', 'confirmed', dateFrom, dateTo, dirFilter, catFilter, locFilter, txPage],
+    queryFn: () => fetch(`/api/cashflow/transactions?${buildParams(txPage, 'true')}`).then(r => r.json()),
     placeholderData: prev => prev,
   });
 
   const txs        = txData?.data ?? [];
   const totalCount = txData?.count ?? 0;
   const totalPages = txData ? Math.ceil(txData.count / txData.pageSize) : 1;
+
+  const uncTxs       = uncData?.data ?? [];
+  const uncCount     = uncData?.count ?? 0;
+  const uncPages     = uncData ? Math.ceil(uncData.count / uncData.pageSize) : 1;
 
   const { data: counterparties = [] } = useQuery<Counterparty[]>({
     queryKey: ['counterparties'],
@@ -970,9 +987,10 @@ export default function CashFlowPage() {
     });
   };
 
-  const sortedTxs = useMemo(() => {
-    if (!sortCol) return txs;
-    return [...txs].sort((a, b) => {
+  /** Shared by both tables so the sort header applies to each identically. */
+  const sortRows = useCallback((rows: CfTx[]) => {
+    if (!sortCol) return rows;
+    return [...rows].sort((a, b) => {
       let av: number | string, bv: number | string;
       switch (sortCol) {
         case 'date':         av = a.date;          bv = b.date;          break;
@@ -1002,7 +1020,10 @@ export default function CashFlowPage() {
       const cmp = typeof av === 'string' ? av.localeCompare(bv as string) : (av as number) - (bv as number);
       return sortDir === 'asc' ? cmp : -cmp;
     });
-  }, [txs, sortCol, sortDir]);
+  }, [sortCol, sortDir]);
+
+  const sortedTxs    = useMemo(() => sortRows(txs),    [sortRows, txs]);
+  const sortedUncTxs = useMemo(() => sortRows(uncTxs), [sortRows, uncTxs]);
 
 
   const patchMut = useMutation({
@@ -1013,11 +1034,17 @@ export default function CashFlowPage() {
         body: JSON.stringify(patch),
       }),
     onSuccess: (_data, { id, patch }) => {
-      // Update the row in-place across all cached transaction pages — no refetch, no reshuffling
-      qc.setQueriesData<TxPage>(
-        { queryKey: ['cashflow-tx'] },
-        old => old ? { ...old, data: old.data.map(tx => tx.id === id ? { ...tx, ...patch } as CfTx : tx) } : old,
-      );
+      // Confirming moves the row from the review queue into the ledger, so an
+      // in-place cache patch is not enough — both lists have to be refetched.
+      if ('confirmed' in patch) {
+        qc.invalidateQueries({ queryKey: ['cashflow-tx'] });
+      } else {
+        // Update the row in-place across all cached transaction pages — no refetch, no reshuffling
+        qc.setQueriesData<TxPage>(
+          { queryKey: ['cashflow-tx'] },
+          old => old ? { ...old, data: old.data.map(tx => tx.id === id ? { ...tx, ...patch } as CfTx : tx) } : old,
+        );
+      }
       // The Group P&L page aggregates these rows, so a category/direction change
       // has to invalidate it — this page no longer shows those totals itself.
       qc.invalidateQueries({ queryKey: ['pnl-monthly'] });
@@ -1073,6 +1100,89 @@ export default function CashFlowPage() {
   const activeQuarterMonths: Period[] = selectedPeriod in QUARTER_PERIODS
     ? QUARTER_PERIODS[selectedPeriod]
     : [];
+
+  /**
+   * One transactions table. Rendered twice — the unconfirmed review queue on
+   * top, the confirmed ledger below — so the row markup and every handler stay
+   * in a single place.
+   */
+  const renderTxTable = (rows: CfTx[], loading: boolean, emptyText: string) => (
+            <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+              {loading && (
+                <div className="flex items-center justify-center py-8 text-gray-400 gap-2">
+                  <Loader2 size={16} className="animate-spin" /> Loading…
+                </div>
+              )}
+              {!loading && rows.length === 0 && (
+                <div className="py-12 text-center text-gray-400 text-sm">{emptyText}</div>
+              )}
+              {rows.length > 0 && (
+                <div>
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50 border-b border-gray-200">
+                      <tr>
+                        {([
+                          { col: 'date',        label: 'Date',        align: 'left'  },
+                          { col: 'counterparty',label: 'Counterparty',align: 'left'  },
+                        ] as { col: string; label: string; align: 'left' | 'right' }[]).map(({ col, label, align }) => {
+                          const active = sortCol === col;
+                          return (
+                            <th key={col}
+                              onClick={() => handleSort(col)}
+                              className={`py-2.5 px-2 text-xs font-semibold uppercase tracking-wide cursor-pointer select-none transition-colors whitespace-nowrap
+                                ${align === 'right' ? 'text-right' : 'text-left'}
+                                ${active ? 'text-[#1B5E20]' : 'text-gray-500 hover:text-gray-800'}`}>
+                              <span className={`inline-flex items-center gap-1 ${align === 'right' ? 'flex-row-reverse' : ''}`}>
+                                {label}
+                                <span className={`transition-opacity ${active ? 'opacity-100' : 'opacity-25'}`}>
+                                  {active && sortDir === 'asc' ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
+                                </span>
+                              </span>
+                            </th>
+                          );
+                        })}
+                        <th className="py-2.5 px-2 text-xs font-semibold text-gray-500 uppercase tracking-wide text-left">Bill</th>
+                        {([
+                          { col: 'brutto',   label: 'Brutto',   align: 'right' },
+                          { col: 'vatpct',   label: 'VAT %',    align: 'right' },
+                          { col: 'vateur',   label: 'VAT €',    align: 'right' },
+                          { col: 'netto',    label: 'Netto',    align: 'right' },
+                          { col: 'category',          label: 'Category', align: 'left'  },
+                          { col: 'location',          label: 'Location', align: 'left'  },
+                          { col: 'accounting_period', label: 'Period',   align: 'left'  },
+                        ] as { col: string; label: string; align: 'left' | 'right' }[]).map(({ col, label, align }) => {
+                          const active = sortCol === col;
+                          return (
+                            <th key={col}
+                              onClick={() => handleSort(col)}
+                              className={`py-2.5 px-2 text-xs font-semibold uppercase tracking-wide cursor-pointer select-none transition-colors whitespace-nowrap
+                                ${align === 'right' ? 'text-right' : 'text-left'}
+                                ${active ? 'text-[#1B5E20]' : 'text-gray-500 hover:text-gray-800'}`}>
+                              <span className={`inline-flex items-center gap-1 ${align === 'right' ? 'flex-row-reverse' : ''}`}>
+                                {label}
+                                <span className={`transition-opacity ${active ? 'opacity-100' : 'opacity-25'}`}>
+                                  {active && sortDir === 'asc' ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
+                                </span>
+                              </span>
+                            </th>
+                          );
+                        })}
+                        <th className="py-2.5 px-2 text-xs font-semibold text-gray-500 uppercase tracking-wide text-left">Notes</th>
+                        <th className="py-2.5 px-2 text-xs font-semibold text-gray-500 uppercase tracking-wide text-left">Confirm</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.map(tx => (
+                        <TxRow key={tx.id} tx={tx} onSave={handleSave} counterparties={counterparties}
+                          onShowDetails={() => setDetailTx(tx)} />
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+  );
+
 
   return (
     <div className="space-y-6">
@@ -1363,7 +1473,7 @@ export default function CashFlowPage() {
               {[...new Set([...OUT_LOCATIONS, ...IN_LOCATIONS])].map(l => <option key={l} value={l}>{l}</option>)}
             </select>
 
-            <span className="ml-auto text-xs text-gray-400">{totalCount} transactions</span>
+            <span className="ml-auto text-xs text-gray-400">{uncCount.toLocaleString('de-DE')} unconfirmed · {totalCount.toLocaleString('de-DE')} confirmed</span>
 
             <button
               onClick={handleAutoMatch}
@@ -1375,104 +1485,44 @@ export default function CashFlowPage() {
             </button>
           </div>
 
-          {/* Pagination — top */}
-          {totalPages > 1 && (
-            <div className="flex items-center justify-between px-4 py-2.5 bg-white rounded-xl border border-gray-100 shadow-sm">
-              <span className="text-xs text-gray-500">Page {txPage} of {totalPages} · {totalCount.toLocaleString('de-DE')} transactions</span>
-              <div className="flex items-center gap-2">
-                <button onClick={() => setTxPage(p => Math.max(1, p - 1))} disabled={txPage === 1 || isFetching}
-                  className="flex items-center gap-1 px-3 py-1 text-xs font-medium border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-40 transition-colors">
-                  <ChevronUp size={12} className="rotate-[-90deg]" /> Previous
-                </button>
-                <div className="flex gap-1">
-                  {Array.from({ length: Math.min(totalPages, 7) }, (_, i) => {
-                    const p = totalPages <= 7 ? i + 1 : txPage <= 4 ? i + 1 : txPage >= totalPages - 3 ? totalPages - 6 + i : txPage - 3 + i;
-                    return <button key={p} onClick={() => setTxPage(p)} className={`w-7 h-7 text-xs rounded-lg font-medium transition-colors ${p === txPage ? 'bg-[#1B5E20] text-white' : 'border border-gray-200 text-gray-600 hover:bg-gray-50'}`}>{p}</button>;
-                  })}
-                </div>
-                <button onClick={() => setTxPage(p => Math.min(totalPages, p + 1))} disabled={txPage === totalPages || isFetching}
-                  className="flex items-center gap-1 px-3 py-1 text-xs font-medium border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-40 transition-colors">
-                  Next <ChevronDown size={12} className="rotate-[-90deg]" />
-                </button>
-              </div>
-            </div>
-          )}
 
-          {/* Table */}
-          <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-            {isFetching && (
-              <div className="flex items-center justify-center py-8 text-gray-400 gap-2">
-                <Loader2 size={16} className="animate-spin" /> Loading…
+          {/* Unconfirmed — the review queue for freshly uploaded transactions */}
+          <section className="mb-6">
+            <div className="flex items-baseline gap-2 mb-2">
+              <h2 className="text-sm font-bold text-gray-900">Unconfirmed</h2>
+              <span className="text-xs font-semibold text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5">
+                {uncCount.toLocaleString('de-DE')}
+              </span>
+              <span className="text-xs text-gray-400">awaiting review</span>
+            </div>
+            {renderTxTable(sortedUncTxs, uncFetching, 'Nothing to review — every transaction in this period is confirmed.')}
+            {uncPages > 1 && (
+              <div className="flex items-center justify-between px-4 py-2 mt-2 bg-white rounded-xl border border-gray-100 shadow-sm">
+                <span className="text-xs text-gray-500">
+                  Page {uncPage} of {uncPages} · {uncCount.toLocaleString('de-DE')} unconfirmed
+                </span>
+                <div className="flex items-center gap-1">
+                  <button onClick={() => setUncPage(p => Math.max(1, p - 1))} disabled={uncPage === 1 || uncFetching}
+                    className="px-3 py-1.5 text-xs font-medium border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-40">
+                    Previous
+                  </button>
+                  <button onClick={() => setUncPage(p => Math.min(uncPages, p + 1))} disabled={uncPage === uncPages || uncFetching}
+                    className="px-3 py-1.5 text-xs font-medium border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-40">
+                    Next
+                  </button>
+                </div>
               </div>
             )}
-            {!isFetching && txs.length === 0 && (
-              <div className="py-12 text-center text-gray-400 text-sm">No transactions for this period.</div>
-            )}
-            {txs.length > 0 && (
-              <div>
-                <table className="w-full text-sm">
-                  <thead className="bg-gray-50 border-b border-gray-200">
-                    <tr>
-                      {([
-                        { col: 'date',        label: 'Date',        align: 'left'  },
-                        { col: 'counterparty',label: 'Counterparty',align: 'left'  },
-                      ] as { col: string; label: string; align: 'left' | 'right' }[]).map(({ col, label, align }) => {
-                        const active = sortCol === col;
-                        return (
-                          <th key={col}
-                            onClick={() => handleSort(col)}
-                            className={`py-2.5 px-2 text-xs font-semibold uppercase tracking-wide cursor-pointer select-none transition-colors whitespace-nowrap
-                              ${align === 'right' ? 'text-right' : 'text-left'}
-                              ${active ? 'text-[#1B5E20]' : 'text-gray-500 hover:text-gray-800'}`}>
-                            <span className={`inline-flex items-center gap-1 ${align === 'right' ? 'flex-row-reverse' : ''}`}>
-                              {label}
-                              <span className={`transition-opacity ${active ? 'opacity-100' : 'opacity-25'}`}>
-                                {active && sortDir === 'asc' ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
-                              </span>
-                            </span>
-                          </th>
-                        );
-                      })}
-                      <th className="py-2.5 px-2 text-xs font-semibold text-gray-500 uppercase tracking-wide text-left">Bill</th>
-                      {([
-                        { col: 'brutto',   label: 'Brutto',   align: 'right' },
-                        { col: 'vatpct',   label: 'VAT %',    align: 'right' },
-                        { col: 'vateur',   label: 'VAT €',    align: 'right' },
-                        { col: 'netto',    label: 'Netto',    align: 'right' },
-                        { col: 'category',          label: 'Category', align: 'left'  },
-                        { col: 'location',          label: 'Location', align: 'left'  },
-                        { col: 'accounting_period', label: 'Period',   align: 'left'  },
-                      ] as { col: string; label: string; align: 'left' | 'right' }[]).map(({ col, label, align }) => {
-                        const active = sortCol === col;
-                        return (
-                          <th key={col}
-                            onClick={() => handleSort(col)}
-                            className={`py-2.5 px-2 text-xs font-semibold uppercase tracking-wide cursor-pointer select-none transition-colors whitespace-nowrap
-                              ${align === 'right' ? 'text-right' : 'text-left'}
-                              ${active ? 'text-[#1B5E20]' : 'text-gray-500 hover:text-gray-800'}`}>
-                            <span className={`inline-flex items-center gap-1 ${align === 'right' ? 'flex-row-reverse' : ''}`}>
-                              {label}
-                              <span className={`transition-opacity ${active ? 'opacity-100' : 'opacity-25'}`}>
-                                {active && sortDir === 'asc' ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
-                              </span>
-                            </span>
-                          </th>
-                        );
-                      })}
-                      <th className="py-2.5 px-2 text-xs font-semibold text-gray-500 uppercase tracking-wide text-left">Notes</th>
-                      <th className="py-2.5 px-2 text-xs font-semibold text-gray-500 uppercase tracking-wide text-left">Confirm</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {sortedTxs.map(tx => (
-                      <TxRow key={tx.id} tx={tx} onSave={handleSave} counterparties={counterparties}
-                        onShowDetails={() => setDetailTx(tx)} />
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
+          </section>
+
+          {/* Confirmed — the settled ledger */}
+          <div className="flex items-baseline gap-2 mb-2">
+            <h2 className="text-sm font-bold text-gray-900">Confirmed</h2>
+            <span className="text-xs font-semibold text-green-700 bg-green-50 border border-green-200 rounded-full px-2 py-0.5">
+              {totalCount.toLocaleString('de-DE')}
+            </span>
           </div>
+          {renderTxTable(sortedTxs, isFetching, 'No confirmed transactions for this period.')}
 
           {/* Pagination controls */}
           {totalPages > 1 && (

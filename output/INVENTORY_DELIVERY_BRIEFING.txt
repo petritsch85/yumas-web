@@ -1,0 +1,1093 @@
+================================================================================
+YUMAS — INVENTORY & DELIVERY
+TECHNICAL PROJECT BRIEFING FOR REIMPLEMENTATION
+================================================================================
+Generated: 28 August 2026
+Source: yumas-web (Next.js App Router + Supabase/PostgreSQL)
+Scope: ONLY the "Inventory" and "Delivery" sidebar groups and their sub-features.
+Purpose: enough detail to rebuild these functions in a separate application.
+
+--------------------------------------------------------------------------------
+0. HOW TO READ THIS DOCUMENT
+--------------------------------------------------------------------------------
+Section 1  Business model — what the system is actually for
+Section 2  Data model — every table these features touch
+Section 3  Inventory features, one per sidebar entry
+Section 4  Delivery features, one per sidebar entry
+Section 5  Core algorithms, stated precisely
+Section 6  Dependencies on the rest of the application
+Section 7  Known defects and traps found while auditing (READ THIS)
+Section 8  Reimplementation notes and suggested order of work
+
+Everything below was read from the live codebase and the live database on the
+generation date. Row counts are real. Where something is broken or dead, it says
+so rather than describing the intent.
+
+
+================================================================================
+1. BUSINESS MODEL — WHAT THIS SYSTEM DOES
+================================================================================
+
+Yumas is a restaurant group with four locations:
+
+  Westend     restaurant
+  Eschborn    restaurant
+  Taunus      restaurant
+  ZK          production kitchen ("Zentralküche") — supplies the other three
+
+The central kitchen (ZK) produces prepared goods (salsas, marinades, proteins,
+tortillas) and delivers them to the three restaurants on a fixed weekly cycle.
+
+The core loop the software automates:
+
+  1. Before a delivery, each restaurant COUNTS its current stock
+     ("inventory submission").
+  2. The system compares that count to a TARGET stock level for that store and
+     that weekday.
+  3. The difference becomes the DELIVERY QUANTITY — how much ZK must send.
+  4. ZK PACKS the delivery, recording what was actually packed (which may
+     differ from what was requested).
+  5. A DRIVER delivers it; each store CONFIRMS receipt.
+  6. The next inventory count closes the cycle, allowing CONSUMPTION to be
+     derived: what was actually used between two deliveries.
+
+Deliveries run on four weekdays only: MONDAY, TUESDAY, WEDNESDAY, FRIDAY.
+This is hard-coded in several places as `[1, 2, 3, 5]` (JS day-of-week) and as
+the column set `mon/tue/wed/fri`. There is no Thursday, Saturday or Sunday
+delivery. Any reimplementation must decide early whether to keep this
+four-day assumption or generalise it — it is baked in deeply.
+
+
+================================================================================
+2. DATA MODEL
+================================================================================
+
+All tables are PostgreSQL via Supabase. Row Level Security is enabled on all of
+them, but the policies are uniformly permissive:
+
+    FOR ALL TO authenticated USING (true) WITH CHECK (true)
+
+i.e. any signed-in user can read and write everything. Access control is
+enforced in the UI layer only (see Section 6.2). This is a significant design
+weakness to reconsider when rebuilding.
+
+--------------------------------------------------------------------------------
+2.1 MASTER DATA
+--------------------------------------------------------------------------------
+
+locations                                                        [4 rows]
+  id uuid PK
+  name text                    'Westend' | 'Eschborn' | 'Taunus' | 'ZK'
+  type text                    'restaurant' | 'production'
+  address text
+  is_active boolean
+  opening_hours jsonb
+  created_at, updated_at
+
+  NOTE: locations are joined by NAME as often as by id. Most inventory and
+  delivery tables store `location_name` as free text, not a foreign key.
+  This is a deliberate denormalisation in the existing code and a frequent
+  source of mismatch. Recommend proper FKs on rebuild.
+
+
+inventory_items                                                [139 rows]
+  id uuid PK
+  section text                 e.g. 'Kühlhaus', 'Tiefkühler', 'Regale'
+  name text                    the item name — used as the JOIN KEY everywhere
+  unit text                    e.g. '1/6 GN groß', 'Beutel (1.0kg)', 'Kisten'
+  sort_order integer           global fallback ordering (gaps of 10)
+  stores text[]                which locations carry this item
+  store_sort_orders jsonb      { "Westend": 120, "Eschborn": 90, ... }
+                               per-store display order, overrides sort_order
+  store_targets jsonb          { "Westend": { "mon": 4, "tue": 6,
+                                              "wed": 5, "fri": 8 }, ... }
+                               *** THE TARGET STOCK LEVELS LIVE HERE ***
+  created_at
+
+  This is the single most important table. `store_targets` is the heart of the
+  delivery calculation. It is a nested JSONB map of
+  store -> weekday-key -> target quantity, where weekday-key is one of
+  'mon' | 'tue' | 'wed' | 'fri'.
+
+
+inventory_sections                                              [11 rows]
+  id uuid PK
+  name text                    'Kühlhaus', 'Tiefkühler', 'Lager', ...
+  stores text[]                which locations use this section
+  sort_order integer
+  created_at
+
+  Sections differ per store. Live data:
+
+    sort  name              stores
+      10  Kühlhaus Links    [ZK]
+      10  Kühlhaus          [Eschborn, Taunus, Westend]
+      20  Kühlhaus Rechts   [ZK]
+      20  Tiefkühler        [Eschborn, Taunus, Westend, ZK]
+      30  Tiefkühlhaus      [ZK]
+      30  Trockenware       [Eschborn, Taunus]
+      40  Regale            [Eschborn, Taunus, Westend]
+      50  Lager             [Eschborn, Taunus]
+      50  Non-Food 1        [ZK]
+      60  Non-Food 2        [ZK]
+      70  Food Lager        [ZK]
+
+  Note sort_order collides across stores (two rows have 10, two have 20 etc.).
+  It is only unique *within* a store's filtered set.
+
+--------------------------------------------------------------------------------
+2.2 INVENTORY COUNTING
+--------------------------------------------------------------------------------
+
+inventory_submissions                                          [169 rows]
+  id uuid PK
+  location_id uuid
+  location_name text
+  submitted_by uuid -> auth.users
+  submitted_at timestamptz
+  data jsonb                   *** ARRAY of { name, quantity } ***
+  comment text
+  started_at timestamptz
+  duration_seconds integer     how long the count took (a stopwatch runs in UI)
+  edited_at timestamptz
+  edited_by uuid
+  original_data jsonb          the FIRST version, preserved across later edits
+  deleted_at timestamptz       soft delete
+  deleted_by uuid
+  linked_delivery_date date    which delivery this count belongs to
+  created_at
+
+  `data` is a denormalised snapshot: an array of item names and quantities,
+  NOT foreign keys to inventory_items. Items are matched later by
+  case-insensitive, trimmed name comparison. If an item is renamed in
+  inventory_items, historic submissions silently stop matching.
+
+  `linked_delivery_date` is what ties a count to a delivery cycle. It is
+  chosen by the user when submitting (see 3.2).
+
+
+inventory_movement_overrides                                     [1 row]
+  id uuid PK
+  store text
+  delivery_date date
+  item_name text
+  overridden_qty numeric
+  original_qty numeric
+  comment text
+  created_at, updated_at
+
+  Manual corrections to the computed consumption figures.
+
+
+inventory_levels                                               [0 rows]  UNUSED
+  Table exists but is empty and not written by any code path found.
+
+--------------------------------------------------------------------------------
+2.3 DELIVERY
+--------------------------------------------------------------------------------
+
+delivery_runs                                                   [55 rows]
+  id uuid PK
+  delivery_date date UNIQUE          one run per calendar date
+  status text                        'draft'|'ready'|'in_progress'|'completed'
+  -- list confirmation stage
+  lists_checked_at timestamptz
+  lists_checked_by uuid
+  list_confirmed_eschborn_at timestamptz
+  list_confirmed_taunus_at   timestamptz
+  list_confirmed_westend_at  timestamptz
+  day_locked_at timestamptz
+  day_locked_by uuid
+  -- packing stage
+  packing_started_at timestamptz
+  packing_finished_at timestamptz
+  packing_duration_seconds integer
+  items_packed_count integer
+  packed_by uuid
+  store_packing_finished_at jsonb    per-store packing completion timestamps
+  -- delivery stage
+  delivery_started_at timestamptz
+  delivery_started_by uuid
+  delivery_finished_at timestamptz
+  delivery_finished_by uuid
+  -- snapshots and misc
+  delivery_snapshot jsonb            frozen copy of the lines at dispatch
+  store_notes jsonb
+  store_inventory_comments jsonb     comments copied from the submissions used
+  inventory_overrides jsonb
+  skipped_stores text[]
+  deleted_at, deleted_by
+  created_at
+
+  Note how many stage timestamps live on this one row. The workflow is a state
+  machine expressed as nullable timestamps rather than an explicit status
+  column — `status` exists but the UI mostly branches on the timestamps.
+
+
+delivery_run_lines                                          [17,183 rows]
+  id uuid PK
+  run_id uuid -> delivery_runs ON DELETE CASCADE
+  location_name text
+  section text
+  item_name text
+  unit text
+  standard_target_qty numeric        the unscaled target from store_targets
+  target_qty numeric                 the target actually applied (editable)
+  reported_qty numeric               what the store counted
+  delivery_qty numeric               computed: max(0, target - reported)
+  packed_qty numeric NULL            what ZK actually packed (NULL = not packed)
+  is_packed boolean
+  created_at
+
+  One row per (run, store, item). ~17k rows across 55 runs.
+
+
+store_delivery_receipts                                         [37 rows]
+  id uuid PK
+  run_id uuid -> delivery_runs ON DELETE CASCADE
+  location_name text
+  received_at timestamptz
+  received_by uuid
+  items_confirmed_count integer
+  confirmed_item_ids text[]
+  notes text
+  created_at
+  UNIQUE (run_id, location_name)
+
+  The store's confirmation that a delivery arrived, and which items it verified.
+
+
+delivery_reports                                               [110 rows]
+  id uuid PK
+  location_id uuid
+  report_date date
+  store_name text
+  shift_type text                    'lunch' | 'dinner'
+  orders_count integer
+  net_revenue numeric
+  gross_revenue numeric
+  file_name text
+  imported_by uuid
+  created_at
+  UNIQUE (location_id, report_date, shift_type)
+
+  CAUTION: despite the name, this table is about DELIVERY-PLATFORM SALES
+  (orders and revenue imported from a file), not about ZK deliveries. The
+  "Delivery Reports" sidebar page does NOT read it — see 4.4. Naming collision.
+
+
+delivery_targets                                       *** DOES NOT EXIST ***
+  A CREATE TABLE exists in supabase/delivery_system.sql and a whole page
+  (/delivery/targets) queries it, but the table is absent from the live
+  database. That page is dead code. Targets moved into
+  inventory_items.store_targets. See Section 7.1.
+
+
+delivery_schedules                                             [0 rows]  UNUSED
+
+--------------------------------------------------------------------------------
+2.4 FORECASTING AND USAGE STANDARDS
+--------------------------------------------------------------------------------
+
+store_day_standards                                             [12 rows]
+  id uuid PK
+  location_name text
+  day_of_week text            'mon'|'tue'|'wed'|'fri'
+  standard_sales_eur numeric
+  UNIQUE (location_name, day_of_week)
+
+  The baseline euro sales each day's targets assume. Seeded values:
+    Eschborn  mon 3000  tue 5000  wed 4000  fri 2000
+    Taunus    mon 1500  tue 2500  wed 2500  fri 2500
+    Westend   mon 1500  tue 2500  wed 2500  fri 2500
+
+
+weekly_sales_forecasts                                          [19 rows]
+  id uuid PK
+  location_name text
+  forecast_date date
+  forecasted_sales_eur numeric
+  is_locked boolean
+  locked_at timestamptz
+  notes text
+  created_at, updated_at
+  UNIQUE (location_name, forecast_date)
+
+  A manager's sales forecast for a given store and date. Used to scale
+  delivery targets up or down (see 5.2).
+
+
+usage_standards                                                [104 rows]
+  id uuid PK
+  item_id uuid -> inventory_items
+  store text
+  lunch_c numeric             baseline usage per LUNCH shift ("C" level)
+  dinner_c numeric            baseline usage per DINNER shift
+  updated_at
+
+
+usage_forecast_rules                                           [288 rows]
+  id uuid PK
+  location_name text
+  shift_type text
+  item_name text
+  net_sales_from numeric
+  net_sales_to numeric
+  quantity numeric
+  created_at
+
+  Banded rules: "for this store and shift, if net sales fall between X and Y,
+  expect to use Z of this item."
+
+
+shift_usage                                                      [1 row]
+  id uuid PK
+  location_name text
+  usage_date date
+  shift text
+  item_name text
+  quantity numeric
+  created_at, updated_at
+
+  Essentially unused in production (1 row).
+
+
+forecast_settings                                                [6 rows]
+  id uuid PK
+  location_id uuid
+  shift_type text                    'lunch' | 'dinner'
+  week_base_net numeric
+  growth_rate numeric
+  weight_mon..weight_sun numeric      day-of-week weighting
+  closed_weekdays                     which days the store is shut
+  default_spend_per_guest numeric
+  guests_mon..guests_sun numeric
+  created_at, updated_at
+
+forecast_overrides                                               [4 rows]
+  id uuid PK
+  location_id uuid
+  forecast_date date
+  shift_type text
+  net_revenue numeric
+  note text
+  created_by, created_at
+
+daily_forecasts                                                [0 rows]  UNUSED
+
+--------------------------------------------------------------------------------
+2.5 CONCURRENCY CONTROL
+--------------------------------------------------------------------------------
+
+editing_locks                                                   [0 rows]
+  page_key text PK
+  locked_by uuid
+  locked_by_name text
+  locked_at timestamptz
+  expires_at timestamptz       default now() + 5 minutes
+
+  Plus two Postgres functions:
+    acquire_edit_lock(p_page_key, p_user_id, p_user_name)
+    release_edit_lock(p_page_key, p_user_id)
+
+  Used by the Inventory Lists page so two managers cannot reorder the master
+  list simultaneously. A soft advisory lock with a 5-minute TTL.
+
+
+================================================================================
+3. INVENTORY FEATURES
+================================================================================
+
+Sidebar group "Inventory" (route /inventory, permission key `inventory`).
+Five children, in order:
+
+--------------------------------------------------------------------------------
+3.1 INVENTORY LISTS            /inventory/lists          (managerOnly)
+--------------------------------------------------------------------------------
+File: app/(app)/inventory/lists/page.tsx  (~1,126 lines)
+
+The master-data editor. Everything downstream depends on what is configured
+here.
+
+Responsibilities:
+  - CRUD on inventory_items: name, unit, section, which stores carry it.
+  - CRUD on inventory_sections: name, which stores, sort order.
+  - Per-store ORDERING of items (store_sort_orders). Managers drag items into
+    the physical walking order of that store's shelves, so counting follows the
+    room layout. This is why ordering is per-store rather than global.
+  - Per-store, per-weekday TARGET quantities (store_targets), i.e. the four
+    numbers mon/tue/wed/fri that drive every delivery.
+  - Bulk clear of a store's targets via RPC `clear_store_targets(p_store)`.
+
+Concurrency:
+  On mount the page calls `acquire_edit_lock` with a page key; on unmount it
+  calls `release_edit_lock`. If another user holds the lock, the UI shows who
+  and blocks editing. Lock expires after 5 minutes.
+
+Sorting rule used consistently across the app:
+  section order  = inventory_sections.sort_order (filtered to this store)
+  item order     = store_sort_orders[store]  ??  sort_order
+
+--------------------------------------------------------------------------------
+3.2 ADD NEW INVENTORY          /inventory/add            (perm `inventory`)
+--------------------------------------------------------------------------------
+Files:
+  app/(app)/inventory/add/page.tsx               (~180 lines)  location picker
+  app/(app)/inventory/add/[locationId]/page.tsx  (~1,007 lines) the count form
+
+This is the highest-traffic screen — staff use it on a phone, standing in a
+cold room. It is the most engineered page in the two sections.
+
+Behaviour:
+  - Loads inventory_items filtered to this store, grouped into sections,
+    ordered by the per-store rule above.
+  - Renders one numeric input per item. Sections are collapsible.
+  - A STOPWATCH runs from first interaction; the elapsed time is saved as
+    duration_seconds so managers can see how long counts take.
+  - AUTO-SAVE DRAFT: every ~800 ms after the last keystroke the partial count
+    is written to localStorage (lib/draft-store.ts) keyed by locationId. On
+    remount the draft is restored. Prevents loss if the phone locks.
+  - OFFLINE QUEUE: if the device is offline at submit time the submission is
+    written to IndexedDB (lib/offline-queue.ts, database 'yumas-offline' via
+    the `idb` package). An online/offline event listener drains the queue
+    automatically when connectivity returns. A badge shows the pending count.
+  - EDIT WINDOW: a submission can be edited by its author until 09:00 the
+    following day. Implemented as:
+
+        function isEditable(submittedAt) {
+          const deadline = new Date(submittedAt);
+          deadline.setDate(deadline.getDate() + 1);
+          deadline.setHours(9, 0, 0, 0);
+          return new Date() < deadline;
+        }
+
+    On the first edit the original payload is copied into `original_data` so
+    the initial count is never lost. Subsequent edits overwrite `data` only.
+  - Managers can reorder items and move an item between sections directly from
+    this screen (mutations write back to inventory_items).
+  - The most recent submission for the location can be loaded to pre-fill the
+    form (useful when little has changed).
+
+The `data` written is an array:  [{ name, quantity }, ...]
+using the item NAME as identifier, not the id.
+
+--------------------------------------------------------------------------------
+3.3 CURRENT INVENTORY          /inventory/overview       (perm `inventory_current`)
+--------------------------------------------------------------------------------
+File: app/(app)/inventory/overview/page.tsx  (~1,241 lines)
+
+Read-only view of the latest known stock per store, with historic navigation.
+
+  - Tabs per store (Eschborn / Taunus / Westend).
+  - Shows the most recent submission per store, grouped by section, in the
+    canonical per-store order.
+  - "Time ago" rendering so staleness is obvious.
+  - Week navigation: `getWeekDays(offset)` builds a Mon–Sun window and the page
+    can step backwards through weeks.
+  - END-OF-DAY CUTOFF: `EOD_CUTOFF_HOUR = 4`. A submission made between
+    midnight and 04:00 is attributed to the PREVIOUS calendar day, because
+    late-shift counts happen after midnight. Any reimplementation must
+    replicate this or day boundaries will be wrong.
+
+--------------------------------------------------------------------------------
+3.4 INVENTORY REPORTS          /inventory/counts         (managerOnly)
+--------------------------------------------------------------------------------
+File: app/(app)/inventory/counts/page.tsx  (~814 lines)
+
+The manager's audit view of submissions.
+
+  - Lists inventory_submissions with filters by location and date.
+  - Shows who submitted, when, how long it took (duration_seconds), and any
+    comment.
+  - Shows edit provenance: whether a submission was edited, by whom, and the
+    original values from `original_data`.
+  - Soft delete (sets deleted_at / deleted_by) and hard delete.
+  - Assign or change `linked_delivery_date`. The picker offers only valid
+    delivery weekdays:
+
+        const DELIVERY_DOW = [1, 2, 3, 5];   // Mon Tue Wed Fri
+
+    This linkage is what makes the consumption calculation possible, so it
+    matters that it is correct.
+  - Groups a submission's `data` back into sections for display via
+    `groupBySection`.
+
+--------------------------------------------------------------------------------
+3.5 USAGE FORECAST             /inventory/usage-forecast (managerOnly)
+--------------------------------------------------------------------------------
+File: app/(app)/inventory/usage-forecast/page.tsx  (~613 lines)
+
+Predicts how much of each item a shift will consume.
+
+Model: each item has a baseline usage per store and per shift type stored in
+usage_standards (lunch_c, dinner_c — the "C" level meaning normal trade). A
+five-band multiplier scales that baseline for busier or quieter shifts:
+
+    const MULTIPLIERS = { A: 0.5, B: 0.75, C: 1, D: 1.25, E: 1.5 };
+    compute(c, key) = round(c * MULTIPLIERS[key] * 10) / 10
+
+So a shift graded "D" is expected to use 1.25x the normal quantity. The UI
+displays a matrix of items x A..E bands per store.
+
+Also includes an upload modal to bulk-set usage_standards per store.
+
+--------------------------------------------------------------------------------
+3.6 NOT IN THE SIDEBAR BUT PART OF INVENTORY
+--------------------------------------------------------------------------------
+
+INVENTORY MOVEMENTS       /inventory/movements/[store]   (~762 lines page)
+                          GET /api/inventory/movements/[store]  (~164 lines)
+                          POST /api/inventory/movements/overrides
+
+  This is the analytical core and the most valuable single piece of logic in
+  the whole section. It reconstructs consumption per delivery cycle.
+  Algorithm in full in Section 5.3.
+
+  The overrides endpoint writes inventory_movement_overrides so a manager can
+  correct an obviously wrong computed consumption figure.
+
+  There is also /api/inventory/movements-debug (69 lines) — a diagnostic
+  endpoint, not user-facing.
+
+SHIFT USAGE               /inventory/shift-usage/[location]  (~991 lines)
+
+  Per-shift usage entry and comparison against forecast_settings. Reads
+  forecast_settings (lunch and dinner rows per location) including
+  week_base_net, growth_rate, per-weekday weights, guests per weekday and
+  default_spend_per_guest. Writes shift_usage.
+
+  In practice this is barely used: shift_usage holds 1 row. Treat as
+  experimental / incomplete when scoping a rebuild.
+
+
+================================================================================
+4. DELIVERY FEATURES
+================================================================================
+
+Sidebar group "Delivery" (route /delivery, permission key `delivery`,
+managerOnly). Three children: Stages, Delivery Cycles, Delivery Reports.
+Plus two staff-only entry points that reuse the same page with a different
+view mode.
+
+--------------------------------------------------------------------------------
+4.1 STAGES                     /delivery                 (the main workflow)
+--------------------------------------------------------------------------------
+File: app/(app)/delivery/page.tsx  (~2,651 lines — by far the largest file)
+
+ONE page, FOUR view modes:
+
+    type ViewMode = 'manager' | 'packer' | 'driver' | 'store';
+
+Mode is chosen by, in order:
+  1. `?view=` query parameter, if one of the four
+  2. localStorage 'delivery-view-mode'
+  3. the user's permissions: driver -> 'driver', packer -> 'packer'
+  4. default 'packer'
+
+Staff-only sidebar shortcuts exist:
+    /delivery?view=packer   (permission `packer`)
+    /delivery?view=driver   (permission `driver`)
+
+THE WORKFLOW, in stages:
+
+  STAGE 1 — LIST CONFIRMATION (manager)
+    A delivery run is created (or previewed) for the target date. The manager
+    reviews each store's computed quantities, may override target_qty per line,
+    and confirms each store's list. Confirmation writes
+    list_confirmed_<store>_at. When all three are confirmed the day can be
+    locked (day_locked_at / day_locked_by), freezing the list.
+
+  STAGE 2 — PACKING (packer, at ZK)
+    packing_started_at is set. The packer walks each store's list and records
+    packed_qty per line. packed_qty is deliberately separate from delivery_qty
+    so shortfalls are visible: a line can be requested 10 and packed 7.
+    The UI classifies lines as fully packed (packed_qty >= delivery_qty),
+    partially packed (0 < packed_qty < delivery_qty) or unpacked (NULL).
+    Per-store completion timestamps go into store_packing_finished_at (jsonb).
+    On completion: packing_finished_at, packing_duration_seconds,
+    items_packed_count, packed_by.
+    The packer view polls every 15 seconds (refetchInterval: 15_000).
+
+  STAGE 3 — DELIVERY (driver)
+    delivery_started_at / delivery_started_by set on departure. A
+    delivery_snapshot (jsonb) freezes the line state at dispatch so later edits
+    cannot rewrite history. On completion delivery_finished_at /
+    delivery_finished_by. The driver view also polls every 15 seconds.
+
+  STAGE 4 — STORE RECEIPT (store staff, permission `store_receiver`)
+    Each store confirms arrival, ticking off items. Writes
+    store_delivery_receipts with confirmed_item_ids, items_confirmed_count,
+    received_by, received_at and free-text notes.
+
+Stores served: Westend, Eschborn, Taunus. ZK is excluded from the packing view
+(`STORES.filter(s => viewMode !== 'packer' || s !== 'ZK')`) because ZK is the
+source, not a destination.
+
+A "skipped_stores" array on the run allows a store to be omitted from a
+delivery day.
+
+--------------------------------------------------------------------------------
+4.2 DELIVERY CYCLES            /delivery/cycles          (managerOnly)
+--------------------------------------------------------------------------------
+File: app/(app)/delivery/cycles/page.tsx  (~364 lines)
+
+IMPORTANT: this page is ENTIRELY STATIC. It reads no database table. It is a
+hard-coded visual reference explaining, per store, which shifts each delivery
+must cover before the next one arrives.
+
+Structure:
+    type StepType = 'inventory' | 'lunch' | 'dinner' | 'delivery' | 'end';
+    const CYCLES: Record<Store, Cycle[]>   // hard-coded constant
+
+Each cycle is a day (Monday/Tuesday/Wednesday/Friday) containing an ordered
+list of steps, rendered as a chain of chips with a legend.
+
+Documented business rules embedded in the page text:
+  - Westend: the Friday delivery must cover Friday Dinner + Saturday Dinner +
+    Sunday Dinner before Monday's delivery arrives — the longest cycle of the
+    three stores.
+  - Taunus: Monday's inventory is taken on SATURDAY. The Monday delivery covers
+    Tuesday Lunch only, because there is no Monday Dinner shift to bridge. The
+    Friday cycle ends at Saturday Dinner.
+
+For a rebuild this is documentation, not functionality — but the rules it
+encodes are real operational constraints that the target quantities assume.
+
+--------------------------------------------------------------------------------
+4.3 DELIVERY REPORTS           /delivery/reports         (managerOnly)
+--------------------------------------------------------------------------------
+File: app/(app)/delivery/reports/page.tsx  (~1,565 lines)
+
+The manager's retrospective and administrative view of delivery RUNS.
+(Despite the name it does NOT read the `delivery_reports` table — see 7.2.)
+
+Reads: delivery_runs, delivery_run_lines, store_delivery_receipts,
+       inventory_submissions, profiles.
+
+Provides:
+  - A history of runs with their full stage timeline.
+  - Per-store receipt status and notes.
+  - Which inventory submission fed each run.
+  - Editing of run lines after the fact.
+  - Administrative actions: soft delete a run (deleted_at/deleted_by), hard
+    delete a run (deletes delivery_run_lines and store_delivery_receipts by
+    run_id first), reset stage timestamps.
+  - Uses the same DELIVERY_DAYS = [1, 2, 3, 5] weekday restriction.
+
+--------------------------------------------------------------------------------
+4.4 DELIVERY TARGETS           /delivery/targets         *** DEAD PAGE ***
+--------------------------------------------------------------------------------
+File: app/(app)/delivery/targets/page.tsx  (~658 lines)
+
+Not in the sidebar. Queries the `delivery_targets` table, which does not exist
+in the live database. Any visit throws. It also implements a
+`scales_with_demand` toggle per target row and reads store_day_standards and
+weekly_sales_forecasts.
+
+This is the remains of an earlier design where targets lived in their own table
+with a per-row opt-in to demand scaling. Targets have since moved to
+inventory_items.store_targets. DO NOT PORT THIS PAGE. Port the concept only if
+you want per-item control over whether a target scales (see 5.2).
+
+
+================================================================================
+5. CORE ALGORITHMS
+================================================================================
+
+--------------------------------------------------------------------------------
+5.1 BUILDING A DELIVERY RUN
+--------------------------------------------------------------------------------
+Source: app/(app)/delivery/page.tsx (~line 1890)
+
+Given a target delivery date:
+
+  dayKey = one of 'mon' | 'tue' | 'wed' | 'fri' derived from the date
+
+  1. Upsert delivery_runs on delivery_date (unique), status 'draft'.
+  2. DELETE all existing delivery_run_lines for that run  (full rebuild, not
+     incremental — any manual edits are lost on regeneration).
+  3. For each store (Westend, Eschborn, Taunus):
+       a. Load inventory_items where stores @> [store].
+       b. Load the latest inventory_submission for that store linked to this
+          delivery date.
+       c. For each item:
+
+            effectiveTarget = max(0, store_targets[store][dayKey] ?? 0)
+
+            reportedQty = quantity from the submission where
+                          item.name.trim().toLowerCase()
+                          === submitted.name.trim().toLowerCase()
+                          else 0
+
+            deliveryQty = max(0, effectiveTarget - reportedQty)
+
+       d. Insert a delivery_run_line with
+            standard_target_qty = effectiveTarget
+            target_qty          = effectiveTarget
+            reported_qty        = reportedQty
+            delivery_qty        = deliveryQty
+            packed_qty          = NULL
+            is_packed           = false
+
+  4. If every store has a submission, the run is considered fully sourced.
+  5. Copy the submissions' comments into delivery_runs.store_inventory_comments.
+
+PREVIEW MODE: if no run exists yet for the date, the same shape is built in
+memory from store_targets with reported_qty = 0 and delivery_qty = target, so
+managers can see a provisional list before any store has counted. Only items
+with a target > 0 for that weekday appear.
+
+--------------------------------------------------------------------------------
+5.2 DEMAND SCALING
+--------------------------------------------------------------------------------
+
+Targets are calibrated to a "standard" trading day. When a manager forecasts
+sales above or below that standard, targets scale proportionally:
+
+    standard = store_day_standards.standard_sales_eur
+               for (store, dayKey)
+
+    forecast = weekly_sales_forecasts.forecasted_sales_eur
+               for (store, delivery_date)
+
+    scale    = standard > 0 ? forecast / standard : 1
+
+    if no forecast exists  ->  scale = 1.0 (targets used as-is)
+
+The UI surfaces this as a banner: "Forecast for Westend: 3.000 € x1.20 (120%)",
+highlighting when the scale is more than 2% away from 1.0.
+
+In the current live code the scale is applied in the manager UI layer when
+proposing target_qty; the persisted `standard_target_qty` always holds the
+unscaled figure so the original is recoverable.
+
+The abandoned delivery_targets table had a per-row `scales_with_demand` boolean
+and a `demand_scale_factor` so that, e.g., cleaning chemicals would not scale
+with sales while food would. That granularity is NOT present in the live
+store_targets design. If you need it, reintroduce it deliberately.
+
+--------------------------------------------------------------------------------
+5.3 CONSUMPTION PER DELIVERY CYCLE   *** the most valuable algorithm ***
+--------------------------------------------------------------------------------
+Source: app/api/inventory/movements/[store]/route.ts
+
+For a given store, reconstructs what was actually consumed between deliveries.
+
+  1. Load all delivery_runs ordered by delivery_date ascending.
+  2. Keep only runs that have delivery_run_lines for this store.
+  3. Group those lines by run.
+  4. Load inventory_submissions for this store where
+       linked_delivery_date IN (all relevant delivery dates + the NEXT run's
+       date after the last relevant one)
+     and deleted_at IS NULL, newest first. Keep only the LATEST submission per
+     linked_delivery_date.
+  5. Build the canonical item list: inventory_items filtered to this store,
+     sorted by inventory_sections.sort_order then
+     store_sort_orders[store] ?? sort_order.
+  6. For each run i:
+
+       preInv   = the submission linked to run[i].delivery_date
+                  -> map of item name -> quantity
+       delivery = for each line of run[i]:  packed_qty ?? delivery_qty ?? 0
+                  (only where > 0)
+       postInv  = the submission linked to run[i+1].delivery_date
+
+       if postInv exists, for every item in the master list:
+
+           consumption[item] = preInv[item] + delivery[item] - postInv[item]
+
+       (missing values default to 0)
+
+  7. Return { store, items[], cycles[] } where each cycle carries
+     deliveryDate, preInvDate, postInvDate, preInv, delivery, postInv,
+     consumption.
+
+Note the fallback `packed_qty ?? delivery_qty`: if the packer recorded what was
+actually packed, that is used; otherwise the requested quantity is assumed.
+This matters — using requested rather than packed quantities silently
+overstates consumption whenever a delivery was short.
+
+--------------------------------------------------------------------------------
+5.4 ORDERING RULE (used everywhere — get this right once)
+--------------------------------------------------------------------------------
+
+    sections: inventory_sections filtered by stores @> [store],
+              ordered by sort_order ascending
+    items:    inventory_items filtered by stores @> [store],
+              ordered by (section's sort_order,
+                          store_sort_orders[store] ?? sort_order)
+
+This ordering is deliberately the physical walking order of each store's
+storage areas. Getting it wrong makes counting slower and error-prone, which is
+the whole reason it is per-store.
+
+--------------------------------------------------------------------------------
+5.5 DAY BOUNDARY RULE
+--------------------------------------------------------------------------------
+
+    EOD_CUTOFF_HOUR = 4
+
+A timestamp between 00:00 and 03:59 belongs to the PREVIOUS calendar day.
+Applied when grouping submissions by day in Current Inventory. Late-shift
+counts routinely happen after midnight.
+
+
+================================================================================
+6. DEPENDENCIES ON THE REST OF THE APPLICATION
+================================================================================
+
+This is the section that matters most for extracting these features.
+
+--------------------------------------------------------------------------------
+6.1 HARD DEPENDENCIES — must be reproduced
+--------------------------------------------------------------------------------
+
+(a) AUTHENTICATION — Supabase Auth
+    Every table references auth.users(id) for submitted_by / packed_by /
+    received_by / locked_by / deleted_by etc. RLS policies are scoped
+    TO authenticated. You need a user identity system with stable UUIDs.
+
+(b) profiles                                                    [18 rows]
+      id uuid PK (= auth.users.id)
+      full_name text
+      role text          'admin' | 'staff' | 'staff_service'
+                         | 'staff_food_production'
+      location_id uuid   which store the user belongs to
+      is_active boolean
+      permissions jsonb  per-feature booleans (see 6.2)
+      language text      UI language
+      job_role text
+      chat_rooms         (unrelated to these features)
+
+    Inventory and Delivery read `role`, `permissions` and `location_id`
+    constantly. This table is NOT optional.
+
+(c) locations                                                    [4 rows]
+    Store master data. Note the widespread use of location NAME as a join key
+    in inventory/delivery tables, alongside location_id in some. Both paths
+    exist; reproduce both or normalise deliberately.
+
+(d) Supabase client wiring
+      lib/supabase-browser.ts   anon client, subject to RLS
+      lib/supabase-admin.ts     service-role client, bypasses RLS
+                                (used by /api/inventory/movements/*)
+
+(e) TanStack Query (@tanstack/react-query)
+    All data fetching and cache invalidation. Polling intervals (15 s in packer
+    and driver views) rely on refetchInterval.
+
+(f) idb (IndexedDB wrapper)
+    lib/offline-queue.ts — database 'yumas-offline'. Required for the offline
+    inventory submission queue.
+
+(g) Next.js App Router
+    Route groups `app/(app)/...`, dynamic segments `[locationId]`, `[store]`,
+    `[location]`, and route handlers under app/api. Params are awaited
+    Promises in this Next version:
+        { params }: { params: Promise<{ store: string }> }
+        const { store } = await params;
+
+--------------------------------------------------------------------------------
+6.2 PERMISSION MODEL
+--------------------------------------------------------------------------------
+
+profiles.permissions is a jsonb map of feature key -> boolean. Keys observed
+live across the whole app:
+
+    analysis, bills, bills_create, buying, delivery, driver, events,
+    inventory, inventory_current, packer, pl_reports, production, products,
+    staff_videos, store_receiver, suppliers, waste_log
+
+Relevant to these two sections:
+
+    inventory          Inventory group and Add New Inventory
+    inventory_current  Current Inventory
+    delivery           Delivery group
+    packer             packer view of /delivery
+    driver             driver view of /delivery
+    store_receiver     store receipt confirmation
+
+Plus two UI-level flags in the sidebar config: `managerOnly` and `staffOnly`,
+and `adminOnly` elsewhere. Inventory Lists, Inventory Reports, Usage Forecast,
+Delivery Cycles and Delivery Reports are all managerOnly.
+
+CRITICAL: this is UI-only gating. RLS grants full read/write to any
+authenticated user. A rebuild should enforce permissions in the database (RLS
+policies keyed on the user's profile) rather than in React.
+
+--------------------------------------------------------------------------------
+6.3 SOFT DEPENDENCIES — shared but replaceable
+--------------------------------------------------------------------------------
+
+  lib/i18n.tsx           useT() translation hook; locales/{en,de,es}.json.
+                         Sidebar labels and several page strings are keyed.
+  components/layout/     Sidebar (nav config incl. permission keys), app shell.
+  components/ui/         shared primitives.
+  PwaInit.tsx            service worker registration — matters because the
+                         count form is used offline on phones.
+  lib/utils.ts           small helpers.
+  lib/forecast-utils.ts  shared forecasting helpers (used by shift-usage).
+
+--------------------------------------------------------------------------------
+6.4 SHARED TABLES — owned by OTHER parts of the app
+--------------------------------------------------------------------------------
+
+These are read by Inventory/Delivery but written by the accounting side.
+If you extract Inventory+Delivery into a separate application that keeps
+pointing at the same database, these are the contact points to govern:
+
+    profiles                 shared identity/permissions        (SHARED)
+    locations                shared store master data           (SHARED)
+    shift_reports            till/Z-report revenue per shift    (read by
+                             inventory shift-usage)
+    delivery_reports         delivery-platform sales import     (accounting)
+    outgoing_bills           referenced by an inventory page    (accounting)
+    forecast_settings        used by both forecasting features
+    daily_forecasts          (currently empty)
+
+    RULE TO AGREE IN WRITING: no schema changes to profiles, locations,
+    shift_reports or forecast_settings without coordinating with the other
+    application. Add columns, never rename or drop.
+
+--------------------------------------------------------------------------------
+6.5 WHAT INVENTORY/DELIVERY DOES *NOT* DEPEND ON
+--------------------------------------------------------------------------------
+
+Good news for extraction. These features do not touch:
+    bills, bill_lines, cashflow_transactions, cashflow_uploads,
+    counterparties, transaction_bill_links, purchased_goods,
+    suppliers, supplier_items, recipes, recipe_ingredients,
+    purchase_orders, chat_*, notifications, push_subscriptions
+
+Inventory/Delivery is genuinely separable from the accounting half of the
+application. The only real coupling is profiles + locations (+ shift_reports
+for the experimental shift-usage screen).
+
+
+================================================================================
+7. KNOWN DEFECTS AND TRAPS
+================================================================================
+
+Do not reproduce these. They were found by auditing the live system.
+
+7.1  delivery_targets DOES NOT EXIST
+     supabase/delivery_system.sql creates it; the live database has no such
+     table; /delivery/targets queries it and therefore throws. Targets live in
+     inventory_items.store_targets. The page is unreachable from the sidebar,
+     which is why nobody has noticed.
+
+7.2  NAME COLLISION: "delivery reports"
+     The table `delivery_reports` holds delivery-PLATFORM sales (Wolt/Lieferando
+     style: orders_count, net_revenue, shift_type). The PAGE "Delivery Reports"
+     (/delivery/reports) is about ZK delivery RUNS and does not read that table.
+     Two unrelated concepts, one name. Rename on rebuild.
+
+7.3  ITEMS ARE JOINED BY NAME, NOT ID
+     inventory_submissions.data stores { name, quantity }. Delivery run
+     construction matches on
+        item.name.trim().toLowerCase() === submitted.name.trim().toLowerCase()
+     Renaming an item in inventory_items silently breaks the match against all
+     historic submissions, and the item then reads as zero stock — which
+     inflates the next delivery quantity. USE IDs.
+
+7.4  POSTGREST 1000-ROW CAP
+     Supabase/PostgREST silently truncates any unpaginated query at 1000 rows
+     with no error. delivery_run_lines already holds 17,183 rows. Several
+     queries elsewhere in this codebase were found to be silently truncated for
+     months. ALWAYS paginate with .range(), or use an explicit count and loop.
+     A helper exists at lib/fetch-all.ts.
+
+7.5  FULL REBUILD ON REGENERATE
+     Regenerating a delivery run DELETEs all its delivery_run_lines and
+     reinserts. Any manual target_qty edits or packed_qty values are lost.
+     There is no warning in the UI.
+
+7.6  RLS IS EFFECTIVELY OFF
+     Every policy is USING (true) WITH CHECK (true) for authenticated users.
+     All access control is client-side. Any authenticated user could read or
+     write any store's data via the API directly.
+
+7.7  STORE LIST HARD-CODED IN MULTIPLE PLACES
+     `const STORES = ['Westend', 'Eschborn', 'Taunus'] as const;` appears in
+     several files, sometimes with ZK, sometimes without. Adding a fourth
+     restaurant means editing many files. Drive this from the locations table.
+
+7.8  DELIVERY WEEKDAYS HARD-CODED
+     `[1, 2, 3, 5]` and the mon/tue/wed/fri key set appear in the schema, the
+     targets JSON shape, and several pages. Changing the delivery schedule is a
+     migration, not a setting.
+
+7.9  SECTION sort_order IS NOT GLOBALLY UNIQUE
+     Values repeat across stores (two sections share 10, two share 20, ...).
+     It is only meaningful within a store's filtered set. Sorting without
+     filtering by store first gives nondeterministic order.
+
+7.10 UNUSED TABLES
+     inventory_levels, delivery_schedules, daily_forecasts are all empty and
+     unwritten. shift_usage has 1 row. Do not port them without deciding
+     whether the feature is actually wanted.
+
+
+================================================================================
+8. REIMPLEMENTATION NOTES
+================================================================================
+
+8.1  SUGGESTED BUILD ORDER
+
+     1. locations + profiles/permissions + auth              (foundation)
+     2. inventory_sections + inventory_items                 (master data)
+        including per-store ordering and per-store/weekday targets
+     3. Inventory Lists screen                               (manage the above)
+     4. inventory_submissions + the Add New Inventory form   (highest value)
+        including draft autosave and the offline queue
+     5. Current Inventory + Inventory Reports                (visibility)
+     6. delivery_runs + delivery_run_lines + run generation  (Section 5.1)
+     7. The four-mode Delivery workflow page                 (largest single
+        piece of work — consider splitting into four routes instead)
+     8. store_delivery_receipts + store confirmation
+     9. Consumption / movements analysis                     (Section 5.3)
+    10. Forecasting and usage standards                      (lowest value —
+        largely unused in production today)
+
+8.2  DESIGN CHANGES WORTH MAKING
+
+     - Reference inventory_items by ID in submissions and run lines, keeping
+       name/unit only as a display snapshot.
+     - Use real foreign keys for location instead of location_name text.
+     - Enforce permissions in RLS, not React.
+     - Split the 2,651-line delivery page into four route-level views sharing
+       a data layer.
+     - Make the delivery weekday set and the store list configuration, not
+       constants.
+     - Represent the run workflow as an explicit state machine rather than a
+       dozen nullable timestamps.
+     - Decide up front whether targets scale with forecast per item (the
+       abandoned scales_with_demand idea) — retrofitting it is painful.
+
+8.3  SIZE OF THE JOB (existing code, for estimation)
+
+     app/(app)/inventory/  ~5,800 lines across 9 files
+     app/(app)/delivery/   ~5,240 lines across 4 files
+     app/api/inventory/      ~290 lines across 3 files
+     shared lib used         offline-queue, draft-store, fetch-all, i18n,
+                             supabase clients (~small)
+     TOTAL                  ~11,300 lines of TypeScript/TSX
+
+     The single delivery page is 2,651 lines and the inventory count form is
+     1,007 lines; these two carry most of the behavioural complexity.
+
+8.4  THE THINGS THAT ARE EASY TO UNDERESTIMATE
+
+     - The offline path in the count form (IndexedDB queue + draft autosave +
+       online/offline listeners + reconciliation). It exists because staff
+       count stock in cold rooms with no signal.
+     - The per-store item ordering. It looks cosmetic; it is the difference
+       between a 12-minute and a 25-minute stock count.
+     - The 04:00 day-boundary rule and the 09:00-next-day edit window. Both are
+       invisible until they are wrong.
+     - packed_qty vs delivery_qty. Keeping them distinct is what makes
+       consumption analysis honest.
+
+================================================================================
+END OF BRIEFING
+================================================================================

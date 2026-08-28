@@ -11,6 +11,7 @@ export async function GET(req: NextRequest) {
   const location       = p.get('location');
   const salesType      = p.get('salesType');
   const counterpartyId = p.get('counterpartyId');
+  const confirmed      = p.get('confirmed');   // 'true' | 'false' | null (= both)
   const keywords       = p.getAll('keyword'); // repeated ?keyword=foo&keyword=bar
   const page           = Math.max(1, parseInt(p.get('page') ?? '1', 10));
   const pageSize       = Math.min(10000, parseInt(p.get('pageSize') ?? '1000', 10));
@@ -30,6 +31,10 @@ export async function GET(req: NextRequest) {
   if (category && category !== 'All')  q = q.eq('category', category);
   if (location && location !== 'All')  q = q.eq('location', location);
   if (salesType && salesType !== 'All') q = q.eq('sales_type', salesType);
+  // Split the review queue from the settled ledger. Older rows may predate the
+  // column default, so treat NULL as unconfirmed.
+  if (confirmed === 'true')  q = q.eq('confirmed', true);
+  if (confirmed === 'false') q = q.or('confirmed.is.null,confirmed.eq.false');
 
   // Counterparty filter: match by pinned id OR by any keyword (ilike)
   if (counterpartyId || keywords.length > 0) {
