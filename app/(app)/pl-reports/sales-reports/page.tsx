@@ -1884,10 +1884,7 @@ export default function SalesReportsPage() {
     }
     return { lunchBookingsMap: lB, dinnerBookingsMap: dB, lunchWalkInsMap: lW, dinnerWalkInsMap: dW, effectiveLunchGuestsMap: effL, effectiveDinnerGuestsMap: effD };
   }, [bookingsData, lunchGuestsMap, dinnerGuestsMap]);
-
-  const lunchQBookings  = Object.values(lunchBookingsMap).reduce((s, v) => s + v, 0);
   const dinnerQBookings = Object.values(dinnerBookingsMap).reduce((s, v) => s + v, 0);
-  const lunchQWalkIns   = Object.values(lunchWalkInsMap).reduce((s, v) => s + v, 0);
   const dinnerQWalkIns  = Object.values(dinnerWalkInsMap).reduce((s, v) => s + v, 0);
   const lunchQEffGuests  = Object.values(effectiveLunchGuestsMap).reduce((s, v) => s + v, 0);
   const dinnerQEffGuests = Object.values(effectiveDinnerGuestsMap).reduce((s, v) => s + v, 0);
@@ -4265,8 +4262,6 @@ export default function SalesReportsPage() {
 
                       return (
                         <>
-                          {bookingsRow('↳ Bookings · Lunch',   lunchBookingsMap,  'lunch',  lunchQBookings)}
-                          {walkInsRow( '↳ Walk-ins · Lunch',  lunchWalkInsMap,  lunchBookingsMap,  'lunch',  lunchQWalkIns)}
                           {estGuestsRow('↳ Est. Guests · Lunch',       effectiveLunchGuestsMap,  'lunch', lunchQEffGuests)}
                           {metricRow('↳ Net Food / Guest · Lunch',    lunchNetFoodPGMap,   lunchQMetrics.guests > 0 ? lunchQMetrics.netFood   / lunchQMetrics.guests : null, 'currency', 'lunch')}
                           {metricRow('↳ Net Drinks / Guest · Lunch',  lunchNetDrinksPGMap, lunchQMetrics.guests > 0 ? lunchQMetrics.netDrinks / lunchQMetrics.guests : null, 'currency', 'lunch')}
