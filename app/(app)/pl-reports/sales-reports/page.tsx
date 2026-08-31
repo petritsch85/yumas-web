@@ -4104,7 +4104,7 @@ export default function SalesReportsPage() {
 
                       /** One revenue source inside a Net sales block. */
                       const netSalesSourceRow = (label: string, shift: 'lunch' | 'dinner') => (
-                        <tr key={label} className="border-b border-gray-100 hover:bg-gray-50/60 group" style={{ backgroundColor: '#ffffff' }}>
+                        <tr key={`${shift}-${label}`} className="border-b border-gray-100 hover:bg-gray-50/60 group" style={{ backgroundColor: '#ffffff' }}>
                           <td className="sticky left-0 z-10 px-4 py-1 whitespace-nowrap border-r border-gray-100 bg-white group-hover:bg-gray-50/60 transition-colors text-[11px] text-gray-600 pl-8">{label}</td>
                           {emptyCells(shift)}
                         </tr>
@@ -4316,11 +4316,11 @@ export default function SalesReportsPage() {
                         <>
                           {/* ── Net sales, by source — labels only for now ── */}
                           {netSalesHeaderRow('Net sales · Lunch', 'lunch')}
-                          {NET_SALES_SOURCES.map(src => netSalesSourceRow(`${src} · Lunch`, 'lunch'))}
+                          {NET_SALES_SOURCES.map(src => netSalesSourceRow(src, 'lunch'))}
                           {netSalesTotalRow('total-net-sales-lunch', 'lunch')}
                           {netSalesSpacerRow('net-sales-gap')}
                           {netSalesHeaderRow('Net sales · Dinner', 'dinner')}
-                          {NET_SALES_SOURCES.map(src => netSalesSourceRow(`${src} · Dinner`, 'dinner'))}
+                          {NET_SALES_SOURCES.map(src => netSalesSourceRow(src, 'dinner'))}
                           {netSalesTotalRow('total-net-sales-dinner', 'dinner')}
                           {netSalesSpacerRow('net-sales-gap-2')}
                           {estGuestsRow('↳ Est. Guests · Lunch',       effectiveLunchGuestsMap,  'lunch', lunchQEffGuests)}
