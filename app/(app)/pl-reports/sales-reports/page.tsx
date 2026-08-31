@@ -4074,6 +4074,58 @@ export default function SalesReportsPage() {
                         </tr>
                       );
 
+                      /* ── Net sales block (placeholders) ──────────────────────────────
+                         Rows and labels only for now — every cell renders an em dash until
+                         the figures behind them are wired up. Column structure mirrors
+                         metricRow so they line up with the rest of the table. */
+                      const emptyCells = (shift?: 'lunch' | 'dinner') => (
+                        <>
+                          {dailyCols.map((col, ci) => (
+                            <td key={ci} className="py-1 text-right tabular-nums text-[11px]"
+                              style={col.type === 'day'
+                                ? { paddingLeft: 4, paddingRight: 8, ...colStyle(shift, col.dateKey) }
+                                : { paddingLeft: 4, paddingRight: 6, backgroundColor: '#fffbeb', borderLeft: '1px solid #fde68a', borderRight: '1px solid #fde68a' }}>
+                              <span className="text-gray-200">—</span>
+                            </td>
+                          ))}
+                          <td className="py-1 text-right tabular-nums text-[11px] border-l border-gray-200" style={{ paddingLeft: 4, paddingRight: 8 }}>
+                            <span className="text-gray-200">—</span>
+                          </td>
+                        </>
+                      );
+
+                      /** A "Net sales - Lunch/Dinner" heading row. */
+                      const netSalesHeaderRow = (label: string, shift: 'lunch' | 'dinner') => (
+                        <tr key={label} className="border-b border-gray-200 hover:bg-gray-50/60 group" style={{ backgroundColor: '#eef2ff' }}>
+                          <td className="sticky left-0 z-10 px-4 py-1.5 whitespace-nowrap border-r border-gray-100 bg-[#eef2ff] group-hover:bg-gray-50/60 transition-colors text-xs font-bold text-gray-800">{label}</td>
+                          {emptyCells(shift)}
+                        </tr>
+                      );
+
+                      /** One revenue source inside a Net sales block. */
+                      const netSalesSourceRow = (label: string, shift: 'lunch' | 'dinner') => (
+                        <tr key={label} className="border-b border-gray-100 hover:bg-gray-50/60 group" style={{ backgroundColor: '#ffffff' }}>
+                          <td className="sticky left-0 z-10 px-4 py-1 whitespace-nowrap border-r border-gray-100 bg-white group-hover:bg-gray-50/60 transition-colors text-[11px] text-gray-600 pl-8">{label}</td>
+                          {emptyCells(shift)}
+                        </tr>
+                      );
+
+                      /** The bold "Total net sales" row closing a block. */
+                      const netSalesTotalRow = (key: string, shift: 'lunch' | 'dinner') => (
+                        <tr key={key} className="border-b-2 border-gray-200 hover:bg-gray-50/60 group" style={{ backgroundColor: '#f0fdf4' }}>
+                          <td className="sticky left-0 z-10 px-4 py-1.5 whitespace-nowrap border-r border-gray-100 bg-[#f0fdf4] group-hover:bg-gray-50/60 transition-colors text-xs font-bold text-[#1B5E20]">Total net sales</td>
+                          {emptyCells(shift)}
+                        </tr>
+                      );
+
+                      /** Visual gap between the two blocks. */
+                      const netSalesSpacerRow = (key: string) => (
+                        <tr key={key}><td colSpan={totalCols} style={{ height: 10, backgroundColor: '#f9fafb' }} /></tr>
+                      );
+
+                      const NET_SALES_SOURCES = ['Orderbird', 'Webshop', 'Wolt', 'Lieferando', 'Bills', 'Too Good To Go'];
+
+
                       const metricRow = (label: string, valMap: Record<string, number>, qVal: number | null, format: 'count' | 'currency' = 'count', shift?: 'lunch' | 'dinner') => (
                         <tr key={label} className="border-b border-gray-100 hover:bg-gray-50/60 group" style={{ backgroundColor:'#f8fafc' }}>
                           <td className="sticky left-0 z-10 px-4 py-1 whitespace-nowrap border-r border-gray-100 bg-[#f8fafc] group-hover:bg-gray-50/60 transition-colors text-[11px] text-gray-400 italic">{label}</td>
@@ -4262,6 +4314,15 @@ export default function SalesReportsPage() {
 
                       return (
                         <>
+                          {/* ── Net sales, by source — labels only for now ── */}
+                          {netSalesHeaderRow('Net sales · Lunch', 'lunch')}
+                          {NET_SALES_SOURCES.map(src => netSalesSourceRow(`${src} · Lunch`, 'lunch'))}
+                          {netSalesTotalRow('total-net-sales-lunch', 'lunch')}
+                          {netSalesSpacerRow('net-sales-gap')}
+                          {netSalesHeaderRow('Net sales · Dinner', 'dinner')}
+                          {NET_SALES_SOURCES.map(src => netSalesSourceRow(`${src} · Dinner`, 'dinner'))}
+                          {netSalesTotalRow('total-net-sales-dinner', 'dinner')}
+                          {netSalesSpacerRow('net-sales-gap-2')}
                           {estGuestsRow('↳ Est. Guests · Lunch',       effectiveLunchGuestsMap,  'lunch', lunchQEffGuests)}
                           {metricRow('↳ Net Food / Guest · Lunch',    lunchNetFoodPGMap,   lunchQMetrics.guests > 0 ? lunchQMetrics.netFood   / lunchQMetrics.guests : null, 'currency', 'lunch')}
                           {metricRow('↳ Net Drinks / Guest · Lunch',  lunchNetDrinksPGMap, lunchQMetrics.guests > 0 ? lunchQMetrics.netDrinks / lunchQMetrics.guests : null, 'currency', 'lunch')}
