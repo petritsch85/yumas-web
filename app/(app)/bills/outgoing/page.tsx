@@ -116,6 +116,15 @@ const makeIntroCatering = (eventDate: string) =>
 const fmt = (n: number) =>
   new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(n);
 
+/** Round money to cents — the form drivers are floats and would otherwise store 1379.8799999999. */
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
+/** ISO yyyy-mm-dd -> dd.mm.yyyy, the format BillData uses. */
+const toDeDate = (iso: string) => {
+  const [y, m, d] = iso.split('-');
+  return d ? `${d}.${m}.${y}` : iso;
+};
+
 const fmtDate = (d: string | null) =>
   d ? new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
 
@@ -181,6 +190,18 @@ export default function OutgoingBillsPage() {
   type RecipientDraft = { company: string; extra: string; contact: string; street: string; postcode: string; city: string };
   const [editRecipient, setEditRecipient] = useState<RecipientDraft | null>(null);
   const [regenerating,  setRegenerating]  = useState(false);
+
+  /**
+   * The amount DRIVERS as they exist on the PDF. Netto, MwSt and the totals are
+   * derived from these, exactly as BillDocument derives them — so the form
+   * cannot produce a bill whose own figures disagree.
+   */
+  type AmountsDraft = {
+    essenBrutto: string; getraenkeBrutto: string;
+    mwstEssenPct: string; mwstGetraenkePct: string;
+    trinkgeld: string; compactTotals: boolean;
+  };
+  const [editAmounts, setEditAmounts] = useState<AmountsDraft | null>(null);
   const [savingEdit, setSavingEdit] = useState(false);
 
   // ── Create Bill state ─────────────────────────────────────────────────────
@@ -1077,7 +1098,8 @@ export default function OutgoingBillsPage() {
   const startEdit = (bill: OutgoingBill) => {
     setEditDraft({ ...bill });
     setEditingId(bill.id);
-    const r = bill.bill_data?.recipient;
+    const bd = bill.bill_data;
+    const r  = bd?.recipient;
     setEditRecipient(r
       ? {
           company:  r.company  ?? '',
@@ -1088,6 +1110,36 @@ export default function OutgoingBillsPage() {
           city:     r.city     ?? '',
         }
       : null);
+    setEditAmounts(bd
+      ? {
+          essenBrutto:      bd.essenBrutto      != null ? String(bd.essenBrutto)      : '',
+          getraenkeBrutto:  bd.getraenkeBrutto  != null ? String(bd.getraenkeBrutto)  : '',
+          mwstEssenPct:     String(bd.mwstEssenPct     ?? 7),
+          mwstGetraenkePct: String(bd.mwstGetraenkePct ?? 19),
+          trinkgeld:        bd.trinkgeld        != null ? String(bd.trinkgeld)        : '0',
+          compactTotals:    bd.compactTotals === true,
+        }
+      : null);
+  };
+
+  /** Same derivation BillDocument uses, so the preview cannot drift from the PDF. */
+  const derive = (a: AmountsDraft) => {
+    const eB = parseFloat(a.essenBrutto)      || 0;
+    const gB = parseFloat(a.getraenkeBrutto)  || 0;
+    const eR = (parseFloat(a.mwstEssenPct)     || 0) / 100;
+    const gR = (parseFloat(a.mwstGetraenkePct) || 0) / 100;
+    const tip = parseFloat(a.trinkgeld) || 0;
+    const eN = eB / (1 + eR);
+    const gN = gB / (1 + gR);
+    return {
+      essenBrutto: eB, getraenkeBrutto: gB, trinkgeld: tip,
+      essenNetto: eN, getraenkeNetto: gN,
+      mwstEssen: eB - eN, mwstGetraenke: gB - gN,
+      gesamtNetto: eN + gN,
+      gesamtMwSt: (eB - eN) + (gB - gN),
+      gesamtBrutto: eB + gB,
+      gesamtbetrag: eB + gB + tip,
+    };
   };
 
   const saveEdit = async () => {
@@ -1128,7 +1180,7 @@ export default function OutgoingBillsPage() {
    * unknown and a rebuild would silently drop them.
    */
   const saveEditAndUpdatePdf = async () => {
-    if (!editingId || !editDraft || !editRecipient) return;
+    if (!editingId || !editDraft || !editRecipient || !editAmounts) return;
     const bill = bills.find(b => b.id === editingId);
     if (!bill?.bill_data || !bill.file_path) {
       alert('This bill has no stored layout data, so its PDF cannot be rebuilt.');
@@ -1140,9 +1192,14 @@ export default function OutgoingBillsPage() {
 
     setRegenerating(true);
     try {
+      const d = derive(editAmounts);
       const nextData: BillData = {
         ...bill.bill_data,
         regeneratedAt: new Date().toISOString(),
+        invoiceNumber: editDraft.invoice_number ?? bill.bill_data.invoiceNumber,
+        date:      editDraft.invoice_date ? toDeDate(editDraft.invoice_date) : bill.bill_data.date,
+        eventDate: editDraft.event_date   ? toDeDate(editDraft.event_date)   : bill.bill_data.eventDate,
+        issuingLocation: editDraft.issuing_location ?? bill.bill_data.issuingLocation,
         recipient: {
           ...bill.bill_data.recipient,
           company:  editRecipient.company.trim(),
@@ -1152,6 +1209,14 @@ export default function OutgoingBillsPage() {
           postcode: editRecipient.postcode.trim(),
           city:     editRecipient.city.trim(),
         },
+        essenBrutto:      d.essenBrutto,
+        getraenkeBrutto:  d.getraenkeBrutto,
+        essenNetto:       d.essenNetto,
+        getraenkeNetto:   d.getraenkeNetto,
+        mwstEssenPct:     parseFloat(editAmounts.mwstEssenPct)     || 7,
+        mwstGetraenkePct: parseFloat(editAmounts.mwstGetraenkePct) || 19,
+        trinkgeld:        d.trinkgeld,
+        compactTotals:    editAmounts.compactTotals || undefined,
       };
 
       const [{ pdf }, { BillDocument: BillDoc }] = await Promise.all([
@@ -1174,14 +1239,14 @@ export default function OutgoingBillsPage() {
         event_date:       editDraft.event_date       ?? null,
         issuing_location: editDraft.issuing_location ?? null,
         shift_type:       editDraft.shift_type       ?? null,
-        net_food:         editDraft.net_food         ?? 0,
-        net_drinks:       editDraft.net_drinks       ?? 0,
-        net_total:        editDraft.net_total        ?? 0,
-        vat_7:            editDraft.vat_7            ?? 0,
-        vat_19:           editDraft.vat_19           ?? 0,
-        gross_total:      editDraft.gross_total      ?? 0,
-        tips:             editDraft.tips             ?? 0,
-        total_payable:    editDraft.total_payable    ?? 0,
+        net_food:         round2(d.essenNetto),
+        net_drinks:       round2(d.getraenkeNetto),
+        net_total:        round2(d.gesamtNetto),
+        vat_7:            round2(d.mwstEssen),
+        vat_19:           round2(d.mwstGetraenke),
+        gross_total:      round2(d.gesamtBrutto),
+        tips:             round2(d.trinkgeld),
+        total_payable:    round2(d.gesamtbetrag),
         bill_data:        nextData,
       }));
 
@@ -1193,6 +1258,7 @@ export default function OutgoingBillsPage() {
       setEditingId(null);
       setEditDraft(null);
       setEditRecipient(null);
+      setEditAmounts(null);
     } catch (err: any) {
       alert(`Could not update the PDF: ${err?.message ?? 'Unknown error'}`);
     } finally {
@@ -1210,6 +1276,233 @@ export default function OutgoingBillsPage() {
   const labelCls = 'block text-xs font-semibold text-gray-600 uppercase tracking-wide mb-1.5';
 
   // ── Render ────────────────────────────────────────────────────────────────
+
+  /**
+   * The bill's edit form — ONE set of inputs describing the document as printed.
+   * Rendered by both the desktop table row and the mobile card list, so the two
+   * can never drift apart. Netto, MwSt and the totals are derived from the gross
+   * drivers rather than typed, which is what keeps the table row and the PDF in
+   * agreement.
+   */
+  const renderEditForm = (bill: OutgoingBill) => {
+    if (!editDraft) return null;
+    return (
+    <>
+                                {/* One set of inputs describing the bill as printed.
+                                    Netto / MwSt / totals are derived, never typed. */}
+                                {editAmounts && editRecipient ? (() => {
+                                  const d = derive(editAmounts);
+                                  const setA = <K extends keyof AmountsDraft>(k: K, v: AmountsDraft[K]) =>
+                                    setEditAmounts(a => a ? { ...a, [k]: v } : a);
+                                  const fld = 'w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300';
+                                  const lbl = 'block text-xs font-semibold text-gray-500 mb-1';
+                                  return (
+                                    <div className="space-y-4">
+                                      {/* ── Invoice ── */}
+                                      <div>
+                                        <p className="text-xs font-bold text-gray-700 mb-2">Invoice</p>
+                                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+                                          <div>
+                                            <label className={lbl}>Invoice Number</label>
+                                            <input type="text" value={editDraft.invoice_number ?? ''} className={fld}
+                                              onChange={e => setEditDraft(x => x ? { ...x, invoice_number: e.target.value || null } : x)} />
+                                          </div>
+                                          <div>
+                                            <label className={lbl}>Invoice Date</label>
+                                            <input type="date" value={editDraft.invoice_date ?? ''} className={fld}
+                                              onChange={e => setEditDraft(x => x ? { ...x, invoice_date: e.target.value || null } : x)} />
+                                          </div>
+                                          <div>
+                                            <label className={lbl}>Event Date</label>
+                                            <input type="date" value={editDraft.event_date ?? ''} className={fld}
+                                              onChange={e => setEditDraft(x => x ? { ...x, event_date: e.target.value || null } : x)} />
+                                          </div>
+                                          <div>
+                                            <label className={lbl}>Issuing Location</label>
+                                            <select value={editDraft.issuing_location ?? ''} className={fld}
+                                              onChange={e => setEditDraft(x => x ? { ...x, issuing_location: e.target.value || null } : x)}>
+                                              <option value="">—</option>
+                                              {LOCATIONS.map(l => <option key={l} value={l}>{l}</option>)}
+                                            </select>
+                                          </div>
+                                          <div>
+                                            <label className={lbl}>Shift</label>
+                                            <div className="flex gap-1">
+                                              {(['lunch', 'dinner'] as const).map(s => (
+                                                <button key={s} type="button"
+                                                  onClick={() => setEditDraft(x => x ? { ...x, shift_type: s } : x)}
+                                                  className={`flex-1 px-2 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
+                                                    editDraft.shift_type === s
+                                                      ? 'bg-indigo-600 border-indigo-600 text-white'
+                                                      : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                                                  }`}>
+                                                  {s === 'lunch' ? '☀️ Lunch' : '🌙 Dinner'}
+                                                </button>
+                                              ))}
+                                            </div>
+                                          </div>
+                                        </div>
+                                      </div>
+
+                                      {/* ── Recipient ── */}
+                                      <div>
+                                        <p className="text-xs font-bold text-gray-700 mb-2">Recipient (as printed on the PDF)</p>
+                                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                                          {([
+                                            { label: 'Company',    key: 'company'  as const, ph: 'Valantic STI' },
+                                            { label: 'Extra line', key: 'extra'    as const, ph: 'optional' },
+                                            { label: 'Contact',    key: 'contact'  as const, ph: 'e.g. Holzwarth' },
+                                            { label: 'Street',     key: 'street'   as const, ph: 'Kölner Str. 5' },
+                                            { label: 'Postcode',   key: 'postcode' as const, ph: '65760' },
+                                            { label: 'City',       key: 'city'     as const, ph: 'Eschborn' },
+                                          ]).map(({ label, key, ph }) => (
+                                            <div key={key}>
+                                              <label className={lbl}>{label}</label>
+                                              <input type="text" value={editRecipient[key]} placeholder={ph} className={fld}
+                                                onChange={e => setEditRecipient(r => r ? { ...r, [key]: e.target.value } : r)} />
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </div>
+
+                                      {/* ── Amounts: only the drivers are editable ── */}
+                                      <div>
+                                        <p className="text-xs font-bold text-gray-700 mb-2">
+                                          Amounts <span className="font-normal text-gray-400">— enter the gross figures; netto, MwSt and totals are calculated</span>
+                                        </p>
+                                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+                                          <div>
+                                            <label className={lbl}>Essen Brutto (€)</label>
+                                            <input type="number" step="0.01" value={editAmounts.essenBrutto} className={fld}
+                                              onChange={e => setA('essenBrutto', e.target.value)} />
+                                          </div>
+                                          <div>
+                                            <label className={lbl}>Getränke Brutto (€)</label>
+                                            <input type="number" step="0.01" value={editAmounts.getraenkeBrutto} className={fld}
+                                              onChange={e => setA('getraenkeBrutto', e.target.value)} />
+                                          </div>
+                                          <div>
+                                            <label className={lbl}>MwSt Essen (%)</label>
+                                            <input type="number" step="0.1" value={editAmounts.mwstEssenPct} className={fld}
+                                              onChange={e => setA('mwstEssenPct', e.target.value)} />
+                                          </div>
+                                          <div>
+                                            <label className={lbl}>MwSt Getränke (%)</label>
+                                            <input type="number" step="0.1" value={editAmounts.mwstGetraenkePct} className={fld}
+                                              onChange={e => setA('mwstGetraenkePct', e.target.value)} />
+                                          </div>
+                                          <div>
+                                            <label className={lbl}>Trinkgeld (€)</label>
+                                            <input type="number" step="0.01" value={editAmounts.trinkgeld} className={fld}
+                                              onChange={e => setA('trinkgeld', e.target.value)} />
+                                          </div>
+                                        </div>
+                                        <label className="flex items-center gap-2 mt-2 text-xs text-gray-600 cursor-pointer">
+                                          <input type="checkbox" checked={editAmounts.compactTotals}
+                                            onChange={e => setA('compactTotals', e.target.checked)}
+                                            className="w-3.5 h-3.5 accent-[#1B5E20]" />
+                                          Hide the Essen / Getränke split on the PDF
+                                        </label>
+                                      </div>
+
+                                      {/* ── Calculated, read-only: exactly what the PDF will print ── */}
+                                      <div>
+                                        <p className="text-xs font-bold text-gray-700 mb-2">Calculated — this is what the PDF will show</p>
+                                        <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+                                          <table className="w-full text-xs">
+                                            <tbody>
+                                              {([
+                                                ['Essen Netto',    d.essenNetto,     !editAmounts.compactTotals],
+                                                ['Getränke Netto', d.getraenkeNetto, !editAmounts.compactTotals],
+                                                ['Gesamt Netto',   d.gesamtNetto,    true],
+                                                ['MwSt Essen',     d.mwstEssen,      !editAmounts.compactTotals],
+                                                ['MwSt Getränke',  d.mwstGetraenke,  !editAmounts.compactTotals],
+                                                ['MwSt Gesamt',    d.gesamtMwSt,     true],
+                                                ['Gesamt Brutto',  d.gesamtBrutto,   true],
+                                                ['Trinkgeld',      d.trinkgeld,      d.trinkgeld > 0],
+                                                ['Gesamtbetrag',   d.gesamtbetrag,   true],
+                                              ] as [string, number, boolean][])
+                                                .filter(([, , show]) => show)
+                                                .map(([label, value], i, arr) => (
+                                                  <tr key={label} className={i === arr.length - 1 ? 'bg-gray-50 font-bold' : 'border-b border-gray-100'}>
+                                                    <td className="px-3 py-1.5 text-gray-600">{label}</td>
+                                                    <td className="px-3 py-1.5 text-right tabular-nums text-gray-900">{fmt(round2(value))}</td>
+                                                  </tr>
+                                                ))}
+                                            </tbody>
+                                          </table>
+                                        </div>
+                                      </div>
+
+                                      <div className="flex items-center gap-2">
+                                        <button onClick={saveEditAndUpdatePdf} disabled={savingEdit || regenerating}
+                                          title="Save these details and rebuild the stored PDF from them"
+                                          className="flex items-center gap-1.5 px-3 py-1.5 bg-[#1B5E20] text-white text-xs font-bold rounded-lg hover:bg-[#2E7D32] disabled:opacity-50 transition-colors">
+                                          {regenerating ? <Loader2 size={12} className="animate-spin" /> : <FileText size={12} />}
+                                          {regenerating ? 'Saving & rebuilding PDF…' : 'Save & update PDF'}
+                                        </button>
+                                        <button onClick={() => { setEditingId(null); setEditDraft(null); setEditRecipient(null); setEditAmounts(null); }}
+                                          className="px-3 py-1.5 text-xs font-semibold text-gray-500 hover:text-gray-700 border border-gray-200 rounded-lg bg-white transition-colors">
+                                          Cancel
+                                        </button>
+                                      </div>
+                                    </div>
+                                  );
+                                })() : (
+                                  /* Legacy bills created before the PDF layout was stored: the
+                                     document cannot be rebuilt, so only the table row is editable. */
+                                  <div className="space-y-3">
+                                    <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                                      This invoice was created before the PDF layout was stored, so its PDF cannot be
+                                      rebuilt. Changes here update the table only.
+                                    </p>
+                                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                                      {([
+                                        { label: 'Customer',       field: 'customer_name'  as keyof OutgoingBill, type: 'text' },
+                                        { label: 'Invoice Number', field: 'invoice_number' as keyof OutgoingBill, type: 'text' },
+                                        { label: 'Invoice Date',   field: 'invoice_date'   as keyof OutgoingBill, type: 'date' },
+                                        { label: 'Event Date',     field: 'event_date'     as keyof OutgoingBill, type: 'date' },
+                                      ]).map(({ label, field, type }) => (
+                                        <div key={field}>
+                                          <label className="block text-xs font-semibold text-gray-500 mb-1">{label}</label>
+                                          <input type={type} value={(editDraft as any)[field] ?? ''}
+                                            onChange={(e) => setEditDraft((x) => x ? { ...x, [field]: e.target.value || null } : x)}
+                                            className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300" />
+                                        </div>
+                                      ))}
+                                    </div>
+                                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                                      {([
+                                        { label: 'Net Total (€)',     field: 'net_total'     as keyof OutgoingBill },
+                                        { label: 'Gross Total (€)',   field: 'gross_total'   as keyof OutgoingBill },
+                                        { label: 'Tips (€)',          field: 'tips'          as keyof OutgoingBill },
+                                        { label: 'Total Payable (€)', field: 'total_payable' as keyof OutgoingBill },
+                                      ]).map(({ label, field }) => (
+                                        <div key={field}>
+                                          <label className="block text-xs font-semibold text-gray-500 mb-1">{label}</label>
+                                          <input type="number" step="0.01" value={(editDraft as any)[field] ?? 0}
+                                            onChange={(e) => setEditDraft((x) => x ? { ...x, [field]: parseFloat(e.target.value) || 0 } : x)}
+                                            className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300" />
+                                        </div>
+                                      ))}
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                      <button onClick={saveEdit} disabled={savingEdit}
+                                        className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white text-xs font-bold rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors">
+                                        {savingEdit ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+                                        {savingEdit ? 'Saving…' : 'Save Changes'}
+                                      </button>
+                                      <button onClick={() => { setEditingId(null); setEditDraft(null); setEditRecipient(null); setEditAmounts(null); }}
+                                        className="px-3 py-1.5 text-xs font-semibold text-gray-500 hover:text-gray-700 border border-gray-200 rounded-lg bg-white transition-colors">
+                                        Cancel
+                                      </button>
+                                    </div>
+                                  </div>
+                                )}
+    </>
+    );
+  };
+
 
   return (
     <div>
@@ -2650,49 +2943,9 @@ export default function OutgoingBillsPage() {
 
                     {/* Inline edit (mobile) */}
                     {editingId === bill.id && editDraft && (
-                      <div className="border-t border-indigo-100 bg-indigo-50/60 px-4 py-4 space-y-3">
-                        <div className="grid grid-cols-2 gap-3">
-                          {([
-                            { label: 'Customer',       field: 'customer_name'  as keyof OutgoingBill, type: 'text' },
-                            { label: 'Invoice #',      field: 'invoice_number' as keyof OutgoingBill, type: 'text' },
-                            { label: 'Invoice Date',   field: 'invoice_date'   as keyof OutgoingBill, type: 'date' },
-                            { label: 'Event Date',     field: 'event_date'     as keyof OutgoingBill, type: 'date' },
-                          ]).map(({ label, field, type }) => (
-                            <div key={field}>
-                              <label className="block text-xs font-semibold text-gray-500 mb-1">{label}</label>
-                              <input type={type} value={(editDraft as any)[field] ?? ''}
-                                onChange={(e) => setEditDraft((d) => d ? { ...d, [field]: e.target.value || null } : d)}
-                                className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300" />
-                            </div>
-                          ))}
-                        </div>
-                        <div className="grid grid-cols-2 gap-3">
-                          {([
-                            { label: 'Net Total (€)',   field: 'net_total'     as keyof OutgoingBill },
-                            { label: 'Gross Total (€)', field: 'gross_total'   as keyof OutgoingBill },
-                            { label: 'Tips (€)',        field: 'tips'          as keyof OutgoingBill },
-                            { label: 'Total Payable (€)',field:'total_payable' as keyof OutgoingBill },
-                          ]).map(({ label, field }) => (
-                            <div key={field}>
-                              <label className="block text-xs font-semibold text-gray-500 mb-1">{label}</label>
-                              <input type="number" step="0.01" value={(editDraft as any)[field] ?? 0}
-                                onChange={(e) => setEditDraft((d) => d ? { ...d, [field]: parseFloat(e.target.value) || 0 } : d)}
-                                className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300" />
-                            </div>
-                          ))}
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <button onClick={saveEdit} disabled={savingEdit}
-                            className="flex items-center gap-1.5 px-3 py-2 bg-indigo-600 text-white text-xs font-bold rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors">
-                            {savingEdit ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
-                            {savingEdit ? 'Saving…' : 'Save'}
-                          </button>
-                          <button onClick={() => { setEditingId(null); setEditDraft(null); }}
-                            className="px-3 py-2 text-xs font-semibold text-gray-500 border border-gray-200 rounded-lg bg-white transition-colors">
-                            Cancel
-                          </button>
-                        </div>
-                      </div>
+                       <div className="border-t border-indigo-100 bg-indigo-50/60 px-4 py-4">
+                         {renderEditForm(bill)}
+                       </div>
                     )}
                   </div>
                 ))}
@@ -2791,130 +3044,7 @@ export default function OutgoingBillsPage() {
                         {editingId === bill.id && editDraft && (
                           <tr className="bg-indigo-50/60">
                             <td colSpan={12} className="px-4 py-4">
-                              <div className="grid grid-cols-4 gap-3 mb-3">
-                                {([
-                                  { label: 'Customer',       field: 'customer_name'  as keyof OutgoingBill, type: 'text' },
-                                  { label: 'Invoice Number', field: 'invoice_number' as keyof OutgoingBill, type: 'text' },
-                                  { label: 'Invoice Date',   field: 'invoice_date'   as keyof OutgoingBill, type: 'date' },
-                                  { label: 'Event Date',     field: 'event_date'     as keyof OutgoingBill, type: 'date' },
-                                ]).map(({ label, field, type }) => (
-                                  <div key={field}>
-                                    <label className="block text-xs font-semibold text-gray-500 mb-1">{label}</label>
-                                    <input type={type} value={(editDraft as any)[field] ?? ''}
-                                      onChange={(e) => setEditDraft((d) => d ? { ...d, [field]: e.target.value || null } : d)}
-                                      className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300" />
-                                  </div>
-                                ))}
-                              </div>
-                              <div className="grid grid-cols-4 gap-3 mb-3">
-                                {([
-                                  { label: 'Net Food (€)',    field: 'net_food'    as keyof OutgoingBill },
-                                  { label: 'Net Drinks (€)',  field: 'net_drinks'  as keyof OutgoingBill },
-                                  { label: 'Net Total (€)',   field: 'net_total'   as keyof OutgoingBill },
-                                  { label: 'Gross Total (€)', field: 'gross_total' as keyof OutgoingBill },
-                                ]).map(({ label, field }) => (
-                                  <div key={field}>
-                                    <label className="block text-xs font-semibold text-gray-500 mb-1">{label}</label>
-                                    <input type="number" step="0.01" value={(editDraft as any)[field] ?? 0}
-                                      onChange={(e) => setEditDraft((d) => d ? { ...d, [field]: parseFloat(e.target.value) || 0 } : d)}
-                                      className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300" />
-                                  </div>
-                                ))}
-                              </div>
-                              <div className="grid grid-cols-4 gap-3 mb-3">
-                                {([
-                                  { label: 'VAT 7% (€)',        field: 'vat_7'         as keyof OutgoingBill },
-                                  { label: 'VAT 19% (€)',       field: 'vat_19'        as keyof OutgoingBill },
-                                  { label: 'Tips (€)',          field: 'tips'          as keyof OutgoingBill },
-                                  { label: 'Total Payable (€)', field: 'total_payable' as keyof OutgoingBill },
-                                ]).map(({ label, field }) => (
-                                  <div key={field}>
-                                    <label className="block text-xs font-semibold text-gray-500 mb-1">{label}</label>
-                                    <input type="number" step="0.01" value={(editDraft as any)[field] ?? 0}
-                                      onChange={(e) => setEditDraft((d) => d ? { ...d, [field]: parseFloat(e.target.value) || 0 } : d)}
-                                      className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300" />
-                                  </div>
-                                ))}
-                              </div>
-                              <div className="grid grid-cols-4 gap-3 mb-3">
-                                <div>
-                                  <label className="block text-xs font-semibold text-gray-500 mb-1">Issuing Location</label>
-                                  <div className="relative">
-                                    <select value={editDraft.issuing_location ?? ''}
-                                      onChange={(e) => setEditDraft((d) => d ? { ...d, issuing_location: e.target.value || null } : d)}
-                                      className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300 appearance-none pr-6">
-                                      <option value="">— Select —</option>
-                                      {LOCATIONS.map((l) => <option key={l}>{l}</option>)}
-                                    </select>
-                                    <ChevronDown size={12} className="absolute right-2 top-2 text-gray-400 pointer-events-none" />
-                                  </div>
-                                </div>
-                                <div>
-                                  <label className="block text-xs font-semibold text-gray-500 mb-1">Shift Type</label>
-                                  <div className="flex gap-2">
-                                    {(['lunch', 'dinner'] as const).map((s) => (
-                                      <button key={s}
-                                        onClick={() => setEditDraft((d) => d ? { ...d, shift_type: d.shift_type === s ? null : s } : d)}
-                                        className={`flex-1 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
-                                          editDraft.shift_type === s
-                                            ? s === 'lunch' ? 'bg-amber-500 text-white border-amber-500' : 'bg-blue-600 text-white border-blue-600'
-                                            : 'bg-white text-gray-500 border-gray-200 hover:border-gray-400'
-                                        }`}>
-                                        {s === 'lunch' ? '☀️ Lunch' : '🌙 Dinner'}
-                                      </button>
-                                    ))}
-                                  </div>
-                                </div>
-                              </div>
-                              {/* Recipient block as it appears on the PDF — editable
-                                  only when the bill stores the data needed to rebuild it. */}
-                              {editRecipient ? (
-                                <div className="mb-3 pt-3 border-t border-indigo-200">
-                                  <p className="text-xs font-bold text-gray-600 mb-2">Recipient (as printed on the PDF)</p>
-                                  <div className="grid grid-cols-3 gap-3">
-                                    {([
-                                      { label: 'Company',          key: 'company'  as const, ph: 'Valantic STI' },
-                                      { label: 'Extra line',       key: 'extra'    as const, ph: 'optional' },
-                                      { label: 'Contact',          key: 'contact'  as const, ph: 'e.g. Holzwarth' },
-                                      { label: 'Street',           key: 'street'   as const, ph: 'Kölner Str. 5' },
-                                      { label: 'Postcode',         key: 'postcode' as const, ph: '65760' },
-                                      { label: 'City',             key: 'city'     as const, ph: 'Eschborn' },
-                                    ]).map(({ label, key, ph }) => (
-                                      <div key={key}>
-                                        <label className="block text-xs font-semibold text-gray-500 mb-1">{label}</label>
-                                        <input type="text" value={editRecipient[key]} placeholder={ph}
-                                          onChange={(e) => setEditRecipient(r => r ? { ...r, [key]: e.target.value } : r)}
-                                          className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300" />
-                                      </div>
-                                    ))}
-                                  </div>
-                                </div>
-                              ) : (
-                                <p className="mb-3 pt-3 border-t border-indigo-200 text-xs text-gray-500">
-                                  This invoice was created before the PDF layout was stored, so its PDF cannot be
-                                  rebuilt. Edits here update the table only.
-                                </p>
-                              )}
-
-                              <div className="flex items-center gap-2">
-                                <button onClick={saveEdit} disabled={savingEdit || regenerating}
-                                  className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white text-xs font-bold rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors">
-                                  {savingEdit ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
-                                  {savingEdit ? 'Saving…' : 'Save Changes'}
-                                </button>
-                                {editRecipient && (
-                                  <button onClick={saveEditAndUpdatePdf} disabled={savingEdit || regenerating}
-                                    title="Rebuild the stored PDF with these recipient details, replacing the current file"
-                                    className="flex items-center gap-1.5 px-3 py-1.5 bg-[#1B5E20] text-white text-xs font-bold rounded-lg hover:bg-[#2E7D32] disabled:opacity-50 transition-colors">
-                                    {regenerating ? <Loader2 size={12} className="animate-spin" /> : <FileText size={12} />}
-                                    {regenerating ? 'Updating PDF…' : 'Save changes & update PDF'}
-                                  </button>
-                                )}
-                                <button onClick={() => { setEditingId(null); setEditDraft(null); setEditRecipient(null); }}
-                                  className="px-3 py-1.5 text-xs font-semibold text-gray-500 hover:text-gray-700 border border-gray-200 rounded-lg bg-white transition-colors">
-                                  Cancel
-                                </button>
-                              </div>
+                              {renderEditForm(bill)}
                             </td>
                           </tr>
                         )}
