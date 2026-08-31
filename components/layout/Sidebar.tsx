@@ -147,6 +147,7 @@ const NAV_GROUPS: NavGroup[] = [
           { labelKey: 'sidebar.nav.salesLieferando',  href: '/sales/lieferando',  icon: Store },
           { labelKey: 'sidebar.nav.salesWebshop',     href: '/sales/webshop',     icon: ShoppingBag },
           { labelKey: 'sidebar.nav.salesTooGoodToGo', href: '/sales/too-good-to-go', icon: Store },
+          { labelKey: 'sidebar.nav.outgoing',         href: '/bills/outgoing',       icon: FileCheck, permKey: 'bills_create' },
         ],
       },
       {
@@ -154,7 +155,6 @@ const NAV_GROUPS: NavGroup[] = [
         children: [
           { labelKey: 'sidebar.nav.staffCosts', href: '/bills/staff',   icon: Users },
           { labelKey: 'sidebar.nav.incoming',   href: '/bills',          icon: FilePlus,  permKey: 'bills' },
-          { labelKey: 'sidebar.nav.outgoing',   href: '/bills/outgoing', icon: FileCheck, permKey: 'bills_create' },
           { labelKey: 'sidebar.nav.costsOther', href: '/bills/other',   icon: FolderOpen },
         ],
       },
