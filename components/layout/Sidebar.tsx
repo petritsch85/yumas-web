@@ -184,6 +184,26 @@ const NAV_GROUPS: NavGroup[] = [
 
 type SidebarProps = { isOpen: boolean; onClose: () => void };
 
+/** Every child route in the nav, used to resolve prefix ambiguity. */
+const ALL_CHILD_HREFS = NAV_GROUPS.flatMap(g => g.items.flatMap(i => i.children?.map(c => c.href) ?? []));
+
+/**
+ * Does `href` own the current path?
+ *
+ * An exact match always wins. A prefix match counts only when no other nav
+ * route is a longer match — otherwise "/bills" (Incoming bills) claims
+ * "/bills/outgoing" and lights up Costs while the user is in Sales.
+ */
+function routeMatches(pathname: string | null, href: string): boolean {
+  const path = pathname ?? '';
+  if (path === href) return true;
+  if (!path.startsWith(href + '/')) return false;
+  return !ALL_CHILD_HREFS.some(other =>
+    other !== href && other.length > href.length &&
+    (path === other || path.startsWith(other + '/')),
+  );
+}
+
 export default function Sidebar({ isOpen, onClose }: SidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
@@ -199,9 +219,7 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
     for (const group of NAV_GROUPS) {
       for (const item of group.items) {
         if (item.children) {
-          const childActive = item.children.some((c) =>
-            pathname === c.href || (pathname ?? '').startsWith(c.href + '/')
-          );
+          const childActive = item.children.some((c) => routeMatches(pathname, c.href));
           if (childActive) toExpand.push(item.href);
         }
       }
@@ -357,7 +375,7 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
                 const hasChildren = !!item.children?.length;
                 // For items with children, active only when a child route is active (not by prefix)
                 const active = hasChildren
-                  ? item.children!.some(c => pathname === c.href || (pathname ?? '').startsWith(c.href + '/'))
+                  ? item.children!.some(c => routeMatches(pathname, c.href))
                   : isActive(item.href);
                 const isComingSoon = item.href.startsWith('/coming-soon');
                 const isExpanded = expanded.has(item.href);
