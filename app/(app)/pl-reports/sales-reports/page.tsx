@@ -3846,7 +3846,7 @@ export default function SalesReportsPage() {
                         const qDisplayVal = qDel + qFcastRem;
                         const qHasMix    = qDel > 0 && qFcastRem > 0;
                         return (
-                          <tr key={label} className="border-b border-gray-100 hover:bg-gray-50/60 group">
+                          <tr key={`${shift ?? 'x'}-${label}`} className="border-b border-gray-100 hover:bg-gray-50/60 group">
                             <td className="sticky left-0 z-10 px-4 py-2 whitespace-nowrap border-r border-gray-100 bg-white group-hover:bg-gray-50/60 transition-colors text-gray-700">{label}</td>
                             {dailyCols.map((col, ci) => {
                               if (col.type === 'day') {
@@ -4123,7 +4123,10 @@ export default function SalesReportsPage() {
                         <tr key={key}><td colSpan={totalCols} style={{ height: 10, backgroundColor: '#f9fafb' }} /></tr>
                       );
 
-                      const NET_SALES_SOURCES = ['Orderbird', 'Webshop', 'Wolt', 'Lieferando', 'Bills', 'Too Good To Go'];
+                      // Bills is rendered by billsRow (live data from Outgoing Bills), so it is
+                      // not in this placeholder list — see the render block below.
+                      const NET_SALES_BEFORE_BILLS = ['Orderbird', 'Webshop', 'Wolt', 'Lieferando'];
+                      const NET_SALES_AFTER_BILLS  = ['Too Good To Go'];
 
 
                       const metricRow = (label: string, valMap: Record<string, number>, qVal: number | null, format: 'count' | 'currency' = 'count', shift?: 'lunch' | 'dinner') => (
@@ -4316,11 +4319,15 @@ export default function SalesReportsPage() {
                         <>
                           {/* ── Net sales, by source — labels only for now ── */}
                           {netSalesHeaderRow('Net sales · Lunch', 'lunch')}
-                          {NET_SALES_SOURCES.map(src => netSalesSourceRow(src, 'lunch'))}
+                          {NET_SALES_BEFORE_BILLS.map(src => netSalesSourceRow(src, 'lunch'))}
+                          {billsRow('🧾 Bills', billsLunchMap, 'lunch')}
+                          {NET_SALES_AFTER_BILLS.map(src => netSalesSourceRow(src, 'lunch'))}
                           {netSalesTotalRow('total-net-sales-lunch', 'lunch')}
                           {netSalesSpacerRow('net-sales-gap')}
                           {netSalesHeaderRow('Net sales · Dinner', 'dinner')}
-                          {NET_SALES_SOURCES.map(src => netSalesSourceRow(src, 'dinner'))}
+                          {NET_SALES_BEFORE_BILLS.map(src => netSalesSourceRow(src, 'dinner'))}
+                          {billsRow('🧾 Bills', billsDinnerMap, 'dinner')}
+                          {NET_SALES_AFTER_BILLS.map(src => netSalesSourceRow(src, 'dinner'))}
                           {netSalesTotalRow('total-net-sales-dinner', 'dinner')}
                           {netSalesSpacerRow('net-sales-gap-2')}
                           {estGuestsRow('↳ Est. Guests · Lunch',       effectiveLunchGuestsMap,  'lunch', lunchQEffGuests)}
@@ -4329,7 +4336,6 @@ export default function SalesReportsPage() {
                           {netPerGuestRow('↳ Net Total / Guest · Lunch', lunchNetTotalPGMap, 'lunch', defaultLunchSpend, lunchQMetrics)}
                           {posRow('☀️  Orderbird · Lunch',  lunchMap,  lunchForecastMap,  lunchQtrTotal, 'lunch')}
                           {simplyRow('🛵 Simply · Lunch', deliveryLunchMap, simplyLunchForecastMap, 'lunch')}
-                          {billsRow('🧾 Bills · Lunch', billsLunchMap, 'lunch')}
                           {totalRow('☀️  Total Lunch',  lunchMap,  lunchForecastMap,  deliveryLunchMap,  lunchQtrTotal,  '#f0fdf4', '#1B5E20', billsLunchMap, simplyLunchForecastMap, 'lunch')}
                           {bookingsRow('↳ Bookings · Dinner',  dinnerBookingsMap, 'dinner', dinnerQBookings)}
                           {walkInsRow( '↳ Walk-ins · Dinner', dinnerWalkInsMap, dinnerBookingsMap, 'dinner', dinnerQWalkIns)}
@@ -4339,7 +4345,6 @@ export default function SalesReportsPage() {
                           {netPerGuestRow('↳ Net Total / Guest · Dinner', dinnerNetTotalPGMap, 'dinner', defaultDinnerSpend, dinnerQMetrics)}
                           {posRow('🌙  Orderbird · Dinner', dinnerMap, dinnerForecastMap, dinnerQtrTotal, 'dinner')}
                           {simplyRow('🛵 Simply · Dinner', deliveryDinnerMap, simplyDinnerForecastMap, 'dinner')}
-                          {billsRow('🧾 Bills · Dinner', billsDinnerMap, 'dinner')}
                           {totalRow('🌙  Total Dinner', dinnerMap, dinnerForecastMap, deliveryDinnerMap, dinnerQtrTotal, '#f0fdf4', '#1B5E20', billsDinnerMap, simplyDinnerForecastMap, 'dinner')}
                           {totalRow('∑   Daily Total',  totalMap,  totalForecastMap,  deliveryTotalMap,  totalQtrTotal,  '#f0fdf4', '#1B5E20', billsTotalMap, simplyTotalForecastMap)}
                         </>
