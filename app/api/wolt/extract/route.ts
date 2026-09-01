@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { extractText, getDocumentProxy } from 'unpdf';
 import { parseWoltInvoice, WoltParseError } from '@/lib/wolt-invoice';
+import { parseWoltSalesReport, aggregateWoltShifts, WoltSalesParseError } from '@/lib/wolt-sales-report';
 
 // pdf text extraction needs the Node runtime, not the edge one.
 export const runtime = 'nodejs';
@@ -57,8 +58,29 @@ export async function POST(req: Request) {
 
   try {
     const data = parseWoltInvoice(invoiceDoc.text);
+
+    // The sales report carries the order timestamps, which is the only way to
+    // cut the period into days and shifts. It is optional: without it the
+    // period totals still import, just with no breakdown.
+    const salesDoc = docs.find(d => /Umsatzbericht/i.test(d.text));
+    let breakdown = null;
+    let breakdownError: string | null = null;
+    if (salesDoc) {
+      try {
+        breakdown = aggregateWoltShifts(parseWoltSalesReport(salesDoc.text), data);
+      } catch (e) {
+        breakdownError = e instanceof WoltSalesParseError
+          ? e.message
+          : 'The sales report could not be read, so there is no daily breakdown.';
+      }
+    } else {
+      breakdownError = 'No sales report (Umsatzbericht) in this set — the period will import without a daily breakdown.';
+    }
+
     return NextResponse.json({
       data,
+      breakdown,
+      breakdownError,
       files: docs.map(d => ({
         name: d.name,
         kind: /Rechnung\s*\(Selbstfakturierung\)/i.test(d.text) ? 'invoice'

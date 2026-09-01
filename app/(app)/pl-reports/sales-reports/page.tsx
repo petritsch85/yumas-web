@@ -5,6 +5,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
 import * as XLSX from 'xlsx';
 import type { WoltInvoiceData } from '@/lib/wolt-invoice';
+import type { WoltShiftBreakdown } from '@/lib/wolt-sales-report';
 import {
   Upload, FileCheck, AlertCircle, DatabaseZap,
   MapPin, CalendarDays, BarChart3, TableProperties,
@@ -928,6 +929,8 @@ export default function SalesReportsPage() {
   const [woltData,    setWoltData]    = useState<WoltInvoiceData | null>(null);
   const [woltKinds,   setWoltKinds]   = useState<{ name: string; kind: string }[]>([]);
   const [woltError,   setWoltError]   = useState<string | null>(null);
+  const [woltBreakdown,   setWoltBreakdown]   = useState<WoltShiftBreakdown | null>(null);
+  const [woltBreakdownMsg, setWoltBreakdownMsg] = useState<string | null>(null);
   const [woltParsing, setWoltParsing] = useState(false);
 
   // Manual entry form state
@@ -1981,6 +1984,7 @@ export default function SalesReportsPage() {
    */
   const parseWoltFiles = useCallback(async (files: File[]) => {
     setWoltParsing(true); setWoltError(null); setWoltData(null); setWoltKinds([]);
+    setWoltBreakdown(null); setWoltBreakdownMsg(null);
     try {
       const fd = new FormData();
       files.forEach(f => fd.append('files', f));
@@ -1989,6 +1993,8 @@ export default function SalesReportsPage() {
       if (!res.ok) { setWoltError(json.error ?? 'Could not read the Wolt documents.'); return; }
       setWoltData(json.data as WoltInvoiceData);
       setWoltKinds(json.files ?? []);
+      setWoltBreakdown(json.breakdown ?? null);
+      setWoltBreakdownMsg(json.breakdownError ?? null);
     } catch (e) {
       setWoltError(e instanceof Error ? e.message : 'Could not read the Wolt documents.');
     } finally {
@@ -2008,7 +2014,7 @@ export default function SalesReportsPage() {
     if (!location || !woltData) return;
     setImporting(true);
     try {
-      const { error } = await supabase.from('wolt_periods').upsert({
+      const { data: period, error } = await supabase.from('wolt_periods').upsert({
         location_id:              location.id,
         invoice_number:           woltData.invoiceNumber,
         invoice_date:             woltData.invoiceDate,
@@ -2021,19 +2027,48 @@ export default function SalesReportsPage() {
         reported_endbetrag:       woltData.reportedEndbetrag,
         check_ok:                 woltData.checkOk,
         source_files:             woltKinds.length > 0 ? woltKinds : woltFiles.map(f => ({ name: f.name, kind: 'unknown' })),
-      }, { onConflict: 'location_id,invoice_number' });
+      }, { onConflict: 'location_id,invoice_number' }).select('id').single();
       if (error) { setWoltError(error.message); return; }
+
+      // The shift rows are rebuilt from scratch on every upload: a re-upload
+      // may move an order between days, and merging into the old rows would
+      // leave the leftovers behind.
+      if (period && woltBreakdown) {
+        const { error: delErr } = await supabase
+          .from('wolt_shift_sales').delete().eq('period_id', period.id);
+        if (delErr) { setWoltError(delErr.message); return; }
+
+        const { error: rowsErr } = await supabase.from('wolt_shift_sales').insert(
+          woltBreakdown.rows.map(r => ({
+            period_id:   period.id,
+            location_id: location.id,
+            sale_date:   r.date,
+            shift:       r.shift,
+            orders:      r.orders,
+            gross:       r.gross,
+            net_sales:   r.netSales,
+            refund_est:  r.refundEst,
+            commission:  r.commission,
+            net_pre_ads: r.netPreAds,
+          })),
+        );
+        if (rowsErr) { setWoltError(rowsErr.message); return; }
+      }
+
       setWoltFiles([]); setWoltData(null); setWoltKinds([]);
+      setWoltBreakdown(null); setWoltBreakdownMsg(null);
       queryClient.invalidateQueries({ queryKey: ['wolt-periods'] });
+      queryClient.invalidateQueries({ queryKey: ['wolt-shift-sales'] });
     } finally {
       setImporting(false);
     }
-  }, [location, woltData, woltKinds, woltFiles, queryClient]);
+  }, [location, woltData, woltKinds, woltFiles, woltBreakdown, queryClient]);
 
   const resetUpload = useCallback(() => {
     setFileName(null); setWeeklyResult(null); setWeeklyBatch([]); setShiftBatch([]);
     setMonthlyResult(null); setDeliveryBatch([]); setParseError(null); setWeeklyPage(0);
     setWoltFiles([]); setWoltData(null); setWoltKinds([]); setWoltError(null);
+    setWoltBreakdown(null); setWoltBreakdownMsg(null);
   }, []);
 
   const processFile = useCallback((file: File) => {
@@ -3612,6 +3647,50 @@ export default function SalesReportsPage() {
                   <p className="px-4 py-2.5 text-xs text-gray-400 border-t border-gray-100">
                     Checked against the invoice&apos;s own Endbetrag of {fmt(woltData.reportedEndbetrag)}.
                   </p>
+
+                  {woltBreakdownMsg && (
+                    <p className="px-4 py-2.5 text-xs text-amber-700 bg-amber-50 border-t border-amber-100">
+                      {woltBreakdownMsg}
+                    </p>
+                  )}
+
+                  {woltBreakdown && (
+                    <>
+                      <div className="px-4 py-2.5 border-t border-gray-100 bg-gray-50">
+                        <p className="text-xs font-bold text-gray-600 uppercase tracking-wider">By day &amp; shift</p>
+                        <p className="text-[11px] text-gray-400 mt-0.5">
+                          From the order times · lunch to 14:30, dinner from 17:30
+                          {woltBreakdown.offShiftOrders > 0 && ` · ${woltBreakdown.offShiftOrders} order${woltBreakdown.offShiftOrders === 1 ? '' : 's'} between the shifts, assigned to the nearer one`}
+                        </p>
+                      </div>
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="bg-gray-50 border-b border-gray-100 text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+                            <th className="px-4 py-1.5 text-left">Day</th>
+                            <th className="px-2 py-1.5 text-right">Orders</th>
+                            <th className="px-2 py-1.5 text-right">Net sales</th>
+                            <th className="px-2 py-1.5 text-right">Refunds (est.)</th>
+                            <th className="px-2 py-1.5 text-right">Commission</th>
+                            <th className="px-4 py-1.5 text-right">Net · pre Ads</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {woltBreakdown.rows.map(r => (
+                            <tr key={`${r.date}-${r.shift}`} className="border-b border-gray-50">
+                              <td className="px-4 py-1.5 whitespace-nowrap text-gray-600">
+                                {r.shift === 'lunch' ? '☀️' : '🌙'} {r.date.split('-').reverse().join('.')}
+                              </td>
+                              <td className="px-2 py-1.5 text-right tabular-nums text-gray-400">{r.orders}</td>
+                              <td className="px-2 py-1.5 text-right tabular-nums text-gray-700">{fmt(r.netSales)}</td>
+                              <td className="px-2 py-1.5 text-right tabular-nums text-gray-400">{fmt(r.refundEst)}</td>
+                              <td className="px-2 py-1.5 text-right tabular-nums text-gray-600">−{fmt(r.commission)}</td>
+                              <td className="px-4 py-1.5 text-right tabular-nums font-semibold text-gray-900">{fmt(r.netPreAds)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </>
+                  )}
                 </div>
               ) : !woltError && (
                 <div className="flex flex-col items-center justify-center h-64 border-2 border-dashed border-gray-200 rounded-xl gap-3">

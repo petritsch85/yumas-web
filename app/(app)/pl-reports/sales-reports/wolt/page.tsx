@@ -30,6 +30,19 @@ interface WoltPeriod {
   source_files:             { name: string; kind: string }[] | null;
 }
 
+interface WoltShiftSale {
+  id:          string;
+  period_id:   string;
+  sale_date:   string;
+  shift:       'lunch' | 'dinner';
+  orders:      number;
+  gross:       number;
+  net_sales:   number;
+  refund_est:  number;
+  commission:  number;
+  net_pre_ads: number;
+}
+
 const fmt = (n: number) =>
   n.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -60,6 +73,29 @@ export default function WoltPage() {
       return (data ?? []) as WoltPeriod[];
     },
   });
+
+  const { data: shifts = [] } = useQuery({
+    queryKey: ['wolt-shift-sales', locationId],
+    queryFn: async () => {
+      let q = supabase.from('wolt_shift_sales').select('*')
+        .order('sale_date', { ascending: false }).order('shift');
+      if (locationId) q = q.eq('location_id', locationId);
+      const { data, error } = await q;
+      if (error) throw error;
+      return (data ?? []) as WoltShiftSale[];
+    },
+  });
+
+  /** Day rows with their two shifts, newest first. */
+  const days = useMemo(() => {
+    const byDate = new Map<string, { date: string; lunch?: WoltShiftSale; dinner?: WoltShiftSale }>();
+    for (const s of shifts) {
+      const d = byDate.get(s.sale_date) ?? { date: s.sale_date };
+      if (s.shift === 'lunch') d.lunch = s; else d.dinner = s;
+      byDate.set(s.sale_date, d);
+    }
+    return [...byDate.values()].sort((a, b) => b.date.localeCompare(a.date));
+  }, [shifts]);
 
   const totals = useMemo(() => periods.reduce(
     (acc, p) => ({
@@ -175,6 +211,72 @@ export default function WoltPage() {
       <p className="mt-3 text-xs text-gray-400">
         Figures are net of VAT, taken from the Wolt self-billing invoice: subtotal (A) for net sales,
         subtotal (B) for commission. The Endbetrag column is Wolt&apos;s own A − B, kept as a check.
+      </p>
+
+      {/* ── Day & shift breakdown ── */}
+      <h2 className="mt-8 text-lg font-bold text-gray-900">By day &amp; shift</h2>
+      <p className="text-sm text-gray-500 mb-4">
+        Cut from the order times in the sales report · lunch to 14:30, dinner from 17:30
+      </p>
+
+      <div className="bg-white border border-gray-100 rounded-xl shadow-sm overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="bg-gray-50 border-b border-gray-100 text-xs font-bold text-gray-500 uppercase tracking-wider">
+                <th className="px-4 py-2.5 text-left">Day</th>
+                <th className="px-3 py-2.5 text-left">Shift</th>
+                <th className="px-3 py-2.5 text-right">Orders</th>
+                <th className="px-3 py-2.5 text-right">Net sales</th>
+                <th className="px-3 py-2.5 text-right">Refunds (est.)</th>
+                <th className="px-3 py-2.5 text-right">Commission</th>
+                <th className="px-4 py-2.5 text-right">Net · pre Ads</th>
+              </tr>
+            </thead>
+            <tbody>
+              {days.length === 0 && (
+                <tr><td colSpan={7} className="px-4 py-12 text-center text-sm text-gray-400">
+                  No daily breakdown yet — upload a set that includes the sales report (Umsatzbericht)
+                </td></tr>
+              )}
+              {days.map(d => (
+                ([d.lunch, d.dinner].filter(Boolean) as WoltShiftSale[]).map((r, i) => (
+                  <tr key={r.id} className={`hover:bg-gray-50/60 ${i === 1 ? 'border-b border-gray-100' : 'border-b border-gray-50'}`}>
+                    <td className="px-4 py-2 whitespace-nowrap font-semibold text-gray-800">
+                      {i === 0 ? de(d.date) : ''}
+                    </td>
+                    <td className="px-3 py-2 whitespace-nowrap text-gray-500">
+                      {r.shift === 'lunch' ? '☀️ Lunch' : '🌙 Dinner'}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums text-gray-400">{r.orders}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-gray-700">{fmt(Number(r.net_sales))}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-gray-400">{fmt(Number(r.refund_est))}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-gray-600">−{fmt(Number(r.commission))}</td>
+                    <td className="px-4 py-2 text-right tabular-nums font-bold text-gray-900">{fmt(Number(r.net_pre_ads))}</td>
+                  </tr>
+                ))
+              ))}
+            </tbody>
+            {shifts.length > 0 && (
+              <tfoot>
+                <tr className="bg-gray-50 font-bold text-gray-900 border-t border-gray-200">
+                  <td className="px-4 py-2.5" colSpan={2}>{days.length} day{days.length === 1 ? '' : 's'}</td>
+                  <td className="px-3 py-2.5 text-right tabular-nums">{shifts.reduce((s, r) => s + r.orders, 0)}</td>
+                  <td className="px-3 py-2.5 text-right tabular-nums">{fmt(shifts.reduce((s, r) => s + Number(r.net_sales), 0))}</td>
+                  <td className="px-3 py-2.5 text-right tabular-nums">{fmt(shifts.reduce((s, r) => s + Number(r.refund_est), 0))}</td>
+                  <td className="px-3 py-2.5 text-right tabular-nums">−{fmt(shifts.reduce((s, r) => s + Number(r.commission), 0))}</td>
+                  <td className="px-4 py-2.5 text-right tabular-nums">{fmt(shifts.reduce((s, r) => s + Number(r.net_pre_ads), 0))}</td>
+                </tr>
+              </tfoot>
+            )}
+          </table>
+        </div>
+      </div>
+
+      <p className="mt-3 mb-8 text-xs text-gray-400">
+        Commission is charged per order on the gross value — 27% on Wolt+ orders, 24% otherwise —
+        then reconciled to subtotal (B). Refunds are marked <strong>(est.)</strong> because Wolt reports
+        them only per period: the total is exact, the split across shifts is pro-rata on net sales.
       </p>
     </div>
   );
