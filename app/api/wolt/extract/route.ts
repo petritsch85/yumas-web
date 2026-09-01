@@ -100,9 +100,19 @@ export async function POST(req: Request) {
     .from('locations').select('id, name').eq('is_active', true);
   const locations = (locationRows ?? []) as { id: string; name: string }[];
 
+  // Closed shifts, so orders are never booked to a shift that never ran.
+  const [{ data: settings }, { data: closures }] = await Promise.all([
+    admin.from('forecast_settings').select('location_id, shift_type, closed_weekdays'),
+    admin.from('closure_days').select('location_id, closure_date, shift_type'),
+  ]);
+  const closedChecker = buildClosedChecker(
+    (settings  ?? []) as ClosedWeekdayRow[],
+    (closures  ?? []) as ClosureDayRow[],
+  );
+
   const sets: WoltSetResult[] = [];
   for (const [source, groupDocs] of groups) {
-    sets.push(buildSet(source, groupDocs, locations));
+    sets.push(buildSet(source, groupDocs, locations, closedChecker));
   }
 
   sets.sort((a, b) => (a.data?.periodStart ?? '').localeCompare(b.data?.periodStart ?? ''));
@@ -110,10 +120,39 @@ export async function POST(req: Request) {
 }
 
 /** Parses and validates one document set. Never throws — it reports instead. */
+interface ClosedWeekdayRow { location_id: string; shift_type: string; closed_weekdays: string[] | null }
+interface ClosureDayRow   { location_id: string; closure_date: string; shift_type: string }
+
+const DOW = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+
+/**
+ * Builds a lookup for "was this location shut for this shift that day?",
+ * combining the recurring weekday closures with one-off closure dates — the
+ * same two sources the P&L shades its closed shifts from.
+ */
+function buildClosedChecker(settings: ClosedWeekdayRow[], closures: ClosureDayRow[]) {
+  const recurring = new Set<string>();
+  for (const r of settings) {
+    for (const day of r.closed_weekdays ?? []) recurring.add(`${r.location_id}|${r.shift_type}|${day}`);
+  }
+  const specific = new Set<string>();
+  for (const c of closures) {
+    for (const shift of c.shift_type === 'all' ? ['lunch', 'dinner'] : [c.shift_type]) {
+      specific.add(`${c.location_id}|${shift}|${c.closure_date}`);
+    }
+  }
+  return (locationId: string, date: string, shift: string) => {
+    if (specific.has(`${locationId}|${shift}|${date}`)) return true;
+    const dow = DOW[new Date(date + 'T12:00:00Z').getUTCDay()];
+    return recurring.has(`${locationId}|${shift}|${dow}`);
+  };
+}
+
 function buildSet(
   source: string,
   docs: Doc[],
   locations: { id: string; name: string }[],
+  isClosed: (locationId: string, date: string, shift: string) => boolean,
 ): WoltSetResult {
   const files: WoltSetFile[] = docs.map(d => ({ name: d.name, kind: d.kind }));
   const warnings: string[] = [];
@@ -154,24 +193,6 @@ function buildSet(
     warnings.push('No netting report — this period will import with no advertising figure.');
   }
 
-  // The daily and shift split.
-  const salesDoc = docs.find(d => d.kind === 'sales_report');
-  let breakdown = null;
-  if (salesDoc) {
-    try {
-      const orders = parseWoltSalesReport(salesDoc.text);
-      // The check that catches mis-paired files: orders must sit inside the
-      // period the invoice states.
-      const mismatch = ordersMatchPeriod(orders.map(o => o.date), data);
-      if (mismatch) return { ...base, data, error: mismatch };
-      breakdown = aggregateWoltShifts(orders, data, services?.total ?? 0);
-    } catch (e) {
-      warnings.push(e instanceof WoltSalesParseError ? e.message : 'The sales report could not be read, so there is no daily breakdown.');
-    }
-  } else {
-    warnings.push('No sales report — this period will import without a daily breakdown.');
-  }
-
   // A set is filed by the restaurant its own invoice names, never by the
   // dropdown: falling back would quietly file one restaurant's sales under
   // another, which is the mistake this whole batch path exists to prevent.
@@ -183,6 +204,34 @@ function buildSet(
         locations.length ? ` (${locations.map(l => l.name).join(', ')})` : ''
       }. Add the location, or name it so the restaurant matches, before importing this period.`,
     };
+  }
+
+  // The daily and shift split. It needs the location, so it comes after the
+  // match: which shifts were open that day decides where an order belongs.
+  const salesDoc = docs.find(d => d.kind === 'sales_report');
+  let breakdown = null;
+  if (salesDoc) {
+    try {
+      const orders = parseWoltSalesReport(salesDoc.text);
+      // The check that catches mis-paired files: orders must sit inside the
+      // period the invoice states.
+      const mismatch = ordersMatchPeriod(orders.map(o => o.date), data);
+      if (mismatch) return { ...base, data, error: mismatch };
+      breakdown = aggregateWoltShifts(
+        orders, data, services?.total ?? 0,
+        (date, shift) => isClosed(location.id, date, shift),
+      );
+      if (breakdown.reassigned > 0) {
+        warnings.push(
+          `${breakdown.reassigned} order${breakdown.reassigned === 1 ? '' : 's'} moved to the other shift — ` +
+          'the shift their time implied was closed that day.',
+        );
+      }
+    } catch (e) {
+      warnings.push(e instanceof WoltSalesParseError ? e.message : 'The sales report could not be read, so there is no daily breakdown.');
+    }
+  } else {
+    warnings.push('No sales report — this period will import without a daily breakdown.');
   }
 
   return {

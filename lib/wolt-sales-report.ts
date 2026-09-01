@@ -45,6 +45,8 @@ export interface WoltOrder {
   shift:      WoltShift;
   /** Placed after lunch closed but before dinner opens — an evening pre-order. */
   preOrder:   boolean;
+  /** Moved to the other shift because this one was closed that day. */
+  reassigned?: boolean;
 }
 
 export interface WoltShiftRow {
@@ -73,6 +75,8 @@ export interface WoltShiftBreakdown {
   rows: WoltShiftRow[];
   /** Evening pre-orders: placed in the afternoon gap, counted as dinner. */
   preOrders: number;
+  /** Orders moved because the shift their time implies was closed that day. */
+  reassigned: number;
   /** Total refunds spread across the shifts. Negative. */
   refundTotal: number;
   /**
@@ -164,7 +168,25 @@ export function aggregateWoltShifts(
   invoice: WoltInvoiceData,
   /** Total Wolt services & advertising for the period, net of VAT. */
   advertising = 0,
+  /** Whether the restaurant was shut for that shift — see reassignment below. */
+  isShiftClosed?: (date: string, shift: WoltShift) => boolean,
 ): WoltShiftBreakdown {
+  /*
+   * An order timed to a shift the restaurant was closed for was fulfilled by
+   * the shift that was open — Westend takes no dinner covers on a Monday, yet
+   * Wolt orders still arrive and get cooked at lunch. Booking them to a closed
+   * shift would invent trade on a day the kitchen was shut.
+   *
+   * Only moved when exactly one of the two shifts was open; if the whole day
+   * was closed there is nowhere better to put it, so it stays where it fell.
+   */
+  const placed = !isShiftClosed ? orders : orders.map(o => {
+    const other: WoltShift = o.shift === 'lunch' ? 'dinner' : 'lunch';
+    return isShiftClosed(o.date, o.shift) && !isShiftClosed(o.date, other)
+      ? { ...o, shift: other, reassigned: true }
+      : o;
+  });
+  orders = placed;
   // Raw per-order commission, before reconciling to the invoice.
   const rawCommission = (o: WoltOrder) => o.gross * (o.woltPlus ? RATE_WOLT_PLUS : RATE_STANDARD);
 
@@ -222,7 +244,8 @@ export function aggregateWoltShifts(
 
   return {
     rows: rows.map(({ rawCommission: _drop, ...r }) => r),
-    preOrders: orders.filter(o => o.preOrder).length,
+    preOrders:  orders.filter(o => o.preOrder).length,
+    reassigned: orders.filter(o => o.reassigned).length,
     refundTotal,
     commissionResidual,
   };
