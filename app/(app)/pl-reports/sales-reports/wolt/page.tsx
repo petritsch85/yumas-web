@@ -154,10 +154,15 @@ export default function WoltPage() {
                 <th className="px-4 py-2.5 text-right">Net sales · pre com, Ads</th>
                 <th className="px-4 py-2.5 text-right">Commission</th>
                 <th className="px-4 py-2.5 text-right">Net sales · pre Ads</th>
+                <th className="px-3 py-2.5 text-right">
+                  Endbetrag
+                  <span className="block font-normal normal-case tracking-normal text-[10px] text-gray-400">
+                    invoice&apos;s own A − B
+                  </span>
+                </th>
+                <th className="px-2 py-2.5 text-center">Check</th>
                 <th className="px-4 py-2.5 text-right">Advertising</th>
                 <th className="px-4 py-2.5 text-right">Net sales</th>
-                <th className="px-4 py-2.5 text-right">Endbetrag</th>
-                <th className="px-4 py-2.5 text-center">Check</th>
               </tr>
             </thead>
             <tbody>
@@ -189,16 +194,16 @@ export default function WoltPage() {
                   <td className="px-4 py-2.5 text-right tabular-nums font-semibold text-gray-900">{fmt(Number(p.net_sales_pre_commission))}</td>
                   <td className="px-4 py-2.5 text-right tabular-nums text-gray-600">−{fmt(Number(p.commission))}</td>
                   <td className="px-4 py-2.5 text-right tabular-nums text-gray-700">{fmt(Number(p.net_sales_pre_ads))}</td>
-                  <td className="px-4 py-2.5 text-right tabular-nums text-gray-600">−{fmt(Number(p.advertising ?? 0))}</td>
-                  <td className="px-4 py-2.5 text-right tabular-nums font-bold text-gray-900">{fmt(Number(p.net_sales_final ?? 0))}</td>
-                  <td className="px-4 py-2.5 text-right tabular-nums text-gray-400">{fmt(Number(p.reported_endbetrag))}</td>
-                  <td className="px-4 py-2.5 text-center">
+                  <td className="px-3 py-2.5 text-right tabular-nums text-gray-400">{fmt(Number(p.reported_endbetrag))}</td>
+                  <td className="px-2 py-2.5 text-center">
                     <span className={`px-2 py-0.5 rounded text-[11px] font-bold ${
                       p.check_ok ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
                     }`}>
                       {p.check_ok ? '✓' : '✗'}
                     </span>
                   </td>
+                  <td className="px-4 py-2.5 text-right tabular-nums text-gray-600">−{fmt(Number(p.advertising ?? 0))}</td>
+                  <td className="px-4 py-2.5 text-right tabular-nums font-bold text-gray-900">{fmt(Number(p.net_sales_final ?? 0))}</td>
                 </tr>
               ))}
             </tbody>
@@ -211,9 +216,9 @@ export default function WoltPage() {
                   <td className="px-4 py-2.5 text-right tabular-nums">{fmt(totals.pre)}</td>
                   <td className="px-4 py-2.5 text-right tabular-nums">−{fmt(totals.com)}</td>
                   <td className="px-4 py-2.5 text-right tabular-nums">{fmt(totals.post)}</td>
+                  <td colSpan={2} />
                   <td className="px-4 py-2.5 text-right tabular-nums">−{fmt(totals.ads)}</td>
                   <td className="px-4 py-2.5 text-right tabular-nums">{fmt(totals.fin)}</td>
-                  <td colSpan={2} />
                 </tr>
               </tfoot>
             )}
@@ -223,7 +228,9 @@ export default function WoltPage() {
 
       <p className="mt-3 text-xs text-gray-400">
         Figures are net of VAT, taken from the Wolt self-billing invoice: subtotal (A) for net sales,
-        subtotal (B) for commission. The Endbetrag column is Wolt&apos;s own A − B, kept as a check.
+        subtotal (B) for commission. The Endbetrag is that invoice&apos;s own A − B, so the check
+        confirms <strong>Net sales · pre Ads</strong>. Advertising comes on a separate Wolt invoice
+        and is netted off afterwards, which is why it sits outside the check.
       </p>
 
       {/* ── Day & shift breakdown ── */}
