@@ -4576,6 +4576,43 @@ export default function SalesReportsPage() {
                         </tr>
                       );
 
+                      /**
+                       * A revenue source with figures behind it, laid out exactly like the
+                       * placeholder rows so a wired-up source does not shift the block.
+                       */
+                      const netSalesValueRow = (label: string, map: Record<string, number>, shift?: 'lunch' | 'dinner') => {
+                        const qTotal = Object.entries(map)
+                          .filter(([k]) => dailyCols.some(c => c.type === 'day' && (c as { dateKey?: string }).dateKey === k))
+                          .reduce((sum, [, v]) => sum + v, 0);
+                        const show = (v: number) => v === 0
+                          ? <span className="text-gray-300">—</span>
+                          : <span className="text-blue-600">{fmtNum(v)}</span>;
+                        return (
+                          <tr key={`${shift ?? 'day'}-${label}`} className="border-b border-gray-100 hover:bg-gray-50/60 group" style={{ backgroundColor: '#ffffff' }}>
+                            <td className="sticky left-0 z-10 px-4 py-1 whitespace-nowrap border-r border-gray-100 bg-white group-hover:bg-gray-50/60 transition-colors text-[11px] text-gray-600 pl-8">{label}</td>
+                            {dailyCols.map((col, ci) => {
+                              if (col.type === 'day') {
+                                return (
+                                  <td key={ci} className="py-1 text-right tabular-nums text-[11px]"
+                                    style={{ paddingLeft: 4, paddingRight: 8, ...colStyle(shift, col.dateKey) }}>
+                                    {show(map[col.dateKey] ?? 0)}
+                                  </td>
+                                );
+                              }
+                              return (
+                                <td key={ci} className="py-1 text-right tabular-nums text-[11px]"
+                                  style={{ paddingLeft: 4, paddingRight: 6, backgroundColor: '#fffbeb', borderLeft: '1px solid #fde68a', borderRight: '1px solid #fde68a' }}>
+                                  {show(col.wDateKeys.reduce((sum, k) => sum + (map[k] ?? 0), 0))}
+                                </td>
+                              );
+                            })}
+                            <td className="py-1 text-right tabular-nums text-[11px] border-l border-gray-200" style={{ paddingLeft: 4, paddingRight: 8 }}>
+                              {show(qTotal)}
+                            </td>
+                          </tr>
+                        );
+                      };
+
                       /** The bold "Total net sales" row closing a block. */
                       const netSalesTotalRow = (key: string, label: string, shift?: 'lunch' | 'dinner') => (
                         <tr key={key} className="border-b-2 border-gray-200 hover:bg-gray-50/60 group" style={{ backgroundColor: '#f0fdf4' }}>
@@ -4593,7 +4630,9 @@ export default function SalesReportsPage() {
                       // not in this placeholder list — see the render block below.
                       // Orderbird is rendered by posRow (live POS data), so it is not in this
                       // placeholder list — see the render block below.
-                      const NET_SALES_AFTER_ORDERBIRD = ['Webshop', 'Wolt', 'Lieferando'];
+                      // Wolt is rendered from its own figures, between these two.
+                      const NET_SALES_BEFORE_WOLT = ['Webshop'];
+                      const NET_SALES_AFTER_WOLT  = ['Lieferando'];
 
                       const NET_SALES_AFTER_BILLS  = ['Too Good To Go'];
 
@@ -4813,21 +4852,27 @@ export default function SalesReportsPage() {
                           {/* ── Net sales, by source — labels only for now ── */}
                           {netSalesHeaderRow('Net sales · Lunch', 'lunch')}
                           {posRow('🟠 Orderbird', lunchMap, lunchForecastMap, lunchQtrTotal, 'lunch')}
-                          {NET_SALES_AFTER_ORDERBIRD.map(src => netSalesSourceRow(src, 'lunch'))}
+                          {NET_SALES_BEFORE_WOLT.map(src => netSalesSourceRow(src, 'lunch'))}
+                          {netSalesValueRow('Wolt', woltMaps.lunch.net, 'lunch')}
+                          {NET_SALES_AFTER_WOLT.map(src => netSalesSourceRow(src, 'lunch'))}
                           {billsRow('🧾 Bills', billsLunchMap, 'lunch')}
                           {NET_SALES_AFTER_BILLS.map(src => netSalesSourceRow(src, 'lunch'))}
                           {netSalesTotalRow('total-net-sales-lunch', 'Total net sales · Lunch', 'lunch')}
                           {netSalesSpacerRow('net-sales-gap')}
                           {netSalesHeaderRow('Net sales · Dinner', 'dinner')}
                           {posRow('🟠 Orderbird', dinnerMap, dinnerForecastMap, dinnerQtrTotal, 'dinner')}
-                          {NET_SALES_AFTER_ORDERBIRD.map(src => netSalesSourceRow(src, 'dinner'))}
+                          {NET_SALES_BEFORE_WOLT.map(src => netSalesSourceRow(src, 'dinner'))}
+                          {netSalesValueRow('Wolt', woltMaps.dinner.net, 'dinner')}
+                          {NET_SALES_AFTER_WOLT.map(src => netSalesSourceRow(src, 'dinner'))}
                           {billsRow('🧾 Bills', billsDinnerMap, 'dinner')}
                           {NET_SALES_AFTER_BILLS.map(src => netSalesSourceRow(src, 'dinner'))}
                           {netSalesTotalRow('total-net-sales-dinner', 'Total net sales · Dinner', 'dinner')}
                           {netSalesSpacerRow('net-sales-gap-2')}
                           {netSalesHeaderRow('Net sales · Day')}
                           {posRow('🟠 Orderbird', orderbirdDayMap, orderbirdDayForecast, orderbirdDayQtr)}
-                          {NET_SALES_AFTER_ORDERBIRD.map(src => netSalesSourceRow(src))}
+                          {NET_SALES_BEFORE_WOLT.map(src => netSalesSourceRow(src))}
+                          {netSalesValueRow('Wolt', woltMaps.day.net)}
+                          {NET_SALES_AFTER_WOLT.map(src => netSalesSourceRow(src))}
                           {billsRow('🧾 Bills', billsDayMap)}
                           {NET_SALES_AFTER_BILLS.map(src => netSalesSourceRow(src))}
                           {netSalesTotalRow('total-net-sales-day', 'Total net sales · All day')}
