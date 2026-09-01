@@ -3796,14 +3796,14 @@ export default function SalesReportsPage() {
                       const todayKey = `${todayYear}-${String(todayMonth).padStart(2,'0')}-${String(todayDay).padStart(2,'0')}`;
 
                       // Render a standard POS net-revenue row (with forecast support)
-                      const posRow = (label: string, posMap: typeof lunchMap, fcastMap: Record<string,number>, qTotal: typeof lunchQtrTotal, shift: 'lunch' | 'dinner') => {
+                      const posRow = (label: string, posMap: typeof lunchMap, fcastMap: Record<string,number>, qTotal: typeof lunchQtrTotal, shift?: 'lunch' | 'dinner') => {
                         const hasFcast    = Object.keys(fcastMap).length > 0;
                         const qActualSum  = qTotal?.netTotal ?? 0;
                         const qFcastRem   = hasFcast ? dailyCols.filter(c => c.type === 'day' && c.dateKey >= todayKey && !(posMap as any)[c.dateKey]).reduce((s, c) => s + (fcastMap[(c as any).dateKey] ?? 0), 0) : 0;
                         const qDisplayVal = qActualSum + qFcastRem;
                         const qHasMix     = qActualSum > 0 && qFcastRem > 0;
                         return (
-                          <tr key={label} className="border-b border-gray-100 hover:bg-gray-50/60 group" style={{ backgroundColor:'#ffffff' }}>
+                          <tr key={`${shift ?? 'day'}-${label}`} className="border-b border-gray-100 hover:bg-gray-50/60 group" style={{ backgroundColor:'#ffffff' }}>
                             <td className="sticky left-0 z-10 px-4 py-2 whitespace-nowrap border-r border-gray-100 group-hover:bg-gray-50/60 transition-colors text-gray-700" style={{ backgroundColor:'#ffffff' }}>{label}</td>
                             {dailyCols.map((col, ci) => {
                               if (col.type === 'day') {
@@ -4125,10 +4125,28 @@ export default function SalesReportsPage() {
 
                       // Bills is rendered by billsRow (live data from Outgoing Bills), so it is
                       // not in this placeholder list — see the render block below.
-                      const NET_SALES_BEFORE_BILLS = ['Orderbird', 'Webshop', 'Wolt', 'Lieferando'];
+                      // Orderbird is rendered by posRow (live POS data), so it is not in this
+                      // placeholder list — see the render block below.
+                      const NET_SALES_AFTER_ORDERBIRD = ['Webshop', 'Wolt', 'Lieferando'];
                       const NET_SALES_AFTER_BILLS  = ['Too Good To Go'];
 
                       // Lunch + Dinner per date, for the all-day block.
+                      const orderbirdDayMap = (() => {
+                        const m: Record<string, { netTotal: number }> = {};
+                        for (const [k, v] of Object.entries(lunchMap))  m[k] = { netTotal: (m[k]?.netTotal ?? 0) + ((v as any)?.netTotal ?? 0) };
+                        for (const [k, v] of Object.entries(dinnerMap)) m[k] = { netTotal: (m[k]?.netTotal ?? 0) + ((v as any)?.netTotal ?? 0) };
+                        return m as unknown as typeof lunchMap;
+                      })();
+                      const orderbirdDayForecast: Record<string, number> = (() => {
+                        const m: Record<string, number> = {};
+                        for (const [k, v] of Object.entries(lunchForecastMap))  m[k] = (m[k] ?? 0) + v;
+                        for (const [k, v] of Object.entries(dinnerForecastMap)) m[k] = (m[k] ?? 0) + v;
+                        return m;
+                      })();
+                      const orderbirdDayQtr = {
+                        netTotal: (lunchQtrTotal?.netTotal ?? 0) + (dinnerQtrTotal?.netTotal ?? 0),
+                      } as unknown as typeof lunchQtrTotal;
+
                       const billsDayMap: Record<string, number> = (() => {
                         const merged: Record<string, number> = {};
                         for (const [k, v] of Object.entries(billsLunchMap))  merged[k] = (merged[k] ?? 0) + v;
@@ -4327,19 +4345,22 @@ export default function SalesReportsPage() {
                         <>
                           {/* ── Net sales, by source — labels only for now ── */}
                           {netSalesHeaderRow('Net sales · Lunch', 'lunch')}
-                          {NET_SALES_BEFORE_BILLS.map(src => netSalesSourceRow(src, 'lunch'))}
+                          {posRow('🟠 Orderbird', lunchMap, lunchForecastMap, lunchQtrTotal, 'lunch')}
+                          {NET_SALES_AFTER_ORDERBIRD.map(src => netSalesSourceRow(src, 'lunch'))}
                           {billsRow('🧾 Bills', billsLunchMap, 'lunch')}
                           {NET_SALES_AFTER_BILLS.map(src => netSalesSourceRow(src, 'lunch'))}
                           {netSalesTotalRow('total-net-sales-lunch', 'Total net sales · Lunch', 'lunch')}
                           {netSalesSpacerRow('net-sales-gap')}
                           {netSalesHeaderRow('Net sales · Dinner', 'dinner')}
-                          {NET_SALES_BEFORE_BILLS.map(src => netSalesSourceRow(src, 'dinner'))}
+                          {posRow('🟠 Orderbird', dinnerMap, dinnerForecastMap, dinnerQtrTotal, 'dinner')}
+                          {NET_SALES_AFTER_ORDERBIRD.map(src => netSalesSourceRow(src, 'dinner'))}
                           {billsRow('🧾 Bills', billsDinnerMap, 'dinner')}
                           {NET_SALES_AFTER_BILLS.map(src => netSalesSourceRow(src, 'dinner'))}
                           {netSalesTotalRow('total-net-sales-dinner', 'Total net sales · Dinner', 'dinner')}
                           {netSalesSpacerRow('net-sales-gap-2')}
                           {netSalesHeaderRow('Net sales · Day')}
-                          {NET_SALES_BEFORE_BILLS.map(src => netSalesSourceRow(src))}
+                          {posRow('🟠 Orderbird', orderbirdDayMap, orderbirdDayForecast, orderbirdDayQtr)}
+                          {NET_SALES_AFTER_ORDERBIRD.map(src => netSalesSourceRow(src))}
                           {billsRow('🧾 Bills', billsDayMap)}
                           {NET_SALES_AFTER_BILLS.map(src => netSalesSourceRow(src))}
                           {netSalesTotalRow('total-net-sales-day', 'Total net sales · All day')}
