@@ -29,6 +29,7 @@ interface WoltPeriod {
   advertising:              number;
   ad_campaign:              number | null;
   net_sales_final:          number;
+  contract:                 'self_billing' | 'self_delivery' | null;
   check_ok:                 boolean;
   source_files:             { name: string; kind: string }[] | null;
 }
@@ -155,9 +156,9 @@ export default function WoltPage() {
                 <th className="px-2.5 py-2.5 text-right">Commission</th>
                 <th className="px-2.5 py-2.5 text-right">Net sales · pre Ads</th>
                 <th className="px-2.5 py-2.5 text-right">
-                  Endbetrag
+                  Wolt&apos;s own
                   <span className="block font-normal normal-case tracking-normal text-[10px] text-gray-400">
-                    invoice&apos;s own A − B
+                    Endbetrag, or payout
                   </span>
                 </th>
                 <th className="px-2 py-2.5 text-center">Check</th>
@@ -194,7 +195,12 @@ export default function WoltPage() {
                   <td className="px-2.5 py-2.5 text-right tabular-nums font-semibold text-gray-900">{fmt(Number(p.net_sales_pre_commission))}</td>
                   <td className="px-2.5 py-2.5 text-right tabular-nums text-gray-600">−{fmt(Number(p.commission))}</td>
                   <td className="px-2.5 py-2.5 text-right tabular-nums text-gray-700">{fmt(Number(p.net_sales_pre_ads))}</td>
-                  <td className="px-2.5 py-2.5 text-right tabular-nums text-gray-400">{fmt(Number(p.reported_endbetrag))}</td>
+                  <td className="px-2.5 py-2.5 text-right tabular-nums text-gray-400">
+                    {fmt(Number(p.reported_endbetrag))}
+                    {p.contract === 'self_delivery' && (
+                      <span className="block text-[10px] text-gray-300">Zahlungsbetrag</span>
+                    )}
+                  </td>
                   <td className="px-2 py-2.5 text-center">
                     <span className={`px-2 py-0.5 rounded text-[11px] font-bold ${
                       p.check_ok ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
@@ -231,6 +237,10 @@ export default function WoltPage() {
         subtotal (B) for commission. The Endbetrag is that invoice&apos;s own A − B, so the check
         confirms <strong>Net sales · pre Ads</strong>. Advertising comes on a separate Wolt invoice
         and is netted off afterwards, which is why it sits outside the check.
+        Eschborn is on Wolt&apos;s self-delivery contract and has no self-billing invoice at all:
+        there, net sales are the goods sold plus the delivery income you earn for delivering
+        yourselves, commission is Wolt&apos;s whole fee invoice, and the check is the
+        <strong> Zahlungsbetrag</strong> Wolt actually paid out.
       </p>
 
       {/* ── Day & shift breakdown ── */}

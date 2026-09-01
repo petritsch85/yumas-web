@@ -2145,6 +2145,7 @@ export default function SalesReportsPage() {
           services:                 set.services?.lines ?? null,
           net_sales_final:          round2(data.netSalesPreAds - (set.services?.total ?? 0)),
           source_files:             set.files,
+          contract:                 set.contract ?? 'self_billing',
         }, { onConflict: 'location_id,invoice_number' }).select('id').single();
         if (error) { setWoltError(`${set.source}: ${error.message}`); return; }
 

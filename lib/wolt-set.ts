@@ -15,7 +15,7 @@ import type { WoltServicesData } from './wolt-services';
 
 export interface WoltSetFile {
   name: string;
-  kind: 'invoice' | 'sales_report' | 'netting_report' | 'wolt_invoice' | 'unknown';
+  kind: 'invoice' | 'sales_report' | 'netting_report' | 'wolt_invoice' | 'payout_report' | 'unknown';
 }
 
 export interface WoltSetResult {
@@ -30,6 +30,12 @@ export interface WoltSetResult {
   data?:      WoltInvoiceData;
   services?:  WoltServicesData | null;
   breakdown?: WoltShiftBreakdown | null;
+
+  /**
+   * Which Wolt contract this period came from: "self_billing" where Wolt
+   * delivers, "self_delivery" where the restaurant does.
+   */
+  contract?: 'self_billing' | 'self_delivery';
 
   /** Resolved from the restaurant name on the invoice. */
   locationId?:   string;

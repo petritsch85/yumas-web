@@ -6,6 +6,7 @@ import { parseWoltInvoice, WoltParseError } from '@/lib/wolt-invoice';
 import { parseWoltSalesReport, aggregateWoltShifts, WoltSalesParseError } from '@/lib/wolt-sales-report';
 import { buildWoltServices, WoltServicesParseError } from '@/lib/wolt-services';
 import { matchLocation, ordersMatchPeriod } from '@/lib/wolt-set';
+import { isPayoutReport, parseWoltPayoutReport, parseWoltFeeInvoice, toInvoiceShape } from '@/lib/wolt-payout';
 import type { WoltSetFile, WoltSetResult } from '@/lib/wolt-set';
 
 // pdf text extraction needs the Node runtime, not the edge one.
@@ -23,7 +24,8 @@ const kindOf = (text: string): WoltSetFile['kind'] =>
   /Rechnung\s*\(Selbstfakturierung\)/i.test(text)      ? 'invoice'
   : /Umsatzbericht/i.test(text)                        ? 'sales_report'
   : /Übersicht Umsätze und Auszahlungen/i.test(text)   ? 'netting_report'
-  : /Wolt Rechnung/i.test(text)                        ? 'wolt_invoice'
+  : isPayoutReport(text)                               ? 'payout_report'
+  : /Wolt Rechnung|Wolt Provision/i.test(text)         ? 'wolt_invoice'
   : 'unknown';
 
 /**
@@ -119,6 +121,91 @@ export async function POST(req: Request) {
   return NextResponse.json({ sets });
 }
 
+/**
+ * Reads a self-delivery set — a payout report plus Wolt's fee invoice.
+ *
+ * Net sales are the goods sold plus the delivery income the restaurant earns
+ * for delivering itself; commission is Wolt's whole fee invoice less any
+ * advertising campaign, so the platform and service fees sit with the
+ * commission they arrive alongside.
+ *
+ * Wolt charges those fees at period level rather than per order, so commission
+ * is spread pro-rata on net sales instead of being attributed per order the way
+ * the delivered contract allows.
+ */
+function buildSelfDeliverySet(
+  base: WoltSetResult,
+  payoutDoc: Doc,
+  docs: Doc[],
+  locations: { id: string; name: string }[],
+  isClosed: (locationId: string, date: string, shift: string) => boolean,
+): WoltSetResult {
+  const warnings = base.warnings;
+  const feeDoc = docs.find(d => d.kind === 'wolt_invoice');
+  if (!feeDoc) {
+    return { ...base, error: "No Wolt fee invoice in this set — that is the document carrying Wolt's commission." };
+  }
+
+  let data;
+  let services;
+  try {
+    const payout = parseWoltPayoutReport(payoutDoc.text);
+    const fees   = parseWoltFeeInvoice(feeDoc.text, payoutDoc.text, docs.find(d => d.kind === 'sales_report')?.text);
+    data = toInvoiceShape(payout, fees);
+    services = { total: fees.adCampaignNet, adCampaign: fees.adCampaignNet || null, lines: [] };
+  } catch (e) {
+    return { ...base, error: e instanceof Error ? e.message : 'The payout report could not be read.' };
+  }
+
+  if (!data.checkOk) {
+    return {
+      ...base, data,
+      error: `The payout does not reconcile: goods plus services less Wolt's invoice should equal the stated Zahlungsbetrag of ${data.reportedEndbetrag}.`,
+    };
+  }
+
+  const location = matchLocation(data.restaurant, locations);
+  if (!location) {
+    return {
+      ...base, data,
+      error: `"${data.restaurant}" does not match a location in the system${
+        locations.length ? ` (${locations.map(l => l.name).join(', ')})` : ''
+      }. Add the location, or name it so the restaurant matches, before importing this period.`,
+    };
+  }
+
+  const salesDoc = docs.find(d => d.kind === 'sales_report');
+  let breakdown = null;
+  if (salesDoc) {
+    try {
+      const orders = parseWoltSalesReport(salesDoc.text);
+      const mismatch = ordersMatchPeriod(orders.map(o => o.date), data);
+      if (mismatch) return { ...base, data, error: mismatch };
+      breakdown = aggregateWoltShifts(
+        orders, data, services.total,
+        (date, shift) => isClosed(location.id, date, shift),
+        () => 0,   // charged per period here, so spread pro-rata rather than per order
+      );
+      if (breakdown.reassigned > 0) {
+        warnings.push(
+          `${breakdown.reassigned} order${breakdown.reassigned === 1 ? '' : 's'} moved to the other shift — ` +
+          'the shift their time implied was closed that day.',
+        );
+      }
+    } catch (e) {
+      warnings.push(e instanceof WoltSalesParseError ? e.message : 'The sales report could not be read, so there is no daily breakdown.');
+    }
+  } else {
+    warnings.push('No sales report — this period will import without a daily breakdown.');
+  }
+
+  return {
+    ...base, data, services, breakdown,
+    contract: 'self_delivery',
+    locationId: location.id, locationName: location.name,
+  };
+}
+
 /** Parses and validates one document set. Never throws — it reports instead. */
 interface ClosedWeekdayRow { location_id: string; shift_type: string; closed_weekdays: string[] | null }
 interface ClosureDayRow   { location_id: string; closure_date: string; shift_type: string }
@@ -159,8 +246,16 @@ function buildSet(
   const base: WoltSetResult = { source: source === 'upload' ? 'Dropped files' : source, files, warnings };
 
   const invoiceDoc = docs.find(d => d.kind === 'invoice');
+  const payoutDoc  = docs.find(d => d.kind === 'payout_report');
+
+  // Two Wolt contracts are in use and they publish different documents: where
+  // Wolt delivers there is a self-billing invoice; where the restaurant
+  // delivers there is a payout report and a separate fee invoice instead.
+  if (!invoiceDoc && payoutDoc) {
+    return buildSelfDeliverySet(base, payoutDoc, docs, locations, isClosed);
+  }
   if (!invoiceDoc) {
-    return { ...base, error: 'No self-billing invoice (Rechnung (Selbstfakturierung)) in this set — that is the document carrying the period totals.' };
+    return { ...base, error: 'No self-billing invoice (Rechnung (Selbstfakturierung)) and no payout report (Auszahlungsbericht) in this set — one of those carries the period totals.' };
   }
   if (docs.filter(d => d.kind === 'invoice').length > 1) {
     return { ...base, error: 'This set contains more than one self-billing invoice, so its files cannot be paired reliably. Upload the periods separately.' };
@@ -236,7 +331,8 @@ function buildSet(
 
   return {
     ...base, data, services, breakdown,
-    locationId:   location?.id,
-    locationName: location?.name,
+    contract: 'self_billing',
+    locationId:   location.id,
+    locationName: location.name,
   };
 }

@@ -101,12 +101,14 @@ const RATE_STANDARD  = 0.24;
  * so whitespace classes have to allow for them.
  */
 const SEP = '[\\s\\u0000]+';
+/** The timestamp itself: NUL-separated on one contract, colon-separated on the other. */
+const TIME = '[\\s\\u0000:]+';
 
 const ORDER_RE = new RegExp(
   `(\\d{2}\\.\\d{2}\\.\\d{4})${SEP}` +      // date
-  `(\\d{1,2})${SEP}(\\d{2})${SEP}(\\d{2})${SEP}` + // hh mm ss
+  `(\\d{1,2})${TIME}(\\d{2})${TIME}(\\d{2})${SEP}` + // hh mm ss
   `(\\d+)${SEP}` +                          // running index
-  `(Ja|Nein)${SEP}` +                       // Wolt+
+  `(?:(Ja|Nein)${SEP})?` +                  // Wolt+, a column Wolt omits when no order used it
   `(\\d+)${SEP}` +                          // order number
   `([\\d.]+,\\d{2})${SEP}` +                // gross
   `([\\d.]+,\\d{2})`,                       // net
@@ -142,15 +144,20 @@ export function parseWoltSalesReport(text: string): WoltOrder[] {
       date:     `${y}-${mo}-${d}`,
       minutes,
       orderNo,
-      woltPlus: woltPlus === 'Ja',
+      woltPlus: woltPlus === 'Ja',   // absent column means no Wolt+ orders
       gross:    num(gross),
       net:      num(net),
       ...classify(minutes),
     });
   }
 
-  if (orders.length === 0) {
-    throw new WoltSalesParseError('No orders could be read from the Wolt sales report.');
+  // A period with no orders is legitimate — a closed week reports none — but so
+  // is a layout this parser no longer understands. They are told apart by the
+  // report's own total line.
+  if (orders.length === 0 && !/Summes+0,00/.test(text)) {
+    throw new WoltSalesParseError(
+      'No orders could be read from the Wolt sales report, and it does not report an empty period.',
+    );
   }
   return orders;
 }
@@ -170,6 +177,15 @@ export function aggregateWoltShifts(
   advertising = 0,
   /** Whether the restaurant was shut for that shift — see reassignment below. */
   isShiftClosed?: (date: string, shift: WoltShift) => boolean,
+  /**
+   * Commission rate for an order, on its gross value.
+   *
+   * Where Wolt delivers, commission is charged per order at a rate set by the
+   * Wolt+ flag, and those rates reproduce the invoice exactly. On the
+   * self-delivery contract Wolt charges its fees at period level instead, so a
+   * rate of zero leaves the whole amount to be spread pro-rata on net sales.
+   */
+  rateFor: (order: WoltOrder) => number = (o) => (o.woltPlus ? RATE_WOLT_PLUS : RATE_STANDARD),
 ): WoltShiftBreakdown {
   /*
    * An order timed to a shift the restaurant was closed for was fulfilled by
@@ -188,7 +204,7 @@ export function aggregateWoltShifts(
   });
   orders = placed;
   // Raw per-order commission, before reconciling to the invoice.
-  const rawCommission = (o: WoltOrder) => o.gross * (o.woltPlus ? RATE_WOLT_PLUS : RATE_STANDARD);
+  const rawCommission = (o: WoltOrder) => o.gross * rateFor(o);
 
   const buckets = new Map<string, WoltShiftRow & { rawCommission: number }>();
   for (const o of orders) {
@@ -215,6 +231,10 @@ export function aggregateWoltShifts(
 
   const rows = [...buckets.values()]
     .sort((a, b) => a.date.localeCompare(b.date) || (a.shift === 'lunch' ? -1 : 1));
+
+  if (rows.length === 0) {
+    return { rows: [], preOrders: 0, reassigned: 0, refundTotal: 0, commissionResidual: 0 };
+  }
 
   // Spread both adjustments in proportion to each row's net sales. Rounding each
   // row would leave the totals a cent or two off the invoice, so the largest row
