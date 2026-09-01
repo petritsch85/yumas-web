@@ -3652,6 +3652,18 @@ export default function SalesReportsPage() {
           </div>
         ) : (() => {
           const totalCols = dailyCols.length + 2; // label + day/week cols + month total
+
+          /** A numbered section banner spanning the full table. The label is
+           *  pinned to the left edge so it stays readable when scrolled right. */
+          const sectionBannerRow = (label: string) => (
+            <tr>
+              <td colSpan={totalCols}
+                className="px-0 py-2 text-xs font-bold uppercase tracking-widest text-white"
+                style={{ backgroundColor: '#0f172a' }}>
+                <div className="sticky left-0 w-fit px-4">{label}</div>
+              </td>
+            </tr>
+          );
           const todayKey  = `${todayYear}-${String(todayMonth).padStart(2,'0')}-${String(todayDay).padStart(2,'0')}`;
 
           // Helper: render one P&L block (lunch / dinner / total) as a <tbody>
@@ -3785,13 +3797,7 @@ export default function SalesReportsPage() {
 
                   {/* ── Summary P&L ── */}
                   <tbody>
-                    <tr>
-                      <td colSpan={totalCols}
-                        className="px-0 py-2 text-xs font-bold uppercase tracking-widest text-white"
-                        style={{ backgroundColor: '#0f172a' }}>
-                        <div className="sticky left-0 w-fit px-4">1) Summary</div>
-                      </td>
-                    </tr>
+                    {sectionBannerRow('1) Summary')}
                     {(() => {
                       const todayKey = `${todayYear}-${String(todayMonth).padStart(2,'0')}-${String(todayDay).padStart(2,'0')}`;
 
@@ -4365,6 +4371,9 @@ export default function SalesReportsPage() {
                           {NET_SALES_AFTER_BILLS.map(src => netSalesSourceRow(src))}
                           {netSalesTotalRow('total-net-sales-day', 'Total net sales · All day')}
                           {netSalesSpacerRow('net-sales-gap-3')}
+
+                          {/* ── 2) Orderbird — the detail behind the Orderbird summary rows ── */}
+                          {sectionBannerRow('2) Orderbird')}
                           {estGuestsRow('↳ Est. Guests · Lunch',       effectiveLunchGuestsMap,  'lunch', lunchQEffGuests)}
                           {metricRow('↳ Net Food / Guest · Lunch',    lunchNetFoodPGMap,   lunchQMetrics.guests > 0 ? lunchQMetrics.netFood   / lunchQMetrics.guests : null, 'currency', 'lunch')}
                           {metricRow('↳ Net Drinks / Guest · Lunch',  lunchNetDrinksPGMap, lunchQMetrics.guests > 0 ? lunchQMetrics.netDrinks / lunchQMetrics.guests : null, 'currency', 'lunch')}
