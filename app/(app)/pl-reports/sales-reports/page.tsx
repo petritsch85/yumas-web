@@ -4134,6 +4134,25 @@ export default function SalesReportsPage() {
                       // Orderbird is rendered by posRow (live POS data), so it is not in this
                       // placeholder list — see the render block below.
                       const NET_SALES_AFTER_ORDERBIRD = ['Webshop', 'Wolt', 'Lieferando'];
+
+                      /** One line of the Wolt block. Labels only for now — the
+                       *  subtotal lines are bold, the deductions between them plain. */
+                      const woltRow = (label: string, bold = false) => (
+                        <tr key={`wolt-${label}`} className="border-b border-gray-100 hover:bg-gray-50/60 group" style={{ backgroundColor: '#ffffff' }}>
+                          <td className={`sticky left-0 z-10 px-4 py-1 whitespace-nowrap border-r border-gray-100 bg-white group-hover:bg-gray-50/60 transition-colors ${
+                            bold ? 'text-xs font-bold text-gray-800' : 'text-[11px] text-gray-600'
+                          }`}>{label}</td>
+                          {emptyCells()}
+                        </tr>
+                      );
+
+                      const WOLT_ROWS: [string, boolean][] = [
+                        ['Net sales · pre com, Ads', true],
+                        ['Commission',               false],
+                        ['Net sales · pre Ads',      true],
+                        ['Advertising',              false],
+                        ['Net sales',                true],
+                      ];
                       const NET_SALES_AFTER_BILLS  = ['Too Good To Go'];
 
                       // Lunch + Dinner per date, for the all-day block.
@@ -4391,6 +4410,11 @@ export default function SalesReportsPage() {
                           {simplyRow('🛵 Simply · Dinner', deliveryDinnerMap, simplyDinnerForecastMap, 'dinner')}
                           {totalRow('🌙  Total Dinner', dinnerMap, dinnerForecastMap, deliveryDinnerMap, dinnerQtrTotal, '#f0fdf4', '#1B5E20', billsDinnerMap, simplyDinnerForecastMap, 'dinner')}
                           {totalRow('∑   Daily Total',  totalMap,  totalForecastMap,  deliveryTotalMap,  totalQtrTotal,  '#f0fdf4', '#1B5E20', billsTotalMap, simplyTotalForecastMap)}
+                          {netSalesSpacerRow('wolt-gap')}
+
+                          {/* ── 3) Wolt — labels only for now ── */}
+                          {sectionBannerRow('3) Wolt')}
+                          {WOLT_ROWS.map(([label, bold]) => woltRow(label, bold))}
                         </>
                       );
                     })()}
