@@ -35,9 +35,11 @@ export interface WoltPayoutData {
   /** Deliveries, service fee and tips together, including VAT. */
   servicesGross: number;
   /**
-   * Payout corrections — customer compensations and the like, including VAT.
-   * Negative, and reported outside the goods total.
+   * Payout corrections — customer compensations and the like. Negative, and
+   * reported outside the goods total. Net of VAT.
    */
+  correctionsNet: number;
+  /** The same corrections including VAT, for the payout reconciliation. */
   correctionsGross: number;
   /** Wolt's invoice to us for the period, including VAT. */
   woltInvoiceGross: number;
@@ -96,8 +98,17 @@ export function parseWoltPayoutReport(text: string): WoltPayoutData {
       String.raw`Verkaufte Lieferungen und Dienstleistungen insgesamt\s+` +
       String.raw`-?[\d.]+,\d{2}\s+-?[\d.]+,\d{2}\s+` + AMOUNT,
     )),
+    // The corrections section lists each compensation and closes with a "Summe"
+    // line carrying net, VAT and gross. Net is what reduces sales.
+    correctionsNet: (() => {
+      const section = text.split(/Auszahlungskorrekturen\s+Gesamtbetrag/)[1];
+      const summe = section?.match(new RegExp(
+        String.raw`Summe\s+` + AMOUNT + String.raw`\s+` + AMOUNT + String.raw`\s+` + AMOUNT,
+      ));
+      return summe ? parseGermanNumber(summe[1]) : 0;
+    })(),
     // "Auszahlungskorrekturen" appears twice when the period has any: once as a
-    // section heading, once in the summary. The summary line is the total.
+    // section heading, once in the summary. The summary line is the gross total.
     correctionsGross: (() => {
       const all = [...text.matchAll(new RegExp(String.raw`Auszahlungskorrekturen\s+` + AMOUNT, 'g'))];
       return all.length === 0 ? 0 : parseGermanNumber(all[all.length - 1][1]);
@@ -171,6 +182,11 @@ export function parseWoltFeeInvoice(text: string, ...others: (string | undefined
  * locations, so this is income Eschborn has and they do not. Tips are left out:
  * they are not revenue.
  *
+ * Customer compensations are deducted, matching the delivered contract, where
+ * refunds already reduce subtotal (A). Wolt reports them outside the goods
+ * total here, so they have to be subtracted explicitly rather than arriving
+ * netted off.
+ *
  * Commission is Wolt's whole fee invoice, less any advertising campaign, so the
  * platform and service fees sit with the commission they arrive alongside.
  *
@@ -181,7 +197,9 @@ export function toInvoiceShape(
   payout: WoltPayoutData,
   fees:   WoltFeeInvoiceData,
 ): WoltInvoiceData {
-  const netSalesPreCommission = round2(payout.goodsNet + payout.deliveryNet);
+  const netSalesPreCommission = round2(
+    payout.goodsNet + payout.deliveryNet + payout.correctionsNet,
+  );
   const commission            = round2(fees.totalNet - fees.adCampaignNet);
   const expectedPayout = round2(
     payout.goodsGross + payout.servicesGross + payout.correctionsGross - payout.woltInvoiceGross,
