@@ -3653,6 +3653,40 @@ export default function SalesReportsPage() {
         ) : (() => {
           const totalCols = dailyCols.length + 2; // label + day/week cols + month total
 
+          /** The Wolt block — labels only for now, so every cell is an em dash.
+           *  Rendered as its own tbody after all the other sections. */
+          const WOLT_ROWS: [string, boolean][] = [
+            ['Net sales · pre com, Ads', true],
+            ['Commission',               false],
+            ['Net sales · pre Ads',      true],
+            ['Advertising',              false],
+            ['Net sales',                true],
+          ];
+
+          const woltTbody = () => (
+            <tbody>
+              {sectionBannerRow('3) Wolt')}
+              {WOLT_ROWS.map(([label, bold]) => (
+                <tr key={`wolt-${label}`} className="border-b border-gray-100 hover:bg-gray-50/60 group" style={{ backgroundColor: '#ffffff' }}>
+                  <td className={`sticky left-0 z-10 px-4 py-1 whitespace-nowrap border-r border-gray-100 bg-white group-hover:bg-gray-50/60 transition-colors ${
+                    bold ? 'text-xs font-bold text-gray-800' : 'text-[11px] text-gray-600'
+                  }`}>{label}</td>
+                  {dailyCols.map((col, ci) => (
+                    <td key={ci} className="py-1 text-right tabular-nums text-[11px]"
+                      style={col.type === 'day'
+                        ? { paddingLeft: 4, paddingRight: 8 }
+                        : { paddingLeft: 4, paddingRight: 6, backgroundColor: '#fffbeb', borderLeft: '1px solid #fde68a', borderRight: '1px solid #fde68a' }}>
+                      <span className="text-gray-200">—</span>
+                    </td>
+                  ))}
+                  <td className="py-1 text-right tabular-nums text-[11px] border-l border-gray-200" style={{ paddingLeft: 4, paddingRight: 8 }}>
+                    <span className="text-gray-200">—</span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          );
+
           /** A numbered section banner spanning the full table. The label is
            *  pinned to the left edge so it stays readable when scrolled right. */
           const sectionBannerRow = (label: string) => (
@@ -4135,24 +4169,6 @@ export default function SalesReportsPage() {
                       // placeholder list — see the render block below.
                       const NET_SALES_AFTER_ORDERBIRD = ['Webshop', 'Wolt', 'Lieferando'];
 
-                      /** One line of the Wolt block. Labels only for now — the
-                       *  subtotal lines are bold, the deductions between them plain. */
-                      const woltRow = (label: string, bold = false) => (
-                        <tr key={`wolt-${label}`} className="border-b border-gray-100 hover:bg-gray-50/60 group" style={{ backgroundColor: '#ffffff' }}>
-                          <td className={`sticky left-0 z-10 px-4 py-1 whitespace-nowrap border-r border-gray-100 bg-white group-hover:bg-gray-50/60 transition-colors ${
-                            bold ? 'text-xs font-bold text-gray-800' : 'text-[11px] text-gray-600'
-                          }`}>{label}</td>
-                          {emptyCells()}
-                        </tr>
-                      );
-
-                      const WOLT_ROWS: [string, boolean][] = [
-                        ['Net sales · pre com, Ads', true],
-                        ['Commission',               false],
-                        ['Net sales · pre Ads',      true],
-                        ['Advertising',              false],
-                        ['Net sales',                true],
-                      ];
                       const NET_SALES_AFTER_BILLS  = ['Too Good To Go'];
 
                       // Lunch + Dinner per date, for the all-day block.
@@ -4410,11 +4426,6 @@ export default function SalesReportsPage() {
                           {simplyRow('🛵 Simply · Dinner', deliveryDinnerMap, simplyDinnerForecastMap, 'dinner')}
                           {totalRow('🌙  Total Dinner', dinnerMap, dinnerForecastMap, deliveryDinnerMap, dinnerQtrTotal, '#f0fdf4', '#1B5E20', billsDinnerMap, simplyDinnerForecastMap, 'dinner')}
                           {totalRow('∑   Daily Total',  totalMap,  totalForecastMap,  deliveryTotalMap,  totalQtrTotal,  '#f0fdf4', '#1B5E20', billsTotalMap, simplyTotalForecastMap)}
-                          {netSalesSpacerRow('wolt-gap')}
-
-                          {/* ── 3) Wolt — labels only for now ── */}
-                          {sectionBannerRow('3) Wolt')}
-                          {WOLT_ROWS.map(([label, bold]) => woltRow(label, bold))}
                         </>
                       );
                     })()}
@@ -4425,6 +4436,9 @@ export default function SalesReportsPage() {
                   {renderBlock(lunchMap,  lunchQtrTotal,  '☀️  Lunch Shift',  '#92400E')}
                   {renderBlock(dinnerMap, dinnerQtrTotal, '🌙  Dinner Shift', '#1E3A5F')}
                   {renderBlock(totalMap,  totalQtrTotal,  '∑   Daily Total',  '#111827')}
+
+                  <tbody><tr><td colSpan={totalCols} style={{ height: 12, backgroundColor:'#f9fafb' }} /></tr></tbody>
+                  {woltTbody()}
                 </table>
               </div>
               <div className="px-4 py-2.5 bg-gray-50 border-t border-gray-100 flex items-center justify-between">
