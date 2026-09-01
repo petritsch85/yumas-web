@@ -116,7 +116,7 @@ export default function WoltPage() {
   const failing = periods.filter(p => !p.check_ok).length;
 
   return (
-    <div className="p-6 max-w-6xl">
+    <div className="p-6">
       <h1 className="text-2xl font-bold text-gray-900">Wolt</h1>
       <p className="text-sm text-gray-500 mb-5">
         Raw five-day settlement periods, exactly as Wolt invoices them
@@ -151,18 +151,18 @@ export default function WoltPage() {
               <tr className="bg-gray-50 border-b border-gray-100 text-xs font-bold text-gray-500 uppercase tracking-wider">
                 <th className="px-4 py-2.5 text-left">Period</th>
                 <th className="px-4 py-2.5 text-left">Invoice</th>
-                <th className="px-4 py-2.5 text-right">Net sales · pre com, Ads</th>
-                <th className="px-4 py-2.5 text-right">Commission</th>
-                <th className="px-4 py-2.5 text-right">Net sales · pre Ads</th>
-                <th className="px-3 py-2.5 text-right">
+                <th className="px-2.5 py-2.5 text-right">Net sales · pre com, Ads</th>
+                <th className="px-2.5 py-2.5 text-right">Commission</th>
+                <th className="px-2.5 py-2.5 text-right">Net sales · pre Ads</th>
+                <th className="px-2.5 py-2.5 text-right">
                   Endbetrag
                   <span className="block font-normal normal-case tracking-normal text-[10px] text-gray-400">
                     invoice&apos;s own A − B
                   </span>
                 </th>
                 <th className="px-2 py-2.5 text-center">Check</th>
-                <th className="px-4 py-2.5 text-right">Advertising</th>
-                <th className="px-4 py-2.5 text-right">Net sales</th>
+                <th className="px-2.5 py-2.5 text-right">Advertising</th>
+                <th className="px-2.5 py-2.5 text-right">Net sales</th>
               </tr>
             </thead>
             <tbody>
@@ -187,14 +187,14 @@ export default function WoltPage() {
                   <td className="px-4 py-2.5 whitespace-nowrap font-semibold text-gray-800">
                     {de(p.period_start)} – {de(p.period_end)}
                   </td>
-                  <td className="px-4 py-2.5 whitespace-nowrap text-xs text-gray-400">
+                  <td className="px-3 py-2.5 text-[11px] leading-tight text-gray-400 break-all">
                     {p.invoice_number}
-                    {p.restaurant && <span className="block text-gray-300">{p.restaurant}</span>}
+                    {p.restaurant && <span className="block text-gray-300 break-normal">{p.restaurant}</span>}
                   </td>
-                  <td className="px-4 py-2.5 text-right tabular-nums font-semibold text-gray-900">{fmt(Number(p.net_sales_pre_commission))}</td>
-                  <td className="px-4 py-2.5 text-right tabular-nums text-gray-600">−{fmt(Number(p.commission))}</td>
-                  <td className="px-4 py-2.5 text-right tabular-nums text-gray-700">{fmt(Number(p.net_sales_pre_ads))}</td>
-                  <td className="px-3 py-2.5 text-right tabular-nums text-gray-400">{fmt(Number(p.reported_endbetrag))}</td>
+                  <td className="px-2.5 py-2.5 text-right tabular-nums font-semibold text-gray-900">{fmt(Number(p.net_sales_pre_commission))}</td>
+                  <td className="px-2.5 py-2.5 text-right tabular-nums text-gray-600">−{fmt(Number(p.commission))}</td>
+                  <td className="px-2.5 py-2.5 text-right tabular-nums text-gray-700">{fmt(Number(p.net_sales_pre_ads))}</td>
+                  <td className="px-2.5 py-2.5 text-right tabular-nums text-gray-400">{fmt(Number(p.reported_endbetrag))}</td>
                   <td className="px-2 py-2.5 text-center">
                     <span className={`px-2 py-0.5 rounded text-[11px] font-bold ${
                       p.check_ok ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
@@ -202,8 +202,8 @@ export default function WoltPage() {
                       {p.check_ok ? '✓' : '✗'}
                     </span>
                   </td>
-                  <td className="px-4 py-2.5 text-right tabular-nums text-gray-600">−{fmt(Number(p.advertising ?? 0))}</td>
-                  <td className="px-4 py-2.5 text-right tabular-nums font-bold text-gray-900">{fmt(Number(p.net_sales_final ?? 0))}</td>
+                  <td className="px-2.5 py-2.5 text-right tabular-nums text-gray-600">−{fmt(Number(p.advertising ?? 0))}</td>
+                  <td className="px-2.5 py-2.5 text-right tabular-nums font-bold text-gray-900">{fmt(Number(p.net_sales_final ?? 0))}</td>
                 </tr>
               ))}
             </tbody>
@@ -213,12 +213,12 @@ export default function WoltPage() {
                   <td className="px-4 py-2.5" colSpan={2}>
                     {periods.length} period{periods.length === 1 ? '' : 's'}
                   </td>
-                  <td className="px-4 py-2.5 text-right tabular-nums">{fmt(totals.pre)}</td>
-                  <td className="px-4 py-2.5 text-right tabular-nums">−{fmt(totals.com)}</td>
-                  <td className="px-4 py-2.5 text-right tabular-nums">{fmt(totals.post)}</td>
+                  <td className="px-2.5 py-2.5 text-right tabular-nums">{fmt(totals.pre)}</td>
+                  <td className="px-2.5 py-2.5 text-right tabular-nums">−{fmt(totals.com)}</td>
+                  <td className="px-2.5 py-2.5 text-right tabular-nums">{fmt(totals.post)}</td>
                   <td colSpan={2} />
-                  <td className="px-4 py-2.5 text-right tabular-nums">−{fmt(totals.ads)}</td>
-                  <td className="px-4 py-2.5 text-right tabular-nums">{fmt(totals.fin)}</td>
+                  <td className="px-2.5 py-2.5 text-right tabular-nums">−{fmt(totals.ads)}</td>
+                  <td className="px-2.5 py-2.5 text-right tabular-nums">{fmt(totals.fin)}</td>
                 </tr>
               </tfoot>
             )}
@@ -246,13 +246,13 @@ export default function WoltPage() {
               <tr className="bg-gray-50 border-b border-gray-100 text-xs font-bold text-gray-500 uppercase tracking-wider">
                 <th className="px-4 py-2.5 text-left">Day</th>
                 <th className="px-3 py-2.5 text-left">Shift</th>
-                <th className="px-3 py-2.5 text-right">Orders</th>
-                <th className="px-3 py-2.5 text-right">Net sales</th>
-                <th className="px-3 py-2.5 text-right">Refunds (est.)</th>
-                <th className="px-3 py-2.5 text-right">Commission</th>
-                <th className="px-3 py-2.5 text-right">Net · pre Ads</th>
-                <th className="px-3 py-2.5 text-right">Advertising (est.)</th>
-                <th className="px-4 py-2.5 text-right">Net sales</th>
+                <th className="px-2.5 py-2.5 text-right">Orders</th>
+                <th className="px-2.5 py-2.5 text-right">Net sales</th>
+                <th className="px-2.5 py-2.5 text-right">Refunds (est.)</th>
+                <th className="px-2.5 py-2.5 text-right">Commission</th>
+                <th className="px-2.5 py-2.5 text-right">Net · pre Ads</th>
+                <th className="px-2.5 py-2.5 text-right">Advertising (est.)</th>
+                <th className="px-2.5 py-2.5 text-right">Net sales</th>
               </tr>
             </thead>
             <tbody>
@@ -270,13 +270,13 @@ export default function WoltPage() {
                     <td className="px-3 py-2 whitespace-nowrap text-gray-500">
                       {r.shift === 'lunch' ? '☀️ Lunch' : '🌙 Dinner'}
                     </td>
-                    <td className="px-3 py-2 text-right tabular-nums text-gray-400">{r.orders}</td>
-                    <td className="px-3 py-2 text-right tabular-nums text-gray-700">{fmt(Number(r.net_sales))}</td>
-                    <td className="px-3 py-2 text-right tabular-nums text-gray-400">{fmt(Number(r.refund_est))}</td>
-                    <td className="px-3 py-2 text-right tabular-nums text-gray-600">−{fmt(Number(r.commission))}</td>
-                    <td className="px-3 py-2 text-right tabular-nums text-gray-700">{fmt(Number(r.net_pre_ads))}</td>
-                    <td className="px-3 py-2 text-right tabular-nums text-gray-400">−{fmt(Number(r.advertising_est ?? 0))}</td>
-                    <td className="px-4 py-2 text-right tabular-nums font-bold text-gray-900">{fmt(Number(r.net_final ?? 0))}</td>
+                    <td className="px-2.5 py-2 text-right tabular-nums text-gray-400">{r.orders}</td>
+                    <td className="px-2.5 py-2 text-right tabular-nums text-gray-700">{fmt(Number(r.net_sales))}</td>
+                    <td className="px-2.5 py-2 text-right tabular-nums text-gray-400">{fmt(Number(r.refund_est))}</td>
+                    <td className="px-2.5 py-2 text-right tabular-nums text-gray-600">−{fmt(Number(r.commission))}</td>
+                    <td className="px-2.5 py-2 text-right tabular-nums text-gray-700">{fmt(Number(r.net_pre_ads))}</td>
+                    <td className="px-2.5 py-2 text-right tabular-nums text-gray-400">−{fmt(Number(r.advertising_est ?? 0))}</td>
+                    <td className="px-2.5 py-2 text-right tabular-nums font-bold text-gray-900">{fmt(Number(r.net_final ?? 0))}</td>
                   </tr>
                 ))
               ))}
@@ -285,13 +285,13 @@ export default function WoltPage() {
               <tfoot>
                 <tr className="bg-gray-50 font-bold text-gray-900 border-t border-gray-200">
                   <td className="px-4 py-2.5" colSpan={2}>{days.length} day{days.length === 1 ? '' : 's'}</td>
-                  <td className="px-3 py-2.5 text-right tabular-nums">{shifts.reduce((s, r) => s + r.orders, 0)}</td>
-                  <td className="px-3 py-2.5 text-right tabular-nums">{fmt(shifts.reduce((s, r) => s + Number(r.net_sales), 0))}</td>
-                  <td className="px-3 py-2.5 text-right tabular-nums">{fmt(shifts.reduce((s, r) => s + Number(r.refund_est), 0))}</td>
-                  <td className="px-3 py-2.5 text-right tabular-nums">−{fmt(shifts.reduce((s, r) => s + Number(r.commission), 0))}</td>
-                  <td className="px-3 py-2.5 text-right tabular-nums">{fmt(shifts.reduce((s, r) => s + Number(r.net_pre_ads), 0))}</td>
-                  <td className="px-3 py-2.5 text-right tabular-nums">−{fmt(shifts.reduce((s, r) => s + Number(r.advertising_est ?? 0), 0))}</td>
-                  <td className="px-4 py-2.5 text-right tabular-nums">{fmt(shifts.reduce((s, r) => s + Number(r.net_final ?? 0), 0))}</td>
+                  <td className="px-2.5 py-2.5 text-right tabular-nums">{shifts.reduce((s, r) => s + r.orders, 0)}</td>
+                  <td className="px-2.5 py-2.5 text-right tabular-nums">{fmt(shifts.reduce((s, r) => s + Number(r.net_sales), 0))}</td>
+                  <td className="px-2.5 py-2.5 text-right tabular-nums">{fmt(shifts.reduce((s, r) => s + Number(r.refund_est), 0))}</td>
+                  <td className="px-2.5 py-2.5 text-right tabular-nums">−{fmt(shifts.reduce((s, r) => s + Number(r.commission), 0))}</td>
+                  <td className="px-2.5 py-2.5 text-right tabular-nums">{fmt(shifts.reduce((s, r) => s + Number(r.net_pre_ads), 0))}</td>
+                  <td className="px-2.5 py-2.5 text-right tabular-nums">−{fmt(shifts.reduce((s, r) => s + Number(r.advertising_est ?? 0), 0))}</td>
+                  <td className="px-2.5 py-2.5 text-right tabular-nums">{fmt(shifts.reduce((s, r) => s + Number(r.net_final ?? 0), 0))}</td>
                 </tr>
               </tfoot>
             )}
