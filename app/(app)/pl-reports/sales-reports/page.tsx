@@ -7,6 +7,27 @@ import * as XLSX from 'xlsx';
 import type { WoltInvoiceData } from '@/lib/wolt-invoice';
 import type { WoltShiftBreakdown } from '@/lib/wolt-sales-report';
 import type { WoltServicesData } from '@/lib/wolt-services';
+
+/** A row of wolt_shift_sales, as stored. */
+interface WoltShiftRowDb {
+  sale_date:       string;
+  shift:           'lunch' | 'dinner';
+  net_sales:       number;
+  refund_est:      number;
+  commission:      number;
+  net_pre_ads:     number;
+  advertising_est: number;
+  net_final:       number;
+}
+
+/** The five Wolt P&L lines, each as dateKey → amount. */
+interface WoltLineMaps {
+  preCom:      Record<string, number>;
+  commission:  Record<string, number>;
+  preAds:      Record<string, number>;
+  advertising: Record<string, number>;
+  net:         Record<string, number>;
+}
 import {
   Upload, FileCheck, AlertCircle, DatabaseZap,
   MapPin, CalendarDays, BarChart3, TableProperties,
@@ -1201,6 +1222,51 @@ export default function SalesReportsPage() {
       return (data ?? []) as { id: string; event_date: string | null; shift_type: 'lunch' | 'dinner' | null; net_total: number }[];
     },
   });
+
+  // Wolt sales, already cut into days and shifts on import
+  const { data: woltShiftRows = [] } = useQuery({
+    queryKey: ['wolt-shift-sales', 'pl', location?.id, year, quarter],
+    enabled: !!location,
+    queryFn: async () => {
+      const [firstM, , lastM] = QUARTER_MONTHS[quarter - 1];
+      const qStart = `${year}-${String(firstM).padStart(2,'0')}-01`;
+      const qEnd   = `${year}-${String(lastM).padStart(2,'0')}-${String(daysInMonth(year, lastM)).padStart(2,'0')}`;
+      const { data } = await supabase
+        .from('wolt_shift_sales')
+        .select('sale_date,shift,net_sales,refund_est,commission,net_pre_ads,advertising_est,net_final')
+        .eq('location_id', location!.id)
+        .gte('sale_date', qStart)
+        .lte('sale_date', qEnd);
+      return (data ?? []) as WoltShiftRowDb[];
+    },
+  });
+
+  /**
+   * One map per Wolt P&L line, per shift, plus the two combined.
+   *
+   * "Net sales · pre com, Ads" folds in the period's refunds, which is what
+   * makes it equal the invoice's subtotal (A); the refund itself has no line of
+   * its own here, it is visible on the Wolt page.
+   */
+  const woltMaps = useMemo(() => {
+    const empty = (): WoltLineMaps => ({ preCom: {}, commission: {}, preAds: {}, advertising: {}, net: {} });
+    const lunch = empty(), dinner = empty(), day = empty();
+
+    const add = (m: WoltLineMaps, r: WoltShiftRowDb) => {
+      const k = r.sale_date;
+      m.preCom[k]      = (m.preCom[k]      ?? 0) + Number(r.net_sales) + Number(r.refund_est);
+      m.commission[k]  = (m.commission[k]  ?? 0) + Number(r.commission);
+      m.preAds[k]      = (m.preAds[k]      ?? 0) + Number(r.net_pre_ads);
+      m.advertising[k] = (m.advertising[k] ?? 0) + Number(r.advertising_est ?? 0);
+      m.net[k]         = (m.net[k]         ?? 0) + Number(r.net_final ?? 0);
+    };
+
+    for (const r of woltShiftRows) {
+      add(r.shift === 'lunch' ? lunch : dinner, r);
+      add(day, r);
+    }
+    return { lunch, dinner, day };
+  }, [woltShiftRows]);
 
   // Closure days — fetch all for this location (across all years)
   const { data: closureDays = [], refetch: refetchClosures } = useQuery({
@@ -3955,19 +4021,63 @@ export default function SalesReportsPage() {
 
           /** The Wolt block — labels only for now, so every cell is an em dash.
            *  Rendered as its own tbody after all the other sections. */
-          const WOLT_BLOCKS: [string, string][] = [
-            ['wolt-lunch',  'Wolt · Lunch'],
-            ['wolt-dinner', 'Wolt · Dinner'],
-            ['wolt-day',    'Wolt · All day'],
+          const WOLT_BLOCKS: [string, string, keyof typeof woltMaps][] = [
+            ['wolt-lunch',  'Wolt · Lunch',   'lunch'],
+            ['wolt-dinner', 'Wolt · Dinner',  'dinner'],
+            ['wolt-day',    'Wolt · All day', 'day'],
           ];
 
-          const WOLT_ROWS: [string, boolean][] = [
-            ['Net sales · pre com, Ads', true],
-            ['Commission',               false],
-            ['Net sales · pre Ads',      true],
-            ['Advertising',              false],
-            ['Net sales',                true],
+          // label, bold, which line of woltMaps it reads, whether it is a deduction
+          const WOLT_ROWS: [string, boolean, keyof WoltLineMaps, boolean][] = [
+            ['Net sales · pre com, Ads', true,  'preCom',      false],
+            ['Commission',               false, 'commission',  true ],
+            ['Net sales · pre Ads',      true,  'preAds',      false],
+            ['Advertising',              false, 'advertising', true ],
+            ['Net sales',                true,  'net',         false],
           ];
+
+          /**
+           * One Wolt P&L line. Deductions show negative and grey, subtotals bold.
+           * Cells carry no closure shading: Wolt keeps delivering on days the
+           * restaurant is shut to walk-ins, so a closed day is not an empty one.
+           */
+          const woltLineRow = (
+            key: string, label: string, map: Record<string, number>,
+            opts: { bold?: boolean; deduction?: boolean } = {},
+          ) => {
+            const { bold = false, deduction = false } = opts;
+            const qTotal = Object.entries(map)
+              .filter(([k]) => dailyCols.some(c => c.type === 'day' && (c as { dateKey?: string }).dateKey === k))
+              .reduce((sum, [, v]) => sum + v, 0);
+            const show = (v: number) => v === 0
+              ? <span className="text-gray-300">—</span>
+              : <span className={deduction ? 'text-gray-500' : 'text-blue-600'}>
+                  {deduction ? '−' : ''}{fmtNum(v)}
+                </span>;
+            return (
+              <tr key={key} className="border-b border-gray-100 hover:bg-gray-50/60 group" style={{ backgroundColor: '#ffffff' }}>
+                <td className={`sticky left-0 z-10 px-4 py-1 whitespace-nowrap border-r border-gray-100 bg-white group-hover:bg-gray-50/60 transition-colors ${
+                  bold ? 'text-xs font-bold text-gray-800' : 'text-[11px] text-gray-600'
+                }`}>{label}</td>
+                {dailyCols.map((col, ci) => {
+                  const value = col.type === 'day'
+                    ? (map[col.dateKey] ?? 0)
+                    : col.wDateKeys.reduce((sum, k) => sum + (map[k] ?? 0), 0);
+                  return (
+                    <td key={ci} className="py-1 text-right tabular-nums text-[11px]"
+                      style={col.type === 'day'
+                        ? { paddingLeft: 4, paddingRight: 8 }
+                        : { paddingLeft: 4, paddingRight: 6, backgroundColor: '#fffbeb', borderLeft: '1px solid #fde68a', borderRight: '1px solid #fde68a' }}>
+                      {show(value)}
+                    </td>
+                  );
+                })}
+                <td className="py-1 text-right tabular-nums text-[11px] border-l border-gray-200" style={{ paddingLeft: 4, paddingRight: 8 }}>
+                  {show(qTotal)}
+                </td>
+              </tr>
+            );
+          };
 
           const woltEmptyCells = () => (
             <>
@@ -3988,20 +4098,15 @@ export default function SalesReportsPage() {
           const woltTbody = () => (
             <tbody>
               {sectionBannerRow('3) Wolt')}
-              {WOLT_BLOCKS.map(([blockKey, blockLabel], bi) => (
+              {WOLT_BLOCKS.map(([blockKey, blockLabel, blockShift], bi) => (
                 <Fragment key={blockKey}>
                   {bi > 0 && <tr><td colSpan={totalCols} style={{ height: 10, backgroundColor: '#f9fafb' }} /></tr>}
                   <tr className="border-b border-gray-200 hover:bg-gray-50/60 group" style={{ backgroundColor: '#eef2ff' }}>
                     <td className="sticky left-0 z-10 px-4 py-1.5 whitespace-nowrap border-r border-gray-100 bg-[#eef2ff] group-hover:bg-gray-50/60 transition-colors text-xs font-bold text-gray-800">{blockLabel}</td>
                     {woltEmptyCells()}
                   </tr>
-                  {WOLT_ROWS.map(([label, bold]) => (
-                    <tr key={`${blockKey}-${label}`} className="border-b border-gray-100 hover:bg-gray-50/60 group" style={{ backgroundColor: '#ffffff' }}>
-                      <td className={`sticky left-0 z-10 px-4 py-1 whitespace-nowrap border-r border-gray-100 bg-white group-hover:bg-gray-50/60 transition-colors ${
-                        bold ? 'text-xs font-bold text-gray-800' : 'text-[11px] text-gray-600'
-                      }`}>{label}</td>
-                      {woltEmptyCells()}
-                    </tr>
+                  {WOLT_ROWS.map(([label, bold, line, deduction]) => (
+                    woltLineRow(`${blockKey}-${line}`, label, woltMaps[blockShift][line], { bold, deduction })
                   ))}
                 </Fragment>
               ))}
