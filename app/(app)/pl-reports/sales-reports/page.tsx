@@ -4,11 +4,12 @@ import { useState, useMemo, useCallback, useRef, useEffect, Fragment } from 'rea
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
 import * as XLSX from 'xlsx';
+import type { WoltInvoiceData } from '@/lib/wolt-invoice';
 import {
   Upload, FileCheck, AlertCircle, DatabaseZap,
   MapPin, CalendarDays, BarChart3, TableProperties,
   ChevronLeft, ChevronRight, TrendingUp, Receipt, Percent, Euro,
-  Loader2, SlidersHorizontal, Ban,
+  Loader2, SlidersHorizontal, Ban, FileText,
 } from 'lucide-react';
 import { useT } from '@/lib/i18n';
 
@@ -917,7 +918,17 @@ export default function SalesReportsPage() {
   // Tab / sub-tab
   const [activeTab,   setActiveTab]   = useState<'upload'|'daily'>('daily');
   const [subTab,      setSubTab]      = useState<'daily'|'weekly'|'monthly'>('daily');
-  const [reportType,  setReportType]  = useState<'weekly'|'shift'|'monthly'|'delivery'|'manual'>('shift');
+  const [reportType,  setReportType]  = useState<'weekly'|'shift'|'monthly'|'delivery'|'manual'|'wolt'>('shift');
+
+  /* ── Wolt: a five-day document set (invoice + netting + sales report) ──
+     Only the self-billing invoice carries the period totals; the other two are
+     posted along with it so the upload stays traceable. Parsing happens
+     server-side because the PDFs need a real PDF reader. */
+  const [woltFiles,   setWoltFiles]   = useState<File[]>([]);
+  const [woltData,    setWoltData]    = useState<WoltInvoiceData | null>(null);
+  const [woltKinds,   setWoltKinds]   = useState<{ name: string; kind: string }[]>([]);
+  const [woltError,   setWoltError]   = useState<string | null>(null);
+  const [woltParsing, setWoltParsing] = useState(false);
 
   // Manual entry form state
   const blankManual = () => ({
@@ -1963,9 +1974,66 @@ export default function SalesReportsPage() {
 
   // ── Handlers ───────────────────────────────────────────────────────────────
 
+  /**
+   * Sends the dropped Wolt PDFs to the server for parsing. The whole set goes
+   * over, and the server decides which file is which by its content rather
+   * than trusting the filenames.
+   */
+  const parseWoltFiles = useCallback(async (files: File[]) => {
+    setWoltParsing(true); setWoltError(null); setWoltData(null); setWoltKinds([]);
+    try {
+      const fd = new FormData();
+      files.forEach(f => fd.append('files', f));
+      const res  = await fetch('/api/wolt/extract', { method: 'POST', body: fd });
+      const json = await res.json();
+      if (!res.ok) { setWoltError(json.error ?? 'Could not read the Wolt documents.'); return; }
+      setWoltData(json.data as WoltInvoiceData);
+      setWoltKinds(json.files ?? []);
+    } catch (e) {
+      setWoltError(e instanceof Error ? e.message : 'Could not read the Wolt documents.');
+    } finally {
+      setWoltParsing(false);
+    }
+  }, []);
+
+  const handleWoltFiles = useCallback((files: File[]) => {
+    const pdfs = files.filter(f => /\.pdf$/i.test(f.name));
+    if (pdfs.length === 0) { setWoltError('Wolt reports are PDFs — drop the files from the Wolt document set.'); return; }
+    setWoltFiles(pdfs);
+    void parseWoltFiles(pdfs);
+  }, [parseWoltFiles]);
+
+  /** Saves the parsed period. Re-uploading the same set updates it in place. */
+  const handleImportWolt = useCallback(async () => {
+    if (!location || !woltData) return;
+    setImporting(true);
+    try {
+      const { error } = await supabase.from('wolt_periods').upsert({
+        location_id:              location.id,
+        invoice_number:           woltData.invoiceNumber,
+        invoice_date:             woltData.invoiceDate,
+        period_start:             woltData.periodStart,
+        period_end:               woltData.periodEnd,
+        restaurant:               woltData.restaurant,
+        net_sales_pre_commission: woltData.netSalesPreCommission,
+        commission:               woltData.commission,
+        net_sales_pre_ads:        woltData.netSalesPreAds,
+        reported_endbetrag:       woltData.reportedEndbetrag,
+        check_ok:                 woltData.checkOk,
+        source_files:             woltKinds.length > 0 ? woltKinds : woltFiles.map(f => ({ name: f.name, kind: 'unknown' })),
+      }, { onConflict: 'location_id,invoice_number' });
+      if (error) { setWoltError(error.message); return; }
+      setWoltFiles([]); setWoltData(null); setWoltKinds([]);
+      queryClient.invalidateQueries({ queryKey: ['wolt-periods'] });
+    } finally {
+      setImporting(false);
+    }
+  }, [location, woltData, woltKinds, woltFiles, queryClient]);
+
   const resetUpload = useCallback(() => {
     setFileName(null); setWeeklyResult(null); setWeeklyBatch([]); setShiftBatch([]);
     setMonthlyResult(null); setDeliveryBatch([]); setParseError(null); setWeeklyPage(0);
+    setWoltFiles([]); setWoltData(null); setWoltKinds([]); setWoltError(null);
   }, []);
 
   const processFile = useCallback((file: File) => {
@@ -2627,6 +2695,7 @@ export default function SalesReportsPage() {
               ['monthly',  '📅', 'Monthly Report',  'Full-month Z-report aggregate'],
               ['weekly',   '📋', 'Weekly Report',   'KW report covering a full week'],
               ['delivery', '🛵', 'Delivery Report', 'Simplydelivery daily XLSX (one file per day)'],
+              ['wolt',     '🛵', 'Wolt Report',     'Wolt 5-day PDF set — invoice, netting & sales report'],
               ['manual',   '✏️', 'Manual Entry',    'Type in shift figures directly — no CSV needed'],
             ] as const).map(([t, emoji, label, desc]) => (
               <button key={t} onClick={() => { setReportType(t); resetUpload(); }}
@@ -2758,7 +2827,7 @@ export default function SalesReportsPage() {
               )}
 
               {/* Drop zone */}
-              {reportType !== 'manual' && <div>
+              {reportType !== 'manual' && reportType !== 'wolt' && <div>
                 <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">
                   {reportType === 'delivery'
                     ? 'Simplydelivery XLSX — Daily Report'
@@ -2874,6 +2943,82 @@ export default function SalesReportsPage() {
                        })()}
                 </button>
               </div>}
+
+              {/* ── Wolt: the five-day document set ── */}
+              {reportType === 'wolt' && (
+                <div>
+                  <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">
+                    Wolt PDFs — 5-day period
+                  </label>
+                  <div
+                    onDragOver={e => { e.preventDefault(); setIsDragging(true); }}
+                    onDragLeave={() => setIsDragging(false)}
+                    onDrop={e => { e.preventDefault(); setIsDragging(false); handleWoltFiles(Array.from(e.dataTransfer.files)); }}
+                    className={`border-2 border-dashed rounded-xl p-6 text-center transition-colors ${
+                      isDragging ? 'border-[#1B5E20] bg-green-50'
+                      : woltError ? 'border-red-300 bg-red-50'
+                      : woltData  ? 'border-green-400 bg-green-50'
+                      : 'border-gray-200 bg-white'
+                    }`}
+                  >
+                    {woltParsing
+                      ? <Loader2 size={26} className="mx-auto mb-2 animate-spin text-[#1B5E20]" />
+                      : <Upload size={26} className={`mx-auto mb-2 ${woltData ? 'text-[#1B5E20]' : 'text-gray-300'}`} />}
+                    <p className={`text-sm font-semibold mb-1 ${woltData ? 'text-green-700' : 'text-gray-600'}`}>
+                      {woltParsing ? 'Reading the PDFs…' : woltData ? `${woltFiles.length} file${woltFiles.length === 1 ? '' : 's'} read` : 'Drop the Wolt PDFs here'}
+                    </p>
+                    <p className="text-xs text-gray-400 mb-3">
+                      All three at once — invoice, netting &amp; sales report
+                    </p>
+                    <input type="file" accept=".pdf,application/pdf" multiple id="wolt-file-input" className="hidden"
+                      onChange={e => { handleWoltFiles(Array.from(e.target.files ?? [])); e.target.value = ''; }} />
+                    <label htmlFor="wolt-file-input"
+                      className="inline-block px-4 py-2 bg-white border border-gray-200 rounded-lg text-xs font-semibold text-gray-600 hover:bg-gray-50 cursor-pointer">
+                      Browse files
+                    </label>
+                  </div>
+
+                  {woltFiles.length > 0 && (
+                    <ul className="mt-2 space-y-1">
+                      {woltFiles.map(f => {
+                        const kind = woltKinds.find(k => k.name === f.name)?.kind;
+                        return (
+                          <li key={f.name} className="flex items-center gap-1.5 text-[11px] text-gray-500">
+                            <FileText size={11} className="flex-shrink-0 text-gray-300" />
+                            <span className="truncate">{f.name}</span>
+                            {kind === 'invoice'        && <span className="flex-shrink-0 px-1.5 py-0.5 rounded bg-green-100 text-green-700 font-semibold">invoice</span>}
+                            {kind === 'sales_report'   && <span className="flex-shrink-0 px-1.5 py-0.5 rounded bg-gray-100 text-gray-500">sales</span>}
+                            {kind === 'netting_report' && <span className="flex-shrink-0 px-1.5 py-0.5 rounded bg-gray-100 text-gray-500">netting</span>}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+
+                  {woltError && (
+                    <div className="mt-2 flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded-lg">
+                      <AlertCircle size={15} className="text-red-500 flex-shrink-0 mt-0.5" />
+                      <p className="text-xs text-red-700">{woltError}</p>
+                    </div>
+                  )}
+
+                  <button
+                    onClick={handleImportWolt}
+                    disabled={!woltData || !location || importing}
+                    className={`mt-3 w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-bold transition-colors ${
+                      woltData && location && !importing
+                        ? 'bg-[#1B5E20] text-white hover:bg-[#2E7D32]'
+                        : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                    }`}
+                  >
+                    {importing ? <Loader2 size={16} className="animate-spin" /> : <DatabaseZap size={16} />}
+                    {importing      ? 'Saving…'
+                      : !location   ? 'Select a location first'
+                      : !woltData   ? 'Drop the Wolt PDFs above'
+                      : `Save ${woltData.periodStart.split('-').reverse().join('.')} – ${woltData.periodEnd.split('-').reverse().join('.')}`}
+                  </button>
+                </div>
+              )}
 
               {/* ── Weekly batch list ── */}
               {reportType === 'weekly' && weeklyBatch.length > 0 && (
@@ -3432,8 +3577,51 @@ export default function SalesReportsPage() {
                 </div>
               )}
 
+              {/* ── Wolt preview: only the lines we take from the invoice ── */}
+              {reportType === 'wolt' && (woltData ? (
+                <div className="bg-white border border-gray-100 rounded-xl shadow-sm overflow-hidden">
+                  <div className="px-4 py-3 border-b border-gray-100 flex items-baseline justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-bold text-gray-800">
+                        {woltData.periodStart.split('-').reverse().join('.')} – {woltData.periodEnd.split('-').reverse().join('.')}
+                      </p>
+                      <p className="text-xs text-gray-400">{woltData.restaurant} · {woltData.invoiceNumber}</p>
+                    </div>
+                    <span className={`px-2 py-1 rounded text-[11px] font-bold ${
+                      woltData.checkOk ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                    }`}>
+                      {woltData.checkOk ? 'Endbetrag ✓' : 'Endbetrag mismatch'}
+                    </span>
+                  </div>
+                  <table className="w-full text-sm">
+                    <tbody>
+                      <tr className="border-b border-gray-100">
+                        <td className="px-4 py-2.5 font-semibold text-gray-700">Net sales · pre com, Ads</td>
+                        <td className="px-4 py-2.5 text-right tabular-nums font-semibold text-gray-900">{fmt(woltData.netSalesPreCommission)}</td>
+                      </tr>
+                      <tr className="border-b border-gray-100">
+                        <td className="px-4 py-2.5 text-gray-600">Commission</td>
+                        <td className="px-4 py-2.5 text-right tabular-nums text-gray-600">−{fmt(woltData.commission)}</td>
+                      </tr>
+                      <tr className="bg-gray-50">
+                        <td className="px-4 py-2.5 font-bold text-gray-800">Net sales · pre Ads</td>
+                        <td className="px-4 py-2.5 text-right tabular-nums font-bold text-gray-900">{fmt(woltData.netSalesPreAds)}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                  <p className="px-4 py-2.5 text-xs text-gray-400 border-t border-gray-100">
+                    Checked against the invoice&apos;s own Endbetrag of {fmt(woltData.reportedEndbetrag)}.
+                  </p>
+                </div>
+              ) : !woltError && (
+                <div className="flex flex-col items-center justify-center h-64 border-2 border-dashed border-gray-200 rounded-xl gap-3">
+                  <Upload size={40} className="text-gray-200" />
+                  <p className="text-sm text-gray-400">Drop the Wolt PDF set to preview the period</p>
+                </div>
+              ))}
+
               {/* Empty state */}
-              {!weeklyResult && shiftBatch.length === 0 && !monthlyResult && deliveryBatch.length === 0 && !parseError && (
+              {reportType !== 'wolt' && !weeklyResult && shiftBatch.length === 0 && !monthlyResult && deliveryBatch.length === 0 && !parseError && (
                 <div className="flex flex-col items-center justify-center h-64 border-2 border-dashed border-gray-200 rounded-xl gap-3">
                   <Upload size={40} className="text-gray-200" />
                   <p className="text-sm text-gray-400">

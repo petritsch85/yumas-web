@@ -34,6 +34,7 @@ import {
   ChevronRight,
   FileUp,
   LineChart,
+  Bike,
   TableProperties,
   PartyPopper,
   Inbox,
@@ -102,7 +103,11 @@ const NAV_GROUPS: NavGroup[] = [
     labelKey: 'sidebar.groups.plReports',
     items: [
       { labelKey: 'sidebar.nav.stats',          href: '/pl-reports/stats',           icon: BarChart3,   permKey: 'pl_reports' },
-      { labelKey: 'sidebar.nav.salesReports',   href: '/pl-reports/sales-reports',   icon: LineChart,   permKey: 'pl_reports' },
+      { labelKey: 'sidebar.nav.salesReports',   href: '/pl-reports/sales-reports',   icon: LineChart,   permKey: 'pl_reports',
+        children: [
+          { labelKey: 'sidebar.nav.wolt', href: '/pl-reports/sales-reports/wolt', icon: Bike },
+        ],
+      },
       { labelKey: 'sidebar.nav.productDetails', href: '/pl-reports/product-details', icon: ShoppingBag, permKey: 'pl_reports' },
     ],
   },

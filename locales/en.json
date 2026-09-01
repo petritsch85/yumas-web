@@ -89,7 +89,8 @@
       "categories": "Categories",
       "weeklySales": "Weekly Sales",
       "bookingInbox": "Inbox",
-      "bookingSettings": "Settings"
+      "bookingSettings": "Settings",
+      "wolt": "Wolt"
     }
   },
   "topbar": {
@@ -363,7 +364,6 @@
     "cancel": "Cancel",
     "save": "Save",
     "instructions": "Instructions",
-    "outputQuantity": "Output Quantity",
     "videoUrl": "YouTube or Vimeo URL",
     "pasteUrl": "Paste YouTube or Vimeo URL…",
     "saveVideo": "Save Video",

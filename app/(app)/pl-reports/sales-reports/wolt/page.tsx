@@ -1,0 +1,181 @@
+'use client';
+
+/**
+ * Wolt — raw five-day periods.
+ *
+ * Wolt settles in five-day blocks that line up with no calendar week or month,
+ * so this page shows each period exactly as the invoice states it, before any
+ * slicing into days or shifts. It is the reference you check when a figure in
+ * the Sales Report P&L looks wrong.
+ */
+
+import { useState, useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { supabase } from '@/lib/supabase-browser';
+import { MapPin, Loader2, AlertCircle, Receipt } from 'lucide-react';
+
+interface WoltPeriod {
+  id:                       string;
+  location_id:              string;
+  invoice_number:           string;
+  invoice_date:             string;
+  period_start:             string;
+  period_end:               string;
+  restaurant:               string | null;
+  net_sales_pre_commission: number;
+  commission:               number;
+  net_sales_pre_ads:        number;
+  reported_endbetrag:       number;
+  check_ok:                 boolean;
+  source_files:             { name: string; kind: string }[] | null;
+}
+
+const fmt = (n: number) =>
+  n.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+/** "2026-08-21" → "21.08.2026" */
+const de = (iso: string) => iso.split('-').reverse().join('.');
+
+export default function WoltPage() {
+  const [locationId, setLocationId] = useState<string>('');
+
+  const { data: locations = [] } = useQuery({
+    queryKey: ['locations-wolt'],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('locations').select('id, name, type').eq('is_active', true).order('name');
+      return ((data ?? []) as { id: string; name: string; type: string }[])
+        .filter(l => l.type === 'restaurant')
+        .map(({ id, name }) => ({ id, name }));
+    },
+  });
+
+  const { data: periods = [], isLoading, error } = useQuery({
+    queryKey: ['wolt-periods', locationId],
+    queryFn: async () => {
+      let q = supabase.from('wolt_periods').select('*').order('period_start', { ascending: false });
+      if (locationId) q = q.eq('location_id', locationId);
+      const { data, error } = await q;
+      if (error) throw error;
+      return (data ?? []) as WoltPeriod[];
+    },
+  });
+
+  const totals = useMemo(() => periods.reduce(
+    (acc, p) => ({
+      pre:  acc.pre  + Number(p.net_sales_pre_commission),
+      com:  acc.com  + Number(p.commission),
+      post: acc.post + Number(p.net_sales_pre_ads),
+    }),
+    { pre: 0, com: 0, post: 0 },
+  ), [periods]);
+
+  const failing = periods.filter(p => !p.check_ok).length;
+
+  return (
+    <div className="p-6 max-w-6xl">
+      <h1 className="text-2xl font-bold text-gray-900">Wolt</h1>
+      <p className="text-sm text-gray-500 mb-5">
+        Raw five-day settlement periods, exactly as Wolt invoices them
+      </p>
+
+      <div className="flex items-center gap-1.5 mb-4">
+        <MapPin size={13} className="text-gray-400" />
+        <select
+          value={locationId}
+          onChange={e => setLocationId(e.target.value)}
+          className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm font-medium text-gray-700 bg-white focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 cursor-pointer"
+        >
+          <option value="">All locations</option>
+          {locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+        </select>
+      </div>
+
+      {failing > 0 && (
+        <div className="flex items-start gap-2 p-3 mb-4 bg-amber-50 border border-amber-200 rounded-lg">
+          <AlertCircle size={15} className="text-amber-500 flex-shrink-0 mt-0.5" />
+          <p className="text-xs text-amber-800">
+            {failing} period{failing === 1 ? '' : 's'} where our net sales minus commission does not
+            match the invoice&apos;s own Endbetrag. Check those before using the figures.
+          </p>
+        </div>
+      )}
+
+      <div className="bg-white border border-gray-100 rounded-xl shadow-sm overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="bg-gray-50 border-b border-gray-100 text-xs font-bold text-gray-500 uppercase tracking-wider">
+                <th className="px-4 py-2.5 text-left">Period</th>
+                <th className="px-4 py-2.5 text-left">Invoice</th>
+                <th className="px-4 py-2.5 text-right">Net sales · pre com, Ads</th>
+                <th className="px-4 py-2.5 text-right">Commission</th>
+                <th className="px-4 py-2.5 text-right">Net sales · pre Ads</th>
+                <th className="px-4 py-2.5 text-right">Endbetrag</th>
+                <th className="px-4 py-2.5 text-center">Check</th>
+              </tr>
+            </thead>
+            <tbody>
+              {isLoading && (
+                <tr><td colSpan={7} className="px-4 py-10 text-center text-gray-400">
+                  <Loader2 size={20} className="mx-auto animate-spin" />
+                </td></tr>
+              )}
+              {error && !isLoading && (
+                <tr><td colSpan={7} className="px-4 py-10 text-center text-sm text-red-600">
+                  {(error as Error).message}
+                </td></tr>
+              )}
+              {!isLoading && !error && periods.length === 0 && (
+                <tr><td colSpan={7} className="px-4 py-12 text-center text-sm text-gray-400">
+                  <Receipt size={28} className="mx-auto mb-2 text-gray-200" />
+                  No Wolt periods yet — upload a document set from Sales Reports → Upload → Wolt Report
+                </td></tr>
+              )}
+              {periods.map(p => (
+                <tr key={p.id} className="border-b border-gray-50 hover:bg-gray-50/60">
+                  <td className="px-4 py-2.5 whitespace-nowrap font-semibold text-gray-800">
+                    {de(p.period_start)} – {de(p.period_end)}
+                  </td>
+                  <td className="px-4 py-2.5 whitespace-nowrap text-xs text-gray-400">
+                    {p.invoice_number}
+                    {p.restaurant && <span className="block text-gray-300">{p.restaurant}</span>}
+                  </td>
+                  <td className="px-4 py-2.5 text-right tabular-nums font-semibold text-gray-900">{fmt(Number(p.net_sales_pre_commission))}</td>
+                  <td className="px-4 py-2.5 text-right tabular-nums text-gray-600">−{fmt(Number(p.commission))}</td>
+                  <td className="px-4 py-2.5 text-right tabular-nums font-bold text-gray-900">{fmt(Number(p.net_sales_pre_ads))}</td>
+                  <td className="px-4 py-2.5 text-right tabular-nums text-gray-400">{fmt(Number(p.reported_endbetrag))}</td>
+                  <td className="px-4 py-2.5 text-center">
+                    <span className={`px-2 py-0.5 rounded text-[11px] font-bold ${
+                      p.check_ok ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                    }`}>
+                      {p.check_ok ? '✓' : '✗'}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+            {periods.length > 0 && (
+              <tfoot>
+                <tr className="bg-gray-50 font-bold text-gray-900 border-t border-gray-200">
+                  <td className="px-4 py-2.5" colSpan={2}>
+                    {periods.length} period{periods.length === 1 ? '' : 's'}
+                  </td>
+                  <td className="px-4 py-2.5 text-right tabular-nums">{fmt(totals.pre)}</td>
+                  <td className="px-4 py-2.5 text-right tabular-nums">−{fmt(totals.com)}</td>
+                  <td className="px-4 py-2.5 text-right tabular-nums">{fmt(totals.post)}</td>
+                  <td colSpan={2} />
+                </tr>
+              </tfoot>
+            )}
+          </table>
+        </div>
+      </div>
+
+      <p className="mt-3 text-xs text-gray-400">
+        Figures are net of VAT, taken from the Wolt self-billing invoice: subtotal (A) for net sales,
+        subtotal (B) for commission. The Endbetrag column is Wolt&apos;s own A − B, kept as a check.
+      </p>
+    </div>
+  );
+}

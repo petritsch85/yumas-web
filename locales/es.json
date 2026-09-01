@@ -84,7 +84,8 @@
       "other": "Otros",
       "users": "Usuarios",
       "categories": "Categorías",
-      "weeklySales": "Ventas Semanales"
+      "weeklySales": "Ventas Semanales",
+      "wolt": "Wolt"
     }
   },
   "topbar": {
@@ -355,7 +356,6 @@
     "cancel": "Cancelar",
     "save": "Guardar",
     "instructions": "Instrucciones",
-    "outputQuantity": "Cantidad de Salida",
     "videoUrl": "URL de YouTube o Vimeo",
     "pasteUrl": "Pegar URL de YouTube o Vimeo…",
     "saveVideo": "Guardar Video",
