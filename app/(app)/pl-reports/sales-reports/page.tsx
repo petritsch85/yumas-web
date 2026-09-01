@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
+import { useState, useMemo, useCallback, useRef, useEffect, Fragment } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
 import * as XLSX from 'xlsx';
@@ -3655,6 +3655,12 @@ export default function SalesReportsPage() {
 
           /** The Wolt block — labels only for now, so every cell is an em dash.
            *  Rendered as its own tbody after all the other sections. */
+          const WOLT_BLOCKS: [string, string][] = [
+            ['wolt-lunch',  'Wolt · Lunch'],
+            ['wolt-dinner', 'Wolt · Dinner'],
+            ['wolt-day',    'Wolt · All day'],
+          ];
+
           const WOLT_ROWS: [string, boolean][] = [
             ['Net sales · pre com, Ads', true],
             ['Commission',               false],
@@ -3663,26 +3669,41 @@ export default function SalesReportsPage() {
             ['Net sales',                true],
           ];
 
+          const woltEmptyCells = () => (
+            <>
+              {dailyCols.map((col, ci) => (
+                <td key={ci} className="py-1 text-right tabular-nums text-[11px]"
+                  style={col.type === 'day'
+                    ? { paddingLeft: 4, paddingRight: 8 }
+                    : { paddingLeft: 4, paddingRight: 6, backgroundColor: '#fffbeb', borderLeft: '1px solid #fde68a', borderRight: '1px solid #fde68a' }}>
+                  <span className="text-gray-200">—</span>
+                </td>
+              ))}
+              <td className="py-1 text-right tabular-nums text-[11px] border-l border-gray-200" style={{ paddingLeft: 4, paddingRight: 8 }}>
+                <span className="text-gray-200">—</span>
+              </td>
+            </>
+          );
+
           const woltTbody = () => (
             <tbody>
               {sectionBannerRow('3) Wolt')}
-              {WOLT_ROWS.map(([label, bold]) => (
-                <tr key={`wolt-${label}`} className="border-b border-gray-100 hover:bg-gray-50/60 group" style={{ backgroundColor: '#ffffff' }}>
-                  <td className={`sticky left-0 z-10 px-4 py-1 whitespace-nowrap border-r border-gray-100 bg-white group-hover:bg-gray-50/60 transition-colors ${
-                    bold ? 'text-xs font-bold text-gray-800' : 'text-[11px] text-gray-600'
-                  }`}>{label}</td>
-                  {dailyCols.map((col, ci) => (
-                    <td key={ci} className="py-1 text-right tabular-nums text-[11px]"
-                      style={col.type === 'day'
-                        ? { paddingLeft: 4, paddingRight: 8 }
-                        : { paddingLeft: 4, paddingRight: 6, backgroundColor: '#fffbeb', borderLeft: '1px solid #fde68a', borderRight: '1px solid #fde68a' }}>
-                      <span className="text-gray-200">—</span>
-                    </td>
+              {WOLT_BLOCKS.map(([blockKey, blockLabel], bi) => (
+                <Fragment key={blockKey}>
+                  {bi > 0 && <tr><td colSpan={totalCols} style={{ height: 10, backgroundColor: '#f9fafb' }} /></tr>}
+                  <tr className="border-b border-gray-200 hover:bg-gray-50/60 group" style={{ backgroundColor: '#eef2ff' }}>
+                    <td className="sticky left-0 z-10 px-4 py-1.5 whitespace-nowrap border-r border-gray-100 bg-[#eef2ff] group-hover:bg-gray-50/60 transition-colors text-xs font-bold text-gray-800">{blockLabel}</td>
+                    {woltEmptyCells()}
+                  </tr>
+                  {WOLT_ROWS.map(([label, bold]) => (
+                    <tr key={`${blockKey}-${label}`} className="border-b border-gray-100 hover:bg-gray-50/60 group" style={{ backgroundColor: '#ffffff' }}>
+                      <td className={`sticky left-0 z-10 px-4 py-1 whitespace-nowrap border-r border-gray-100 bg-white group-hover:bg-gray-50/60 transition-colors ${
+                        bold ? 'text-xs font-bold text-gray-800' : 'text-[11px] text-gray-600'
+                      }`}>{label}</td>
+                      {woltEmptyCells()}
+                    </tr>
                   ))}
-                  <td className="py-1 text-right tabular-nums text-[11px] border-l border-gray-200" style={{ paddingLeft: 4, paddingRight: 8 }}>
-                    <span className="text-gray-200">—</span>
-                  </td>
-                </tr>
+                </Fragment>
               ))}
             </tbody>
           );
