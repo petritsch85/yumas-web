@@ -7,6 +7,8 @@ import * as XLSX from 'xlsx';
 import type { WoltInvoiceData } from '@/lib/wolt-invoice';
 import type { WoltShiftBreakdown } from '@/lib/wolt-sales-report';
 import type { WoltServicesData } from '@/lib/wolt-services';
+import type { WoltSetResult, WoltCoverageIssue } from '@/lib/wolt-set';
+import { findCoverageIssues } from '@/lib/wolt-set';
 
 /** A row of wolt_shift_sales, as stored. */
 interface WoltShiftRowDb {
@@ -340,6 +342,9 @@ const growth = (curr: any, prev: any): number | null => {
 };
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
+
+/** "2026-08-21" → "21.08.2026" */
+const toDe = (iso: string) => iso.split('-').reverse().join('.');
 
 const fmt = (n: number) =>
   new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(n);
@@ -949,14 +954,12 @@ export default function SalesReportsPage() {
      Only the self-billing invoice carries the period totals; the other two are
      posted along with it so the upload stays traceable. Parsing happens
      server-side because the PDFs need a real PDF reader. */
-  const [woltFiles,   setWoltFiles]   = useState<File[]>([]);
-  const [woltData,    setWoltData]    = useState<WoltInvoiceData | null>(null);
-  const [woltKinds,   setWoltKinds]   = useState<{ name: string; kind: string }[]>([]);
+  const [woltSets,    setWoltSets]    = useState<WoltSetResult[]>([]);
   const [woltError,   setWoltError]   = useState<string | null>(null);
-  const [woltBreakdown,   setWoltBreakdown]   = useState<WoltShiftBreakdown | null>(null);
-  const [woltServices,    setWoltServices]    = useState<WoltServicesData | null>(null);
-  const [woltBreakdownMsg, setWoltBreakdownMsg] = useState<string | null>(null);
   const [woltParsing, setWoltParsing] = useState(false);
+  /** "3 of 12" while a folder of zips is being read. */
+  const [woltProgress, setWoltProgress] = useState<{ done: number; total: number } | null>(null);
+  const [woltSaved,   setWoltSaved]    = useState<number | null>(null);
 
   // Manual entry form state
   const blankManual = () => ({
@@ -2048,104 +2051,143 @@ export default function SalesReportsPage() {
   // ── Handlers ───────────────────────────────────────────────────────────────
 
   /**
-   * Sends the dropped Wolt PDFs to the server for parsing. The whole set goes
-   * over, and the server decides which file is which by its content rather
-   * than trusting the filenames.
+   * Reads the dropped Wolt files, one upload at a time.
+   *
+   * A period is sent per request rather than the whole folder at once: a dozen
+   * zips would exceed the request body limit, and this way a set that fails to
+   * parse neither loses the ones already read nor blocks those after it. It
+   * also gives the upload a progress count.
    */
   const parseWoltFiles = useCallback(async (files: File[]) => {
-    setWoltParsing(true); setWoltError(null); setWoltData(null); setWoltKinds([]);
-    setWoltBreakdown(null); setWoltBreakdownMsg(null); setWoltServices(null);
+    setWoltParsing(true); setWoltError(null); setWoltSets([]); setWoltSaved(null);
+    setWoltProgress({ done: 0, total: files.length });
+
+    const collected: WoltSetResult[] = [];
     try {
-      const fd = new FormData();
-      files.forEach(f => fd.append('files', f));
-      const res  = await fetch('/api/wolt/extract', { method: 'POST', body: fd });
-      const json = await res.json();
-      if (!res.ok) { setWoltError(json.error ?? 'Could not read the Wolt documents.'); return; }
-      setWoltData(json.data as WoltInvoiceData);
-      setWoltKinds(json.files ?? []);
-      setWoltBreakdown(json.breakdown ?? null);
-      setWoltServices(json.services ?? null);
-      setWoltBreakdownMsg(json.breakdownError ?? null);
-    } catch (e) {
-      setWoltError(e instanceof Error ? e.message : 'Could not read the Wolt documents.');
+      for (const [i, file] of files.entries()) {
+        const fd = new FormData();
+        fd.append('files', file);
+        try {
+          const res  = await fetch('/api/wolt/extract', { method: 'POST', body: fd });
+          const json = await res.json();
+          if (!res.ok) {
+            collected.push({ source: file.name, files: [], warnings: [], error: json.error ?? 'Could not be read.' });
+          } else {
+            collected.push(...(json.sets as WoltSetResult[]));
+          }
+        } catch (e) {
+          collected.push({
+            source: file.name, files: [], warnings: [],
+            error: e instanceof Error ? e.message : 'Could not be read.',
+          });
+        }
+        setWoltProgress({ done: i + 1, total: files.length });
+        setWoltSets([...collected].sort((x, y) => (x.data?.periodStart ?? '').localeCompare(y.data?.periodStart ?? '')));
+      }
     } finally {
-      setWoltParsing(false);
+      setWoltParsing(false); setWoltProgress(null);
     }
   }, []);
 
   const handleWoltFiles = useCallback((files: File[]) => {
-    const pdfs = files.filter(f => /\.pdf$/i.test(f.name));
-    if (pdfs.length === 0) { setWoltError('Wolt reports are PDFs — drop the files from the Wolt document set.'); return; }
-    setWoltFiles(pdfs);
-    void parseWoltFiles(pdfs);
+    const usable = files.filter(f => /\.(pdf|zip)$/i.test(f.name));
+    if (usable.length === 0) {
+      setWoltError('Drop the Wolt zips, or the PDFs from a document set.');
+      return;
+    }
+    void parseWoltFiles(usable);
   }, [parseWoltFiles]);
 
-  /** Saves the parsed period. Re-uploading the same set updates it in place. */
+  /** Every set that parsed cleanly, in period order. */
+  const woltImportable = useMemo(() => woltSets.filter(s => !s.error && s.data), [woltSets]);
+
+  /** Days no uploaded period covers, and days two periods both claim. */
+  const woltCoverage = useMemo<WoltCoverageIssue[]>(() => findCoverageIssues(
+    woltImportable.map(s => ({
+      source:       s.source,
+      locationName: s.locationName ?? '—',
+      start:        s.data!.periodStart,
+      end:          s.data!.periodEnd,
+    })),
+  ), [woltImportable]);
+
+  /**
+   * Saves every set that passed its checks.
+   *
+   * Each period is written on its own — one failure leaves the others in place
+   * rather than rolling back work that was already correct. A set's location
+   * comes from the restaurant named on its invoice, falling back to the
+   * dropdown when the name did not resolve.
+   */
   const handleImportWolt = useCallback(async () => {
-    if (!location || !woltData) return;
+    if (woltImportable.length === 0) return;
     setImporting(true);
+    let saved = 0;
     try {
-      const { data: period, error } = await supabase.from('wolt_periods').upsert({
-        location_id:              location.id,
-        invoice_number:           woltData.invoiceNumber,
-        invoice_date:             woltData.invoiceDate,
-        period_start:             woltData.periodStart,
-        period_end:               woltData.periodEnd,
-        restaurant:               woltData.restaurant,
-        net_sales_pre_commission: woltData.netSalesPreCommission,
-        commission:               woltData.commission,
-        net_sales_pre_ads:        woltData.netSalesPreAds,
-        reported_endbetrag:       woltData.reportedEndbetrag,
-        advertising:              woltServices?.total ?? 0,
-        ad_campaign:              woltServices?.adCampaign ?? null,
-        services:                 woltServices?.lines ?? null,
-        net_sales_final:          round2(woltData.netSalesPreAds - (woltServices?.total ?? 0)),
-        check_ok:                 woltData.checkOk,
-        source_files:             woltKinds.length > 0 ? woltKinds : woltFiles.map(f => ({ name: f.name, kind: 'unknown' })),
-      }, { onConflict: 'location_id,invoice_number' }).select('id').single();
-      if (error) { setWoltError(error.message); return; }
+      for (const set of woltImportable) {
+        const locationId = set.locationId!;   // a set without one is never importable
+        const data = set.data!;
 
-      // The shift rows are rebuilt from scratch on every upload: a re-upload
-      // may move an order between days, and merging into the old rows would
-      // leave the leftovers behind.
-      if (period && woltBreakdown) {
-        const { error: delErr } = await supabase
-          .from('wolt_shift_sales').delete().eq('period_id', period.id);
-        if (delErr) { setWoltError(delErr.message); return; }
+        const { data: period, error } = await supabase.from('wolt_periods').upsert({
+          location_id:              locationId,
+          invoice_number:           data.invoiceNumber,
+          invoice_date:             data.invoiceDate,
+          period_start:             data.periodStart,
+          period_end:               data.periodEnd,
+          restaurant:               data.restaurant,
+          net_sales_pre_commission: data.netSalesPreCommission,
+          commission:               data.commission,
+          net_sales_pre_ads:        data.netSalesPreAds,
+          reported_endbetrag:       data.reportedEndbetrag,
+          check_ok:                 data.checkOk,
+          advertising:              set.services?.total ?? 0,
+          ad_campaign:              set.services?.adCampaign ?? null,
+          services:                 set.services?.lines ?? null,
+          net_sales_final:          round2(data.netSalesPreAds - (set.services?.total ?? 0)),
+          source_files:             set.files,
+        }, { onConflict: 'location_id,invoice_number' }).select('id').single();
+        if (error) { setWoltError(`${set.source}: ${error.message}`); return; }
 
-        const { error: rowsErr } = await supabase.from('wolt_shift_sales').insert(
-          woltBreakdown.rows.map(r => ({
-            period_id:   period.id,
-            location_id: location.id,
-            sale_date:   r.date,
-            shift:       r.shift,
-            orders:      r.orders,
-            gross:       r.gross,
-            net_sales:   r.netSales,
-            refund_est:  r.refundEst,
-            commission:  r.commission,
-            net_pre_ads: r.netPreAds,
-            advertising_est: r.advertisingEst,
-            net_final:       r.netFinal,
-          })),
-        );
-        if (rowsErr) { setWoltError(rowsErr.message); return; }
+        // Shift rows are rebuilt rather than merged: a corrected document can
+        // move an order between days, and merging would leave the old one behind.
+        if (period && set.breakdown) {
+          const { error: delErr } = await supabase
+            .from('wolt_shift_sales').delete().eq('period_id', period.id);
+          if (delErr) { setWoltError(`${set.source}: ${delErr.message}`); return; }
+
+          const { error: rowsErr } = await supabase.from('wolt_shift_sales').insert(
+            set.breakdown.rows.map(r => ({
+              period_id:   period.id,
+              location_id: locationId,
+              sale_date:   r.date,
+              shift:       r.shift,
+              orders:      r.orders,
+              gross:       r.gross,
+              net_sales:   r.netSales,
+              refund_est:  r.refundEst,
+              commission:  r.commission,
+              net_pre_ads: r.netPreAds,
+              advertising_est: r.advertisingEst,
+              net_final:       r.netFinal,
+            })),
+          );
+          if (rowsErr) { setWoltError(`${set.source}: ${rowsErr.message}`); return; }
+        }
+        saved += 1;
       }
 
-      setWoltFiles([]); setWoltData(null); setWoltKinds([]);
-      setWoltBreakdown(null); setWoltBreakdownMsg(null);
+      setWoltSets([]); setWoltSaved(saved);
       queryClient.invalidateQueries({ queryKey: ['wolt-periods'] });
       queryClient.invalidateQueries({ queryKey: ['wolt-shift-sales'] });
     } finally {
       setImporting(false);
     }
-  }, [location, woltData, woltKinds, woltFiles, woltBreakdown, woltServices, queryClient]);
+  }, [woltImportable, queryClient]);
 
   const resetUpload = useCallback(() => {
     setFileName(null); setWeeklyResult(null); setWeeklyBatch([]); setShiftBatch([]);
     setMonthlyResult(null); setDeliveryBatch([]); setParseError(null); setWeeklyPage(0);
-    setWoltFiles([]); setWoltData(null); setWoltKinds([]); setWoltError(null);
-    setWoltBreakdown(null); setWoltBreakdownMsg(null); setWoltServices(null);
+    setWoltSets([]); setWoltError(null); setWoltSaved(null);
   }, []);
 
   const processFile = useCallback((file: File) => {
@@ -3056,11 +3098,11 @@ export default function SalesReportsPage() {
                 </button>
               </div>}
 
-              {/* ── Wolt: the five-day document set ── */}
+              {/* ── Wolt: one or many five-day document sets ── */}
               {reportType === 'wolt' && (
                 <div>
                   <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">
-                    Wolt PDFs — 5-day period
+                    Wolt zips or PDFs
                   </label>
                   <div
                     onDragOver={e => { e.preventDefault(); setIsDragging(true); }}
@@ -3069,43 +3111,30 @@ export default function SalesReportsPage() {
                     className={`border-2 border-dashed rounded-xl p-6 text-center transition-colors ${
                       isDragging ? 'border-[#1B5E20] bg-green-50'
                       : woltError ? 'border-red-300 bg-red-50'
-                      : woltData  ? 'border-green-400 bg-green-50'
+                      : woltSets.length > 0 ? 'border-green-400 bg-green-50'
                       : 'border-gray-200 bg-white'
                     }`}
                   >
                     {woltParsing
                       ? <Loader2 size={26} className="mx-auto mb-2 animate-spin text-[#1B5E20]" />
-                      : <Upload size={26} className={`mx-auto mb-2 ${woltData ? 'text-[#1B5E20]' : 'text-gray-300'}`} />}
-                    <p className={`text-sm font-semibold mb-1 ${woltData ? 'text-green-700' : 'text-gray-600'}`}>
-                      {woltParsing ? 'Reading the PDFs…' : woltData ? `${woltFiles.length} file${woltFiles.length === 1 ? '' : 's'} read` : 'Drop the Wolt PDFs here'}
+                      : <Upload size={26} className={`mx-auto mb-2 ${woltSets.length > 0 ? 'text-[#1B5E20]' : 'text-gray-300'}`} />}
+                    <p className={`text-sm font-semibold mb-1 ${woltSets.length > 0 ? 'text-green-700' : 'text-gray-600'}`}>
+                      {woltParsing && woltProgress
+                        ? `Reading ${woltProgress.done} of ${woltProgress.total}…`
+                        : woltSets.length > 0
+                          ? `${woltSets.length} period${woltSets.length === 1 ? '' : 's'} read`
+                          : 'Drop the Wolt zips here'}
                     </p>
                     <p className="text-xs text-gray-400 mb-3">
-                      All three at once — invoice, netting &amp; sales report
+                      A whole folder at once, or the PDFs of a single period
                     </p>
-                    <input type="file" accept=".pdf,application/pdf" multiple id="wolt-file-input" className="hidden"
+                    <input type="file" accept=".pdf,.zip,application/pdf,application/zip" multiple id="wolt-file-input" className="hidden"
                       onChange={e => { handleWoltFiles(Array.from(e.target.files ?? [])); e.target.value = ''; }} />
                     <label htmlFor="wolt-file-input"
                       className="inline-block px-4 py-2 bg-white border border-gray-200 rounded-lg text-xs font-semibold text-gray-600 hover:bg-gray-50 cursor-pointer">
                       Browse files
                     </label>
                   </div>
-
-                  {woltFiles.length > 0 && (
-                    <ul className="mt-2 space-y-1">
-                      {woltFiles.map(f => {
-                        const kind = woltKinds.find(k => k.name === f.name)?.kind;
-                        return (
-                          <li key={f.name} className="flex items-center gap-1.5 text-[11px] text-gray-500">
-                            <FileText size={11} className="flex-shrink-0 text-gray-300" />
-                            <span className="truncate">{f.name}</span>
-                            {kind === 'invoice'        && <span className="flex-shrink-0 px-1.5 py-0.5 rounded bg-green-100 text-green-700 font-semibold">invoice</span>}
-                            {kind === 'sales_report'   && <span className="flex-shrink-0 px-1.5 py-0.5 rounded bg-gray-100 text-gray-500">sales</span>}
-                            {kind === 'netting_report' && <span className="flex-shrink-0 px-1.5 py-0.5 rounded bg-gray-100 text-gray-500">netting</span>}
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  )}
 
                   {woltError && (
                     <div className="mt-2 flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded-lg">
@@ -3114,20 +3143,28 @@ export default function SalesReportsPage() {
                     </div>
                   )}
 
+                  {woltSaved !== null && (
+                    <div className="mt-2 flex items-start gap-2 p-3 bg-green-50 border border-green-200 rounded-lg">
+                      <FileCheck size={15} className="text-green-600 flex-shrink-0 mt-0.5" />
+                      <p className="text-xs text-green-800">
+                        {woltSaved} period{woltSaved === 1 ? '' : 's'} saved.
+                      </p>
+                    </div>
+                  )}
+
                   <button
                     onClick={handleImportWolt}
-                    disabled={!woltData || !location || importing}
+                    disabled={woltImportable.length === 0 || importing}
                     className={`mt-3 w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-bold transition-colors ${
-                      woltData && location && !importing
+                      woltImportable.length > 0 && !importing
                         ? 'bg-[#1B5E20] text-white hover:bg-[#2E7D32]'
                         : 'bg-gray-100 text-gray-400 cursor-not-allowed'
                     }`}
                   >
                     {importing ? <Loader2 size={16} className="animate-spin" /> : <DatabaseZap size={16} />}
-                    {importing      ? 'Saving…'
-                      : !location   ? 'Select a location first'
-                      : !woltData   ? 'Drop the Wolt PDFs above'
-                      : `Save ${woltData.periodStart.split('-').reverse().join('.')} – ${woltData.periodEnd.split('-').reverse().join('.')}`}
+                    {importing                     ? 'Saving…'
+                      : woltImportable.length === 0 ? 'Drop the Wolt files above'
+                      : `Save ${woltImportable.length} period${woltImportable.length === 1 ? '' : 's'}`}
                   </button>
                 </div>
               )}
@@ -3689,112 +3726,112 @@ export default function SalesReportsPage() {
                 </div>
               )}
 
-              {/* ── Wolt preview: only the lines we take from the invoice ── */}
-              {reportType === 'wolt' && (woltData ? (
-                <div className="bg-white border border-gray-100 rounded-xl shadow-sm overflow-hidden">
-                  <div className="px-4 py-3 border-b border-gray-100 flex items-baseline justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-bold text-gray-800">
-                        {woltData.periodStart.split('-').reverse().join('.')} – {woltData.periodEnd.split('-').reverse().join('.')}
-                      </p>
-                      <p className="text-xs text-gray-400">{woltData.restaurant} · {woltData.invoiceNumber}</p>
-                    </div>
-                    <span className={`px-2 py-1 rounded text-[11px] font-bold ${
-                      woltData.checkOk ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
-                    }`}>
-                      {woltData.checkOk ? 'Endbetrag ✓' : 'Endbetrag mismatch'}
-                    </span>
-                  </div>
-                  <table className="w-full text-sm">
-                    <tbody>
-                      <tr className="border-b border-gray-100">
-                        <td className="px-4 py-2.5 font-semibold text-gray-700">Net sales · pre com, Ads</td>
-                        <td className="px-4 py-2.5 text-right tabular-nums font-semibold text-gray-900">{fmt(woltData.netSalesPreCommission)}</td>
-                      </tr>
-                      <tr className="border-b border-gray-100">
-                        <td className="px-4 py-2.5 text-gray-600">Commission</td>
-                        <td className="px-4 py-2.5 text-right tabular-nums text-gray-600">−{fmt(woltData.commission)}</td>
-                      </tr>
-                      <tr className={woltServices ? 'border-b border-gray-100' : 'bg-gray-50'}>
-                        <td className="px-4 py-2.5 font-bold text-gray-800">Net sales · pre Ads</td>
-                        <td className="px-4 py-2.5 text-right tabular-nums font-bold text-gray-900">{fmt(woltData.netSalesPreAds)}</td>
-                      </tr>
-                      {woltServices && (
-                        <>
-                          <tr className="border-b border-gray-100">
-                            <td className="px-4 py-2.5 text-gray-600">
-                              Advertising
-                              {woltServices.adCampaign !== null && woltServices.adCampaign !== woltServices.total && (
-                                <span className="block text-[11px] text-gray-400">
-                                  incl. {fmt(round2(woltServices.total - woltServices.adCampaign))} of fees ·
-                                  ad campaign alone {fmt(woltServices.adCampaign)}
-                                </span>
-                              )}
-                            </td>
-                            <td className="px-4 py-2.5 text-right tabular-nums text-gray-600 align-top">−{fmt(woltServices.total)}</td>
-                          </tr>
-                          <tr className="bg-gray-50">
-                            <td className="px-4 py-2.5 font-bold text-gray-800">Net sales</td>
-                            <td className="px-4 py-2.5 text-right tabular-nums font-bold text-gray-900">
-                              {fmt(round2(woltData.netSalesPreAds - woltServices.total))}
-                            </td>
-                          </tr>
-                        </>
-                      )}
-                    </tbody>
-                  </table>
-                  <p className="px-4 py-2.5 text-xs text-gray-400 border-t border-gray-100">
-                    Checked against the invoice&apos;s own Endbetrag of {fmt(woltData.reportedEndbetrag)}.
-                  </p>
-
-                  {woltBreakdownMsg && (
-                    <p className="px-4 py-2.5 text-xs text-amber-700 bg-amber-50 border-t border-amber-100">
-                      {woltBreakdownMsg}
-                    </p>
-                  )}
-
-                  {woltBreakdown && (
-                    <>
-                      <div className="px-4 py-2.5 border-t border-gray-100 bg-gray-50">
-                        <p className="text-xs font-bold text-gray-600 uppercase tracking-wider">By day &amp; shift</p>
-                        <p className="text-[11px] text-gray-400 mt-0.5">
-                          From the order times · lunch to 14:30, everything after counts as dinner
-                          {woltBreakdown.preOrders > 0 && ` · ${woltBreakdown.preOrders} afternoon pre-order${woltBreakdown.preOrders === 1 ? '' : 's'} counted as dinner`}
-                        </p>
+              {/* ── Wolt preview: one row per period, plus what needs attention ── */}
+              {reportType === 'wolt' && (woltSets.length > 0 ? (
+                <div className="space-y-4">
+                  {woltCoverage.length > 0 && (
+                    <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                      <AlertCircle size={15} className="text-amber-500 flex-shrink-0 mt-0.5" />
+                      <div className="text-xs text-amber-800 space-y-0.5">
+                        {woltCoverage.map((c, i) => (
+                          <p key={i}>
+                            {c.kind === 'gap'
+                              ? `No period covers ${toDe(c.from)} – ${toDe(c.to)}${c.locationName ? ` at ${c.locationName}` : ''} — a document set is missing.`
+                              : `Two periods both cover ${toDe(c.from)} – ${toDe(c.to)}: ${c.between[0]} and ${c.between[1]}.`}
+                          </p>
+                        ))}
                       </div>
-                      <table className="w-full text-xs">
-                        <thead>
-                          <tr className="bg-gray-50 border-b border-gray-100 text-[10px] font-bold text-gray-400 uppercase tracking-wider">
-                            <th className="px-4 py-1.5 text-left">Day</th>
-                            <th className="px-2 py-1.5 text-right">Orders</th>
-                            <th className="px-2 py-1.5 text-right">Net sales</th>
-                            <th className="px-2 py-1.5 text-right">Refunds (est.)</th>
-                            <th className="px-2 py-1.5 text-right">Commission</th>
-                            <th className="px-4 py-1.5 text-right">Net · pre Ads</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {woltBreakdown.rows.map(r => (
-                            <tr key={`${r.date}-${r.shift}`} className="border-b border-gray-50">
-                              <td className="px-4 py-1.5 whitespace-nowrap text-gray-600">
-                                {r.shift === 'lunch' ? '☀️' : '🌙'} {r.date.split('-').reverse().join('.')}
-                              </td>
-                              <td className="px-2 py-1.5 text-right tabular-nums text-gray-400">{r.orders}</td>
-                              <td className="px-2 py-1.5 text-right tabular-nums text-gray-700">{fmt(r.netSales)}</td>
-                              <td className="px-2 py-1.5 text-right tabular-nums text-gray-400">{fmt(r.refundEst)}</td>
-                              <td className="px-2 py-1.5 text-right tabular-nums text-gray-600">−{fmt(r.commission)}</td>
-                              <td className="px-4 py-1.5 text-right tabular-nums font-semibold text-gray-900">{fmt(r.netPreAds)}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </>
+                    </div>
                   )}
+
+                  <div className="bg-white border border-gray-100 rounded-xl shadow-sm overflow-hidden">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="bg-gray-50 border-b border-gray-100 text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+                          <th className="px-4 py-2 text-left">Period</th>
+                          <th className="px-2 py-2 text-left">Location</th>
+                          <th className="px-2 py-2 text-right">Net sales · pre com, Ads</th>
+                          <th className="px-2 py-2 text-right">Commission</th>
+                          <th className="px-2 py-2 text-right">Advertising</th>
+                          <th className="px-2 py-2 text-right">Net sales</th>
+                          <th className="px-4 py-2 text-center">Days</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {woltSets.map((set, i) => (
+                          <Fragment key={`${set.source}-${i}`}>
+                            <tr className={`border-b border-gray-50 ${set.error ? 'bg-red-50/60' : ''}`}>
+                              <td className="px-4 py-2 whitespace-nowrap font-semibold text-gray-800">
+                                {set.data
+                                  ? <>{toDe(set.data.periodStart)} – {toDe(set.data.periodEnd)}</>
+                                  : <span className="text-gray-400">{set.source}</span>}
+                              </td>
+                              <td className="px-2 py-2 whitespace-nowrap text-gray-500">
+                                {set.locationName ?? <span className="text-gray-300">—</span>}
+                              </td>
+                              {set.error || !set.data ? (
+                                <td colSpan={5} className="px-2 py-2 text-red-700">{set.error ?? 'Could not be read.'}</td>
+                              ) : (
+                                <>
+                                  <td className="px-2 py-2 text-right tabular-nums text-gray-700">{fmt(set.data.netSalesPreCommission)}</td>
+                                  <td className="px-2 py-2 text-right tabular-nums text-gray-500">−{fmt(set.data.commission)}</td>
+                                  <td className="px-2 py-2 text-right tabular-nums text-gray-500">−{fmt(set.services?.total ?? 0)}</td>
+                                  <td className="px-2 py-2 text-right tabular-nums font-bold text-gray-900">
+                                    {fmt(round2(set.data.netSalesPreAds - (set.services?.total ?? 0)))}
+                                  </td>
+                                  <td className="px-4 py-2 text-center text-gray-400">
+                                    {set.breakdown
+                                      ? new Set(set.breakdown.rows.map(r => r.date)).size
+                                      : <span className="text-amber-600">—</span>}
+                                  </td>
+                                </>
+                              )}
+                            </tr>
+                            {set.warnings.length > 0 && (
+                              <tr className="border-b border-gray-50">
+                                <td colSpan={7} className="px-4 py-1 text-[11px] text-amber-700 bg-amber-50/50">
+                                  {set.warnings.join(' · ')}
+                                </td>
+                              </tr>
+                            )}
+                          </Fragment>
+                        ))}
+                      </tbody>
+                      {woltImportable.length > 0 && (
+                        <tfoot>
+                          <tr className="bg-gray-50 font-bold text-gray-900 border-t border-gray-200">
+                            <td className="px-4 py-2" colSpan={2}>
+                              {woltImportable.length} period{woltImportable.length === 1 ? '' : 's'} ready
+                            </td>
+                            <td className="px-2 py-2 text-right tabular-nums">
+                              {fmt(woltImportable.reduce((t, x) => t + x.data!.netSalesPreCommission, 0))}
+                            </td>
+                            <td className="px-2 py-2 text-right tabular-nums">
+                              −{fmt(woltImportable.reduce((t, x) => t + x.data!.commission, 0))}
+                            </td>
+                            <td className="px-2 py-2 text-right tabular-nums">
+                              −{fmt(woltImportable.reduce((t, x) => t + (x.services?.total ?? 0), 0))}
+                            </td>
+                            <td className="px-2 py-2 text-right tabular-nums">
+                              {fmt(round2(woltImportable.reduce((t, x) => t + x.data!.netSalesPreAds - (x.services?.total ?? 0), 0)))}
+                            </td>
+                            <td />
+                          </tr>
+                        </tfoot>
+                      )}
+                    </table>
+                  </div>
+
+                  <p className="text-xs text-gray-400">
+                    Each period is checked on its own before it can be saved: the invoice must add up,
+                    and its orders must fall inside the period it states — which is what catches files
+                    from different periods being read together.
+                  </p>
                 </div>
               ) : !woltError && (
                 <div className="flex flex-col items-center justify-center h-64 border-2 border-dashed border-gray-200 rounded-xl gap-3">
                   <Upload size={40} className="text-gray-200" />
-                  <p className="text-sm text-gray-400">Drop the Wolt PDF set to preview the period</p>
+                  <p className="text-sm text-gray-400">Drop the Wolt zips to preview every period</p>
                 </div>
               ))}
 

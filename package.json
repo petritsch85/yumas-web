@@ -27,6 +27,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "emoji-picker-react": "^4.19.1",
+    "fflate": "^0.8.3",
     "googleapis": "^171.4.0",
     "idb": "^8.0.3",
     "lucide-react": "^1.8.0",
