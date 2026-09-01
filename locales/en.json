@@ -90,7 +90,8 @@
       "weeklySales": "Weekly Sales",
       "bookingInbox": "Inbox",
       "bookingSettings": "Settings",
-      "wolt": "Wolt"
+      "wolt": "Wolt",
+      "salesReportsPl": "P&L"
     }
   },
   "topbar": {

@@ -89,7 +89,8 @@
       "weeklySales": "Wöchentliche Verkäufe",
       "bookingInbox": "Posteingang",
       "bookingSettings": "Einstellungen",
-      "wolt": "Wolt"
+      "wolt": "Wolt",
+      "salesReportsPl": "GuV"
     }
   },
   "topbar": {

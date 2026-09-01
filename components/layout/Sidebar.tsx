@@ -105,7 +105,9 @@ const NAV_GROUPS: NavGroup[] = [
       { labelKey: 'sidebar.nav.stats',          href: '/pl-reports/stats',           icon: BarChart3,   permKey: 'pl_reports' },
       { labelKey: 'sidebar.nav.salesReports',   href: '/pl-reports/sales-reports',   icon: LineChart,   permKey: 'pl_reports',
         children: [
-          { labelKey: 'sidebar.nav.wolt', href: '/pl-reports/sales-reports/wolt', icon: Bike },
+          // The parent row only expands, so the page itself needs its own entry.
+          { labelKey: 'sidebar.nav.salesReportsPl', href: '/pl-reports/sales-reports', icon: LineChart },
+          { labelKey: 'sidebar.nav.wolt',           href: '/pl-reports/sales-reports/wolt', icon: Bike },
         ],
       },
       { labelKey: 'sidebar.nav.productDetails', href: '/pl-reports/product-details', icon: ShoppingBag, permKey: 'pl_reports' },
