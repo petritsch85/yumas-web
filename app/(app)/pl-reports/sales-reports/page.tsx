@@ -3787,9 +3787,9 @@ export default function SalesReportsPage() {
                   <tbody>
                     <tr>
                       <td colSpan={totalCols}
-                        className="sticky left-0 px-4 py-2 text-xs font-bold uppercase tracking-widest text-white"
+                        className="px-0 py-2 text-xs font-bold uppercase tracking-widest text-white"
                         style={{ backgroundColor: '#0f172a' }}>
-                        Summary
+                        <div className="sticky left-0 w-fit px-4">1) Summary</div>
                       </td>
                     </tr>
                     {(() => {
@@ -4095,7 +4095,7 @@ export default function SalesReportsPage() {
                       );
 
                       /** A "Net sales - Lunch/Dinner" heading row. */
-                      const netSalesHeaderRow = (label: string, shift: 'lunch' | 'dinner') => (
+                      const netSalesHeaderRow = (label: string, shift?: 'lunch' | 'dinner') => (
                         <tr key={label} className="border-b border-gray-200 hover:bg-gray-50/60 group" style={{ backgroundColor: '#eef2ff' }}>
                           <td className="sticky left-0 z-10 px-4 py-1.5 whitespace-nowrap border-r border-gray-100 bg-[#eef2ff] group-hover:bg-gray-50/60 transition-colors text-xs font-bold text-gray-800">{label}</td>
                           {emptyCells(shift)}
@@ -4103,17 +4103,17 @@ export default function SalesReportsPage() {
                       );
 
                       /** One revenue source inside a Net sales block. */
-                      const netSalesSourceRow = (label: string, shift: 'lunch' | 'dinner') => (
-                        <tr key={`${shift}-${label}`} className="border-b border-gray-100 hover:bg-gray-50/60 group" style={{ backgroundColor: '#ffffff' }}>
+                      const netSalesSourceRow = (label: string, shift?: 'lunch' | 'dinner') => (
+                        <tr key={`${shift ?? 'day'}-${label}`} className="border-b border-gray-100 hover:bg-gray-50/60 group" style={{ backgroundColor: '#ffffff' }}>
                           <td className="sticky left-0 z-10 px-4 py-1 whitespace-nowrap border-r border-gray-100 bg-white group-hover:bg-gray-50/60 transition-colors text-[11px] text-gray-600 pl-8">{label}</td>
                           {emptyCells(shift)}
                         </tr>
                       );
 
                       /** The bold "Total net sales" row closing a block. */
-                      const netSalesTotalRow = (key: string, shift: 'lunch' | 'dinner') => (
+                      const netSalesTotalRow = (key: string, label: string, shift?: 'lunch' | 'dinner') => (
                         <tr key={key} className="border-b-2 border-gray-200 hover:bg-gray-50/60 group" style={{ backgroundColor: '#f0fdf4' }}>
-                          <td className="sticky left-0 z-10 px-4 py-1.5 whitespace-nowrap border-r border-gray-100 bg-[#f0fdf4] group-hover:bg-gray-50/60 transition-colors text-xs font-bold text-[#1B5E20]">Total net sales</td>
+                          <td className="sticky left-0 z-10 px-4 py-1.5 whitespace-nowrap border-r border-gray-100 bg-[#f0fdf4] group-hover:bg-gray-50/60 transition-colors text-xs font-bold text-[#1B5E20]">{label}</td>
                           {emptyCells(shift)}
                         </tr>
                       );
@@ -4127,6 +4127,14 @@ export default function SalesReportsPage() {
                       // not in this placeholder list — see the render block below.
                       const NET_SALES_BEFORE_BILLS = ['Orderbird', 'Webshop', 'Wolt', 'Lieferando'];
                       const NET_SALES_AFTER_BILLS  = ['Too Good To Go'];
+
+                      // Lunch + Dinner per date, for the all-day block.
+                      const billsDayMap: Record<string, number> = (() => {
+                        const merged: Record<string, number> = {};
+                        for (const [k, v] of Object.entries(billsLunchMap))  merged[k] = (merged[k] ?? 0) + v;
+                        for (const [k, v] of Object.entries(billsDinnerMap)) merged[k] = (merged[k] ?? 0) + v;
+                        return merged;
+                      })();
 
 
                       const metricRow = (label: string, valMap: Record<string, number>, qVal: number | null, format: 'count' | 'currency' = 'count', shift?: 'lunch' | 'dinner') => (
@@ -4322,14 +4330,20 @@ export default function SalesReportsPage() {
                           {NET_SALES_BEFORE_BILLS.map(src => netSalesSourceRow(src, 'lunch'))}
                           {billsRow('🧾 Bills', billsLunchMap, 'lunch')}
                           {NET_SALES_AFTER_BILLS.map(src => netSalesSourceRow(src, 'lunch'))}
-                          {netSalesTotalRow('total-net-sales-lunch', 'lunch')}
+                          {netSalesTotalRow('total-net-sales-lunch', 'Total net sales · Lunch', 'lunch')}
                           {netSalesSpacerRow('net-sales-gap')}
                           {netSalesHeaderRow('Net sales · Dinner', 'dinner')}
                           {NET_SALES_BEFORE_BILLS.map(src => netSalesSourceRow(src, 'dinner'))}
                           {billsRow('🧾 Bills', billsDinnerMap, 'dinner')}
                           {NET_SALES_AFTER_BILLS.map(src => netSalesSourceRow(src, 'dinner'))}
-                          {netSalesTotalRow('total-net-sales-dinner', 'dinner')}
+                          {netSalesTotalRow('total-net-sales-dinner', 'Total net sales · Dinner', 'dinner')}
                           {netSalesSpacerRow('net-sales-gap-2')}
+                          {netSalesHeaderRow('Net sales · Day')}
+                          {NET_SALES_BEFORE_BILLS.map(src => netSalesSourceRow(src))}
+                          {billsRow('🧾 Bills', billsDayMap)}
+                          {NET_SALES_AFTER_BILLS.map(src => netSalesSourceRow(src))}
+                          {netSalesTotalRow('total-net-sales-day', 'Total net sales · All day')}
+                          {netSalesSpacerRow('net-sales-gap-3')}
                           {estGuestsRow('↳ Est. Guests · Lunch',       effectiveLunchGuestsMap,  'lunch', lunchQEffGuests)}
                           {metricRow('↳ Net Food / Guest · Lunch',    lunchNetFoodPGMap,   lunchQMetrics.guests > 0 ? lunchQMetrics.netFood   / lunchQMetrics.guests : null, 'currency', 'lunch')}
                           {metricRow('↳ Net Drinks / Guest · Lunch',  lunchNetDrinksPGMap, lunchQMetrics.guests > 0 ? lunchQMetrics.netDrinks / lunchQMetrics.guests : null, 'currency', 'lunch')}
