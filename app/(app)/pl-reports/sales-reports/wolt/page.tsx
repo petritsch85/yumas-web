@@ -216,7 +216,7 @@ export default function WoltPage() {
       {/* ── Day & shift breakdown ── */}
       <h2 className="mt-8 text-lg font-bold text-gray-900">By day &amp; shift</h2>
       <p className="text-sm text-gray-500 mb-4">
-        Cut from the order times in the sales report · lunch to 14:30, dinner from 17:30
+        Cut from the order times in the sales report · lunch to 14:30, everything after counts as dinner
       </p>
 
       <div className="bg-white border border-gray-100 rounded-xl shadow-sm overflow-hidden">
@@ -274,6 +274,7 @@ export default function WoltPage() {
       </div>
 
       <p className="mt-3 mb-8 text-xs text-gray-400">
+        Orders placed in the afternoon are evening pre-orders, so anything after 14:30 counts as dinner.
         Commission is charged per order on the gross value — 27% on Wolt+ orders, 24% otherwise —
         then reconciled to subtotal (B). Refunds are marked <strong>(est.)</strong> because Wolt reports
         them only per period: the total is exact, the split across shifts is pro-rata on net sales.

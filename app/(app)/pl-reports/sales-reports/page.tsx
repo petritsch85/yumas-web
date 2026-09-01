@@ -3659,8 +3659,8 @@ export default function SalesReportsPage() {
                       <div className="px-4 py-2.5 border-t border-gray-100 bg-gray-50">
                         <p className="text-xs font-bold text-gray-600 uppercase tracking-wider">By day &amp; shift</p>
                         <p className="text-[11px] text-gray-400 mt-0.5">
-                          From the order times · lunch to 14:30, dinner from 17:30
-                          {woltBreakdown.offShiftOrders > 0 && ` · ${woltBreakdown.offShiftOrders} order${woltBreakdown.offShiftOrders === 1 ? '' : 's'} between the shifts, assigned to the nearer one`}
+                          From the order times · lunch to 14:30, everything after counts as dinner
+                          {woltBreakdown.preOrders > 0 && ` · ${woltBreakdown.preOrders} afternoon pre-order${woltBreakdown.preOrders === 1 ? '' : 's'} counted as dinner`}
                         </p>
                       </div>
                       <table className="w-full text-xs">

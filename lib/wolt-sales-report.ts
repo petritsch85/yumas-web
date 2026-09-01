@@ -22,7 +22,8 @@
 
 import type { WoltInvoiceData } from './wolt-invoice';
 
-/** Lunch runs until 14:30; dinner starts at 17:30. */
+/** Lunch runs until 14:30. Everything after it counts as dinner; 17:30 is only
+ *  used to tell an evening pre-order from an order placed during service. */
 export const LUNCH_END_MINUTES   = 14 * 60 + 30;
 export const DINNER_START_MINUTES = 17 * 60 + 30;
 
@@ -42,8 +43,8 @@ export interface WoltOrder {
   /** Order value excluding VAT — what we book as sales. */
   net:        number;
   shift:      WoltShift;
-  /** True when the order fell between the two shifts and had to be assigned. */
-  offShift:   boolean;
+  /** Placed after lunch closed but before dinner opens — an evening pre-order. */
+  preOrder:   boolean;
 }
 
 export interface WoltShiftRow {
@@ -63,8 +64,8 @@ export interface WoltShiftRow {
 
 export interface WoltShiftBreakdown {
   rows: WoltShiftRow[];
-  /** Orders that fell between the shifts and were assigned to the nearer one. */
-  offShiftOrders: number;
+  /** Evening pre-orders: placed in the afternoon gap, counted as dinner. */
+  preOrders: number;
   /** Total refunds spread across the shifts. Negative. */
   refundTotal: number;
   /**
@@ -101,12 +102,16 @@ const ORDER_RE = new RegExp(
   'g',
 );
 
-/** Assigns an order to a shift; orders between the two go to the nearer one. */
-function classify(minutes: number): { shift: WoltShift; offShift: boolean } {
-  if (minutes <= LUNCH_END_MINUTES)    return { shift: 'lunch',  offShift: false };
-  if (minutes >= DINNER_START_MINUTES) return { shift: 'dinner', offShift: false };
-  const midpoint = (LUNCH_END_MINUTES + DINNER_START_MINUTES) / 2;
-  return { shift: minutes < midpoint ? 'lunch' : 'dinner', offShift: true };
+/**
+ * Assigns an order to a shift.
+ *
+ * Anything after lunch closes counts as dinner, including orders placed in the
+ * afternoon gap: those are pre-orders for the evening, which on Wolt can be
+ * placed hours ahead, so they belong to the dinner shift that fulfils them.
+ */
+function classify(minutes: number): { shift: WoltShift; preOrder: boolean } {
+  if (minutes <= LUNCH_END_MINUTES) return { shift: 'lunch', preOrder: false };
+  return { shift: 'dinner', preOrder: minutes < DINNER_START_MINUTES };
 }
 
 /** Parses every order line out of the sales report. */
@@ -204,7 +209,7 @@ export function aggregateWoltShifts(
 
   return {
     rows: rows.map(({ rawCommission: _drop, ...r }) => r),
-    offShiftOrders: orders.filter(o => o.offShift).length,
+    preOrders: orders.filter(o => o.preOrder).length,
     refundTotal,
     commissionResidual,
   };
