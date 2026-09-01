@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { extractText, getDocumentProxy } from 'unpdf';
 import { parseWoltInvoice, WoltParseError } from '@/lib/wolt-invoice';
 import { parseWoltSalesReport, aggregateWoltShifts, WoltSalesParseError } from '@/lib/wolt-sales-report';
+import { buildWoltServices, WoltServicesParseError } from '@/lib/wolt-services';
 
 // pdf text extraction needs the Node runtime, not the edge one.
 export const runtime = 'nodejs';
@@ -59,6 +60,25 @@ export async function POST(req: Request) {
   try {
     const data = parseWoltInvoice(invoiceDoc.text);
 
+    // What Wolt charges us: the netting report states it as one figure, the
+    // Wolt-to-merchant invoice itemises it. Both are optional; without either,
+    // the period imports with no advertising.
+    const nettingDoc = docs.find(d => /Übersicht Umsätze und Auszahlungen/i.test(d.text));
+    const woltInvDoc = docs.find(d => /Wolt Rechnung/i.test(d.text));
+    let services = null;
+    let servicesError: string | null = null;
+    if (nettingDoc || woltInvDoc) {
+      try {
+        services = buildWoltServices(nettingDoc?.text ?? null, woltInvDoc?.text ?? null);
+      } catch (e) {
+        servicesError = e instanceof WoltServicesParseError
+          ? e.message
+          : 'The Wolt services charge could not be read.';
+      }
+    } else {
+      servicesError = 'No netting report in this set — the period will import with no advertising figure.';
+    }
+
     // The sales report carries the order timestamps, which is the only way to
     // cut the period into days and shifts. It is optional: without it the
     // period totals still import, just with no breakdown.
@@ -67,7 +87,9 @@ export async function POST(req: Request) {
     let breakdownError: string | null = null;
     if (salesDoc) {
       try {
-        breakdown = aggregateWoltShifts(parseWoltSalesReport(salesDoc.text), data);
+        breakdown = aggregateWoltShifts(
+          parseWoltSalesReport(salesDoc.text), data, services?.total ?? 0,
+        );
       } catch (e) {
         breakdownError = e instanceof WoltSalesParseError
           ? e.message
@@ -79,6 +101,8 @@ export async function POST(req: Request) {
 
     return NextResponse.json({
       data,
+      services,
+      servicesError,
       breakdown,
       breakdownError,
       files: docs.map(d => ({
@@ -86,6 +110,7 @@ export async function POST(req: Request) {
         kind: /Rechnung\s*\(Selbstfakturierung\)/i.test(d.text) ? 'invoice'
             : /Umsatzbericht/i.test(d.text)                     ? 'sales_report'
             : /Übersicht Umsätze und Auszahlungen/i.test(d.text) ? 'netting_report'
+            : /Wolt Rechnung/i.test(d.text)                      ? 'wolt_invoice'
             : 'unknown',
       })),
     });

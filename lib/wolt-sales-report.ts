@@ -60,6 +60,13 @@ export interface WoltShiftRow {
   commission: number;
   /** netSales + refundEst − commission. */
   netPreAds:  number;
+  /**
+   * This shift's pro-rata share of what Wolt charged for services and
+   * advertising. An estimate at shift level: Wolt bills it per period.
+   */
+  advertisingEst: number;
+  /** netPreAds − advertisingEst. */
+  netFinal: number;
 }
 
 export interface WoltShiftBreakdown {
@@ -155,6 +162,8 @@ export function parseWoltSalesReport(text: string): WoltOrder[] {
 export function aggregateWoltShifts(
   orders:  WoltOrder[],
   invoice: WoltInvoiceData,
+  /** Total Wolt services & advertising for the period, net of VAT. */
+  advertising = 0,
 ): WoltShiftBreakdown {
   // Raw per-order commission, before reconciling to the invoice.
   const rawCommission = (o: WoltOrder) => o.gross * (o.woltPlus ? RATE_WOLT_PLUS : RATE_STANDARD);
@@ -165,6 +174,7 @@ export function aggregateWoltShifts(
     const row = buckets.get(key) ?? {
       date: o.date, shift: o.shift, orders: 0,
       gross: 0, netSales: 0, refundEst: 0, commission: 0, netPreAds: 0,
+      advertisingEst: 0, netFinal: 0,
       rawCommission: 0,
     };
     row.orders        += 1;
@@ -193,18 +203,21 @@ export function aggregateWoltShifts(
   for (const row of rows) {
     if (row === biggest) continue;   // settled below, from what the others leave
     const share = netTotal === 0 ? 0 : row.netSales / netTotal;
-    row.refundEst  = round2(refundTotal * share);
-    row.commission = round2(row.rawCommission + commissionResidual * share);
+    row.refundEst      = round2(refundTotal * share);
+    row.commission     = round2(row.rawCommission + commissionResidual * share);
+    row.advertisingEst = round2(advertising * share);
   }
 
   const others = rows.filter(r => r !== biggest);
-  biggest.refundEst  = round2(refundTotal        - others.reduce((s, r) => s + r.refundEst,  0));
-  biggest.commission = round2(invoice.commission - others.reduce((s, r) => s + r.commission, 0));
+  biggest.refundEst      = round2(refundTotal        - others.reduce((s, r) => s + r.refundEst,      0));
+  biggest.commission     = round2(invoice.commission - others.reduce((s, r) => s + r.commission,     0));
+  biggest.advertisingEst = round2(advertising        - others.reduce((s, r) => s + r.advertisingEst, 0));
 
   for (const row of rows) {
     row.gross     = round2(row.gross);
     row.netSales  = round2(row.netSales);
     row.netPreAds = round2(row.netSales + row.refundEst - row.commission);
+    row.netFinal  = round2(row.netPreAds - row.advertisingEst);
   }
 
   return {

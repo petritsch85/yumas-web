@@ -26,6 +26,9 @@ interface WoltPeriod {
   commission:               number;
   net_sales_pre_ads:        number;
   reported_endbetrag:       number;
+  advertising:              number;
+  ad_campaign:              number | null;
+  net_sales_final:          number;
   check_ok:                 boolean;
   source_files:             { name: string; kind: string }[] | null;
 }
@@ -41,6 +44,8 @@ interface WoltShiftSale {
   refund_est:  number;
   commission:  number;
   net_pre_ads: number;
+  advertising_est: number;
+  net_final:   number;
 }
 
 const fmt = (n: number) =>
@@ -102,8 +107,10 @@ export default function WoltPage() {
       pre:  acc.pre  + Number(p.net_sales_pre_commission),
       com:  acc.com  + Number(p.commission),
       post: acc.post + Number(p.net_sales_pre_ads),
+      ads:  acc.ads  + Number(p.advertising ?? 0),
+      fin:  acc.fin  + Number(p.net_sales_final ?? 0),
     }),
-    { pre: 0, com: 0, post: 0 },
+    { pre: 0, com: 0, post: 0, ads: 0, fin: 0 },
   ), [periods]);
 
   const failing = periods.filter(p => !p.check_ok).length;
@@ -147,23 +154,25 @@ export default function WoltPage() {
                 <th className="px-4 py-2.5 text-right">Net sales · pre com, Ads</th>
                 <th className="px-4 py-2.5 text-right">Commission</th>
                 <th className="px-4 py-2.5 text-right">Net sales · pre Ads</th>
+                <th className="px-4 py-2.5 text-right">Advertising</th>
+                <th className="px-4 py-2.5 text-right">Net sales</th>
                 <th className="px-4 py-2.5 text-right">Endbetrag</th>
                 <th className="px-4 py-2.5 text-center">Check</th>
               </tr>
             </thead>
             <tbody>
               {isLoading && (
-                <tr><td colSpan={7} className="px-4 py-10 text-center text-gray-400">
+                <tr><td colSpan={9} className="px-4 py-10 text-center text-gray-400">
                   <Loader2 size={20} className="mx-auto animate-spin" />
                 </td></tr>
               )}
               {error && !isLoading && (
-                <tr><td colSpan={7} className="px-4 py-10 text-center text-sm text-red-600">
+                <tr><td colSpan={9} className="px-4 py-10 text-center text-sm text-red-600">
                   {(error as Error).message}
                 </td></tr>
               )}
               {!isLoading && !error && periods.length === 0 && (
-                <tr><td colSpan={7} className="px-4 py-12 text-center text-sm text-gray-400">
+                <tr><td colSpan={9} className="px-4 py-12 text-center text-sm text-gray-400">
                   <Receipt size={28} className="mx-auto mb-2 text-gray-200" />
                   No Wolt periods yet — upload a document set from Sales Reports → Upload → Wolt Report
                 </td></tr>
@@ -179,7 +188,9 @@ export default function WoltPage() {
                   </td>
                   <td className="px-4 py-2.5 text-right tabular-nums font-semibold text-gray-900">{fmt(Number(p.net_sales_pre_commission))}</td>
                   <td className="px-4 py-2.5 text-right tabular-nums text-gray-600">−{fmt(Number(p.commission))}</td>
-                  <td className="px-4 py-2.5 text-right tabular-nums font-bold text-gray-900">{fmt(Number(p.net_sales_pre_ads))}</td>
+                  <td className="px-4 py-2.5 text-right tabular-nums text-gray-700">{fmt(Number(p.net_sales_pre_ads))}</td>
+                  <td className="px-4 py-2.5 text-right tabular-nums text-gray-600">−{fmt(Number(p.advertising ?? 0))}</td>
+                  <td className="px-4 py-2.5 text-right tabular-nums font-bold text-gray-900">{fmt(Number(p.net_sales_final ?? 0))}</td>
                   <td className="px-4 py-2.5 text-right tabular-nums text-gray-400">{fmt(Number(p.reported_endbetrag))}</td>
                   <td className="px-4 py-2.5 text-center">
                     <span className={`px-2 py-0.5 rounded text-[11px] font-bold ${
@@ -200,6 +211,8 @@ export default function WoltPage() {
                   <td className="px-4 py-2.5 text-right tabular-nums">{fmt(totals.pre)}</td>
                   <td className="px-4 py-2.5 text-right tabular-nums">−{fmt(totals.com)}</td>
                   <td className="px-4 py-2.5 text-right tabular-nums">{fmt(totals.post)}</td>
+                  <td className="px-4 py-2.5 text-right tabular-nums">−{fmt(totals.ads)}</td>
+                  <td className="px-4 py-2.5 text-right tabular-nums">{fmt(totals.fin)}</td>
                   <td colSpan={2} />
                 </tr>
               </tfoot>
@@ -230,12 +243,14 @@ export default function WoltPage() {
                 <th className="px-3 py-2.5 text-right">Net sales</th>
                 <th className="px-3 py-2.5 text-right">Refunds (est.)</th>
                 <th className="px-3 py-2.5 text-right">Commission</th>
-                <th className="px-4 py-2.5 text-right">Net · pre Ads</th>
+                <th className="px-3 py-2.5 text-right">Net · pre Ads</th>
+                <th className="px-3 py-2.5 text-right">Advertising (est.)</th>
+                <th className="px-4 py-2.5 text-right">Net sales</th>
               </tr>
             </thead>
             <tbody>
               {days.length === 0 && (
-                <tr><td colSpan={7} className="px-4 py-12 text-center text-sm text-gray-400">
+                <tr><td colSpan={9} className="px-4 py-12 text-center text-sm text-gray-400">
                   No daily breakdown yet — upload a set that includes the sales report (Umsatzbericht)
                 </td></tr>
               )}
@@ -252,7 +267,9 @@ export default function WoltPage() {
                     <td className="px-3 py-2 text-right tabular-nums text-gray-700">{fmt(Number(r.net_sales))}</td>
                     <td className="px-3 py-2 text-right tabular-nums text-gray-400">{fmt(Number(r.refund_est))}</td>
                     <td className="px-3 py-2 text-right tabular-nums text-gray-600">−{fmt(Number(r.commission))}</td>
-                    <td className="px-4 py-2 text-right tabular-nums font-bold text-gray-900">{fmt(Number(r.net_pre_ads))}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-gray-700">{fmt(Number(r.net_pre_ads))}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-gray-400">−{fmt(Number(r.advertising_est ?? 0))}</td>
+                    <td className="px-4 py-2 text-right tabular-nums font-bold text-gray-900">{fmt(Number(r.net_final ?? 0))}</td>
                   </tr>
                 ))
               ))}
@@ -265,7 +282,9 @@ export default function WoltPage() {
                   <td className="px-3 py-2.5 text-right tabular-nums">{fmt(shifts.reduce((s, r) => s + Number(r.net_sales), 0))}</td>
                   <td className="px-3 py-2.5 text-right tabular-nums">{fmt(shifts.reduce((s, r) => s + Number(r.refund_est), 0))}</td>
                   <td className="px-3 py-2.5 text-right tabular-nums">−{fmt(shifts.reduce((s, r) => s + Number(r.commission), 0))}</td>
-                  <td className="px-4 py-2.5 text-right tabular-nums">{fmt(shifts.reduce((s, r) => s + Number(r.net_pre_ads), 0))}</td>
+                  <td className="px-3 py-2.5 text-right tabular-nums">{fmt(shifts.reduce((s, r) => s + Number(r.net_pre_ads), 0))}</td>
+                  <td className="px-3 py-2.5 text-right tabular-nums">−{fmt(shifts.reduce((s, r) => s + Number(r.advertising_est ?? 0), 0))}</td>
+                  <td className="px-4 py-2.5 text-right tabular-nums">{fmt(shifts.reduce((s, r) => s + Number(r.net_final ?? 0), 0))}</td>
                 </tr>
               </tfoot>
             )}
@@ -278,6 +297,9 @@ export default function WoltPage() {
         Commission is charged per order on the gross value — 27% on Wolt+ orders, 24% otherwise —
         then reconciled to subtotal (B). Refunds are marked <strong>(est.)</strong> because Wolt reports
         them only per period: the total is exact, the split across shifts is pro-rata on net sales.
+        Advertising is Wolt&apos;s &quot;Dienstleistungen und Produkte&quot; charge from the netting report,
+        split the same way — so it carries the same estimate caveat, and it can include fees that are
+        not advertising.
       </p>
     </div>
   );

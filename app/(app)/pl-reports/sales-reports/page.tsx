@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabase-browser';
 import * as XLSX from 'xlsx';
 import type { WoltInvoiceData } from '@/lib/wolt-invoice';
 import type { WoltShiftBreakdown } from '@/lib/wolt-sales-report';
+import type { WoltServicesData } from '@/lib/wolt-services';
 import {
   Upload, FileCheck, AlertCircle, DatabaseZap,
   MapPin, CalendarDays, BarChart3, TableProperties,
@@ -316,6 +317,8 @@ const growth = (curr: any, prev: any): number | null => {
   if (c === null || p === null || p === 0) return null;
   return ((c - p) / Math.abs(p)) * 100;
 };
+
+const round2 = (n: number) => Math.round(n * 100) / 100;
 
 const fmt = (n: number) =>
   new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(n);
@@ -930,6 +933,7 @@ export default function SalesReportsPage() {
   const [woltKinds,   setWoltKinds]   = useState<{ name: string; kind: string }[]>([]);
   const [woltError,   setWoltError]   = useState<string | null>(null);
   const [woltBreakdown,   setWoltBreakdown]   = useState<WoltShiftBreakdown | null>(null);
+  const [woltServices,    setWoltServices]    = useState<WoltServicesData | null>(null);
   const [woltBreakdownMsg, setWoltBreakdownMsg] = useState<string | null>(null);
   const [woltParsing, setWoltParsing] = useState(false);
 
@@ -1984,7 +1988,7 @@ export default function SalesReportsPage() {
    */
   const parseWoltFiles = useCallback(async (files: File[]) => {
     setWoltParsing(true); setWoltError(null); setWoltData(null); setWoltKinds([]);
-    setWoltBreakdown(null); setWoltBreakdownMsg(null);
+    setWoltBreakdown(null); setWoltBreakdownMsg(null); setWoltServices(null);
     try {
       const fd = new FormData();
       files.forEach(f => fd.append('files', f));
@@ -1994,6 +1998,7 @@ export default function SalesReportsPage() {
       setWoltData(json.data as WoltInvoiceData);
       setWoltKinds(json.files ?? []);
       setWoltBreakdown(json.breakdown ?? null);
+      setWoltServices(json.services ?? null);
       setWoltBreakdownMsg(json.breakdownError ?? null);
     } catch (e) {
       setWoltError(e instanceof Error ? e.message : 'Could not read the Wolt documents.');
@@ -2025,6 +2030,10 @@ export default function SalesReportsPage() {
         commission:               woltData.commission,
         net_sales_pre_ads:        woltData.netSalesPreAds,
         reported_endbetrag:       woltData.reportedEndbetrag,
+        advertising:              woltServices?.total ?? 0,
+        ad_campaign:              woltServices?.adCampaign ?? null,
+        services:                 woltServices?.lines ?? null,
+        net_sales_final:          round2(woltData.netSalesPreAds - (woltServices?.total ?? 0)),
         check_ok:                 woltData.checkOk,
         source_files:             woltKinds.length > 0 ? woltKinds : woltFiles.map(f => ({ name: f.name, kind: 'unknown' })),
       }, { onConflict: 'location_id,invoice_number' }).select('id').single();
@@ -2050,6 +2059,8 @@ export default function SalesReportsPage() {
             refund_est:  r.refundEst,
             commission:  r.commission,
             net_pre_ads: r.netPreAds,
+            advertising_est: r.advertisingEst,
+            net_final:       r.netFinal,
           })),
         );
         if (rowsErr) { setWoltError(rowsErr.message); return; }
@@ -2062,13 +2073,13 @@ export default function SalesReportsPage() {
     } finally {
       setImporting(false);
     }
-  }, [location, woltData, woltKinds, woltFiles, woltBreakdown, queryClient]);
+  }, [location, woltData, woltKinds, woltFiles, woltBreakdown, woltServices, queryClient]);
 
   const resetUpload = useCallback(() => {
     setFileName(null); setWeeklyResult(null); setWeeklyBatch([]); setShiftBatch([]);
     setMonthlyResult(null); setDeliveryBatch([]); setParseError(null); setWeeklyPage(0);
     setWoltFiles([]); setWoltData(null); setWoltKinds([]); setWoltError(null);
-    setWoltBreakdown(null); setWoltBreakdownMsg(null);
+    setWoltBreakdown(null); setWoltBreakdownMsg(null); setWoltServices(null);
   }, []);
 
   const processFile = useCallback((file: File) => {
@@ -3638,10 +3649,32 @@ export default function SalesReportsPage() {
                         <td className="px-4 py-2.5 text-gray-600">Commission</td>
                         <td className="px-4 py-2.5 text-right tabular-nums text-gray-600">−{fmt(woltData.commission)}</td>
                       </tr>
-                      <tr className="bg-gray-50">
+                      <tr className={woltServices ? 'border-b border-gray-100' : 'bg-gray-50'}>
                         <td className="px-4 py-2.5 font-bold text-gray-800">Net sales · pre Ads</td>
                         <td className="px-4 py-2.5 text-right tabular-nums font-bold text-gray-900">{fmt(woltData.netSalesPreAds)}</td>
                       </tr>
+                      {woltServices && (
+                        <>
+                          <tr className="border-b border-gray-100">
+                            <td className="px-4 py-2.5 text-gray-600">
+                              Advertising
+                              {woltServices.adCampaign !== null && woltServices.adCampaign !== woltServices.total && (
+                                <span className="block text-[11px] text-gray-400">
+                                  incl. {fmt(round2(woltServices.total - woltServices.adCampaign))} of fees ·
+                                  ad campaign alone {fmt(woltServices.adCampaign)}
+                                </span>
+                              )}
+                            </td>
+                            <td className="px-4 py-2.5 text-right tabular-nums text-gray-600 align-top">−{fmt(woltServices.total)}</td>
+                          </tr>
+                          <tr className="bg-gray-50">
+                            <td className="px-4 py-2.5 font-bold text-gray-800">Net sales</td>
+                            <td className="px-4 py-2.5 text-right tabular-nums font-bold text-gray-900">
+                              {fmt(round2(woltData.netSalesPreAds - woltServices.total))}
+                            </td>
+                          </tr>
+                        </>
+                      )}
                     </tbody>
                   </table>
                   <p className="px-4 py-2.5 text-xs text-gray-400 border-t border-gray-100">
