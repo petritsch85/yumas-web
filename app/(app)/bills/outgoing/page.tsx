@@ -10,6 +10,7 @@ import {
   FilePlus, Plus, FileDown, Camera, FileUp,
 } from 'lucide-react';
 import type { BillData, LineItem } from '@/components/bills/BillDocument';
+import { splitAdHocNet, EVENT_EFFECTIVE_RATE, type AdHocVat } from '@/lib/event-vat';
 import { useT } from '@/lib/i18n';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -196,7 +197,7 @@ export default function OutgoingBillsPage() {
    * derived from these, exactly as BillDocument derives them — so the form
    * cannot produce a bill whose own figures disagree.
    */
-  type AdHocDraft    = { description: string; amountNetto: string; vat: 7 | 19 };
+  type AdHocDraft    = { description: string; amountNetto: string; vat: AdHocVat };
   type CateringDraft = { description: string; amount: string };
   type LineItemDraft = { qty: string; item: string; unitPrice: string };
 
@@ -252,7 +253,7 @@ export default function OutgoingBillsPage() {
   /** Hide the Essen/Getränke split rows — show only the Gesamt lines on the bill. */
   const [compactTotals,     setCompactTotals]     = useState(false);
   const [cateringLines,     setCateringLines]     = useState<{ id: string; description: string; amount: string }[]>([{ id: uid(), description: '', amount: '' }]);
-  const [adHocLines,        setAdHocLines]        = useState<{ id: string; description: string; amount: string; vat: 7 | 19 }[]>([{ id: uid(), description: '', amount: '', vat: 7 }]);
+  const [adHocLines,        setAdHocLines]        = useState<{ id: string; description: string; amount: string; vat: AdHocVat }[]>([{ id: uid(), description: '', amount: '', vat: 7 }]);
   const [cateringDesc,      setCateringDesc]      = useState('');
   const [lineItems,             setLineItems]             = useState<LineItem[]>([{ qty: 1, item: '', unitPrice: 0 }]);
   const [generating,            setGenerating]            = useState(false);
@@ -477,8 +478,10 @@ export default function OutgoingBillsPage() {
   const cateringMwstN   = cateringBruttoN - cateringNettoN;
 
   // Ad Hoc totals (per-line VAT)
-  const ahNetto7      = adHocLines.filter(l => l.vat === 7).reduce((s, l) => s + (parseFloat(l.amount) || 0), 0);
-  const ahNetto19     = adHocLines.filter(l => l.vat === 19).reduce((s, l) => s + (parseFloat(l.amount) || 0), 0);
+  // An event Pauschale line splits 70/30 across the two rates — see lib/event-vat.
+  const { net7: ahNetto7, net19: ahNetto19 } = splitAdHocNet(
+    adHocLines.map(l => ({ amountNetto: parseFloat(l.amount) || 0, vat: l.vat })),
+  );
   const ahMwst7       = ahNetto7  * 0.07;
   const ahMwst19      = ahNetto19 * 0.19;
   const ahTotalNetto  = ahNetto7  + ahNetto19;
@@ -1140,7 +1143,8 @@ export default function OutgoingBillsPage() {
           trinkgeld:        bd.trinkgeld        != null ? String(bd.trinkgeld)        : '0',
           compactTotals:    bd.compactTotals === true,
           adHocLines: (bd.adHocLines ?? []).map(l => ({
-            description: l.description ?? '', amountNetto: String(l.amountNetto ?? 0), vat: (l.vat === 7 ? 7 : 19) as 7 | 19,
+            description: l.description ?? '', amountNetto: String(l.amountNetto ?? 0),
+            vat: (l.vat === 'event' ? 'event' : l.vat === 7 ? 7 : 19) as AdHocVat,
           })),
           cateringDescription: bd.cateringDescription ?? '',
           cateringLines: (bd.cateringLines ?? []).map(l => ({
@@ -1163,8 +1167,9 @@ export default function OutgoingBillsPage() {
     const tip = num(a.trinkgeld);
 
     if (a.mode === 'adhoc') {
-      const n7  = a.adHocLines.filter(l => l.vat === 7 ).reduce((s, l) => s + num(l.amountNetto), 0);
-      const n19 = a.adHocLines.filter(l => l.vat === 19).reduce((s, l) => s + num(l.amountNetto), 0);
+      const { net7: n7, net19: n19 } = splitAdHocNet(
+        a.adHocLines.map(l => ({ amountNetto: num(l.amountNetto), vat: l.vat })),
+      );
       const brutto = n7 * 1.07 + n19 * 1.19;
       return {
         rows: [
@@ -1505,12 +1510,13 @@ export default function OutgoingBillsPage() {
                                                   className={fld + ' w-28 text-right'}
                                                   onChange={e => setEditAmounts(a => a ? { ...a, adHocLines: a.adHocLines.map((x, j) => j === i ? { ...x, amountNetto: e.target.value } : x) } : a)} />
                                                 <div className="flex gap-1">
-                                                  {([7, 19] as const).map(v => (
+                                                  {([7, 19, 'event'] as const).map(v => (
                                                     <button key={v} type="button"
+                                                      title={v === 'event' ? 'Event-Pauschale — 70% Essen (7%), 30% Getränke (19%)' : undefined}
                                                       onClick={() => setEditAmounts(a => a ? { ...a, adHocLines: a.adHocLines.map((x, j) => j === i ? { ...x, vat: v } : x) } : a)}
                                                       className={`px-2 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
                                                         ln.vat === v ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
-                                                      }`}>{v}%</button>
+                                                      }`}>{v === 'event' ? 'Event' : `${v}%`}</button>
                                                   ))}
                                                 </div>
                                                 <button type="button" title="Remove this position"
@@ -2603,6 +2609,12 @@ export default function OutgoingBillsPage() {
                               onClick={() => setAdHocLines(ls => ls.map(l => l.id === line.id ? { ...l, vat: 19 } : l))}
                               className={`px-2.5 py-1.5 transition-colors border-l border-gray-300 ${line.vat === 19 ? 'bg-[#1B5E20] text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}
                             >19%</button>
+                            <button
+                              type="button"
+                              title="Event-Pauschale — 70% Essen (7% MwSt), 30% Getränke (19% MwSt)"
+                              onClick={() => setAdHocLines(ls => ls.map(l => l.id === line.id ? { ...l, vat: 'event' } : l))}
+                              className={`px-2.5 py-1.5 transition-colors border-l border-gray-300 ${line.vat === 'event' ? 'bg-[#1B5E20] text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}
+                            >Event</button>
                           </div>
                           {adHocLines.length > 1 && (
                             <button
@@ -2653,7 +2665,13 @@ export default function OutgoingBillsPage() {
                       </div>
                     )}
                   </div>
-                  <p className="text-xs text-violet-700">Netto-Beträge eingeben · MwSt wird automatisch berechnet · Negative Beträge = Rabatte</p>
+                  <p className="text-xs text-violet-700">
+                    Netto-Beträge eingeben · MwSt wird automatisch berechnet · Negative Beträge = Rabatte
+                  </p>
+                  <p className="text-xs text-violet-700 mt-0.5">
+                    Event = Pauschale 70% Essen (7%) / 30% Getränke (19%) ={' '}
+                    {(EVENT_EFFECTIVE_RATE * 100).toFixed(1).replace('.', ',')}% effektiv
+                  </p>
                 </div>
               )}
 

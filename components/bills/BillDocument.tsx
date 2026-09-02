@@ -1,5 +1,6 @@
 import { Document, Page, View, Text, Image, StyleSheet } from '@react-pdf/renderer';
 import { YUMAS_LOGO_PATH } from './yumasLogo';
+import { splitAdHocNet, vatLabel, type AdHocVat } from '@/lib/event-vat';
 
 const YUMAS_LOGO = typeof window !== 'undefined'
   ? `${window.location.origin}${YUMAS_LOGO_PATH}`
@@ -68,7 +69,7 @@ export type BillData = {
   cateringDescription?  : string;
   cateringLines?        : { description: string; amount: number }[];
   // Ad Hoc mode: per-line VAT rate
-  adHocLines?           : { description: string; amountNetto: number; vat: 7 | 19 }[];
+  adHocLines?           : { description: string; amountNetto: number; vat: AdHocVat }[];
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -186,8 +187,9 @@ export function BillDocument({ data }: { data: BillData }) {
   // Ad Hoc mode
   const isAdHoc       = (data.adHocLines?.length ?? 0) > 0;
   const ahLines       = data.adHocLines ?? [];
-  const ahNetto7      = ahLines.filter(l => l.vat === 7).reduce((s, l) => s + l.amountNetto, 0);
-  const ahNetto19     = ahLines.filter(l => l.vat === 19).reduce((s, l) => s + l.amountNetto, 0);
+  // An event Pauschale line lands in both bases, 70/30, so the bill still shows
+  // a single MwSt line per rate however the positions were entered.
+  const { net7: ahNetto7, net19: ahNetto19 } = splitAdHocNet(ahLines);
   const ahMwst7       = ahNetto7  * 0.07;
   const ahMwst19      = ahNetto19 * 0.19;
   const ahBrutto7     = ahNetto7  * 1.07;
@@ -372,7 +374,7 @@ export function BillDocument({ data }: { data: BillData }) {
             <View style={s.groupGap}>
               {ahLines.map((l, i) => (
                 <View key={i} style={s.amountRow}>
-                  <Text style={{ flex: 1 }}>{l.description || `Position ${i + 1}`} ({l.vat}% MwSt)</Text>
+                  <Text style={{ flex: 1 }}>{l.description || `Position ${i + 1}`} ({vatLabel(l.vat)})</Text>
                   <Text>{fmt(l.amountNetto)}</Text>
                 </View>
               ))}
