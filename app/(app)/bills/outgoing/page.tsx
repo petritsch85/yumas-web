@@ -534,7 +534,7 @@ export default function OutgoingBillsPage() {
                      inputMode === 'adhoc'    ? ahTotalBrutto :
                      bruttoGesamt;
   const billTotal  = inputMode === 'catering' ? cateringBruttoN :
-                     inputMode === 'adhoc'    ? ahTotalBrutto :
+                     inputMode === 'adhoc'    ? ahTotalBrutto + trinkgeldN :
                      brutto + (billType !== 'monthly' ? trinkgeldN : 0);
   const ermaessigungN = parseFloat(ermaessigung) || 0;
 
@@ -882,7 +882,9 @@ export default function OutgoingBillsPage() {
       mwstGetraenkePct:    isDinnerLike && inputMode !== 'catering' ? (parseFloat(mwstGetraenke) || 19) : undefined,
       essenNetto:          isDinnerLike && inputMode !== 'catering' ? essenN           : undefined,
       getraenkeNetto:      isDinnerLike && inputMode !== 'catering' ? getraenkeN       : undefined,
-      trinkgeld:           isDinnerLike && inputMode !== 'catering' ? trinkgeldN       : undefined,
+      trinkgeld:           inputMode === 'adhoc'
+                             ? (trinkgeldN > 0 ? trinkgeldN : undefined)
+                             : isDinnerLike && inputMode !== 'catering' ? trinkgeldN : undefined,
       compactTotals:       compactTotals || undefined,
       cateringNetto:       inputMode === 'catering' ? cateringNettoN  : undefined,
       cateringBrutto:      inputMode === 'catering' ? cateringBruttoN : undefined,
@@ -1179,11 +1181,12 @@ export default function OutgoingBillsPage() {
           ['MwSt 7%',          n7 * 0.07, n7  > 0],
           ['MwSt 19%',         n19 * 0.19, n19 > 0],
           ['Gesamt Brutto',    brutto,    true],
-          ['Gesamtbetrag',     brutto,    true],
+          ['Trinkgeld',        tip,       tip > 0],
+          ['Gesamtbetrag',     brutto + tip, true],
         ] as [string, number, boolean][],
         netFood: n7, netDrinks: n19, netTotal: n7 + n19,
         vat7: n7 * 0.07, vat19: n19 * 0.19,
-        gross: brutto, tips: 0, payable: brutto,
+        gross: brutto, tips: tip, payable: brutto + tip,
       };
     }
 
@@ -1531,6 +1534,11 @@ export default function OutgoingBillsPage() {
                                               className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 transition-colors">
                                               + Add position
                                             </button>
+                                            <div className="w-40 pt-1">
+                                              <label className={lbl}>Trinkgeld (€)</label>
+                                              <input type="number" step="0.01" value={editAmounts.trinkgeld} className={fld}
+                                                onChange={e => setA('trinkgeld', e.target.value)} />
+                                            </div>
                                           </div>
                                         )}
 
@@ -2664,6 +2672,17 @@ export default function OutgoingBillsPage() {
                         </div>
                       </div>
                     )}
+                  </div>
+                  <div className="w-48">
+                    <label className={labelCls}>Trinkgeld (€) — optional</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      className={inputCls}
+                      placeholder="0,00"
+                      value={trinkgeld}
+                      onChange={(e) => setTrinkgeld(e.target.value)}
+                    />
                   </div>
                   <p className="text-xs text-violet-700">
                     Netto-Beträge eingeben · MwSt wird automatisch berechnet · Negative Beträge = Rabatte

@@ -212,7 +212,9 @@ export function BillDocument({ data }: { data: BillData }) {
   const mwstEssenAmt      = essenBrutto     - essenNetto;
   const mwstGetraenkeAmt  = getraenkeBrutto - getraenkeNetto;
   const mwstGesamtAmt     = mwstEssenAmt + mwstGetraenkeAmt;
-  const gesamtBetrag      = isMonthly ? 0 : isCatering ? cateringBruttoVal : isAdHoc ? ahTotalBrutto : gesamtBrutto + tip;
+  // A tip is not turnover, so it sits outside the VAT bases and is added last —
+  // the same treatment a dinner bill gives it.
+  const gesamtBetrag      = isMonthly ? 0 : isCatering ? cateringBruttoVal : isAdHoc ? ahTotalBrutto + tip : gesamtBrutto + tip;
 
   if (isMonthly && data.lineItems) {
     gesamtNetto   = data.lineItems.reduce((s, i) => s + i.qty * i.unitPrice, 0);
@@ -394,8 +396,13 @@ export function BillDocument({ data }: { data: BillData }) {
               {ahBrutto19 > 0 && <AmtRow label="Brutto (19% MwSt)" value={ahBrutto19} />}
               <AmtRowBold label="Gesamt Brutto" value={ahTotalBrutto} />
             </View>
+            {tip > 0 && (
+              <View style={s.groupGap}>
+                <AmtRow label="Trinkgeld" value={tip} />
+              </View>
+            )}
             <View style={{ marginTop: 2 }}>
-              <AmtRowBold label="Gesamtbetrag (zu zahlen)" value={ahTotalBrutto} />
+              <AmtRowBold label="Gesamtbetrag (zu zahlen)" value={ahTotalBrutto + tip} />
             </View>
           </View>
         )}
