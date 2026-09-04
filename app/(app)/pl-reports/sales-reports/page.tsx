@@ -8,6 +8,13 @@ import type { WoltInvoiceData } from '@/lib/wolt-invoice';
 import type { WoltShiftBreakdown } from '@/lib/wolt-sales-report';
 import type { WoltServicesData } from '@/lib/wolt-services';
 import type { WoltSetResult, WoltCoverageIssue } from '@/lib/wolt-set';
+
+/** What the webshop import reports back about a file. */
+interface WebshopImportSummary {
+  total: number; counted: number; skipped: number;
+  netCents: number; grossCents: number;
+  from: string; to: string; reassigned: number;
+}
 import { findCoverageIssues } from '@/lib/wolt-set';
 
 /** A row of wolt_shift_sales, as stored. */
@@ -20,6 +27,12 @@ interface WoltShiftRowDb {
   net_pre_ads:     number;
   advertising_est: number;
   net_final:       number;
+}
+
+/** Webshop lines: order count and net sales, each as dateKey → amount. */
+interface WebshopLineMaps {
+  orders: Record<string, number>;
+  net:    Record<string, number>;
 }
 
 /** The five Wolt P&L lines, each as dateKey → amount. */
@@ -948,7 +961,14 @@ export default function SalesReportsPage() {
   // Tab / sub-tab
   const [activeTab,   setActiveTab]   = useState<'upload'|'daily'>('daily');
   const [subTab,      setSubTab]      = useState<'daily'|'weekly'|'monthly'>('daily');
-  const [reportType,  setReportType]  = useState<'weekly'|'shift'|'monthly'|'delivery'|'manual'|'wolt'>('shift');
+  const [reportType,  setReportType]  = useState<'weekly'|'shift'|'monthly'|'delivery'|'manual'|'wolt'|'webshop'>('shift');
+
+  /* ── Webshop: one CSV export holding every order ── */
+  const [webshopRows,    setWebshopRows]    = useState<Record<string, unknown>[]>([]);
+  const [webshopSummary, setWebshopSummary] = useState<WebshopImportSummary | null>(null);
+  const [webshopError,   setWebshopError]   = useState<string | null>(null);
+  const [webshopParsing, setWebshopParsing] = useState(false);
+  const [webshopSaved,   setWebshopSaved]   = useState<number | null>(null);
 
   /* ── Wolt: a five-day document set (invoice + netting + sales report) ──
      Only the self-billing invoice carries the period totals; the other two are
@@ -1225,6 +1245,47 @@ export default function SalesReportsPage() {
       return (data ?? []) as { id: string; event_date: string | null; shift_type: 'lunch' | 'dinner' | null; net_total: number }[];
     },
   });
+
+  // Webshop orders, already carrying the shift they were handed over on
+  const { data: webshopOrderRows = [] } = useQuery({
+    queryKey: ['webshop-orders', 'pl', location?.id, year, quarter],
+    enabled: !!location,
+    queryFn: async () => {
+      const [firstM, , lastM] = QUARTER_MONTHS[quarter - 1];
+      const qStart = `${year}-${String(firstM).padStart(2,'0')}-01`;
+      const qEnd   = `${year}-${String(lastM).padStart(2,'0')}-${String(daysInMonth(year, lastM)).padStart(2,'0')}`;
+      const { data } = await supabase
+        .from('webshop_orders')
+        .select('sale_date,shift,net_cents,counts')
+        .eq('location_id', location!.id)
+        .eq('counts', true)          // unpaid checkouts are not sales
+        .gte('sale_date', qStart)
+        .lte('sale_date', qEnd);
+      return (data ?? []) as { sale_date: string; shift: 'lunch' | 'dinner'; net_cents: number }[];
+    },
+  });
+
+  /**
+   * Orders and net sales per day, per shift and combined.
+   *
+   * The average order value is deliberately not stored: it is net sales over
+   * order count, and computing it per column keeps it right for a week or a
+   * quarter as well as a day.
+   */
+  const webshopMaps = useMemo(() => {
+    const empty = (): WebshopLineMaps => ({ orders: {}, net: {} });
+    const lunch = empty(), dinner = empty(), day = empty();
+    const add = (m: WebshopLineMaps, date: string, net: number) => {
+      m.orders[date] = (m.orders[date] ?? 0) + 1;
+      m.net[date]    = (m.net[date]    ?? 0) + net;
+    };
+    for (const o of webshopOrderRows) {
+      const net = Number(o.net_cents) / 100;
+      add(o.shift === 'lunch' ? lunch : dinner, o.sale_date, net);
+      add(day, o.sale_date, net);
+    }
+    return { lunch, dinner, day };
+  }, [webshopOrderRows]);
 
   // Wolt sales, already cut into days and shifts on import
   const { data: woltShiftRows = [] } = useQuery({
@@ -2185,10 +2246,58 @@ export default function SalesReportsPage() {
     }
   }, [woltImportable, queryClient]);
 
+  /** Reads the webshop export. Parsing happens server-side so venue matching
+   *  and the closed-shift rule stay identical to the Wolt import. */
+  const parseWebshopFile = useCallback(async (file: File) => {
+    setWebshopParsing(true); setWebshopError(null);
+    setWebshopRows([]); setWebshopSummary(null); setWebshopSaved(null);
+    try {
+      const fd = new FormData();
+      fd.append('files', file);
+      const res  = await fetch('/api/webshop/extract', { method: 'POST', body: fd });
+      const json = await res.json();
+      if (!res.ok) { setWebshopError(json.error ?? 'The export could not be read.'); return; }
+      setWebshopRows(json.rows as Record<string, unknown>[]);
+      setWebshopSummary(json.summary as WebshopImportSummary);
+    } catch (e) {
+      setWebshopError(e instanceof Error ? e.message : 'The export could not be read.');
+    } finally {
+      setWebshopParsing(false);
+    }
+  }, []);
+
+  const handleWebshopFiles = useCallback((files: File[]) => {
+    const csv = files.find(f => /\.csv$/i.test(f.name));
+    if (!csv) { setWebshopError('Drop the webshop order export — a .csv file.'); return; }
+    void parseWebshopFile(csv);
+  }, [parseWebshopFile]);
+
+  /** Saves every order. Re-importing an export updates rather than duplicates. */
+  const handleImportWebshop = useCallback(async () => {
+    if (webshopRows.length === 0) return;
+    setImporting(true);
+    try {
+      // PostgREST is happier with a few hundred rows at a time than one large body.
+      const CHUNK = 500;
+      for (let i = 0; i < webshopRows.length; i += CHUNK) {
+        const { error } = await supabase
+          .from('webshop_orders')
+          .upsert(webshopRows.slice(i, i + CHUNK), { onConflict: 'order_number' });
+        if (error) { setWebshopError(error.message); return; }
+      }
+      setWebshopSaved(webshopRows.length);
+      setWebshopRows([]); setWebshopSummary(null);
+      queryClient.invalidateQueries({ queryKey: ['webshop-orders'] });
+    } finally {
+      setImporting(false);
+    }
+  }, [webshopRows, queryClient]);
+
   const resetUpload = useCallback(() => {
     setFileName(null); setWeeklyResult(null); setWeeklyBatch([]); setShiftBatch([]);
     setMonthlyResult(null); setDeliveryBatch([]); setParseError(null); setWeeklyPage(0);
     setWoltSets([]); setWoltError(null); setWoltSaved(null);
+    setWebshopRows([]); setWebshopSummary(null); setWebshopError(null); setWebshopSaved(null);
   }, []);
 
   const processFile = useCallback((file: File) => {
@@ -2851,6 +2960,7 @@ export default function SalesReportsPage() {
               ['weekly',   '📋', 'Weekly Report',   'KW report covering a full week'],
               ['delivery', '🛵', 'Delivery Report', 'Simplydelivery daily XLSX (one file per day)'],
               ['wolt',     '🛵', 'Wolt Report',     'Wolt 5-day PDF set — invoice, netting & sales report'],
+              ['webshop',  '🛒', 'Webshop',         'Order export from our own webshop (CSV)'],
               ['manual',   '✏️', 'Manual Entry',    'Type in shift figures directly — no CSV needed'],
             ] as const).map(([t, emoji, label, desc]) => (
               <button key={t} onClick={() => { setReportType(t); resetUpload(); }}
@@ -2982,7 +3092,7 @@ export default function SalesReportsPage() {
               )}
 
               {/* Drop zone */}
-              {reportType !== 'manual' && reportType !== 'wolt' && <div>
+              {reportType !== 'manual' && reportType !== 'wolt' && reportType !== 'webshop' && <div>
                 <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">
                   {reportType === 'delivery'
                     ? 'Simplydelivery XLSX — Daily Report'
@@ -3166,6 +3276,71 @@ export default function SalesReportsPage() {
                     {importing                     ? 'Saving…'
                       : woltImportable.length === 0 ? 'Drop the Wolt files above'
                       : `Save ${woltImportable.length} period${woltImportable.length === 1 ? '' : 's'}`}
+                  </button>
+                </div>
+              )}
+
+              {/* ── Webshop: the order export ── */}
+              {reportType === 'webshop' && (
+                <div>
+                  <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">
+                    Webshop export (CSV)
+                  </label>
+                  <div
+                    onDragOver={e => { e.preventDefault(); setIsDragging(true); }}
+                    onDragLeave={() => setIsDragging(false)}
+                    onDrop={e => { e.preventDefault(); setIsDragging(false); handleWebshopFiles(Array.from(e.dataTransfer.files)); }}
+                    className={`border-2 border-dashed rounded-xl p-6 text-center transition-colors ${
+                      isDragging ? 'border-[#1B5E20] bg-green-50'
+                      : webshopError ? 'border-red-300 bg-red-50'
+                      : webshopSummary ? 'border-green-400 bg-green-50'
+                      : 'border-gray-200 bg-white'
+                    }`}
+                  >
+                    {webshopParsing
+                      ? <Loader2 size={26} className="mx-auto mb-2 animate-spin text-[#1B5E20]" />
+                      : <Upload size={26} className={`mx-auto mb-2 ${webshopSummary ? 'text-[#1B5E20]' : 'text-gray-300'}`} />}
+                    <p className={`text-sm font-semibold mb-1 ${webshopSummary ? 'text-green-700' : 'text-gray-600'}`}>
+                      {webshopParsing ? 'Reading the export…'
+                        : webshopSummary ? `${webshopSummary.total} orders read`
+                        : 'Drop the webshop CSV here'}
+                    </p>
+                    <p className="text-xs text-gray-400 mb-3">The full order export — re-importing updates what is there</p>
+                    <input type="file" accept=".csv,text/csv" id="webshop-file-input" className="hidden"
+                      onChange={e => { handleWebshopFiles(Array.from(e.target.files ?? [])); e.target.value = ''; }} />
+                    <label htmlFor="webshop-file-input"
+                      className="inline-block px-4 py-2 bg-white border border-gray-200 rounded-lg text-xs font-semibold text-gray-600 hover:bg-gray-50 cursor-pointer">
+                      Browse files
+                    </label>
+                  </div>
+
+                  {webshopError && (
+                    <div className="mt-2 flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded-lg">
+                      <AlertCircle size={15} className="text-red-500 flex-shrink-0 mt-0.5" />
+                      <p className="text-xs text-red-700">{webshopError}</p>
+                    </div>
+                  )}
+
+                  {webshopSaved !== null && (
+                    <div className="mt-2 flex items-start gap-2 p-3 bg-green-50 border border-green-200 rounded-lg">
+                      <FileCheck size={15} className="text-green-600 flex-shrink-0 mt-0.5" />
+                      <p className="text-xs text-green-800">{webshopSaved} orders saved.</p>
+                    </div>
+                  )}
+
+                  <button
+                    onClick={handleImportWebshop}
+                    disabled={webshopRows.length === 0 || importing}
+                    className={`mt-3 w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-bold transition-colors ${
+                      webshopRows.length > 0 && !importing
+                        ? 'bg-[#1B5E20] text-white hover:bg-[#2E7D32]'
+                        : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                    }`}
+                  >
+                    {importing ? <Loader2 size={16} className="animate-spin" /> : <DatabaseZap size={16} />}
+                    {importing                 ? 'Saving…'
+                      : webshopRows.length === 0 ? 'Drop the export above'
+                      : `Save ${webshopRows.length} orders`}
                   </button>
                 </div>
               )}
@@ -3836,8 +4011,48 @@ export default function SalesReportsPage() {
                 </div>
               ))}
 
+              {/* ── Webshop preview ── */}
+              {reportType === 'webshop' && (webshopSummary ? (
+                <div className="bg-white border border-gray-100 rounded-xl shadow-sm overflow-hidden">
+                  <div className="px-4 py-3 border-b border-gray-100">
+                    <p className="text-sm font-bold text-gray-800">
+                      {toDe(webshopSummary.from)} – {toDe(webshopSummary.to)}
+                    </p>
+                    <p className="text-xs text-gray-400">{webshopSummary.total} orders in the export</p>
+                  </div>
+                  <table className="w-full text-sm">
+                    <tbody>
+                      <tr className="border-b border-gray-100">
+                        <td className="px-4 py-2.5 text-gray-600">Counted as sales</td>
+                        <td className="px-4 py-2.5 text-right tabular-nums font-semibold text-gray-900">{webshopSummary.counted}</td>
+                      </tr>
+                      <tr className="border-b border-gray-100">
+                        <td className="px-4 py-2.5 text-gray-600">
+                          Not counted
+                          <span className="block text-[11px] text-gray-400">unpaid or unfinished checkouts</span>
+                        </td>
+                        <td className="px-4 py-2.5 text-right tabular-nums text-gray-500 align-top">{webshopSummary.skipped}</td>
+                      </tr>
+                      <tr className="bg-gray-50">
+                        <td className="px-4 py-2.5 font-bold text-gray-800">Net sales</td>
+                        <td className="px-4 py-2.5 text-right tabular-nums font-bold text-gray-900">{fmt(webshopSummary.netCents / 100)}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                  <p className="px-4 py-2.5 text-xs text-gray-400 border-t border-gray-100">
+                    Net sales exclude tips and count only paid, completed orders.
+                    {webshopSummary.reassigned > 0 && ` ${webshopSummary.reassigned} order${webshopSummary.reassigned === 1 ? '' : 's'} moved to the shift that was open.`}
+                  </p>
+                </div>
+              ) : !webshopError && (
+                <div className="flex flex-col items-center justify-center h-64 border-2 border-dashed border-gray-200 rounded-xl gap-3">
+                  <Upload size={40} className="text-gray-200" />
+                  <p className="text-sm text-gray-400">Drop the webshop CSV to preview the import</p>
+                </div>
+              ))}
+
               {/* Empty state */}
-              {reportType !== 'wolt' && !weeklyResult && shiftBatch.length === 0 && !monthlyResult && deliveryBatch.length === 0 && !parseError && (
+              {reportType !== 'wolt' && reportType !== 'webshop' && !weeklyResult && shiftBatch.length === 0 && !monthlyResult && deliveryBatch.length === 0 && !parseError && (
                 <div className="flex flex-col items-center justify-center h-64 border-2 border-dashed border-gray-200 rounded-xl gap-3">
                   <Upload size={40} className="text-gray-200" />
                   <p className="text-sm text-gray-400">
@@ -4116,6 +4331,79 @@ export default function SalesReportsPage() {
               </tr>
             );
           };
+
+          /**
+           * One Webshop line. Counts print plain, money in the reported blue,
+           * and the average is derived per column rather than summed — an
+           * average of averages would be wrong for a week or a quarter.
+           */
+          const webshopLineRow = (
+            key: string, label: string, maps: WebshopLineMaps,
+            valueFor: (orders: number, net: number) => number | null,
+            opts: { bold?: boolean; money?: boolean } = {},
+          ) => {
+            const { bold = false, money = true } = opts;
+            const sumOver = (keys: string[]) => keys.reduce(
+              (acc, k) => ({ orders: acc.orders + (maps.orders[k] ?? 0), net: acc.net + (maps.net[k] ?? 0) }),
+              { orders: 0, net: 0 },
+            );
+            const dayKeys = dailyCols.filter(c => c.type === 'day').map(c => (c as { dateKey: string }).dateKey);
+            const qAgg    = sumOver(dayKeys);
+            const show = (v: number | null) => v === null || v === 0
+              ? <span className="text-gray-300">—</span>
+              : <span className="text-blue-600">{money ? fmtNum(v) : v}</span>;
+
+            return (
+              <tr key={key} className="border-b border-gray-100 hover:bg-gray-50/60 group" style={{ backgroundColor: '#ffffff' }}>
+                <td className={`sticky left-0 z-10 px-4 py-1 whitespace-nowrap border-r border-gray-100 bg-white group-hover:bg-gray-50/60 transition-colors ${
+                  bold ? 'text-xs font-bold text-gray-800' : 'text-[11px] text-gray-600'
+                }`}>{label}</td>
+                {dailyCols.map((col, ci) => {
+                  const agg = col.type === 'day'
+                    ? { orders: maps.orders[col.dateKey] ?? 0, net: maps.net[col.dateKey] ?? 0 }
+                    : sumOver(col.wDateKeys);
+                  return (
+                    <td key={ci} className="py-1 text-right tabular-nums text-[11px]"
+                      style={col.type === 'day'
+                        ? { paddingLeft: 4, paddingRight: 8 }
+                        : { paddingLeft: 4, paddingRight: 6, backgroundColor: '#fffbeb', borderLeft: '1px solid #fde68a', borderRight: '1px solid #fde68a' }}>
+                      {show(valueFor(agg.orders, agg.net))}
+                    </td>
+                  );
+                })}
+                <td className="py-1 text-right tabular-nums text-[11px] border-l border-gray-200" style={{ paddingLeft: 4, paddingRight: 8 }}>
+                  {show(valueFor(qAgg.orders, qAgg.net))}
+                </td>
+              </tr>
+            );
+          };
+
+          const WEBSHOP_BLOCKS: [keyof typeof webshopMaps, string][] = [
+            ['lunch',  'Webshop · Lunch'],
+            ['dinner', 'Webshop · Dinner'],
+            ['day',    'Webshop · All day'],
+          ];
+
+          const webshopTbody = () => (
+            <tbody>
+              {sectionBannerRow('4) Webshop')}
+              {WEBSHOP_BLOCKS.map(([blockKey, blockLabel], bi) => (
+                <Fragment key={blockKey}>
+                  {bi > 0 && <tr><td colSpan={totalCols} style={{ height: 10, backgroundColor: '#f9fafb' }} /></tr>}
+                  <tr className="border-b border-gray-200 hover:bg-gray-50/60 group" style={{ backgroundColor: '#eef2ff' }}>
+                    <td className="sticky left-0 z-10 px-4 py-1.5 whitespace-nowrap border-r border-gray-100 bg-[#eef2ff] group-hover:bg-gray-50/60 transition-colors text-xs font-bold text-gray-800">{blockLabel}</td>
+                    {woltEmptyCells()}
+                  </tr>
+                  {webshopLineRow(`${blockKey}-orders`, '# orders', webshopMaps[blockKey],
+                    (orders) => orders || null, { money: false })}
+                  {webshopLineRow(`${blockKey}-aov`, 'Av. order value (netto)', webshopMaps[blockKey],
+                    (orders, net) => (orders > 0 ? net / orders : null))}
+                  {webshopLineRow(`${blockKey}-net`, 'Net sales', webshopMaps[blockKey],
+                    (_orders, net) => net || null, { bold: true })}
+                </Fragment>
+              ))}
+            </tbody>
+          );
 
           const woltEmptyCells = () => (
             <>
@@ -4668,9 +4956,8 @@ export default function SalesReportsPage() {
                       // not in this placeholder list — see the render block below.
                       // Orderbird is rendered by posRow (live POS data), so it is not in this
                       // placeholder list — see the render block below.
-                      // Wolt is rendered from its own figures, between these two.
-                      const NET_SALES_BEFORE_WOLT = ['Webshop'];
-                      const NET_SALES_AFTER_WOLT  = ['Lieferando'];
+                      // Webshop and Wolt both render from their own figures now.
+                      const NET_SALES_AFTER_WOLT = ['Lieferando'];
 
                       const NET_SALES_AFTER_BILLS  = ['Too Good To Go'];
 
@@ -4890,7 +5177,7 @@ export default function SalesReportsPage() {
                           {/* ── Net sales, by source — labels only for now ── */}
                           {netSalesHeaderRow('Net sales · Lunch', 'lunch')}
                           {posRow('🟠 Orderbird', lunchMap, lunchForecastMap, lunchQtrTotal, 'lunch')}
-                          {NET_SALES_BEFORE_WOLT.map(src => netSalesSourceRow(src, 'lunch'))}
+                          {netSalesValueRow('Webshop', webshopMaps.lunch.net, 'lunch')}
                           {netSalesValueRow('Wolt', woltMaps.lunch.net, 'lunch')}
                           {NET_SALES_AFTER_WOLT.map(src => netSalesSourceRow(src, 'lunch'))}
                           {billsRow('🧾 Bills', billsLunchMap, 'lunch')}
@@ -4899,7 +5186,7 @@ export default function SalesReportsPage() {
                           {netSalesSpacerRow('net-sales-gap')}
                           {netSalesHeaderRow('Net sales · Dinner', 'dinner')}
                           {posRow('🟠 Orderbird', dinnerMap, dinnerForecastMap, dinnerQtrTotal, 'dinner')}
-                          {NET_SALES_BEFORE_WOLT.map(src => netSalesSourceRow(src, 'dinner'))}
+                          {netSalesValueRow('Webshop', webshopMaps.dinner.net, 'dinner')}
                           {netSalesValueRow('Wolt', woltMaps.dinner.net, 'dinner')}
                           {NET_SALES_AFTER_WOLT.map(src => netSalesSourceRow(src, 'dinner'))}
                           {billsRow('🧾 Bills', billsDinnerMap, 'dinner')}
@@ -4908,7 +5195,7 @@ export default function SalesReportsPage() {
                           {netSalesSpacerRow('net-sales-gap-2')}
                           {netSalesHeaderRow('Net sales · Day')}
                           {posRow('🟠 Orderbird', orderbirdDayMap, orderbirdDayForecast, orderbirdDayQtr)}
-                          {NET_SALES_BEFORE_WOLT.map(src => netSalesSourceRow(src))}
+                          {netSalesValueRow('Webshop', webshopMaps.day.net)}
                           {netSalesValueRow('Wolt', woltMaps.day.net)}
                           {NET_SALES_AFTER_WOLT.map(src => netSalesSourceRow(src))}
                           {billsRow('🧾 Bills', billsDayMap)}
@@ -4948,6 +5235,9 @@ export default function SalesReportsPage() {
 
                   <tbody><tr><td colSpan={totalCols} style={{ height: 12, backgroundColor:'#f9fafb' }} /></tr></tbody>
                   {woltTbody()}
+
+                  <tbody><tr><td colSpan={totalCols} style={{ height: 12, backgroundColor:'#f9fafb' }} /></tr></tbody>
+                  {webshopTbody()}
                 </table>
               </div>
               <div className="px-4 py-2.5 bg-gray-50 border-t border-gray-100 flex items-center justify-between">
