@@ -104,6 +104,12 @@ export default function WebshopPage() {
   }, [orders, locationName]);
 
   const counted = orders.filter(o => o.counts);
+  /** The span the figures cover, so the totals are not mistaken for a period. */
+  const dateRange = useMemo(() => {
+    if (counted.length === 0) return null;
+    const dates = counted.map(o => o.sale_date).sort();
+    return `${de(dates[0])} – ${de(dates[dates.length - 1])}`;
+  }, [counted]);
   const skipped = orders.length - counted.length;
   const netTotal = counted.reduce((s, o) => s + o.net_cents, 0);
 
@@ -136,18 +142,25 @@ export default function WebshopPage() {
 
       {/* ── Net sales per location and shift ── */}
       <h2 className="text-lg font-bold text-gray-900 mb-1">Net sales by location &amp; shift</h2>
-      <p className="text-sm text-gray-500 mb-3">Paid, completed orders only · tips excluded</p>
+      <p className="text-sm text-gray-500 mb-3">
+        Every order imported{dateRange && ` · ${dateRange}`} · paid and completed only · tips excluded
+      </p>
       <div className="bg-white border border-gray-100 rounded-xl shadow-sm overflow-hidden mb-8">
         <table className="w-full text-sm">
           <thead>
-            <tr className="bg-gray-50 border-b border-gray-100 text-xs font-bold text-gray-500 uppercase tracking-wider">
-              <th className="px-4 py-2.5 text-left">Location</th>
-              <th className="px-2.5 py-2.5 text-right">☀️ Orders</th>
-              <th className="px-2.5 py-2.5 text-right">☀️ Net sales</th>
-              <th className="px-2.5 py-2.5 text-right">🌙 Orders</th>
-              <th className="px-2.5 py-2.5 text-right">🌙 Net sales</th>
-              <th className="px-2.5 py-2.5 text-right">Orders</th>
-              <th className="px-4 py-2.5 text-right">Net sales</th>
+            <tr className="bg-gray-50 text-xs font-bold text-gray-500 uppercase tracking-wider">
+              <th className="px-4 pt-2.5 pb-1 text-left" rowSpan={2}>Location</th>
+              <th className="px-2.5 pt-2.5 pb-1 text-center border-l border-gray-200" colSpan={2}>☀️ Lunch</th>
+              <th className="px-2.5 pt-2.5 pb-1 text-center border-l border-gray-200" colSpan={2}>🌙 Dinner</th>
+              <th className="px-2.5 pt-2.5 pb-1 text-center border-l border-gray-200" colSpan={2}>Both shifts</th>
+            </tr>
+            <tr className="bg-gray-50 border-b border-gray-200 text-[10px] font-semibold text-gray-400 uppercase tracking-wider">
+              <th className="px-2.5 pb-2 text-right border-l border-gray-200">Orders</th>
+              <th className="px-2.5 pb-2 text-right">Net sales €</th>
+              <th className="px-2.5 pb-2 text-right border-l border-gray-200">Orders</th>
+              <th className="px-2.5 pb-2 text-right">Net sales €</th>
+              <th className="px-2.5 pb-2 text-right border-l border-gray-200">Orders</th>
+              <th className="px-4   pb-2 text-right">Net sales €</th>
             </tr>
           </thead>
           <tbody>
@@ -160,11 +173,11 @@ export default function WebshopPage() {
             {byLocation.map(([id, v]) => (
               <tr key={id} className="border-b border-gray-50 hover:bg-gray-50/60">
                 <td className="px-4 py-2.5 font-semibold text-gray-800">{locationName(id)}</td>
-                <td className="px-2.5 py-2.5 text-right tabular-nums text-gray-400">{v.lunch.n || '—'}</td>
+                <td className="px-2.5 py-2.5 text-right tabular-nums text-gray-400 border-l border-gray-100">{v.lunch.n || '—'}</td>
                 <td className="px-2.5 py-2.5 text-right tabular-nums text-gray-700">{eur(v.lunch.net)}</td>
-                <td className="px-2.5 py-2.5 text-right tabular-nums text-gray-400">{v.dinner.n || '—'}</td>
+                <td className="px-2.5 py-2.5 text-right tabular-nums text-gray-400 border-l border-gray-100">{v.dinner.n || '—'}</td>
                 <td className="px-2.5 py-2.5 text-right tabular-nums text-gray-700">{eur(v.dinner.net)}</td>
-                <td className="px-2.5 py-2.5 text-right tabular-nums text-gray-500">{v.lunch.n + v.dinner.n}</td>
+                <td className="px-2.5 py-2.5 text-right tabular-nums text-gray-500 border-l border-gray-100">{v.lunch.n + v.dinner.n}</td>
                 <td className="px-4 py-2.5 text-right tabular-nums font-bold text-gray-900">{eur(v.lunch.net + v.dinner.net)}</td>
               </tr>
             ))}
@@ -173,11 +186,11 @@ export default function WebshopPage() {
             <tfoot>
               <tr className="bg-gray-50 font-bold text-gray-900 border-t border-gray-200">
                 <td className="px-4 py-2.5">All locations</td>
-                <td className="px-2.5 py-2.5 text-right tabular-nums">{byLocation.reduce((s, [, v]) => s + v.lunch.n, 0)}</td>
+                <td className="px-2.5 py-2.5 text-right tabular-nums border-l border-gray-200">{byLocation.reduce((s, [, v]) => s + v.lunch.n, 0)}</td>
                 <td className="px-2.5 py-2.5 text-right tabular-nums">{eur(byLocation.reduce((s, [, v]) => s + v.lunch.net, 0))}</td>
-                <td className="px-2.5 py-2.5 text-right tabular-nums">{byLocation.reduce((s, [, v]) => s + v.dinner.n, 0)}</td>
+                <td className="px-2.5 py-2.5 text-right tabular-nums border-l border-gray-200">{byLocation.reduce((s, [, v]) => s + v.dinner.n, 0)}</td>
                 <td className="px-2.5 py-2.5 text-right tabular-nums">{eur(byLocation.reduce((s, [, v]) => s + v.dinner.net, 0))}</td>
-                <td className="px-2.5 py-2.5 text-right tabular-nums">{counted.length}</td>
+                <td className="px-2.5 py-2.5 text-right tabular-nums border-l border-gray-200">{counted.length}</td>
                 <td className="px-4 py-2.5 text-right tabular-nums">{eur(netTotal)}</td>
               </tr>
             </tfoot>
