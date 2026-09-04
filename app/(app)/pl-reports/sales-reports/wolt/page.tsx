@@ -49,6 +49,19 @@ interface WoltShiftSale {
   net_final:   number;
 }
 
+interface WoltOrderItem {
+  id:           string;
+  location_id:  string;
+  order_number: string;
+  sale_date:    string;
+  shift:        'lunch' | 'dinner';
+  counts:       boolean;
+  product_name: string;
+  pos_id:       string | null;
+  quantity:     number;
+  line_gross_cents: number;
+}
+
 const fmt = (n: number) =>
   n.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -91,6 +104,55 @@ export default function WoltPage() {
       return (data ?? []) as WoltShiftSale[];
     },
   });
+
+  const { data: items = [] } = useQuery({
+    queryKey: ['wolt-order-items', locationId],
+    queryFn: async () => {
+      // One row per item line, so this passes 1000 quickly — page through it.
+      const all: WoltOrderItem[] = [];
+      for (let p = 0; ; p++) {
+        let q = supabase.from('wolt_order_items')
+          .select('id,location_id,order_number,sale_date,shift,counts,product_name,pos_id,quantity,line_gross_cents')
+          .order('sale_date', { ascending: false })
+          .range(p * 1000, (p + 1) * 1000 - 1);
+        if (locationId) q = q.eq('location_id', locationId);
+        const { data, error } = await q;
+        if (error) throw error;
+        if (!data?.length) break;
+        all.push(...(data as WoltOrderItem[]));
+        if (data.length < 1000) break;
+      }
+      return all;
+    },
+  });
+
+  /** Products sold, split by shift — the basis for combining channels later. */
+  const products = useMemo(() => {
+    const m = new Map<string, {
+      name: string; posId: string | null;
+      lunchQty: number; dinnerQty: number; qty: number; grossCents: number;
+    }>();
+    for (const it of items) {
+      if (!it.counts) continue;
+      const cur = m.get(it.product_name) ?? {
+        name: it.product_name, posId: it.pos_id,
+        lunchQty: 0, dinnerQty: 0, qty: 0, grossCents: 0,
+      };
+      if (it.shift === 'lunch') cur.lunchQty += it.quantity; else cur.dinnerQty += it.quantity;
+      cur.qty        += it.quantity;
+      cur.grossCents += it.line_gross_cents;
+      cur.posId      = cur.posId ?? it.pos_id;
+      m.set(it.product_name, cur);
+    }
+    return [...m.values()].sort((a, b) => b.qty - a.qty);
+  }, [items]);
+
+  const productQtyTotal = useMemo(() => products.reduce((t, x) => t + x.qty, 0), [products]);
+
+  const itemsRange = useMemo(() => {
+    const dates = items.filter(i => i.counts).map(i => i.sale_date).sort();
+    return dates.length ? `${de(dates[0])} – ${de(dates[dates.length - 1])}` : null;
+  }, [items]);
 
   /** Day rows with their two shifts, newest first. */
   const days = useMemo(() => {
@@ -308,6 +370,71 @@ export default function WoltPage() {
           </table>
         </div>
       </div>
+
+      {/* ── What was actually sold ── */}
+      <h2 className="mt-8 text-lg font-bold text-gray-900">Products sold</h2>
+      <p className="text-sm text-gray-500 mb-3">
+        From the purchases export{itemsRange && ` · ${itemsRange}`} · delivered orders only
+      </p>
+
+      <div className="bg-white border border-gray-100 rounded-xl shadow-sm overflow-hidden">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="bg-gray-50 border-b border-gray-200 text-xs font-bold text-gray-500 uppercase tracking-wider">
+              <th className="px-4 py-2.5 text-left">Product</th>
+              <th className="px-2.5 py-2.5 text-right border-l border-gray-200">☀️ Lunch</th>
+              <th className="px-2.5 py-2.5 text-right">🌙 Dinner</th>
+              <th className="px-2.5 py-2.5 text-right border-l border-gray-200">Sold</th>
+              <th className="px-2.5 py-2.5 text-right">Share</th>
+              <th className="px-4 py-2.5 text-right border-l border-gray-200">Gross €</th>
+            </tr>
+          </thead>
+          <tbody>
+            {products.length === 0 && (
+              <tr><td colSpan={6} className="px-4 py-12 text-center text-sm text-gray-400">
+                <Receipt size={26} className="mx-auto mb-2 text-gray-200" />
+                No product data yet — upload the Wolt purchases export from Sales Reports → Upload → Wolt Report
+              </td></tr>
+            )}
+            {products.map(pr => {
+              return (
+                <tr key={pr.name} className="border-b border-gray-50 hover:bg-gray-50/60">
+                  <td className="px-4 py-2 font-medium text-gray-800">
+                    {pr.name}
+                    {pr.posId && <span className="ml-2 text-[10px] text-gray-300">{pr.posId}</span>}
+                  </td>
+                  <td className="px-2.5 py-2 text-right tabular-nums text-gray-400 border-l border-gray-100">{pr.lunchQty || '—'}</td>
+                  <td className="px-2.5 py-2 text-right tabular-nums text-gray-400">{pr.dinnerQty || '—'}</td>
+                  <td className="px-2.5 py-2 text-right tabular-nums font-semibold text-gray-900 border-l border-gray-100">{pr.qty}</td>
+                  <td className="px-2.5 py-2 text-right tabular-nums text-gray-400">
+                    {productQtyTotal > 0 ? `${((pr.qty / productQtyTotal) * 100).toFixed(1)}%` : '—'}
+                  </td>
+                  <td className="px-4 py-2 text-right tabular-nums text-gray-700 border-l border-gray-100">{fmt(pr.grossCents / 100)}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+          {products.length > 0 && (
+            <tfoot>
+              <tr className="bg-gray-50 font-bold text-gray-900 border-t border-gray-200">
+                <td className="px-4 py-2.5">{products.length} products</td>
+                <td className="px-2.5 py-2.5 text-right tabular-nums border-l border-gray-200">{products.reduce((t, x) => t + x.lunchQty, 0)}</td>
+                <td className="px-2.5 py-2.5 text-right tabular-nums">{products.reduce((t, x) => t + x.dinnerQty, 0)}</td>
+                <td className="px-2.5 py-2.5 text-right tabular-nums border-l border-gray-200">{products.reduce((t, x) => t + x.qty, 0)}</td>
+                <td />
+                <td className="px-4 py-2.5 text-right tabular-nums border-l border-gray-200">{fmt(products.reduce((t, x) => t + x.grossCents, 0) / 100)}</td>
+              </tr>
+            </tfoot>
+          )}
+        </table>
+      </div>
+
+      <p className="mt-3 mb-8 text-xs text-gray-400">
+        Gross is what the customer paid for the item, before Wolt&apos;s commission. A sale belongs to
+        the day and shift it was <strong>delivered</strong> on: attributing by delivery reproduced
+        Wolt&apos;s own daily totals exactly, while order time did not, because an order placed late in
+        the evening can be delivered the next day.
+      </p>
 
       <p className="mt-3 mb-8 text-xs text-gray-400">
         Orders placed in the afternoon are evening pre-orders, so anything after 14:30 counts as dinner.

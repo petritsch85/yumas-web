@@ -9,6 +9,16 @@ import type { WoltShiftBreakdown } from '@/lib/wolt-sales-report';
 import type { WoltServicesData } from '@/lib/wolt-services';
 import type { WoltSetResult, WoltCoverageIssue } from '@/lib/wolt-set';
 
+/** What the Wolt purchases import reports back. */
+interface WoltPurchaseSummary {
+  orders: number; lines: number; rejected: number; products: number;
+  grossCents: number; from: string; to: string; venues: string[];
+  check: {
+    daysCompared: number; daysMatching: number; daysUnchecked: number;
+    differing: { date: string; exportGross: number; woltGross: number | null; diff: number | null }[];
+  };
+}
+
 /** What the webshop import reports back about a file. */
 interface WebshopImportSummary {
   total: number; counted: number; skipped: number;
@@ -980,6 +990,10 @@ export default function SalesReportsPage() {
   /** "3 of 12" while a folder of zips is being read. */
   const [woltProgress, setWoltProgress] = useState<{ done: number; total: number } | null>(null);
   const [woltSaved,   setWoltSaved]    = useState<number | null>(null);
+  /* The purchases export — order items, uploaded through the same Wolt card. */
+  const [woltItemRows,    setWoltItemRows]    = useState<Record<string, unknown>[]>([]);
+  const [woltItemSummary, setWoltItemSummary] = useState<WoltPurchaseSummary | null>(null);
+  const [woltItemsSaved,  setWoltItemsSaved]  = useState<number | null>(null);
 
   // Manual entry form state
   const blankManual = () => ({
@@ -2121,6 +2135,7 @@ export default function SalesReportsPage() {
    */
   const parseWoltFiles = useCallback(async (files: File[]) => {
     setWoltParsing(true); setWoltError(null); setWoltSets([]); setWoltSaved(null);
+    setWoltItemRows([]); setWoltItemSummary(null); setWoltItemsSaved(null);
     setWoltProgress({ done: 0, total: files.length });
 
     const collected: WoltSetResult[] = [];
@@ -2150,14 +2165,64 @@ export default function SalesReportsPage() {
     }
   }, []);
 
+  /**
+   * Reads the purchases export — the order list carrying the items sold.
+   *
+   * The server checks it against the periods already imported from the
+   * document sets, so a file covering days we have invoices for is verified
+   * rather than merely accepted.
+   */
+  const parseWoltPurchasesFile = useCallback(async (file: File) => {
+    setWoltParsing(true); setWoltError(null);
+    setWoltItemRows([]); setWoltItemSummary(null); setWoltItemsSaved(null);
+    try {
+      const fd = new FormData();
+      fd.append('files', file);
+      const res  = await fetch('/api/wolt/purchases', { method: 'POST', body: fd });
+      const json = await res.json();
+      if (!res.ok) { setWoltError(json.error ?? 'The export could not be read.'); return; }
+      setWoltItemRows(json.rows as Record<string, unknown>[]);
+      setWoltItemSummary(json.summary as WoltPurchaseSummary);
+    } catch (e) {
+      setWoltError(e instanceof Error ? e.message : 'The export could not be read.');
+    } finally {
+      setWoltParsing(false);
+    }
+  }, []);
+
+  /** Saves the order items. Re-importing updates rather than duplicating. */
+  const handleImportWoltItems = useCallback(async () => {
+    if (woltItemRows.length === 0) return;
+    setImporting(true);
+    try {
+      const CHUNK = 500;
+      for (let i = 0; i < woltItemRows.length; i += CHUNK) {
+        const { error } = await supabase
+          .from('wolt_order_items')
+          .upsert(woltItemRows.slice(i, i + CHUNK), { onConflict: 'location_id,order_number,line_no' });
+        if (error) { setWoltError(error.message); return; }
+      }
+      setWoltItemsSaved(woltItemRows.length);
+      setWoltItemRows([]); setWoltItemSummary(null);
+      queryClient.invalidateQueries({ queryKey: ['wolt-order-items'] });
+    } finally {
+      setImporting(false);
+    }
+  }, [woltItemRows, queryClient]);
+
   const handleWoltFiles = useCallback((files: File[]) => {
+    // A CSV in this card is the purchases export; zips and PDFs are the
+    // five-day document sets. Same channel, so one drop zone serves both.
+    const csv = files.find(f => /\.csv$/i.test(f.name));
+    if (csv) { void parseWoltPurchasesFile(csv); return; }
+
     const usable = files.filter(f => /\.(pdf|zip)$/i.test(f.name));
     if (usable.length === 0) {
-      setWoltError('Drop the Wolt zips, or the PDFs from a document set.');
+      setWoltError('Drop the Wolt zips or PDFs of a document set, or the purchases export (CSV).');
       return;
     }
     void parseWoltFiles(usable);
-  }, [parseWoltFiles]);
+  }, [parseWoltFiles, parseWoltPurchasesFile]);
 
   /** Every set that parsed cleanly, in period order. */
   const woltImportable = useMemo(() => woltSets.filter(s => !s.error && s.data), [woltSets]);
@@ -2297,6 +2362,7 @@ export default function SalesReportsPage() {
     setFileName(null); setWeeklyResult(null); setWeeklyBatch([]); setShiftBatch([]);
     setMonthlyResult(null); setDeliveryBatch([]); setParseError(null); setWeeklyPage(0);
     setWoltSets([]); setWoltError(null); setWoltSaved(null);
+    setWoltItemRows([]); setWoltItemSummary(null); setWoltItemsSaved(null);
     setWebshopRows([]); setWebshopSummary(null); setWebshopError(null); setWebshopSaved(null);
   }, []);
 
@@ -2959,7 +3025,7 @@ export default function SalesReportsPage() {
               ['monthly',  '📅', 'Monthly Report',  'Full-month Z-report aggregate'],
               ['weekly',   '📋', 'Weekly Report',   'KW report covering a full week'],
               ['delivery', '🛵', 'Delivery Report', 'Simplydelivery daily XLSX (one file per day)'],
-              ['wolt',     '🛵', 'Wolt Report',     'Wolt 5-day PDF set — invoice, netting & sales report'],
+              ['wolt',     '🛵', 'Wolt Report',     '5-day PDF set, or the purchases export (CSV)'],
               ['webshop',  '🛒', 'Webshop',         'Order export from our own webshop (CSV)'],
               ['manual',   '✏️', 'Manual Entry',    'Type in shift figures directly — no CSV needed'],
             ] as const).map(([t, emoji, label, desc]) => (
@@ -3222,24 +3288,28 @@ export default function SalesReportsPage() {
                     className={`border-2 border-dashed rounded-xl p-6 text-center transition-colors ${
                       isDragging ? 'border-[#1B5E20] bg-green-50'
                       : woltError ? 'border-red-300 bg-red-50'
-                      : woltSets.length > 0 ? 'border-green-400 bg-green-50'
+                      : (woltSets.length > 0 || woltItemSummary) ? 'border-green-400 bg-green-50'
                       : 'border-gray-200 bg-white'
                     }`}
                   >
                     {woltParsing
                       ? <Loader2 size={26} className="mx-auto mb-2 animate-spin text-[#1B5E20]" />
                       : <Upload size={26} className={`mx-auto mb-2 ${woltSets.length > 0 ? 'text-[#1B5E20]' : 'text-gray-300'}`} />}
-                    <p className={`text-sm font-semibold mb-1 ${woltSets.length > 0 ? 'text-green-700' : 'text-gray-600'}`}>
+                    <p className={`text-sm font-semibold mb-1 ${woltSets.length > 0 || woltItemSummary ? 'text-green-700' : 'text-gray-600'}`}>
                       {woltParsing && woltProgress
                         ? `Reading ${woltProgress.done} of ${woltProgress.total}…`
+                        : woltParsing
+                          ? 'Reading the export…'
+                        : woltItemSummary
+                          ? `${woltItemSummary.orders} orders · ${woltItemSummary.lines} item lines read`
                         : woltSets.length > 0
                           ? `${woltSets.length} period${woltSets.length === 1 ? '' : 's'} read`
-                          : 'Drop the Wolt zips here'}
+                          : 'Drop the Wolt files here'}
                     </p>
                     <p className="text-xs text-gray-400 mb-3">
-                      A whole folder at once, or the PDFs of a single period
+                      A whole folder at once, the PDFs of a single period, or the purchases CSV
                     </p>
-                    <input type="file" accept=".pdf,.zip,application/pdf,application/zip" multiple id="wolt-file-input" className="hidden"
+                    <input type="file" accept=".pdf,.zip,.csv,application/pdf,application/zip,text/csv" multiple id="wolt-file-input" className="hidden"
                       onChange={e => { handleWoltFiles(Array.from(e.target.files ?? [])); e.target.value = ''; }} />
                     <label htmlFor="wolt-file-input"
                       className="inline-block px-4 py-2 bg-white border border-gray-200 rounded-lg text-xs font-semibold text-gray-600 hover:bg-gray-50 cursor-pointer">
@@ -3263,6 +3333,26 @@ export default function SalesReportsPage() {
                     </div>
                   )}
 
+                  {woltItemsSaved !== null && (
+                    <div className="mt-2 flex items-start gap-2 p-3 bg-green-50 border border-green-200 rounded-lg">
+                      <FileCheck size={15} className="text-green-600 flex-shrink-0 mt-0.5" />
+                      <p className="text-xs text-green-800">{woltItemsSaved} item lines saved.</p>
+                    </div>
+                  )}
+
+                  {woltItemRows.length > 0 && (
+                    <button
+                      onClick={handleImportWoltItems}
+                      disabled={importing}
+                      className={`mt-3 w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-bold transition-colors ${
+                        importing ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-[#1B5E20] text-white hover:bg-[#2E7D32]'
+                      }`}
+                    >
+                      {importing ? <Loader2 size={16} className="animate-spin" /> : <DatabaseZap size={16} />}
+                      {importing ? 'Saving…' : `Save ${woltItemRows.length} item lines`}
+                    </button>
+                  )}
+
                   <button
                     onClick={handleImportWolt}
                     disabled={woltImportable.length === 0 || importing}
@@ -3270,7 +3360,7 @@ export default function SalesReportsPage() {
                       woltImportable.length > 0 && !importing
                         ? 'bg-[#1B5E20] text-white hover:bg-[#2E7D32]'
                         : 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                    }`}
+                    } ${woltItemRows.length > 0 ? 'hidden' : ''}`}
                   >
                     {importing ? <Loader2 size={16} className="animate-spin" /> : <DatabaseZap size={16} />}
                     {importing                     ? 'Saving…'
@@ -3902,8 +3992,74 @@ export default function SalesReportsPage() {
                 </div>
               )}
 
+              {/* ── Wolt purchases export: what was sold, and does it agree ── */}
+              {reportType === 'wolt' && woltItemSummary && (() => {
+                const chk = woltItemSummary.check;
+                const allMatch = chk.daysCompared > 0 && chk.differing.length === 0;
+                return (
+                  <div className="space-y-4">
+                    <div className="bg-white border border-gray-100 rounded-xl shadow-sm overflow-hidden">
+                      <div className="px-4 py-3 border-b border-gray-100">
+                        <p className="text-sm font-bold text-gray-800">
+                          {toDe(woltItemSummary.from)} – {toDe(woltItemSummary.to)}
+                        </p>
+                        <p className="text-xs text-gray-400">{woltItemSummary.venues.join(', ')}</p>
+                      </div>
+                      <table className="w-full text-sm">
+                        <tbody>
+                          <tr className="border-b border-gray-100">
+                            <td className="px-4 py-2.5 text-gray-600">Orders</td>
+                            <td className="px-4 py-2.5 text-right tabular-nums text-gray-900">{woltItemSummary.orders}</td>
+                          </tr>
+                          <tr className="border-b border-gray-100">
+                            <td className="px-4 py-2.5 text-gray-600">
+                              Item lines
+                              <span className="block text-[11px] text-gray-400">{woltItemSummary.products} distinct products</span>
+                            </td>
+                            <td className="px-4 py-2.5 text-right tabular-nums text-gray-900 align-top">{woltItemSummary.lines}</td>
+                          </tr>
+                          {woltItemSummary.rejected > 0 && (
+                            <tr className="border-b border-gray-100">
+                              <td className="px-4 py-2.5 text-gray-600">
+                                Rejected orders
+                                <span className="block text-[11px] text-gray-400">stored, but not counted as sales</span>
+                              </td>
+                              <td className="px-4 py-2.5 text-right tabular-nums text-gray-500 align-top">{woltItemSummary.rejected}</td>
+                            </tr>
+                          )}
+                          <tr className="bg-gray-50">
+                            <td className="px-4 py-2.5 font-bold text-gray-800">Gross sold</td>
+                            <td className="px-4 py-2.5 text-right tabular-nums font-bold text-gray-900">{fmt(woltItemSummary.grossCents / 100)}</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div className={`flex items-start gap-2 p-3 rounded-lg border ${
+                      allMatch ? 'bg-green-50 border-green-200' : 'bg-amber-50 border-amber-200'
+                    }`}>
+                      {allMatch
+                        ? <FileCheck size={15} className="text-green-600 flex-shrink-0 mt-0.5" />
+                        : <AlertCircle size={15} className="text-amber-500 flex-shrink-0 mt-0.5" />}
+                      <div className={`text-xs ${allMatch ? 'text-green-800' : 'text-amber-800'} space-y-1`}>
+                        <p>
+                          Checked against the Wolt invoices already imported:{' '}
+                          <strong>{chk.daysMatching} of {chk.daysCompared} days match</strong>
+                          {chk.daysUnchecked > 0 && ` · ${chk.daysUnchecked} day${chk.daysUnchecked === 1 ? '' : 's'} not yet covered by an imported period`}.
+                        </p>
+                        {chk.differing.map(d => (
+                          <p key={d.date}>
+                            {toDe(d.date)}: export {fmt(d.exportGross)} vs invoiced {fmt(d.woltGross ?? 0)} ({fmt(d.diff ?? 0)})
+                          </p>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
               {/* ── Wolt preview: one row per period, plus what needs attention ── */}
-              {reportType === 'wolt' && (woltSets.length > 0 ? (
+              {reportType === 'wolt' && !woltItemSummary && (woltSets.length > 0 ? (
                 <div className="space-y-4">
                   {woltCoverage.length > 0 && (
                     <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg">
