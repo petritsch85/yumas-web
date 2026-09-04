@@ -5096,12 +5096,65 @@ export default function SalesReportsPage() {
                       };
 
                       /** The bold "Total net sales" row closing a block. */
-                      const netSalesTotalRow = (key: string, label: string, shift?: 'lunch' | 'dinner') => (
-                        <tr key={key} className="border-b-2 border-gray-200 hover:bg-gray-50/60 group" style={{ backgroundColor: '#f0fdf4' }}>
-                          <td className="sticky left-0 z-10 px-4 py-1.5 whitespace-nowrap border-r border-gray-100 bg-[#f0fdf4] group-hover:bg-gray-50/60 transition-colors text-xs font-bold text-[#1B5E20]">{label}</td>
-                          {emptyCells(shift)}
-                        </tr>
-                      );
+                      /**
+                       * Every channel's net sales for one day, added up.
+                       *
+                       * Orderbird follows the same actual-or-forecast rule its own row
+                       * uses, so the total always equals what is printed above it rather
+                       * than a second opinion computed from different inputs. Sources with
+                       * no data yet contribute nothing.
+                       */
+                      const netSalesTotalMap = (
+                        posMap: typeof lunchMap, fcastMap: Record<string, number>,
+                        webshopNet: Record<string, number>, woltNet: Record<string, number>,
+                        billsMap: Record<string, number>,
+                      ) => {
+                        const m: Record<string, number> = {};
+                        for (const col of dailyCols) {
+                          if (col.type !== 'day') continue;
+                          const k = col.dateKey;
+                          const actual = posMap[k]?.netTotal ?? 0;
+                          const orderbird = actual > 0
+                            ? actual
+                            : (k >= todayKey ? (fcastMap[k] ?? 0) : 0);
+                          const total = orderbird + (webshopNet[k] ?? 0) + (woltNet[k] ?? 0) + (billsMap[k] ?? 0);
+                          if (total !== 0) m[k] = total;
+                        }
+                        return m;
+                      };
+
+                      /** The bold "Total net sales" row closing a block. */
+                      const netSalesTotalRow = (
+                        key: string, label: string, map: Record<string, number>, shift?: 'lunch' | 'dinner',
+                      ) => {
+                        const qTotal = Object.entries(map)
+                          .filter(([k]) => dailyCols.some(c => c.type === 'day' && (c as { dateKey?: string }).dateKey === k))
+                          .reduce((sum, [, v]) => sum + v, 0);
+                        const show = (v: number) => v === 0
+                          ? <span className="text-gray-300">—</span>
+                          : <span className="text-[#1B5E20] font-bold">{fmtNum(v)}</span>;
+                        return (
+                          <tr key={key} className="border-b-2 border-gray-200 hover:bg-gray-50/60 group" style={{ backgroundColor: '#f0fdf4' }}>
+                            <td className="sticky left-0 z-10 px-4 py-1.5 whitespace-nowrap border-r border-gray-100 bg-[#f0fdf4] group-hover:bg-gray-50/60 transition-colors text-xs font-bold text-[#1B5E20]">{label}</td>
+                            {dailyCols.map((col, ci) => {
+                              const value = col.type === 'day'
+                                ? (map[col.dateKey] ?? 0)
+                                : col.wDateKeys.reduce((sum, k) => sum + (map[k] ?? 0), 0);
+                              return (
+                                <td key={ci} className="py-1.5 text-right tabular-nums text-[11px]"
+                                  style={col.type === 'day'
+                                    ? { paddingLeft: 4, paddingRight: 8, ...colStyle(shift, col.dateKey) }
+                                    : { paddingLeft: 4, paddingRight: 6, backgroundColor: '#fffbeb', borderLeft: '1px solid #fde68a', borderRight: '1px solid #fde68a' }}>
+                                  {show(value)}
+                                </td>
+                              );
+                            })}
+                            <td className="py-1.5 text-right tabular-nums text-[11px] border-l border-gray-200" style={{ paddingLeft: 4, paddingRight: 8 }}>
+                              {show(qTotal)}
+                            </td>
+                          </tr>
+                        );
+                      };
 
                       /** Visual gap between the two blocks. */
                       const netSalesSpacerRow = (key: string) => (
@@ -5338,7 +5391,8 @@ export default function SalesReportsPage() {
                           {NET_SALES_AFTER_WOLT.map(src => netSalesSourceRow(src, 'lunch'))}
                           {billsRow('🧾 Bills', billsLunchMap, 'lunch')}
                           {NET_SALES_AFTER_BILLS.map(src => netSalesSourceRow(src, 'lunch'))}
-                          {netSalesTotalRow('total-net-sales-lunch', 'Total net sales · Lunch', 'lunch')}
+                          {netSalesTotalRow('total-net-sales-lunch', 'Total net sales · Lunch',
+                            netSalesTotalMap(lunchMap, lunchForecastMap, webshopMaps.lunch.net, woltMaps.lunch.net, billsLunchMap), 'lunch')}
                           {netSalesSpacerRow('net-sales-gap')}
                           {netSalesHeaderRow('Net sales · Dinner', 'dinner')}
                           {posRow('🟠 Orderbird', dinnerMap, dinnerForecastMap, dinnerQtrTotal, 'dinner')}
@@ -5347,7 +5401,8 @@ export default function SalesReportsPage() {
                           {NET_SALES_AFTER_WOLT.map(src => netSalesSourceRow(src, 'dinner'))}
                           {billsRow('🧾 Bills', billsDinnerMap, 'dinner')}
                           {NET_SALES_AFTER_BILLS.map(src => netSalesSourceRow(src, 'dinner'))}
-                          {netSalesTotalRow('total-net-sales-dinner', 'Total net sales · Dinner', 'dinner')}
+                          {netSalesTotalRow('total-net-sales-dinner', 'Total net sales · Dinner',
+                            netSalesTotalMap(dinnerMap, dinnerForecastMap, webshopMaps.dinner.net, woltMaps.dinner.net, billsDinnerMap), 'dinner')}
                           {netSalesSpacerRow('net-sales-gap-2')}
                           {netSalesHeaderRow('Net sales · Day')}
                           {posRow('🟠 Orderbird', orderbirdDayMap, orderbirdDayForecast, orderbirdDayQtr)}
@@ -5356,7 +5411,8 @@ export default function SalesReportsPage() {
                           {NET_SALES_AFTER_WOLT.map(src => netSalesSourceRow(src))}
                           {billsRow('🧾 Bills', billsDayMap)}
                           {NET_SALES_AFTER_BILLS.map(src => netSalesSourceRow(src))}
-                          {netSalesTotalRow('total-net-sales-day', 'Total net sales · All day')}
+                          {netSalesTotalRow('total-net-sales-day', 'Total net sales · All day',
+                            netSalesTotalMap(orderbirdDayMap, orderbirdDayForecast, webshopMaps.day.net, woltMaps.day.net, billsDayMap))}
                           {netSalesSpacerRow('net-sales-gap-3')}
 
                           {/* ── 2) Orderbird — the detail behind the Orderbird summary rows ── */}
