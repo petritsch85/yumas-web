@@ -48,6 +48,10 @@ interface WebshopLineMaps {
 
 /** The five Wolt P&L lines, each as dateKey → amount. */
 interface WoltLineMaps {
+  /** Order net before refunds are taken off. */
+  preRefunds:  Record<string, number>;
+  /** Refunds, held positive so the row can print its own minus sign. */
+  refunds:     Record<string, number>;
   preCom:      Record<string, number>;
   commission:  Record<string, number>;
   preAds:      Record<string, number>;
@@ -1330,11 +1334,17 @@ export default function SalesReportsPage() {
    * its own here, it is visible on the Wolt page.
    */
   const woltMaps = useMemo(() => {
-    const empty = (): WoltLineMaps => ({ preCom: {}, commission: {}, preAds: {}, advertising: {}, net: {}, orders: {} });
+    const empty = (): WoltLineMaps => ({
+      preRefunds: {}, refunds: {}, preCom: {}, commission: {},
+      preAds: {}, advertising: {}, net: {}, orders: {},
+    });
     const lunch = empty(), dinner = empty(), day = empty();
 
     const add = (m: WoltLineMaps, r: WoltShiftRowDb) => {
       const k = r.sale_date;
+      m.preRefunds[k]  = (m.preRefunds[k]  ?? 0) + Number(r.net_sales);
+      // Stored negative; the row prints the sign, so it is held positive here.
+      m.refunds[k]     = (m.refunds[k]     ?? 0) - Number(r.refund_est);
       m.preCom[k]      = (m.preCom[k]      ?? 0) + Number(r.net_sales) + Number(r.refund_est);
       m.commission[k]  = (m.commission[k]  ?? 0) + Number(r.commission);
       m.preAds[k]      = (m.preAds[k]      ?? 0) + Number(r.net_pre_ads);
@@ -4442,6 +4452,8 @@ export default function SalesReportsPage() {
 
           // label, bold, which line of woltMaps it reads, whether it is a deduction
           const WOLT_ROWS: [string, boolean, keyof WoltLineMaps, boolean][] = [
+            ['Net sales · pre refunds',  true,  'preRefunds',  false],
+            ['Refunds',                  false, 'refunds',     true ],
             ['Net sales · pre com, Ads', true,  'preCom',      false],
             ['Commission',               false, 'commission',  true ],
             ['Net sales · pre Ads',      true,  'preAds',      false],
@@ -4684,7 +4696,7 @@ export default function SalesReportsPage() {
                   </tr>
                   {woltCountRow(`${blockKey}-orders`, '# Orders', woltMaps[blockShift].orders)}
                   {woltRatioRow(`${blockKey}-per-order`, 'Net sales / order',
-                    woltMaps[blockShift].preCom, woltMaps[blockShift].orders)}
+                    woltMaps[blockShift].preRefunds, woltMaps[blockShift].orders)}
                   {WOLT_ROWS.map(([label, bold, line, deduction]) => (
                     woltLineRow(`${blockKey}-${line}`, label, woltMaps[blockShift][line], { bold, deduction })
                   ))}

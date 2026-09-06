@@ -319,8 +319,9 @@ export default function WoltPage() {
                 <th className="px-4 py-2.5 text-left">Day</th>
                 <th className="px-3 py-2.5 text-left">Shift</th>
                 <th className="px-2.5 py-2.5 text-right">Orders</th>
-                <th className="px-2.5 py-2.5 text-right">Net sales</th>
+                <th className="px-2.5 py-2.5 text-right">Net sales · pre refunds</th>
                 <th className="px-2.5 py-2.5 text-right">Refunds</th>
+                <th className="px-2.5 py-2.5 text-right">Net sales · pre com, Ads</th>
                 <th className="px-2.5 py-2.5 text-right">Commission</th>
                 <th className="px-2.5 py-2.5 text-right">Net · pre Ads</th>
                 <th className="px-2.5 py-2.5 text-right">Advertising (est.)</th>
@@ -329,7 +330,7 @@ export default function WoltPage() {
             </thead>
             <tbody>
               {days.length === 0 && (
-                <tr><td colSpan={9} className="px-4 py-12 text-center text-sm text-gray-400">
+                <tr><td colSpan={10} className="px-4 py-12 text-center text-sm text-gray-400">
                   No daily breakdown yet — upload a set that includes the sales report (Umsatzbericht)
                 </td></tr>
               )}
@@ -345,6 +346,9 @@ export default function WoltPage() {
                     <td className="px-2.5 py-2 text-right tabular-nums text-gray-400">{r.orders}</td>
                     <td className="px-2.5 py-2 text-right tabular-nums text-gray-700">{fmt(Number(r.net_sales))}</td>
                     <td className="px-2.5 py-2 text-right tabular-nums text-gray-400">{fmt(Number(r.refund_est))}</td>
+                    <td className="px-2.5 py-2 text-right tabular-nums text-gray-700">
+                      {fmt(Number(r.net_sales) + Number(r.refund_est))}
+                    </td>
                     <td className="px-2.5 py-2 text-right tabular-nums text-gray-600">−{fmt(Number(r.commission))}</td>
                     <td className="px-2.5 py-2 text-right tabular-nums text-gray-700">{fmt(Number(r.net_pre_ads))}</td>
                     <td className="px-2.5 py-2 text-right tabular-nums text-gray-400">−{fmt(Number(r.advertising_est ?? 0))}</td>
@@ -360,6 +364,9 @@ export default function WoltPage() {
                   <td className="px-2.5 py-2.5 text-right tabular-nums">{shifts.reduce((s, r) => s + r.orders, 0)}</td>
                   <td className="px-2.5 py-2.5 text-right tabular-nums">{fmt(shifts.reduce((s, r) => s + Number(r.net_sales), 0))}</td>
                   <td className="px-2.5 py-2.5 text-right tabular-nums">{fmt(shifts.reduce((s, r) => s + Number(r.refund_est), 0))}</td>
+                  <td className="px-2.5 py-2.5 text-right tabular-nums">
+                    {fmt(shifts.reduce((s, r) => s + Number(r.net_sales) + Number(r.refund_est), 0))}
+                  </td>
                   <td className="px-2.5 py-2.5 text-right tabular-nums">−{fmt(shifts.reduce((s, r) => s + Number(r.commission), 0))}</td>
                   <td className="px-2.5 py-2.5 text-right tabular-nums">{fmt(shifts.reduce((s, r) => s + Number(r.net_pre_ads), 0))}</td>
                   <td className="px-2.5 py-2.5 text-right tabular-nums">−{fmt(shifts.reduce((s, r) => s + Number(r.advertising_est ?? 0), 0))}</td>
