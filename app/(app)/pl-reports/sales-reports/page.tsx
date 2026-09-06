@@ -4569,7 +4569,7 @@ export default function SalesReportsPage() {
            * A plain count — no currency formatting, no minus signs.
            */
           const woltCountRow = (key: string, label: string, map: Record<string, number>) => (
-            woltLineRow(key, label, map, { count: true })
+            woltLineRow(key, label, map, { count: true, bold: true })
           );
 
           /**
@@ -4682,7 +4682,7 @@ export default function SalesReportsPage() {
                     <td className="sticky left-0 z-10 px-4 py-1.5 whitespace-nowrap border-r border-gray-100 bg-[#eef2ff] group-hover:bg-gray-50 transition-colors text-xs font-bold text-gray-800">{blockLabel}</td>
                     {woltEmptyCells()}
                   </tr>
-                  {woltCountRow(`${blockKey}-orders`, '# orders', woltMaps[blockShift].orders)}
+                  {woltCountRow(`${blockKey}-orders`, '# Orders', woltMaps[blockShift].orders)}
                   {woltRatioRow(`${blockKey}-per-order`, 'Net sales / order',
                     woltMaps[blockShift].preCom, woltMaps[blockShift].orders)}
                   {WOLT_ROWS.map(([label, bold, line, deduction]) => (
