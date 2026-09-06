@@ -4465,7 +4465,7 @@ export default function SalesReportsPage() {
                 </span>;
             return (
               <tr key={key} className="border-b border-gray-100 hover:bg-gray-50/60 group" style={{ backgroundColor: '#ffffff' }}>
-                <td className={`sticky left-0 z-10 px-4 py-1 whitespace-nowrap border-r border-gray-100 bg-white group-hover:bg-gray-50/60 transition-colors ${
+                <td className={`sticky left-0 z-10 px-4 py-1 whitespace-nowrap border-r border-gray-100 bg-white group-hover:bg-gray-50 transition-colors ${
                   bold ? 'text-xs font-bold text-gray-800' : 'text-[11px] text-gray-600'
                 }`}>{label}</td>
                 {dailyCols.map((col, ci) => {
@@ -4511,7 +4511,7 @@ export default function SalesReportsPage() {
 
             return (
               <tr key={key} className="border-b border-gray-100 hover:bg-gray-50/60 group" style={{ backgroundColor: '#ffffff' }}>
-                <td className={`sticky left-0 z-10 px-4 py-1 whitespace-nowrap border-r border-gray-100 bg-white group-hover:bg-gray-50/60 transition-colors ${
+                <td className={`sticky left-0 z-10 px-4 py-1 whitespace-nowrap border-r border-gray-100 bg-white group-hover:bg-gray-50 transition-colors ${
                   bold ? 'text-xs font-bold text-gray-800' : 'text-[11px] text-gray-600'
                 }`}>{label}</td>
                 {dailyCols.map((col, ci) => {
@@ -4547,7 +4547,7 @@ export default function SalesReportsPage() {
                 <Fragment key={blockKey}>
                   {bi > 0 && <tr><td colSpan={totalCols} style={{ height: 10, backgroundColor: '#f9fafb' }} /></tr>}
                   <tr className="border-b border-gray-200 hover:bg-gray-50/60 group" style={{ backgroundColor: '#eef2ff' }}>
-                    <td className="sticky left-0 z-10 px-4 py-1.5 whitespace-nowrap border-r border-gray-100 bg-[#eef2ff] group-hover:bg-gray-50/60 transition-colors text-xs font-bold text-gray-800">{blockLabel}</td>
+                    <td className="sticky left-0 z-10 px-4 py-1.5 whitespace-nowrap border-r border-gray-100 bg-[#eef2ff] group-hover:bg-gray-50 transition-colors text-xs font-bold text-gray-800">{blockLabel}</td>
                     {woltEmptyCells()}
                   </tr>
                   {webshopLineRow(`${blockKey}-orders`, '# orders', webshopMaps[blockKey],
@@ -4584,7 +4584,7 @@ export default function SalesReportsPage() {
                 <Fragment key={blockKey}>
                   {bi > 0 && <tr><td colSpan={totalCols} style={{ height: 10, backgroundColor: '#f9fafb' }} /></tr>}
                   <tr className="border-b border-gray-200 hover:bg-gray-50/60 group" style={{ backgroundColor: '#eef2ff' }}>
-                    <td className="sticky left-0 z-10 px-4 py-1.5 whitespace-nowrap border-r border-gray-100 bg-[#eef2ff] group-hover:bg-gray-50/60 transition-colors text-xs font-bold text-gray-800">{blockLabel}</td>
+                    <td className="sticky left-0 z-10 px-4 py-1.5 whitespace-nowrap border-r border-gray-100 bg-[#eef2ff] group-hover:bg-gray-50 transition-colors text-xs font-bold text-gray-800">{blockLabel}</td>
                     {woltEmptyCells()}
                   </tr>
                   {WOLT_ROWS.map(([label, bold, line, deduction]) => (
@@ -4641,7 +4641,7 @@ export default function SalesReportsPage() {
                 const bg     = isBold ? '#f0fdf4' : '#ffffff';
                 return (
                   <tr key={i} className="border-b border-gray-100 hover:bg-gray-50/60 group" style={{ backgroundColor:bg }}>
-                    <td className={`sticky left-0 z-10 px-4 py-2 whitespace-nowrap border-r border-gray-100 group-hover:bg-gray-50/60 transition-colors ${
+                    <td className={`sticky left-0 z-10 px-4 py-2 whitespace-nowrap border-r border-gray-100 group-hover:bg-gray-50 transition-colors ${
                       isBold ? 'font-bold text-gray-900' : isPct ? 'pl-8 text-gray-400 italic' : 'text-gray-700'
                     }`} style={{ backgroundColor:bg }}>
                       {row.label}
@@ -4752,7 +4752,7 @@ export default function SalesReportsPage() {
                         const qHasMix     = qActualSum > 0 && qFcastRem > 0;
                         return (
                           <tr key={`${shift ?? 'day'}-${label}`} className="border-b border-gray-100 hover:bg-gray-50/60 group" style={{ backgroundColor:'#ffffff' }}>
-                            <td className="sticky left-0 z-10 px-4 py-2 whitespace-nowrap border-r border-gray-100 group-hover:bg-gray-50/60 transition-colors text-gray-700" style={{ backgroundColor:'#ffffff' }}>{label}</td>
+                            <td className="sticky left-0 z-10 px-4 py-2 whitespace-nowrap border-r border-gray-100 group-hover:bg-gray-50 transition-colors text-gray-700" style={{ backgroundColor:'#ffffff' }}>{label}</td>
                             {dailyCols.map((col, ci) => {
                               if (col.type === 'day') {
                                 const isFuture = col.dateKey >= todayKey;
@@ -4795,7 +4795,7 @@ export default function SalesReportsPage() {
                         const qHasMix    = qDel > 0 && qFcastRem > 0;
                         return (
                           <tr key={`${shift ?? 'x'}-${label}`} className="border-b border-gray-100 hover:bg-gray-50/60 group">
-                            <td className="sticky left-0 z-10 px-4 py-2 whitespace-nowrap border-r border-gray-100 bg-white group-hover:bg-gray-50/60 transition-colors text-gray-700">{label}</td>
+                            <td className="sticky left-0 z-10 px-4 py-2 whitespace-nowrap border-r border-gray-100 bg-white group-hover:bg-gray-50 transition-colors text-gray-700">{label}</td>
                             {dailyCols.map((col, ci) => {
                               if (col.type === 'day') {
                                 const isFuture = col.dateKey >= todayKey;
@@ -4839,7 +4839,7 @@ export default function SalesReportsPage() {
                         const qBills = Object.entries(billsMap).filter(([k]) => dailyCols.some(c => c.type === 'day' && (c as any).dateKey === k)).reduce((s, [,v]) => s + v, 0);
                         return (
                           <tr key={label} className="border-b border-gray-100 hover:bg-gray-50/60 group">
-                            <td className="sticky left-0 z-10 px-4 py-2 whitespace-nowrap border-r border-gray-100 bg-white group-hover:bg-gray-50/60 transition-colors text-gray-700">{label}</td>
+                            <td className="sticky left-0 z-10 px-4 py-2 whitespace-nowrap border-r border-gray-100 bg-white group-hover:bg-gray-50 transition-colors text-gray-700">{label}</td>
                             {dailyCols.map((col, ci) => {
                               if (col.type === 'day') {
                                 const val = billsMap[col.dateKey] ?? 0;
@@ -4876,7 +4876,7 @@ export default function SalesReportsPage() {
                         const qHasMix    = (qPosActual + qDel + qBills) > 0 && (qFcastRem + qSimplyFcastRem) > 0;
                         return (
                           <tr key={label} className="border-b border-gray-100 hover:bg-gray-50/60 group" style={{ backgroundColor: bg }}>
-                            <td className="sticky left-0 z-10 px-4 py-2 whitespace-nowrap border-r border-gray-100 group-hover:bg-gray-50/60 transition-colors font-bold" style={{ backgroundColor: bg, color }}>{label}</td>
+                            <td className="sticky left-0 z-10 px-4 py-2 whitespace-nowrap border-r border-gray-100 group-hover:bg-gray-50 transition-colors font-bold" style={{ backgroundColor: bg, color }}>{label}</td>
                             {dailyCols.map((col, ci) => {
                               if (col.type === 'day') {
                                 const isFuture   = col.dateKey >= todayKey;
@@ -5045,7 +5045,7 @@ export default function SalesReportsPage() {
                       /** A "Net sales - Lunch/Dinner" heading row. */
                       const netSalesHeaderRow = (label: string, shift?: 'lunch' | 'dinner') => (
                         <tr key={label} className="border-b border-gray-200 hover:bg-gray-50/60 group" style={{ backgroundColor: '#eef2ff' }}>
-                          <td className="sticky left-0 z-10 px-4 py-1.5 whitespace-nowrap border-r border-gray-100 bg-[#eef2ff] group-hover:bg-gray-50/60 transition-colors text-xs font-bold text-gray-800">{label}</td>
+                          <td className="sticky left-0 z-10 px-4 py-1.5 whitespace-nowrap border-r border-gray-100 bg-[#eef2ff] group-hover:bg-gray-50 transition-colors text-xs font-bold text-gray-800">{label}</td>
                           {emptyCells(shift)}
                         </tr>
                       );
@@ -5053,7 +5053,7 @@ export default function SalesReportsPage() {
                       /** One revenue source inside a Net sales block. */
                       const netSalesSourceRow = (label: string, shift?: 'lunch' | 'dinner') => (
                         <tr key={`${shift ?? 'day'}-${label}`} className="border-b border-gray-100 hover:bg-gray-50/60 group" style={{ backgroundColor: '#ffffff' }}>
-                          <td className="sticky left-0 z-10 px-4 py-1 whitespace-nowrap border-r border-gray-100 bg-white group-hover:bg-gray-50/60 transition-colors text-[11px] text-gray-600 pl-8">{label}</td>
+                          <td className="sticky left-0 z-10 px-4 py-1 whitespace-nowrap border-r border-gray-100 bg-white group-hover:bg-gray-50 transition-colors text-[11px] text-gray-600 pl-8">{label}</td>
                           {emptyCells(shift)}
                         </tr>
                       );
@@ -5071,7 +5071,7 @@ export default function SalesReportsPage() {
                           : <span className="text-blue-600">{fmtNum(v)}</span>;
                         return (
                           <tr key={`${shift ?? 'day'}-${label}`} className="border-b border-gray-100 hover:bg-gray-50/60 group" style={{ backgroundColor: '#ffffff' }}>
-                            <td className="sticky left-0 z-10 px-4 py-1 whitespace-nowrap border-r border-gray-100 bg-white group-hover:bg-gray-50/60 transition-colors text-[11px] text-gray-600 pl-8">{label}</td>
+                            <td className="sticky left-0 z-10 px-4 py-1 whitespace-nowrap border-r border-gray-100 bg-white group-hover:bg-gray-50 transition-colors text-[11px] text-gray-600 pl-8">{label}</td>
                             {dailyCols.map((col, ci) => {
                               if (col.type === 'day') {
                                 return (
@@ -5135,7 +5135,7 @@ export default function SalesReportsPage() {
                           : <span className="text-[#1B5E20] font-bold">{fmtNum(v)}</span>;
                         return (
                           <tr key={key} className="border-b-2 border-gray-200 hover:bg-gray-50/60 group" style={{ backgroundColor: '#f0fdf4' }}>
-                            <td className="sticky left-0 z-10 px-4 py-1.5 whitespace-nowrap border-r border-gray-100 bg-[#f0fdf4] group-hover:bg-gray-50/60 transition-colors text-xs font-bold text-[#1B5E20]">{label}</td>
+                            <td className="sticky left-0 z-10 px-4 py-1.5 whitespace-nowrap border-r border-gray-100 bg-[#f0fdf4] group-hover:bg-gray-50 transition-colors text-xs font-bold text-[#1B5E20]">{label}</td>
                             {dailyCols.map((col, ci) => {
                               const value = col.type === 'day'
                                 ? (map[col.dateKey] ?? 0)
@@ -5197,7 +5197,7 @@ export default function SalesReportsPage() {
 
                       const metricRow = (label: string, valMap: Record<string, number>, qVal: number | null, format: 'count' | 'currency' = 'count', shift?: 'lunch' | 'dinner') => (
                         <tr key={label} className="border-b border-gray-100 hover:bg-gray-50/60 group" style={{ backgroundColor:'#f8fafc' }}>
-                          <td className="sticky left-0 z-10 px-4 py-1 whitespace-nowrap border-r border-gray-100 bg-[#f8fafc] group-hover:bg-gray-50/60 transition-colors text-[11px] text-gray-400 italic">{label}</td>
+                          <td className="sticky left-0 z-10 px-4 py-1 whitespace-nowrap border-r border-gray-100 bg-[#f8fafc] group-hover:bg-gray-50 transition-colors text-[11px] text-gray-400 italic">{label}</td>
                           {dailyCols.map((col, ci) => {
                             if (col.type === 'day') {
                               const val = valMap[col.dateKey] ?? null;
@@ -5281,7 +5281,7 @@ export default function SalesReportsPage() {
                         const qTotal = qActual + qFcst;
                         return (
                           <tr key={label} className="border-b border-gray-100 hover:bg-gray-50/60 group" style={{ backgroundColor:'#f8fafc' }}>
-                            <td className="sticky left-0 z-10 px-4 py-1 whitespace-nowrap border-r border-gray-100 bg-[#f8fafc] group-hover:bg-gray-50/60 transition-colors text-[11px] text-gray-400 italic">{label}</td>
+                            <td className="sticky left-0 z-10 px-4 py-1 whitespace-nowrap border-r border-gray-100 bg-[#f8fafc] group-hover:bg-gray-50 transition-colors text-[11px] text-gray-400 italic">{label}</td>
                             {dailyCols.map((col, ci) => {
                               if (col.type === 'day') {
                                 const isCurDay = col.dateKey === todayKey;
@@ -5333,7 +5333,7 @@ export default function SalesReportsPage() {
                         const qActualVal = qMetrics.guests > 0 ? (qMetrics.netFood + qMetrics.netDrinks) / qMetrics.guests : null;
                         return (
                           <tr key={label} className="border-b border-gray-100 hover:bg-gray-50/60 group" style={{ backgroundColor:'#f8fafc' }}>
-                            <td className="sticky left-0 z-10 px-4 py-1 whitespace-nowrap border-r border-gray-100 bg-[#f8fafc] group-hover:bg-gray-50/60 transition-colors text-[11px] text-gray-400 italic">{label}</td>
+                            <td className="sticky left-0 z-10 px-4 py-1 whitespace-nowrap border-r border-gray-100 bg-[#f8fafc] group-hover:bg-gray-50 transition-colors text-[11px] text-gray-400 italic">{label}</td>
                             {dailyCols.map((col, ci) => {
                               if (col.type === 'day') {
                                 const isCurDay = col.dateKey === todayKey;
@@ -5883,7 +5883,7 @@ export default function SalesReportsPage() {
                       const bg = row.bold ? '#f0fdf4' : '#ffffff';
                       return (
                         <tr key={i} className="border-b border-gray-100 hover:bg-gray-50/60 group" style={{ backgroundColor: bg }}>
-                          <td className={`sticky left-0 z-10 px-4 py-2 whitespace-nowrap border-r border-gray-100 group-hover:bg-gray-50/60 transition-colors ${row.bold ? 'font-bold text-gray-900' : row.perDay ? 'pl-8 text-gray-400 italic text-[11px]' : 'text-gray-700'}`}
+                          <td className={`sticky left-0 z-10 px-4 py-2 whitespace-nowrap border-r border-gray-100 group-hover:bg-gray-50 transition-colors ${row.bold ? 'font-bold text-gray-900' : row.perDay ? 'pl-8 text-gray-400 italic text-[11px]' : 'text-gray-700'}`}
                             style={{ backgroundColor: bg }}>
                             {row.label}
                           </td>
@@ -5944,7 +5944,7 @@ export default function SalesReportsPage() {
                       const bg     = isBold ? '#f0fdf4' : '#ffffff';
                       return (
                         <tr key={i} className="border-b border-gray-100 hover:bg-gray-50/60 group" style={{ backgroundColor:bg }}>
-                          <td className={`sticky left-0 z-10 px-4 py-2 whitespace-nowrap border-r border-gray-100 group-hover:bg-gray-50/60 transition-colors ${
+                          <td className={`sticky left-0 z-10 px-4 py-2 whitespace-nowrap border-r border-gray-100 group-hover:bg-gray-50 transition-colors ${
                             isBold ? 'font-bold text-gray-900' : isPct ? 'pl-8 text-gray-400 italic' : 'text-gray-700'
                           }`} style={{ backgroundColor:bg }}>
                             {row.label}
@@ -6045,7 +6045,7 @@ export default function SalesReportsPage() {
                         const bg     = isBold ? '#f0fdf4' : '#ffffff';
                         return (
                           <tr key={i} className="border-b border-gray-100 hover:bg-gray-50/60 group" style={{ backgroundColor:bg }}>
-                            <td className={`sticky left-0 z-10 px-4 py-2 whitespace-nowrap border-r border-gray-100 group-hover:bg-gray-50/60 transition-colors ${
+                            <td className={`sticky left-0 z-10 px-4 py-2 whitespace-nowrap border-r border-gray-100 group-hover:bg-gray-50 transition-colors ${
                               isBold ? 'font-bold text-gray-900' : isPct ? 'pl-8 text-gray-400 italic' : 'text-gray-700'
                             }`} style={{ backgroundColor:bg }}>
                               {row.label}
@@ -6098,7 +6098,7 @@ export default function SalesReportsPage() {
                               const fyVal = fyTotals[cat] ?? 0;
                               return (
                                 <tr key={cat} className="border-b border-gray-100 hover:bg-gray-50/60 group" style={{ backgroundColor:'#ffffff' }}>
-                                  <td className="sticky left-0 z-10 px-4 py-2 whitespace-nowrap border-r border-gray-100 text-gray-700 group-hover:bg-gray-50/60 transition-colors"
+                                  <td className="sticky left-0 z-10 px-4 py-2 whitespace-nowrap border-r border-gray-100 text-gray-700 group-hover:bg-gray-50 transition-colors"
                                     style={{ backgroundColor:'#ffffff' }}>
                                     {cat}
                                   </td>

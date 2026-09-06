@@ -401,7 +401,7 @@ export default function WeeklySalesPage() {
                     >
                       {/* Metric label */}
                       <td
-                        className={`sticky left-0 z-10 px-4 py-2 whitespace-nowrap border-r border-gray-100 group-hover:bg-gray-50/60 transition-colors ${
+                        className={`sticky left-0 z-10 px-4 py-2 whitespace-nowrap border-r border-gray-100 group-hover:bg-gray-50 transition-colors ${
                           isBold ? 'font-bold text-gray-900' :
                           isPct  ? 'pl-8 text-gray-400 italic' :
                                    'text-gray-700'
