@@ -442,9 +442,9 @@ export default function WoltPage() {
         then reconciled to subtotal (B). Refunds come from the report's Abzüge section, which dates
         each one, so a refund is booked to the day and shift it happened on. Only what those
         dated lines leave unaccounted for — usually a few cents of rounding — is spread pro-rata.
-        Advertising is Wolt&apos;s &quot;Dienstleistungen und Produkte&quot; charge from the netting report,
-        split the same way — so it carries the same estimate caveat, and it can include fees that are
-        not advertising.
+        Advertising is Wolt&apos;s &quot;Dienstleistungen und Produkte&quot; charge from the netting
+        report. That one really is billed per period, so it stays an estimate at shift level —
+        spread pro-rata on net sales — and it can include fees that are not advertising.
       </p>
     </div>
   );
