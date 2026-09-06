@@ -3,7 +3,7 @@ import { extractText, getDocumentProxy } from 'unpdf';
 import { unzipSync } from 'fflate';
 import { getSupabaseAdmin } from '@/lib/supabase-admin';
 import { parseWoltInvoice, WoltParseError } from '@/lib/wolt-invoice';
-import { parseWoltSalesReport, aggregateWoltShifts, WoltSalesParseError } from '@/lib/wolt-sales-report';
+import { parseWoltSalesReport, parseWoltDeductions, aggregateWoltShifts, WoltSalesParseError } from '@/lib/wolt-sales-report';
 import { buildWoltServices, WoltServicesParseError } from '@/lib/wolt-services';
 import { matchLocation, ordersMatchPeriod } from '@/lib/wolt-set';
 import { isPayoutReport, parseWoltPayoutReport, parseWoltFeeInvoice, toInvoiceShape } from '@/lib/wolt-payout';
@@ -185,7 +185,14 @@ function buildSelfDeliverySet(
         orders, data, services.total,
         (date, shift) => isClosed(location.id, date, shift),
         () => 0,   // charged per period here, so spread pro-rata rather than per order
+        parseWoltDeductions(salesDoc.text),
       );
+      if (Math.abs(breakdown.refundsSpread) >= 0.05) {
+        warnings.push(
+          `${breakdown.refundsSpread.toFixed(2)} of the refund total is not accounted for by the ` +
+          `dated deductions and had to be spread across the period.`,
+        );
+      }
       if (breakdown.reassigned > 0) {
         warnings.push(
           `${breakdown.reassigned} order${breakdown.reassigned === 1 ? '' : 's'} moved to the other shift — ` +
@@ -315,7 +322,15 @@ function buildSet(
       breakdown = aggregateWoltShifts(
         orders, data, services?.total ?? 0,
         (date, shift) => isClosed(location.id, date, shift),
+        undefined,
+        parseWoltDeductions(salesDoc.text),
       );
+      if (Math.abs(breakdown.refundsSpread) >= 0.05) {
+        warnings.push(
+          `${breakdown.refundsSpread.toFixed(2)} of the refund total is not accounted for by the ` +
+          `dated deductions and had to be spread across the period.`,
+        );
+      }
       if (breakdown.reassigned > 0) {
         warnings.push(
           `${breakdown.reassigned} order${breakdown.reassigned === 1 ? '' : 's'} moved to the other shift — ` +

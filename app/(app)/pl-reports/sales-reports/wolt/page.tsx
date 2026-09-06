@@ -320,7 +320,7 @@ export default function WoltPage() {
                 <th className="px-3 py-2.5 text-left">Shift</th>
                 <th className="px-2.5 py-2.5 text-right">Orders</th>
                 <th className="px-2.5 py-2.5 text-right">Net sales</th>
-                <th className="px-2.5 py-2.5 text-right">Refunds (est.)</th>
+                <th className="px-2.5 py-2.5 text-right">Refunds</th>
                 <th className="px-2.5 py-2.5 text-right">Commission</th>
                 <th className="px-2.5 py-2.5 text-right">Net · pre Ads</th>
                 <th className="px-2.5 py-2.5 text-right">Advertising (est.)</th>
@@ -439,8 +439,9 @@ export default function WoltPage() {
       <p className="mt-3 mb-8 text-xs text-gray-400">
         Orders placed in the afternoon are evening pre-orders, so anything after 14:30 counts as dinner.
         Commission is charged per order on the gross value — 27% on Wolt+ orders, 24% otherwise —
-        then reconciled to subtotal (B). Refunds are marked <strong>(est.)</strong> because Wolt reports
-        them only per period: the total is exact, the split across shifts is pro-rata on net sales.
+        then reconciled to subtotal (B). Refunds come from the report's Abzüge section, which dates
+        each one, so a refund is booked to the day and shift it happened on. Only what those
+        dated lines leave unaccounted for — usually a few cents of rounding — is spread pro-rata.
         Advertising is Wolt&apos;s &quot;Dienstleistungen und Produkte&quot; charge from the netting report,
         split the same way — so it carries the same estimate caveat, and it can include fees that are
         not advertising.

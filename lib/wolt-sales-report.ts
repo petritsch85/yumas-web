@@ -15,9 +15,11 @@
  *    per order rather than smeared across the period.
  *
  *  - Order net sums to slightly more than the invoice's subtotal (A): the
- *    difference is the period's refunds (Summe Vergütungen), which Wolt reports
- *    only at period level. Those are spread pro-rata and kept on their own line
- *    so a shift figure is never quietly adjusted.
+ *    difference is the period's refunds. The report's "Abzüge" section dates
+ *    and times every one of them, so each is booked to the shift it happened
+ *    on; only what the dated lines leave unaccounted for is spread pro-rata.
+ *    Refunds keep their own line either way, so a shift figure is never
+ *    quietly adjusted.
  */
 
 import type { WoltInvoiceData } from './wolt-invoice';
@@ -56,7 +58,12 @@ export interface WoltShiftRow {
   gross:      number;
   /** Order net, before the refund share. */
   netSales:   number;
-  /** This shift's pro-rata share of the period's refunds. Negative. */
+  /**
+   * Refunds booked to this shift. Negative.
+   *
+   * The dated deductions land on the day and shift they happened on; only
+   * whatever the dated lines do not account for is spread pro-rata.
+   */
   refundEst:  number;
   /** Commission attributed to this shift. Positive. */
   commission: number;
@@ -77,8 +84,16 @@ export interface WoltShiftBreakdown {
   preOrders: number;
   /** Orders moved because the shift their time implies was closed that day. */
   reassigned: number;
-  /** Total refunds spread across the shifts. Negative. */
+  /** The period's total refunds. Negative. */
   refundTotal: number;
+  /** How many dated deductions were booked to their own day and shift. */
+  refundsDated: number;
+  /**
+   * The part of the refund total no dated deduction accounts for, spread
+   * pro-rata. Usually a few cents of rounding; a larger figure means the
+   * period's sales and its orders disagree for some other reason.
+   */
+  refundsSpread: number;
   /**
    * Difference between commission from the per-order rates and the invoice's
    * subtotal (B), spread pro-rata so the rows always tie to the invoice.
@@ -125,6 +140,61 @@ const ORDER_RE = new RegExp(
 function classify(minutes: number): { shift: WoltShift; preOrder: boolean } {
   if (minutes <= LUNCH_END_MINUTES) return { shift: 'lunch', preOrder: false };
   return { shift: 'dinner', preOrder: minutes < DINNER_START_MINUTES };
+}
+
+/** One deduction from the sales report's "Abzüge" section. */
+export interface WoltDeduction {
+  /** ISO date it happened on. */
+  date:        string;
+  /** Minutes since midnight, for the shift. */
+  minutes:     number;
+  description: string;
+  /** Net of VAT — the amount that reduces sales. Positive. */
+  net:         number;
+}
+
+/**
+ * Reads the dated deductions — compensations, missing items, quality issues.
+ *
+ * These are what the period's refund total is made of, and because each one
+ * carries its own date and time it can be booked to the day and shift it
+ * actually happened on instead of being spread across the period.
+ *
+ * Note the dates here are month/day/year, unlike everywhere else in the same
+ * document, which uses day.month.year.
+ */
+export function parseWoltDeductions(text: string): WoltDeduction[] {
+  const section = text.split(/Abzüge/)[1];
+  if (!section) return [];
+  // Stop at the section's own "Summe" line so the tables after it are not read.
+  const body = section.split(/\nSumme/)[0];
+
+  // Date, time, a description that can wrap across lines, then three amounts —
+  // gross, net, VAT — and the rate. Net is the one that reduces sales.
+  const re = new RegExp(
+    // The time separator is a NUL byte here too, not the colon it resembles.
+    String.raw`(\d{1,2})\/(\d{1,2})\/(\d{4})` + SEP +
+    String.raw`(\d{1,2})` + TIME + String.raw`(\d{2})` +
+    String.raw`([\s\S]*?)` +
+    String.raw`([\d.]+,\d{2})\s+([\d.]+,\d{2})\s+([\d.]+,\d{2})\s+\d+`,
+    'g',
+  );
+
+  const out: WoltDeduction[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(body)) !== null) {
+    const [, mm, dd, yyyy, hh, mi, description, , netStr] = m;
+    out.push({
+      date:    `${yyyy}-${mm.padStart(2, '0')}-${dd.padStart(2, '0')}`,
+      minutes: Number(hh) * 60 + Number(mi),
+      description: description
+        .replace(/\s+/g, ' ')
+        .replace(/\s*[0-9a-f]{16,}\s*$/, '')   // the trailing Wolt id
+        .trim(),
+      net:     num(netStr),
+    });
+  }
+  return out;
 }
 
 /** Parses every order line out of the sales report. */
@@ -186,6 +256,12 @@ export function aggregateWoltShifts(
    * rate of zero leaves the whole amount to be spread pro-rata on net sales.
    */
   rateFor: (order: WoltOrder) => number = (o) => (o.woltPlus ? RATE_WOLT_PLUS : RATE_STANDARD),
+  /**
+   * The dated deductions from the same report. Each is booked to the day and
+   * shift it happened on rather than spread, which is possible because Wolt
+   * dates and times every one of them.
+   */
+  deductions: WoltDeduction[] = [],
 ): WoltShiftBreakdown {
   /*
    * An order timed to a shift the restaurant was closed for was fulfilled by
@@ -222,18 +298,38 @@ export function aggregateWoltShifts(
     buckets.set(key, row);
   }
 
+  // Where a deduction falls on a shift that was closed, it follows the same
+  // rule the orders do and moves to the shift that was open.
+  const datedByBucket = new Map<string, number>();
+  let datedTotal = 0;
+  for (const d of deductions) {
+    let shift: WoltShift = d.minutes <= LUNCH_END_MINUTES ? 'lunch' : 'dinner';
+    if (isShiftClosed) {
+      const other: WoltShift = shift === 'lunch' ? 'dinner' : 'lunch';
+      if (isShiftClosed(d.date, shift) && !isShiftClosed(d.date, other)) shift = other;
+    }
+    const key = `${d.date}|${shift}`;
+    datedByBucket.set(key, (datedByBucket.get(key) ?? 0) + d.net);
+    datedTotal += d.net;
+  }
+
   const netTotal = orders.reduce((s, o) => s + o.net, 0);
   const rawComTotal = orders.reduce((s, o) => s + rawCommission(o), 0);
 
   // Refunds: what the invoice says we sold, less what the orders add up to.
   const refundTotal        = round2(invoice.netSalesPreCommission - netTotal);
+  // A dated deduction reduces sales, so it enters the rows negative.
+  const refundsSpread      = round2(refundTotal + datedTotal);
   const commissionResidual = round2(invoice.commission - rawComTotal);
 
   const rows = [...buckets.values()]
     .sort((a, b) => a.date.localeCompare(b.date) || (a.shift === 'lunch' ? -1 : 1));
 
   if (rows.length === 0) {
-    return { rows: [], preOrders: 0, reassigned: 0, refundTotal: 0, commissionResidual: 0 };
+    return {
+      rows: [], preOrders: 0, reassigned: 0,
+      refundTotal: 0, refundsDated: 0, refundsSpread: 0, commissionResidual: 0,
+    };
   }
 
   // Spread both adjustments in proportion to each row's net sales. Rounding each
@@ -245,13 +341,13 @@ export function aggregateWoltShifts(
   for (const row of rows) {
     if (row === biggest) continue;   // settled below, from what the others leave
     const share = netTotal === 0 ? 0 : row.netSales / netTotal;
-    row.refundEst      = round2(refundTotal * share);
+    row.refundEst      = round2(-(datedByBucket.get(`${row.date}|${row.shift}`) ?? 0) + refundsSpread * share);
     row.commission     = round2(row.rawCommission + commissionResidual * share);
     row.advertisingEst = round2(advertising * share);
   }
 
   const others = rows.filter(r => r !== biggest);
-  biggest.refundEst      = round2(refundTotal        - others.reduce((s, r) => s + r.refundEst,      0));
+  biggest.refundEst      = round2(refundTotal        - others.reduce((s, r) => s + r.refundEst,      0));   // takes the rounding
   biggest.commission     = round2(invoice.commission - others.reduce((s, r) => s + r.commission,     0));
   biggest.advertisingEst = round2(advertising        - others.reduce((s, r) => s + r.advertisingEst, 0));
 
@@ -263,6 +359,8 @@ export function aggregateWoltShifts(
   }
 
   return {
+    refundsDated:  deductions.length,
+    refundsSpread,
     rows: rows.map(({ rawCommission: _drop, ...r }) => r),
     preOrders:  orders.filter(o => o.preOrder).length,
     reassigned: orders.filter(o => o.reassigned).length,
