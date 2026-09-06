@@ -37,6 +37,13 @@ export interface WoltSetResult {
    */
   contract?: 'self_billing' | 'self_delivery';
 
+  /**
+   * Service fee collected from customers and passed straight to Wolt, net of
+   * VAT. Kept out of every reported figure; stored only because the two sides
+   * carry different VAT rates, so it is not neutral for the VAT return.
+   */
+  serviceFeePassThrough?: number;
+
   /** Resolved from the restaurant name on the invoice. */
   locationId?:   string;
   locationName?: string;

@@ -148,8 +148,12 @@ function buildSelfDeliverySet(
 
   let data;
   let services;
+  let serviceFeePassThrough = 0;
   try {
     const payout = parseWoltPayoutReport(payoutDoc.text);
+    // Collected from the customer and charged straight back by Wolt: not sales,
+    // not commissioned, and deliberately kept out of every reported line.
+    serviceFeePassThrough = payout.serviceFeeNet;
     const fees   = parseWoltFeeInvoice(feeDoc.text, payoutDoc.text, docs.find(d => d.kind === 'sales_report')?.text);
     data = toInvoiceShape(payout, fees);
     services = { total: fees.adCampaignNet, adCampaign: fees.adCampaignNet || null, lines: [] };
@@ -186,6 +190,7 @@ function buildSelfDeliverySet(
         (date, shift) => isClosed(location.id, date, shift),
         () => 0,   // charged per period here, so spread pro-rata rather than per order
         parseWoltDeductions(salesDoc.text),
+        serviceFeePassThrough,
       );
       if (Math.abs(breakdown.refundsSpread) >= 0.05) {
         warnings.push(
@@ -209,6 +214,7 @@ function buildSelfDeliverySet(
   return {
     ...base, data, services, breakdown,
     contract: 'self_delivery',
+    serviceFeePassThrough,
     locationId: location.id, locationName: location.name,
   };
 }

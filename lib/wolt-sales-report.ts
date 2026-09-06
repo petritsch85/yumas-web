@@ -262,6 +262,15 @@ export function aggregateWoltShifts(
    * dates and times every one of them.
    */
   deductions: WoltDeduction[] = [],
+  /**
+   * Money that passes straight through us, net of VAT — Eschborn's service fee,
+   * which the customer pays us and Wolt charges back in full.
+   *
+   * It is inside the per-order net the sales report gives us but is not our
+   * sales, so it is removed here. Left in, it would show up as a refund, since
+   * refunds are defined as the gap between the invoice's sales and the orders.
+   */
+  passThroughNet = 0,
 ): WoltShiftBreakdown {
   /*
    * An order timed to a shift the restaurant was closed for was fulfilled by
@@ -313,7 +322,8 @@ export function aggregateWoltShifts(
     datedTotal += d.net;
   }
 
-  const netTotal = orders.reduce((s, o) => s + o.net, 0);
+  const ordersNet = orders.reduce((s, o) => s + o.net, 0);
+  const netTotal  = round2(ordersNet - passThroughNet);
   const rawComTotal = orders.reduce((s, o) => s + rawCommission(o), 0);
 
   // Refunds: what the invoice says we sold, less what the orders add up to.
@@ -330,6 +340,21 @@ export function aggregateWoltShifts(
       rows: [], preOrders: 0, reassigned: 0,
       refundTotal: 0, refundsDated: 0, refundsSpread: 0, commissionResidual: 0,
     };
+  }
+
+  // The pass-through is a period figure, so it comes off the rows in proportion
+  // to what each sold. It is excluded from every line either way, so how it is
+  // apportioned changes nothing that is reported.
+  if (passThroughNet !== 0 && ordersNet !== 0) {
+    let left = passThroughNet;
+    const biggestByNet = rows.reduce((best, r) => (r.netSales > best.netSales ? r : best), rows[0]);
+    for (const row of rows) {
+      if (row === biggestByNet) continue;
+      const cut = round2(passThroughNet * (row.netSales / ordersNet));
+      row.netSales = round2(row.netSales - cut);
+      left = round2(left - cut);
+    }
+    biggestByNet.netSales = round2(biggestByNet.netSales - left);
   }
 
   // Spread both adjustments in proportion to each row's net sales. Rounding each

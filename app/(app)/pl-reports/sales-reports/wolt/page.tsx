@@ -29,6 +29,7 @@ interface WoltPeriod {
   advertising:              number;
   ad_campaign:              number | null;
   net_sales_final:          number;
+  service_fee_pass_through: number | null;
   contract:                 'self_billing' | 'self_delivery' | null;
   check_ok:                 boolean;
   source_files:             { name: string; kind: string }[] | null;
@@ -177,6 +178,7 @@ export default function WoltPage() {
   ), [periods]);
 
   const failing = periods.filter(p => !p.check_ok).length;
+  const serviceFeeTotal = periods.reduce((t, p) => t + Number(p.service_fee_pass_through ?? 0), 0);
 
   return (
     <div className="p-6">
@@ -442,6 +444,15 @@ export default function WoltPage() {
         Wolt&apos;s own daily totals exactly, while order time did not, because an order placed late in
         the evening can be delivered the next day.
       </p>
+
+      {serviceFeeTotal > 0 && (
+        <p className="mt-3 text-xs text-gray-400">
+          Service fee collected from customers and passed straight to Wolt over these periods:{' '}
+          <strong>{fmt(serviceFeeTotal)} €</strong>. It appears in no column above — Wolt charges the
+          same net amount back in full and takes no commission on it, so it changes no figure here.
+          It is not neutral for VAT, though: collected at 7%, charged back at 19%.
+        </p>
+      )}
 
       <p className="mt-3 mb-8 text-xs text-gray-400">
         Orders placed in the afternoon are evening pre-orders, so anything after 14:30 counts as dinner.
