@@ -4445,7 +4445,7 @@ export default function SalesReportsPage() {
             ['Net sales · pre com, Ads', true,  'preCom',      false],
             ['Commission',               false, 'commission',  true ],
             ['Net sales · pre Ads',      true,  'preAds',      false],
-            ['Advertising',              false, 'advertising', true ],
+            ['Advertising (est.)',       false, 'advertising', true ],
             ['Net sales',                true,  'net',         false],
           ];
 
