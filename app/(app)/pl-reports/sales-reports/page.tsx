@@ -4628,9 +4628,15 @@ export default function SalesReportsPage() {
           };
 
           /**
-           * A share of sales — commission or advertising against the sales they
-           * were charged on. Summed then divided per column, so a week's rate is
-           * the week's cost over the week's sales rather than a mean of daily rates.
+           * A cost as a share of sales.
+           *
+           * All of these measure against sales BEFORE refunds, so the three of
+           * them share a denominator and can be compared and added. It does mean
+           * the commission share reads slightly below Wolt's own rate, which is
+           * charged on sales after refunds.
+           *
+           * Summed then divided per column, so a week's rate is the week's cost
+           * over the week's sales rather than a mean of daily rates.
            */
           const woltPercentRow = (
             key: string, label: string,
@@ -4704,9 +4710,9 @@ export default function SalesReportsPage() {
                   {woltPercentRow(`${blockKey}-ref-pct`, 'Refunds as % of sales',
                     woltMaps[blockShift].refunds, woltMaps[blockShift].preRefunds)}
                   {woltPercentRow(`${blockKey}-com-pct`, 'Commission as % of sales',
-                    woltMaps[blockShift].commission, woltMaps[blockShift].preCom)}
+                    woltMaps[blockShift].commission, woltMaps[blockShift].preRefunds)}
                   {woltPercentRow(`${blockKey}-ads-pct`, 'Advertising as % of sales',
-                    woltMaps[blockShift].advertising, woltMaps[blockShift].preCom)}
+                    woltMaps[blockShift].advertising, woltMaps[blockShift].preRefunds)}
                 </Fragment>
               ))}
             </tbody>
