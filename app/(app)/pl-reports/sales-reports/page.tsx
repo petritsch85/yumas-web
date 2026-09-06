@@ -1286,6 +1286,22 @@ export default function SalesReportsPage() {
     },
   });
 
+  // Monthly credits — Wolt+ delivery-fee refunds — for the quarter on show.
+  const { data: woltCreditRows = [] } = useQuery({
+    queryKey: ['wolt-month-credits', 'pl', location?.id, year, quarter],
+    enabled: !!location,
+    queryFn: async () => {
+      const [firstM, , lastM] = QUARTER_MONTHS[quarter - 1];
+      const { data } = await supabase
+        .from('wolt_month_credits')
+        .select('month, label, net')
+        .eq('location_id', location!.id)
+        .gte('month', `${year}-${String(firstM).padStart(2,'0')}-01`)
+        .lte('month', `${year}-${String(lastM).padStart(2,'0')}-01`);
+      return (data ?? []) as { month: string; label: string; net: number }[];
+    },
+  });
+
   /**
    * Orders and net sales per day, per shift and combined.
    *
@@ -1357,8 +1373,37 @@ export default function SalesReportsPage() {
       add(r.shift === 'lunch' ? lunch : dinner, r);
       add(day, r);
     }
+
+    /*
+     * A Wolt+ delivery-fee refund is delivery income for a whole calendar month,
+     * settled on whichever invoice came next. It is spread over that month's
+     * trading in proportion to what each shift sold, so it lands where the
+     * deliveries it pays for actually happened rather than on the day the
+     * invoice arrived.
+     *
+     * It is added here rather than stored on the shift rows so those keep tying
+     * to their own five-day invoice exactly.
+     */
+    for (const credit of woltCreditRows) {
+      const monthKey = credit.month.slice(0, 7);
+      const inMonth  = woltShiftRows.filter(r => r.sale_date.startsWith(monthKey));
+      const base     = inMonth.reduce((t, r) => t + Number(r.net_sales), 0);
+      if (base <= 0) continue;
+
+      for (const r of inMonth) {
+        const share = Number(credit.net) * (Number(r.net_sales) / base);
+        for (const m of [r.shift === 'lunch' ? lunch : dinner, day]) {
+          const k = r.sale_date;
+          m.preRefunds[k] = (m.preRefunds[k] ?? 0) + share;
+          m.preCom[k]     = (m.preCom[k]     ?? 0) + share;
+          m.preAds[k]     = (m.preAds[k]     ?? 0) + share;
+          m.net[k]        = (m.net[k]        ?? 0) + share;
+        }
+      }
+    }
+
     return { lunch, dinner, day };
-  }, [woltShiftRows]);
+  }, [woltShiftRows, woltCreditRows]);
 
   // Closure days — fetch all for this location (across all years)
   const { data: closureDays = [], refetch: refetchClosures } = useQuery({
@@ -2318,9 +2363,28 @@ export default function SalesReportsPage() {
         saved += 1;
       }
 
+      // Credits belong to the month they name, so they are stored apart from the
+      // period they arrived on and spread when the P&L reads them.
+      const credits = woltImportable.flatMap(set =>
+        (set.monthCredits ?? []).map(c => ({
+          location_id:    set.locationId!,
+          month:          c.month,
+          label:          c.label,
+          net:            c.net,
+          source_invoice: c.sourceInvoice,
+        })),
+      );
+      if (credits.length > 0) {
+        const { error: credErr } = await supabase
+          .from('wolt_month_credits')
+          .upsert(credits, { onConflict: 'location_id,month,label' });
+        if (credErr) { setWoltError(credErr.message); return; }
+      }
+
       setWoltSets([]); setWoltSaved(saved);
       queryClient.invalidateQueries({ queryKey: ['wolt-periods'] });
       queryClient.invalidateQueries({ queryKey: ['wolt-shift-sales'] });
+      queryClient.invalidateQueries({ queryKey: ['wolt-month-credits'] });
     } finally {
       setImporting(false);
     }

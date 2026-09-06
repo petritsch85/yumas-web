@@ -47,6 +47,19 @@ export interface WoltPayoutData {
   payout: number;
 }
 
+/**
+ * A credit Wolt settles for a whole calendar month, on whichever five-day
+ * invoice comes next — the Wolt+ delivery-fee refund being the one in use.
+ */
+export interface WoltMonthCredit {
+  /** First day of the month it relates to, ISO. */
+  month: string;
+  /** The line as Wolt words it. */
+  label: string;
+  /** Positive: income to us, net of VAT. */
+  net:   number;
+}
+
 /** Wolt's own invoice for its fees, on the self-delivery contract. */
 export interface WoltFeeInvoiceData {
   /** Every fee Wolt charged, net of VAT. */
@@ -63,10 +76,12 @@ export interface WoltFeeInvoiceData {
   provisionNet: number;
   /** "Auftragsbezogene Gebühren" — the per-order platform fee, net of VAT. */
   platformFeeNet: number;
+  /** Monthly credits, each belonging to the month it names. */
+  credits: WoltMonthCredit[];
   /**
-   * Anything else on the invoice: credits such as a Wolt+ delivery-fee refund.
-   * Reported rather than folded into commission, where a credit would make the
-   * commission rate meaningless — one period came out at −5%.
+   * Anything else on the invoice, once commission, fees, advertising and the
+   * credits are accounted for. Reported rather than folded into commission,
+   * where it would make the commission rate meaningless.
    */
   otherNet: number;
   invoiceNumber: string;
@@ -193,6 +208,27 @@ export function parseWoltFeeInvoice(text: string, ...others: (string | undefined
   const provisionNet   = blockSum(/Wolt Provision/, 2);
   const platformFeeNet = blockSum(/Auftragsbezogene Gebühren/, 1);
 
+  // "Wolt+ Delivery Fee Refund - July 2026  1  -25,21  19.00%  -4,79  -30,00".
+  // Wolt names the month in English, and the amount is negative because it
+  // reduces what we owe — it is income, so it is stored positive.
+  const MONTHS = ['january','february','march','april','may','june',
+                  'july','august','september','october','november','december'];
+  const credits: WoltMonthCredit[] = [];
+  const creditRe = new RegExp(
+    String.raw`(Wolt\+ Delivery Fee Refund|Delivery Fee Refund)\s*[-–]\s*([A-Za-zä]+)\s+(\d{4})[^\n]*?\s` + AMOUNT,
+    'gi',
+  );
+  let c: RegExpExecArray | null;
+  while ((c = creditRe.exec(text)) !== null) {
+    const monthIndex = MONTHS.indexOf(c[2].toLowerCase());
+    if (monthIndex === -1) continue;
+    credits.push({
+      month: `${c[3]}-${String(monthIndex + 1).padStart(2, '0')}-01`,
+      label: `${c[1]} - ${c[2]} ${c[3]}`,
+      net:   Math.abs(parseGermanNumber(c[4])),
+    });
+  }
+
   const restaurant = findRestaurant(text, ...others);
   if (!restaurant) throw new WoltParseError('Could not find the restaurant this set belongs to.');
 
@@ -205,8 +241,10 @@ export function parseWoltFeeInvoice(text: string, ...others: (string | undefined
     serviceFeeNet,
     provisionNet,
     platformFeeNet,
+    credits,
     otherNet: round2(
-      parseGermanNumber(totals[1]) - provisionNet - platformFeeNet - serviceFeeNet - adCampaignNet,
+      parseGermanNumber(totals[1]) - provisionNet - platformFeeNet - serviceFeeNet - adCampaignNet
+      + credits.reduce((t, x) => t + x.net, 0),
     ),
     invoiceNumber: need(text, /Rechnungsnummer\s+(DEU\/\S+)/, 'the fee invoice number'),
     invoiceDate:   parseGermanDate(need(text, /Rechnungsdatum\s+(\d{2}\.\d{2}\.\d{4})/, 'the fee invoice date')),

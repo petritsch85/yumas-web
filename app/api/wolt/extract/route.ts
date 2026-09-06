@@ -149,6 +149,7 @@ function buildSelfDeliverySet(
   let data;
   let services;
   let serviceFeePassThrough = 0;
+  let monthCredits: { month: string; label: string; net: number; sourceInvoice: string }[] = [];
   try {
     const payout = parseWoltPayoutReport(payoutDoc.text);
     const fees   = parseWoltFeeInvoice(feeDoc.text, payoutDoc.text, docs.find(d => d.kind === 'sales_report')?.text);
@@ -156,6 +157,7 @@ function buildSelfDeliverySet(
     // Collected from the customer and charged straight back by Wolt: not sales,
     // not commissioned, and deliberately kept out of every reported line.
     serviceFeePassThrough = payout.serviceFeeNet;
+    monthCredits = fees.credits.map(x => ({ ...x, sourceInvoice: fees.invoiceNumber }));
     if (Math.abs(fees.otherNet) >= 0.005) {
       warnings.push(
         `Wolt's invoice carries ${fees.otherNet.toFixed(2)} that is neither commission, ` +
@@ -230,6 +232,7 @@ function buildSelfDeliverySet(
     ...base, data, services, breakdown,
     contract: 'self_delivery',
     serviceFeePassThrough,
+    monthCredits,
     locationId: location.id, locationName: location.name,
   };
 }

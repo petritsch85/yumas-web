@@ -44,6 +44,13 @@ export interface WoltSetResult {
    */
   serviceFeePassThrough?: number;
 
+  /**
+   * Credits Wolt settles per calendar month — the Wolt+ delivery-fee refund.
+   * They belong to the month they name, not to the period they arrived on, so
+   * they are stored apart and spread over that month when the P&L reads them.
+   */
+  monthCredits?: { month: string; label: string; net: number; sourceInvoice: string }[];
+
   /** Resolved from the restaurant name on the invoice. */
   locationId?:   string;
   locationName?: string;
