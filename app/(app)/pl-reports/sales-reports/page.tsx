@@ -4701,6 +4701,8 @@ export default function SalesReportsPage() {
                     woltLineRow(`${blockKey}-${line}`, label, woltMaps[blockShift][line], { bold, deduction })
                   ))}
                   <tr key={`${blockKey}-gap`}><td colSpan={totalCols} style={{ height: 6, backgroundColor: '#ffffff' }} /></tr>
+                  {woltPercentRow(`${blockKey}-ref-pct`, 'Refunds as % of sales',
+                    woltMaps[blockShift].refunds, woltMaps[blockShift].preRefunds)}
                   {woltPercentRow(`${blockKey}-com-pct`, 'Commission as % of sales',
                     woltMaps[blockShift].commission, woltMaps[blockShift].preCom)}
                   {woltPercentRow(`${blockKey}-ads-pct`, 'Advertising as % of sales',
