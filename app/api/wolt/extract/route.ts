@@ -151,10 +151,25 @@ function buildSelfDeliverySet(
   let serviceFeePassThrough = 0;
   try {
     const payout = parseWoltPayoutReport(payoutDoc.text);
+    const fees   = parseWoltFeeInvoice(feeDoc.text, payoutDoc.text, docs.find(d => d.kind === 'sales_report')?.text);
+
     // Collected from the customer and charged straight back by Wolt: not sales,
     // not commissioned, and deliberately kept out of every reported line.
     serviceFeePassThrough = payout.serviceFeeNet;
-    const fees   = parseWoltFeeInvoice(feeDoc.text, payoutDoc.text, docs.find(d => d.kind === 'sales_report')?.text);
+    if (Math.abs(fees.otherNet) >= 0.005) {
+      warnings.push(
+        `Wolt's invoice carries ${fees.otherNet.toFixed(2)} that is neither commission, ` +
+        `platform fee, service fee nor advertising — a credit or charge shown in none of the lines.`,
+      );
+    }
+    // The two sides should be the same amount. If they ever are not, the
+    // difference is real money and must not pass unnoticed.
+    if (Math.abs(payout.serviceFeeNet - fees.serviceFeeNet) >= 0.005) {
+      warnings.push(
+        `Service fee collected (${payout.serviceFeeNet.toFixed(2)}) and charged back ` +
+        `(${fees.serviceFeeNet.toFixed(2)}) do not match; the difference is not reflected anywhere.`,
+      );
+    }
     data = toInvoiceShape(payout, fees);
     services = { total: fees.adCampaignNet, adCampaign: fees.adCampaignNet || null, lines: [] };
   } catch (e) {

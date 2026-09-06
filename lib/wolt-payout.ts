@@ -53,6 +53,22 @@ export interface WoltFeeInvoiceData {
   totalNet: number;
   /** The advertising part alone, when the invoice carries a campaign. */
   adCampaignNet: number;
+  /**
+   * The service fee Wolt charges back, net of VAT. A pass-through: the same
+   * amount was collected from the customer, so it is excluded from sales and
+   * from commission alike.
+   */
+  serviceFeeNet: number;
+  /** "Wolt Provision" — the 11% itself, net of VAT. */
+  provisionNet: number;
+  /** "Auftragsbezogene Gebühren" — the per-order platform fee, net of VAT. */
+  platformFeeNet: number;
+  /**
+   * Anything else on the invoice: credits such as a Wolt+ delivery-fee refund.
+   * Reported rather than folded into commission, where a credit would make the
+   * commission rate meaningless — one period came out at −5%.
+   */
+  otherNet: number;
   invoiceNumber: string;
   invoiceDate:   string;
   periodStart:   string;
@@ -157,6 +173,26 @@ export function parseWoltFeeInvoice(text: string, ...others: (string | undefined
   let m: RegExpExecArray | null;
   while ((m = adRe.exec(text)) !== null) adCampaignNet = round2(adCampaignNet + parseGermanNumber(m[1]));
 
+  // "Servicegebühr  8,78  8,78  19.00%  1,67  10,45" — turnover, then the fee.
+  const serviceFee = text.match(new RegExp(String.raw`Servicegebühr\s+` + AMOUNT + String.raw`\s+` + AMOUNT));
+  const serviceFeeNet = serviceFee ? parseGermanNumber(serviceFee[2]) : 0;
+
+  /**
+   * Each block of the invoice closes with its own "Summe". The commission block
+   * states turnover first and then the fee; the per-order block states only the
+   * fee. Reading them individually keeps commission to what Wolt charges for
+   * commission, whatever else the invoice happens to carry.
+   */
+  const blockSum = (heading: RegExp, amountIndex: 1 | 2) => {
+    const section = text.split(heading)[1];
+    if (!section) return 0;
+    const m = section.match(new RegExp(String.raw`Summe\s+` + AMOUNT + String.raw`(?:\s+` + AMOUNT + String.raw`)?`));
+    if (!m) return 0;
+    return parseGermanNumber(m[amountIndex] ?? m[1]);
+  };
+  const provisionNet   = blockSum(/Wolt Provision/, 2);
+  const platformFeeNet = blockSum(/Auftragsbezogene Gebühren/, 1);
+
   const restaurant = findRestaurant(text, ...others);
   if (!restaurant) throw new WoltParseError('Could not find the restaurant this set belongs to.');
 
@@ -166,6 +202,12 @@ export function parseWoltFeeInvoice(text: string, ...others: (string | undefined
   return {
     totalNet:      parseGermanNumber(totals[1]),
     adCampaignNet,
+    serviceFeeNet,
+    provisionNet,
+    platformFeeNet,
+    otherNet: round2(
+      parseGermanNumber(totals[1]) - provisionNet - platformFeeNet - serviceFeeNet - adCampaignNet,
+    ),
     invoiceNumber: need(text, /Rechnungsnummer\s+(DEU\/\S+)/, 'the fee invoice number'),
     invoiceDate:   parseGermanDate(need(text, /Rechnungsdatum\s+(\d{2}\.\d{2}\.\d{4})/, 'the fee invoice date')),
     periodStart:   parseGermanDate(period[1]),
@@ -187,8 +229,10 @@ export function parseWoltFeeInvoice(text: string, ...others: (string | undefined
  * total here, so they have to be subtracted explicitly rather than arriving
  * netted off.
  *
- * Commission is Wolt's whole fee invoice, less any advertising campaign, so the
- * platform and service fees sit with the commission they arrive alongside.
+ * Commission is the invoice's own commission block plus the per-order platform
+ * fee. Advertising has its own line, the service fee is a pass-through excluded
+ * from sales as well, and anything else — a Wolt+ delivery-fee refund, say — is
+ * reported rather than buried in the commission rate.
  *
  * The check is the payout itself: goods plus services less Wolt's invoice must
  * equal what Wolt paid, all including VAT.
@@ -200,7 +244,11 @@ export function toInvoiceShape(
   const netSalesPreCommission = round2(
     payout.goodsNet + payout.deliveryNet + payout.correctionsNet,
   );
-  const commission            = round2(fees.totalNet - fees.adCampaignNet);
+  // What Wolt charges for handling the order: its commission and the per-order
+  // platform fee. Advertising has its own line; the service fee is a
+  // pass-through excluded from sales too; credits are reported separately,
+  // since netting one into commission makes the rate meaningless.
+  const commission            = round2(fees.provisionNet + fees.platformFeeNet);
   const expectedPayout = round2(
     payout.goodsGross + payout.servicesGross + payout.correctionsGross - payout.woltInvoiceGross,
   );
