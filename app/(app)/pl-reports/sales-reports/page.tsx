@@ -4444,6 +4444,15 @@ export default function SalesReportsPage() {
 
           /** The Wolt block — labels only for now, so every cell is an em dash.
            *  Rendered as its own tbody after all the other sections. */
+          /** Adds maps key by key — for the total of the three cost lines. */
+          const sumMaps = (...maps: Record<string, number>[]) => {
+            const out: Record<string, number> = {};
+            for (const m of maps) {
+              for (const [k, v] of Object.entries(m)) out[k] = (out[k] ?? 0) + v;
+            }
+            return out;
+          };
+
           const WOLT_BLOCKS: [string, string, keyof typeof woltMaps][] = [
             ['wolt-lunch',  'Wolt · Lunch',   'lunch'],
             ['wolt-dinner', 'Wolt · Dinner',  'dinner'],
@@ -4641,7 +4650,9 @@ export default function SalesReportsPage() {
           const woltPercentRow = (
             key: string, label: string,
             cost: Record<string, number>, sales: Record<string, number>,
+            opts: { bold?: boolean } = {},
           ) => {
+            const { bold = false } = opts;
             const sumOver = (keys: string[]) => ({
               cost:  keys.reduce((t, k) => t + (cost[k]  ?? 0), 0),
               sales: keys.reduce((t, k) => t + (sales[k] ?? 0), 0),
@@ -4650,10 +4661,14 @@ export default function SalesReportsPage() {
             const q = sumOver(dayKeys);
             const show = (c: number, sl: number) => sl === 0
               ? <span className="text-gray-300">—</span>
-              : <span className="text-gray-600">{(c / sl * 100).toFixed(1).replace('.', ',')}%</span>;
+              : <span className={bold ? 'text-gray-800 font-bold' : 'text-gray-600'}>
+                  {(c / sl * 100).toFixed(1).replace('.', ',')}%
+                </span>;
             return (
               <tr key={key} className="border-b border-gray-100 hover:bg-gray-50/60 group" style={{ backgroundColor: '#ffffff' }}>
-                <td className="sticky left-0 z-10 px-4 py-1 whitespace-nowrap border-r border-gray-100 bg-white group-hover:bg-gray-50 transition-colors text-[11px] italic text-gray-500">{label}</td>
+                <td className={`sticky left-0 z-10 px-4 py-1 whitespace-nowrap border-r border-gray-100 bg-white group-hover:bg-gray-50 transition-colors text-[11px] italic ${
+                  bold ? 'font-bold text-gray-700' : 'text-gray-500'
+                }`}>{label}</td>
                 {dailyCols.map((col, ci) => {
                   const agg = col.type === 'day'
                     ? { cost: cost[col.dateKey] ?? 0, sales: sales[col.dateKey] ?? 0 }
@@ -4713,6 +4728,14 @@ export default function SalesReportsPage() {
                     woltMaps[blockShift].commission, woltMaps[blockShift].preRefunds)}
                   {woltPercentRow(`${blockKey}-ads-pct`, 'Advertising as % of sales',
                     woltMaps[blockShift].advertising, woltMaps[blockShift].preRefunds)}
+                  {woltPercentRow(`${blockKey}-total-pct`, 'Total cost (%)',
+                    sumMaps(
+                      woltMaps[blockShift].refunds,
+                      woltMaps[blockShift].commission,
+                      woltMaps[blockShift].advertising,
+                    ),
+                    woltMaps[blockShift].preRefunds,
+                    { bold: true })}
                 </Fragment>
               ))}
             </tbody>
