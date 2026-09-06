@@ -4615,6 +4615,47 @@ export default function SalesReportsPage() {
             );
           };
 
+          /**
+           * A share of sales — commission or advertising against the sales they
+           * were charged on. Summed then divided per column, so a week's rate is
+           * the week's cost over the week's sales rather than a mean of daily rates.
+           */
+          const woltPercentRow = (
+            key: string, label: string,
+            cost: Record<string, number>, sales: Record<string, number>,
+          ) => {
+            const sumOver = (keys: string[]) => ({
+              cost:  keys.reduce((t, k) => t + (cost[k]  ?? 0), 0),
+              sales: keys.reduce((t, k) => t + (sales[k] ?? 0), 0),
+            });
+            const dayKeys = dailyCols.filter(c => c.type === 'day').map(c => (c as { dateKey: string }).dateKey);
+            const q = sumOver(dayKeys);
+            const show = (c: number, sl: number) => sl === 0
+              ? <span className="text-gray-300">—</span>
+              : <span className="text-gray-600">{(c / sl * 100).toFixed(1).replace('.', ',')}%</span>;
+            return (
+              <tr key={key} className="border-b border-gray-100 hover:bg-gray-50/60 group" style={{ backgroundColor: '#ffffff' }}>
+                <td className="sticky left-0 z-10 px-4 py-1 whitespace-nowrap border-r border-gray-100 bg-white group-hover:bg-gray-50 transition-colors text-[11px] italic text-gray-500">{label}</td>
+                {dailyCols.map((col, ci) => {
+                  const agg = col.type === 'day'
+                    ? { cost: cost[col.dateKey] ?? 0, sales: sales[col.dateKey] ?? 0 }
+                    : sumOver(col.wDateKeys);
+                  return (
+                    <td key={ci} className="py-1 text-right tabular-nums text-[11px]"
+                      style={col.type === 'day'
+                        ? { paddingLeft: 4, paddingRight: 8 }
+                        : { paddingLeft: 4, paddingRight: 6, backgroundColor: '#fffbeb', borderLeft: '1px solid #fde68a', borderRight: '1px solid #fde68a' }}>
+                      {show(agg.cost, agg.sales)}
+                    </td>
+                  );
+                })}
+                <td className="py-1 text-right tabular-nums text-[11px] border-l border-gray-200" style={{ paddingLeft: 4, paddingRight: 8 }}>
+                  {show(q.cost, q.sales)}
+                </td>
+              </tr>
+            );
+          };
+
           const woltEmptyCells = () => (
             <>
               {dailyCols.map((col, ci) => (
@@ -4641,12 +4682,17 @@ export default function SalesReportsPage() {
                     <td className="sticky left-0 z-10 px-4 py-1.5 whitespace-nowrap border-r border-gray-100 bg-[#eef2ff] group-hover:bg-gray-50 transition-colors text-xs font-bold text-gray-800">{blockLabel}</td>
                     {woltEmptyCells()}
                   </tr>
+                  {woltCountRow(`${blockKey}-orders`, '# orders', woltMaps[blockShift].orders)}
+                  {woltRatioRow(`${blockKey}-per-order`, 'Net sales / order',
+                    woltMaps[blockShift].preCom, woltMaps[blockShift].orders)}
                   {WOLT_ROWS.map(([label, bold, line, deduction]) => (
                     woltLineRow(`${blockKey}-${line}`, label, woltMaps[blockShift][line], { bold, deduction })
                   ))}
-                  {woltCountRow(`${blockKey}-orders`, '# orders', woltMaps[blockShift].orders)}
-                  {woltRatioRow(`${blockKey}-per-order`, 'Net sales / order',
-                    woltMaps[blockShift].net, woltMaps[blockShift].orders)}
+                  <tr key={`${blockKey}-gap`}><td colSpan={totalCols} style={{ height: 6, backgroundColor: '#ffffff' }} /></tr>
+                  {woltPercentRow(`${blockKey}-com-pct`, 'Commission as % of sales',
+                    woltMaps[blockShift].commission, woltMaps[blockShift].preCom)}
+                  {woltPercentRow(`${blockKey}-ads-pct`, 'Advertising as % of sales',
+                    woltMaps[blockShift].advertising, woltMaps[blockShift].preCom)}
                 </Fragment>
               ))}
             </tbody>
