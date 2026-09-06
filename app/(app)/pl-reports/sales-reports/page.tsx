@@ -31,6 +31,7 @@ import { findCoverageIssues } from '@/lib/wolt-set';
 interface WoltShiftRowDb {
   sale_date:       string;
   shift:           'lunch' | 'dinner';
+  orders:          number;
   net_sales:       number;
   refund_est:      number;
   commission:      number;
@@ -52,6 +53,8 @@ interface WoltLineMaps {
   preAds:      Record<string, number>;
   advertising: Record<string, number>;
   net:         Record<string, number>;
+  /** Orders delivered, for the count and the net-per-order line. */
+  orders:      Record<string, number>;
 }
 import {
   Upload, FileCheck, AlertCircle, DatabaseZap,
@@ -1311,7 +1314,7 @@ export default function SalesReportsPage() {
       const qEnd   = `${year}-${String(lastM).padStart(2,'0')}-${String(daysInMonth(year, lastM)).padStart(2,'0')}`;
       const { data } = await supabase
         .from('wolt_shift_sales')
-        .select('sale_date,shift,net_sales,refund_est,commission,net_pre_ads,advertising_est,net_final')
+        .select('sale_date,shift,orders,net_sales,refund_est,commission,net_pre_ads,advertising_est,net_final')
         .eq('location_id', location!.id)
         .gte('sale_date', qStart)
         .lte('sale_date', qEnd);
@@ -1327,7 +1330,7 @@ export default function SalesReportsPage() {
    * its own here, it is visible on the Wolt page.
    */
   const woltMaps = useMemo(() => {
-    const empty = (): WoltLineMaps => ({ preCom: {}, commission: {}, preAds: {}, advertising: {}, net: {} });
+    const empty = (): WoltLineMaps => ({ preCom: {}, commission: {}, preAds: {}, advertising: {}, net: {}, orders: {} });
     const lunch = empty(), dinner = empty(), day = empty();
 
     const add = (m: WoltLineMaps, r: WoltShiftRowDb) => {
@@ -1337,6 +1340,7 @@ export default function SalesReportsPage() {
       m.preAds[k]      = (m.preAds[k]      ?? 0) + Number(r.net_pre_ads);
       m.advertising[k] = (m.advertising[k] ?? 0) + Number(r.advertising_est ?? 0);
       m.net[k]         = (m.net[k]         ?? 0) + Number(r.net_final ?? 0);
+      m.orders[k]      = (m.orders[k]      ?? 0) + Number(r.orders ?? 0);
     };
 
     for (const r of woltShiftRows) {
@@ -4452,16 +4456,16 @@ export default function SalesReportsPage() {
            */
           const woltLineRow = (
             key: string, label: string, map: Record<string, number>,
-            opts: { bold?: boolean; deduction?: boolean } = {},
+            opts: { bold?: boolean; deduction?: boolean; count?: boolean } = {},
           ) => {
-            const { bold = false, deduction = false } = opts;
+            const { bold = false, deduction = false, count = false } = opts;
             const qTotal = Object.entries(map)
               .filter(([k]) => dailyCols.some(c => c.type === 'day' && (c as { dateKey?: string }).dateKey === k))
               .reduce((sum, [, v]) => sum + v, 0);
             const show = (v: number) => v === 0
               ? <span className="text-gray-300">—</span>
               : <span className={deduction ? 'text-gray-500' : 'text-blue-600'}>
-                  {deduction ? '−' : ''}{fmtNum(v)}
+                  {deduction ? '−' : ''}{count ? v : fmtNum(v)}
                 </span>;
             return (
               <tr key={key} className="border-b border-gray-100 hover:bg-gray-50/60 group" style={{ backgroundColor: '#ffffff' }}>
@@ -4561,6 +4565,56 @@ export default function SalesReportsPage() {
             </tbody>
           );
 
+          /**
+           * A plain count — no currency formatting, no minus signs.
+           */
+          const woltCountRow = (key: string, label: string, map: Record<string, number>) => (
+            woltLineRow(key, label, map, { count: true })
+          );
+
+          /**
+           * Net sales per order.
+           *
+           * Divided per column rather than stored: a week's figure is the week's
+           * sales over the week's orders, which is not the average of the daily
+           * averages.
+           */
+          const woltRatioRow = (
+            key: string, label: string,
+            numerator: Record<string, number>, denominator: Record<string, number>,
+          ) => {
+            const sumOver = (keys: string[]) => ({
+              num: keys.reduce((t, k) => t + (numerator[k]   ?? 0), 0),
+              den: keys.reduce((t, k) => t + (denominator[k] ?? 0), 0),
+            });
+            const dayKeys = dailyCols.filter(c => c.type === 'day').map(c => (c as { dateKey: string }).dateKey);
+            const q = sumOver(dayKeys);
+            const show = (num: number, den: number) => den === 0
+              ? <span className="text-gray-300">—</span>
+              : <span className="text-blue-600">{fmtNum(num / den)}</span>;
+            return (
+              <tr key={key} className="border-b border-gray-100 hover:bg-gray-50/60 group" style={{ backgroundColor: '#ffffff' }}>
+                <td className="sticky left-0 z-10 px-4 py-1 whitespace-nowrap border-r border-gray-100 bg-white group-hover:bg-gray-50 transition-colors text-[11px] text-gray-600">{label}</td>
+                {dailyCols.map((col, ci) => {
+                  const agg = col.type === 'day'
+                    ? { num: numerator[col.dateKey] ?? 0, den: denominator[col.dateKey] ?? 0 }
+                    : sumOver(col.wDateKeys);
+                  return (
+                    <td key={ci} className="py-1 text-right tabular-nums text-[11px]"
+                      style={col.type === 'day'
+                        ? { paddingLeft: 4, paddingRight: 8 }
+                        : { paddingLeft: 4, paddingRight: 6, backgroundColor: '#fffbeb', borderLeft: '1px solid #fde68a', borderRight: '1px solid #fde68a' }}>
+                      {show(agg.num, agg.den)}
+                    </td>
+                  );
+                })}
+                <td className="py-1 text-right tabular-nums text-[11px] border-l border-gray-200" style={{ paddingLeft: 4, paddingRight: 8 }}>
+                  {show(q.num, q.den)}
+                </td>
+              </tr>
+            );
+          };
+
           const woltEmptyCells = () => (
             <>
               {dailyCols.map((col, ci) => (
@@ -4590,6 +4644,9 @@ export default function SalesReportsPage() {
                   {WOLT_ROWS.map(([label, bold, line, deduction]) => (
                     woltLineRow(`${blockKey}-${line}`, label, woltMaps[blockShift][line], { bold, deduction })
                   ))}
+                  {woltCountRow(`${blockKey}-orders`, '# orders', woltMaps[blockShift].orders)}
+                  {woltRatioRow(`${blockKey}-per-order`, 'Net sales / order',
+                    woltMaps[blockShift].net, woltMaps[blockShift].orders)}
                 </Fragment>
               ))}
             </tbody>
