@@ -55,7 +55,7 @@ export const LUNCH_END_MINUTES = 14 * 60 + 30;
  * Item lists contain commas ("1x Chicken Quesadilla, 1x Nachos"), so splitting
  * on commas alone would corrupt every multi-item order.
  */
-export function parseCsvRows(text: string): string[][] {
+export function parseCsvRows(text: string, delimiter = ','): string[][] {
   const rows: string[][] = [];
   let row: string[] = [];
   let field = '';
@@ -68,7 +68,7 @@ export function parseCsvRows(text: string): string[][] {
         if (text[i + 1] === '"') { field += '"'; i++; } else inQuotes = false;
       } else field += c;
     } else if (c === '"') inQuotes = true;
-    else if (c === ',') { row.push(field); field = ''; }
+    else if (c === delimiter) { row.push(field); field = ''; }
     else if (c === '\n') { row.push(field); rows.push(row); row = []; field = ''; }
     else if (c !== '\r') field += c;
   }
@@ -76,9 +76,23 @@ export function parseCsvRows(text: string): string[][] {
   return rows;
 }
 
+/**
+ * Which separator the export used.
+ *
+ * The shop emits two dialects: comma-separated with amounts in cents, and
+ * semicolon-separated with German decimals. Counting both on the header line
+ * settles it without having to ask.
+ */
+export function detectDelimiter(text: string): ',' | ';' {
+  const header = text.split('\n', 1)[0] ?? '';
+  const commas = (header.match(/,/g) ?? []).length;
+  const semis  = (header.match(/;/g) ?? []).length;
+  return semis > commas ? ';' : ',';
+}
+
 /** "27/07/2026 13:27" → { date: "2026-07-27", minutes: 807 }. */
 function parseGermanDateTime(value: string): { date: string; minutes: number; iso: string } | null {
-  const m = value.trim().match(/^(\d{2})\/(\d{2})\/(\d{4})(?:[ T](\d{1,2}):(\d{2}))?/);
+  const m = value.trim().match(/^(\d{2})[./](\d{2})[./](\d{4})(?:[ T](\d{1,2}):(\d{2}))?/);
   if (!m) return null;
   const [, dd, mm, yyyy, hh = '0', mi = '0'] = m;
   return {
@@ -88,9 +102,27 @@ function parseGermanDateTime(value: string): { date: string; minutes: number; is
   };
 }
 
-const cents = (v: string) => {
-  const n = Number(String(v).trim().replace(',', '.'));
-  return Number.isFinite(n) ? Math.round(n) : 0;
+/**
+ * Reads a money field into cents.
+ *
+ * One dialect writes cents as a bare integer ("1350"), the other euros with a
+ * decimal comma ("13,50"). Which it is cannot be told from a single value —
+ * "1350" is valid in both — so the whole file is inspected once and every field
+ * read the same way.
+ */
+const toCents = (v: string, euros: boolean) => {
+  const raw = String(v).trim();
+  if (!raw) return 0;
+  const n = Number(raw.replace(/\./g, euros ? '' : '.').replace(',', '.'));
+  if (!Number.isFinite(n)) return 0;
+  return euros ? Math.round(n * 100) : Math.round(n);
+};
+
+/** True when the file writes money as euros with decimals rather than cents. */
+const usesEuroAmounts = (rows: string[][], header: string[]) => {
+  const columns = ['Gesamt', 'Netto (gesamt)', 'MwSt (gesamt)', 'Zwischensumme']
+    .map(c => header.indexOf(c)).filter(i => i >= 0);
+  return rows.some(row => columns.some(i => /[.,]\d{1,2}$/.test((row[i] ?? '').trim())));
 };
 
 const REQUIRED = ['Bestellnummer', 'Erstellt am', 'Standort', 'Art', 'Status', 'Netto (gesamt)'];
@@ -103,7 +135,8 @@ const REQUIRED = ['Bestellnummer', 'Erstellt am', 'Standort', 'Art', 'Status', '
  * discarding a third of the file.
  */
 export function parseWebshopCsv(text: string): WebshopOrder[] {
-  const rows = parseCsvRows(text.replace(/^﻿/, ''));
+  const clean = text.replace(/^﻿/, '');
+  const rows  = parseCsvRows(clean, detectDelimiter(clean));
   if (rows.length === 0) throw new WebshopParseError('The file is empty.');
 
   const header = rows[0].map(h => h.trim());
@@ -114,6 +147,8 @@ export function parseWebshopCsv(text: string): WebshopOrder[] {
     );
   }
   const at = (row: string[], name: string) => (row[header.indexOf(name)] ?? '').trim();
+  const euros = usesEuroAmounts(rows.slice(1), header);
+  const cents = (v: string) => toCents(v, euros);
 
   const orders: WebshopOrder[] = [];
   for (const row of rows.slice(1)) {
