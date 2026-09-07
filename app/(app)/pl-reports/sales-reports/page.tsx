@@ -5014,7 +5014,7 @@ export default function SalesReportsPage() {
                         const qHasMix     = qActualSum > 0 && qFcastRem > 0;
                         return (
                           <tr key={`${shift ?? 'day'}-${label}`} className="border-b border-gray-100 hover:bg-gray-50/60 group" style={{ backgroundColor:'#ffffff' }}>
-                            <td className={`sticky left-0 z-10 px-4 ${padY} whitespace-nowrap border-r border-gray-100 group-hover:bg-gray-50 transition-colors ${compact ? 'pl-8 text-[11px] text-gray-600' : 'text-gray-700'}`} style={{ backgroundColor:'#ffffff' }}>{label}</td>
+                            <td className={`sticky left-0 z-10 ${compact ? 'pl-8 pr-4' : 'px-4'} ${padY} whitespace-nowrap border-r border-gray-100 group-hover:bg-gray-50 transition-colors ${compact ? 'text-[11px] text-gray-600' : 'text-gray-700'}`} style={{ backgroundColor:'#ffffff' }}>{label}</td>
                             {dailyCols.map((col, ci) => {
                               if (col.type === 'day') {
                                 const isFuture = col.dateKey >= todayKey;
@@ -5102,8 +5102,8 @@ export default function SalesReportsPage() {
                         const small = compact ? ' text-[11px]' : '';
                         const qBills = Object.entries(billsMap).filter(([k]) => dailyCols.some(c => c.type === 'day' && (c as any).dateKey === k)).reduce((s, [,v]) => s + v, 0);
                         return (
-                          <tr key={label} className="border-b border-gray-100 hover:bg-gray-50/60 group">
-                            <td className="sticky left-0 z-10 px-4 py-2 whitespace-nowrap border-r border-gray-100 bg-white group-hover:bg-gray-50 transition-colors text-gray-700">{label}</td>
+                          <tr key={label} className="border-b border-gray-100 hover:bg-gray-50/60 group" style={{ backgroundColor: '#ffffff' }}>
+                            <td className={`sticky left-0 z-10 ${compact ? 'pl-8 pr-4' : 'px-4'} ${padY} whitespace-nowrap border-r border-gray-100 bg-white group-hover:bg-gray-50 transition-colors ${compact ? 'text-[11px] text-gray-600' : 'text-gray-700'}`}>{label}</td>
                             {dailyCols.map((col, ci) => {
                               if (col.type === 'day') {
                                 const val = billsMap[col.dateKey] ?? 0;
