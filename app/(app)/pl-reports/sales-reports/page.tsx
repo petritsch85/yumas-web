@@ -1278,6 +1278,9 @@ export default function SalesReportsPage() {
       let q = supabase
         .from('outgoing_bills')
         .select('id,event_date,shift_type,net_total,issuing_location')
+        // Settled at the till, so the money is already in a Z-report. Counting
+        // it here as well would double the evening.
+        .eq('paid_in_store', false)
         .gte('event_date', qStart)
         .lte('event_date', qEnd);
       if (!isGroup) q = q.eq('issuing_location', location!.name);

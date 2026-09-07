@@ -62,6 +62,12 @@ type OutgoingBill = {
   tips:             number;
   total_payable:    number;
   status:           'pending' | 'paid' | 'cancelled';
+  /**
+   * Settled through the till, so the amount is already in a Z-report. The bill
+   * and its PDF stay exactly as they are; only the P&L's Bills row skips it,
+   * which would otherwise count the same evening twice.
+   */
+  paid_in_store?:   boolean;
   file_path:        string | null;
   /** Full BillData used to render the stored PDF. Null on bills created before
    *  the column existed — those cannot be regenerated. */
@@ -1076,6 +1082,11 @@ export default function OutgoingBillsPage() {
   }, [queue, queryClient]);
 
   const removeFromQueue = (id: string) => setQueue((q) => q.filter((i) => i.id !== id));
+
+  const updatePaidInStore = async (id: string, paidInStore: boolean) => {
+    await supabase.from('outgoing_bills').update({ paid_in_store: paidInStore }).eq('id', id);
+    queryClient.invalidateQueries({ queryKey: ['outgoing-bills'] });
+  };
 
   const updateStatus = async (id: string, status: string) => {
     await supabase.from('outgoing_bills').update({ status }).eq('id', id);
@@ -3139,6 +3150,20 @@ export default function OutgoingBillsPage() {
                             <p className="text-xs font-mono text-gray-400">#{bill.invoice_number}</p>
                           )}
                         </div>
+                        <button
+                          type="button"
+                          title={bill.paid_in_store
+                            ? 'Paid at the till — already in a Z-report, so the P&L Bills row skips it. Click to undo.'
+                            : 'Mark as paid at the till: the amount is in a Z-report, so the P&L should not count it twice.'}
+                          onClick={() => updatePaidInStore(bill.id, !bill.paid_in_store)}
+                          className={`mr-2 px-2 py-1 rounded-lg text-[11px] font-semibold border transition-colors ${
+                            bill.paid_in_store
+                              ? 'bg-amber-100 border-amber-300 text-amber-800'
+                              : 'bg-white border-gray-200 text-gray-400 hover:border-gray-300'
+                          }`}
+                        >
+                          {bill.paid_in_store ? 'In Z-report' : 'In Z-report?'}
+                        </button>
                         <select value={bill.status} onChange={(e) => updateStatus(bill.id, e.target.value)}
                           className={`flex-shrink-0 text-xs font-semibold px-2 py-1 rounded-full border cursor-pointer focus:outline-none ${STATUS_STYLES[bill.status] ?? ''}`}>
                           <option value="pending">Pending</option>
