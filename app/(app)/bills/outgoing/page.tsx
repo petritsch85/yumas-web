@@ -1418,7 +1418,11 @@ export default function OutgoingBillsPage() {
                                   const d = derive(editAmounts);
                                   const setA = <K extends keyof AmountsDraft>(k: K, v: AmountsDraft[K]) =>
                                     setEditAmounts(a => a ? { ...a, [k]: v } : a);
-                                  const fld = 'w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300';
+                                  const fldBase = 'border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300';
+                                  const fld = 'w-full ' + fldBase;
+                                  /* Inputs that sit side by side in a row size themselves from the
+                                     row, so they take the base without w-full. */
+                                  const fldRow = fldBase;
                                   const lbl = 'block text-xs font-semibold text-gray-500 mb-1';
                                   return (
                                     <div className="space-y-4">
@@ -1507,10 +1511,10 @@ export default function OutgoingBillsPage() {
                                             {editAmounts.adHocLines.map((ln, i) => (
                                               <div key={i} className="flex items-center gap-2">
                                                 <input type="text" value={ln.description} placeholder="Description"
-                                                  className={fld + ' flex-1'}
+                                                  className={fldRow + ' flex-1 min-w-0'}
                                                   onChange={e => setEditAmounts(a => a ? { ...a, adHocLines: a.adHocLines.map((x, j) => j === i ? { ...x, description: e.target.value } : x) } : a)} />
                                                 <input type="number" step="0.01" value={ln.amountNetto} placeholder="Netto"
-                                                  className={fld + ' w-28 text-right'}
+                                                  className={fldRow + ' w-28 flex-none text-right'}
                                                   onChange={e => setEditAmounts(a => a ? { ...a, adHocLines: a.adHocLines.map((x, j) => j === i ? { ...x, amountNetto: e.target.value } : x) } : a)} />
                                                 <div className="flex gap-1">
                                                   {([7, 19, 'event'] as const).map(v => (
@@ -1554,10 +1558,10 @@ export default function OutgoingBillsPage() {
                                               {editAmounts.cateringLines.map((ln, i) => (
                                                 <div key={i} className="flex items-center gap-2">
                                                   <input type="text" value={ln.description} placeholder="Position"
-                                                    className={fld + ' flex-1'}
+                                                    className={fldRow + ' flex-1 min-w-0'}
                                                     onChange={e => setEditAmounts(a => a ? { ...a, cateringLines: a.cateringLines.map((x, j) => j === i ? { ...x, description: e.target.value } : x) } : a)} />
                                                   <input type="number" step="0.01" value={ln.amount} placeholder="Betrag"
-                                                    className={fld + ' w-32 text-right'}
+                                                    className={fldRow + ' w-32 flex-none text-right'}
                                                     onChange={e => setEditAmounts(a => a ? { ...a, cateringLines: a.cateringLines.map((x, j) => j === i ? { ...x, amount: e.target.value } : x) } : a)} />
                                                   <button type="button" title="Remove this position"
                                                     onClick={() => setEditAmounts(a => a ? { ...a, cateringLines: a.cateringLines.filter((_, j) => j !== i) } : a)}
@@ -1585,13 +1589,13 @@ export default function OutgoingBillsPage() {
                                             {editAmounts.lineItems.map((ln, i) => (
                                               <div key={i} className="flex items-center gap-2">
                                                 <input type="number" step="1" value={ln.qty} placeholder="Menge"
-                                                  className={fld + ' w-20 text-right'}
+                                                  className={fldRow + ' w-20 flex-none text-right'}
                                                   onChange={e => setEditAmounts(a => a ? { ...a, lineItems: a.lineItems.map((x, j) => j === i ? { ...x, qty: e.target.value } : x) } : a)} />
                                                 <input type="text" value={ln.item} placeholder="Artikel"
-                                                  className={fld + ' flex-1'}
+                                                  className={fldRow + ' flex-1 min-w-0'}
                                                   onChange={e => setEditAmounts(a => a ? { ...a, lineItems: a.lineItems.map((x, j) => j === i ? { ...x, item: e.target.value } : x) } : a)} />
                                                 <input type="number" step="0.01" value={ln.unitPrice} placeholder="Einzelpreis"
-                                                  className={fld + ' w-28 text-right'}
+                                                  className={fldRow + ' w-28 flex-none text-right'}
                                                   onChange={e => setEditAmounts(a => a ? { ...a, lineItems: a.lineItems.map((x, j) => j === i ? { ...x, unitPrice: e.target.value } : x) } : a)} />
                                                 <button type="button" title="Remove this line"
                                                   onClick={() => setEditAmounts(a => a ? { ...a, lineItems: a.lineItems.filter((_, j) => j !== i) } : a)}
