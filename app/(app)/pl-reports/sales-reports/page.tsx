@@ -978,6 +978,11 @@ export default function SalesReportsPage() {
   // Tab / sub-tab
   const [activeTab,   setActiveTab]   = useState<'upload'|'daily'>('daily');
   const [subTab,      setSubTab]      = useState<'daily'|'weekly'|'monthly'>('daily');
+  /**
+   * Which numbered section of the daily P&L is on screen. They used to run one
+   * under the other, which meant scrolling past a hundred rows to reach Wolt.
+   */
+  const [plSection, setPlSection] = useState<'summary'|'orderbird'|'wolt'|'webshop'>('summary');
   const [reportType,  setReportType]  = useState<'weekly'|'shift'|'monthly'|'delivery'|'manual'|'wolt'|'webshop'>('shift');
 
   /* ── Webshop: one CSV export holding every order ── */
@@ -3059,7 +3064,24 @@ export default function SalesReportsPage() {
                 >{st.charAt(0).toUpperCase() + st.slice(1)}</button>
               ))}
             </div>
-            {subTab === 'daily' && (<div />)}
+            {subTab === 'daily' && (
+              <div className="flex items-center gap-1.5">
+                {([
+                  ['summary',   '1) Summary'],
+                  ['orderbird', '2) Orderbird'],
+                  ['wolt',      '3) Wolt'],
+                  ['webshop',   '4) Webshop'],
+                ] as const).map(([key, label]) => (
+                  <button key={key} onClick={() => setPlSection(key)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors ${
+                      plSection === key
+                        ? 'bg-slate-900 text-white border-slate-900'
+                        : 'bg-white text-gray-600 border-gray-200 hover:border-slate-900 hover:text-slate-900'
+                    }`}
+                  >{label}</button>
+                ))}
+              </div>
+            )}
             {subTab === 'daily' && (
               <div className="ml-auto flex items-center gap-2">
                 <button onClick={() => { setShowClosuresPanel(p => !p); setShowForecastPanel(false); }}
@@ -4950,7 +4972,7 @@ export default function SalesReportsPage() {
 
                   {/* ── Summary P&L ── */}
                   <tbody>
-                    {sectionBannerRow('1) Summary')}
+                    {plSection === 'summary' && sectionBannerRow('1) Summary')}
                     {(() => {
                       const todayKey = `${todayYear}-${String(todayMonth).padStart(2,'0')}-${String(todayDay).padStart(2,'0')}`;
 
@@ -5595,6 +5617,7 @@ export default function SalesReportsPage() {
                       return (
                         <>
                           {/* ── Net sales, by source — labels only for now ── */}
+                          {plSection === 'summary' && <>
                           {netSalesHeaderRow('Net sales · Lunch', 'lunch')}
                           {posRow('🟠 Orderbird', lunchMap, lunchForecastMap, lunchQtrTotal, 'lunch')}
                           {netSalesValueRow('Webshop', webshopMaps.lunch.net, 'lunch')}
@@ -5625,9 +5648,11 @@ export default function SalesReportsPage() {
                           {netSalesTotalRow('total-net-sales-day', 'Total net sales · All day',
                             netSalesTotalMap(orderbirdDayMap, orderbirdDayForecast, webshopMaps.day.net, woltMaps.day.net, billsDayMap))}
                           {netSalesSpacerRow('net-sales-gap-3')}
+                          </>}
 
                           {/* ── 2) Orderbird — the detail behind the Orderbird summary rows ── */}
-                          {sectionBannerRow('2) Orderbird')}
+                          {plSection === 'orderbird' && sectionBannerRow('2) Orderbird')}
+                          {plSection === 'orderbird' && <>
                           {estGuestsRow('↳ Est. Guests · Lunch',       effectiveLunchGuestsMap,  'lunch', lunchQEffGuests)}
                           {metricRow('↳ Net Food / Guest · Lunch',    lunchNetFoodPGMap,   lunchQMetrics.guests > 0 ? lunchQMetrics.netFood   / lunchQMetrics.guests : null, 'currency', 'lunch')}
                           {metricRow('↳ Net Drinks / Guest · Lunch',  lunchNetDrinksPGMap, lunchQMetrics.guests > 0 ? lunchQMetrics.netDrinks / lunchQMetrics.guests : null, 'currency', 'lunch')}
@@ -5645,22 +5670,23 @@ export default function SalesReportsPage() {
                           {simplyRow('🛵 Simply · Dinner', deliveryDinnerMap, simplyDinnerForecastMap, 'dinner')}
                           {totalRow('🌙  Total Dinner', dinnerMap, dinnerForecastMap, deliveryDinnerMap, dinnerQtrTotal, '#f0fdf4', '#1B5E20', billsDinnerMap, simplyDinnerForecastMap, 'dinner')}
                           {totalRow('∑   Daily Total',  totalMap,  totalForecastMap,  deliveryTotalMap,  totalQtrTotal,  '#f0fdf4', '#1B5E20', billsTotalMap, simplyTotalForecastMap)}
+                          </>}
                         </>
                       );
                     })()}
                   </tbody>
 
-                  <tbody><tr><td colSpan={totalCols} style={{ height: 12, backgroundColor:'#f9fafb' }} /></tr></tbody>
+                  {plSection === 'orderbird' && (
+                    <>
+                      <tbody><tr><td colSpan={totalCols} style={{ height: 12, backgroundColor:'#f9fafb' }} /></tr></tbody>
+                      {renderBlock(lunchMap,  lunchQtrTotal,  '☀️  Lunch Shift',  '#92400E')}
+                      {renderBlock(dinnerMap, dinnerQtrTotal, '🌙  Dinner Shift', '#1E3A5F')}
+                      {renderBlock(totalMap,  totalQtrTotal,  '∑   Daily Total',  '#111827')}
+                    </>
+                  )}
 
-                  {renderBlock(lunchMap,  lunchQtrTotal,  '☀️  Lunch Shift',  '#92400E')}
-                  {renderBlock(dinnerMap, dinnerQtrTotal, '🌙  Dinner Shift', '#1E3A5F')}
-                  {renderBlock(totalMap,  totalQtrTotal,  '∑   Daily Total',  '#111827')}
-
-                  <tbody><tr><td colSpan={totalCols} style={{ height: 12, backgroundColor:'#f9fafb' }} /></tr></tbody>
-                  {woltTbody()}
-
-                  <tbody><tr><td colSpan={totalCols} style={{ height: 12, backgroundColor:'#f9fafb' }} /></tr></tbody>
-                  {webshopTbody()}
+                  {plSection === 'wolt'    && woltTbody()}
+                  {plSection === 'webshop' && webshopTbody()}
                 </table>
               </div>
               <div className="px-4 py-2.5 bg-gray-50 border-t border-gray-100 flex items-center justify-between">
