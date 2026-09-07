@@ -5035,13 +5035,13 @@ export default function SalesReportsPage() {
                                 const wTotal  = wActual + wFcast;
                                 const wMix    = wActual > 0 && wFcast > 0;
                                 return (
-                                  <td key={ci} className="py-2 text-right tabular-nums" style={{ paddingLeft:4, paddingRight:6, backgroundColor:'#fffbeb', borderLeft:'1px solid #fde68a', borderRight:'1px solid #fde68a' }}>
+                                  <td key={ci} className={`${padY} text-right tabular-nums${small}`} style={{ paddingLeft:4, paddingRight:6, backgroundColor:'#fffbeb', borderLeft:'1px solid #fde68a', borderRight:'1px solid #fde68a' }}>
                                     {wTotal > 0 ? <span className={wMix ? 'text-amber-600' : 'text-blue-700'}>{fmtNum(wTotal)}</span> : <span className="text-gray-300">—</span>}
                                   </td>
                                 );
                               }
                             })}
-                            <td className="py-2 text-right tabular-nums border-l border-gray-200" style={{ paddingLeft:4, paddingRight:8 }}>
+                            <td className={`${padY} text-right tabular-nums${small} border-l border-gray-200`} style={{ paddingLeft:4, paddingRight:8 }}>
                               {qDisplayVal > 0 ? <span className={qHasMix ? 'text-amber-600' : 'text-blue-700'}>{fmtNum(qDisplayVal)}</span> : <span className="text-gray-300">—</span>}
                             </td>
                           </tr>
