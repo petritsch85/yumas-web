@@ -5000,7 +5000,13 @@ export default function SalesReportsPage() {
                       const todayKey = `${todayYear}-${String(todayMonth).padStart(2,'0')}-${String(todayDay).padStart(2,'0')}`;
 
                       // Render a standard POS net-revenue row (with forecast support)
-                      const posRow = (label: string, posMap: typeof lunchMap, fcastMap: Record<string,number>, qTotal: typeof lunchQtrTotal, shift?: 'lunch' | 'dinner') => {
+                      /**
+                       * @param compact in the Summary every source is one row of the same
+                       *   size; the detail section below keeps the roomier form.
+                       */
+                      const posRow = (label: string, posMap: typeof lunchMap, fcastMap: Record<string,number>, qTotal: typeof lunchQtrTotal, shift?: 'lunch' | 'dinner', compact = false) => {
+                        const padY  = compact ? 'py-1' : 'py-2';
+                        const small = compact ? ' text-[11px]' : '';
                         const hasFcast    = Object.keys(fcastMap).length > 0;
                         const qActualSum  = qTotal?.netTotal ?? 0;
                         const qFcastRem   = hasFcast ? dailyCols.filter(c => c.type === 'day' && c.dateKey >= todayKey && !(posMap as any)[c.dateKey]).reduce((s, c) => s + (fcastMap[(c as any).dateKey] ?? 0), 0) : 0;
@@ -5008,7 +5014,7 @@ export default function SalesReportsPage() {
                         const qHasMix     = qActualSum > 0 && qFcastRem > 0;
                         return (
                           <tr key={`${shift ?? 'day'}-${label}`} className="border-b border-gray-100 hover:bg-gray-50/60 group" style={{ backgroundColor:'#ffffff' }}>
-                            <td className="sticky left-0 z-10 px-4 py-2 whitespace-nowrap border-r border-gray-100 group-hover:bg-gray-50 transition-colors text-gray-700" style={{ backgroundColor:'#ffffff' }}>{label}</td>
+                            <td className={`sticky left-0 z-10 px-4 ${padY} whitespace-nowrap border-r border-gray-100 group-hover:bg-gray-50 transition-colors ${compact ? 'pl-8 text-[11px] text-gray-600' : 'text-gray-700'}`} style={{ backgroundColor:'#ffffff' }}>{label}</td>
                             {dailyCols.map((col, ci) => {
                               if (col.type === 'day') {
                                 const isFuture = col.dateKey >= todayKey;
@@ -5017,7 +5023,7 @@ export default function SalesReportsPage() {
                                 const hasActual = actual > 0;
                                 const showFcast = !hasActual && isFuture && fcast !== null && fcast > 0;
                                 return (
-                                  <td key={ci} className="py-2 text-right tabular-nums" style={{ paddingLeft:4, paddingRight:8, ...colStyle(shift, col.dateKey) }}>
+                                  <td key={ci} className={`${padY} text-right tabular-nums${small}`} style={{ paddingLeft:4, paddingRight:8, ...colStyle(shift, col.dateKey) }}>
                                     {hasActual ? <span className="text-blue-700">{fmtNum(actual)}</span>
                                       : showFcast ? <span className="text-amber-500 italic text-[10px]">{fmtNum(fcast!)}</span>
                                       : <span className="text-gray-300">—</span>}
@@ -5091,7 +5097,9 @@ export default function SalesReportsPage() {
                       };
 
                       // Render a Bills row (large-group invoices, no forecast)
-                      const billsRow = (label: string, billsMap: Record<string,number>, shift?: 'lunch' | 'dinner') => {
+                      const billsRow = (label: string, billsMap: Record<string,number>, shift?: 'lunch' | 'dinner', compact = false) => {
+                        const padY  = compact ? 'py-1' : 'py-2';
+                        const small = compact ? ' text-[11px]' : '';
                         const qBills = Object.entries(billsMap).filter(([k]) => dailyCols.some(c => c.type === 'day' && (c as any).dateKey === k)).reduce((s, [,v]) => s + v, 0);
                         return (
                           <tr key={label} className="border-b border-gray-100 hover:bg-gray-50/60 group">
@@ -5100,20 +5108,20 @@ export default function SalesReportsPage() {
                               if (col.type === 'day') {
                                 const val = billsMap[col.dateKey] ?? 0;
                                 return (
-                                  <td key={ci} className="py-2 text-right tabular-nums" style={{ paddingLeft:4, paddingRight:8, ...colStyle(shift, col.dateKey) }}>
+                                  <td key={ci} className={`${padY} text-right tabular-nums${small}`} style={{ paddingLeft:4, paddingRight:8, ...colStyle(shift, col.dateKey) }}>
                                     {val > 0 ? <span className="text-blue-600">{fmtNum(val)}</span> : <span className="text-gray-300">—</span>}
                                   </td>
                                 );
                               } else {
                                 const wTotal = col.wDateKeys.reduce((s, k) => s + (billsMap[k] ?? 0), 0);
                                 return (
-                                  <td key={ci} className="py-2 text-right tabular-nums" style={{ paddingLeft:4, paddingRight:6, backgroundColor:'#fffbeb', borderLeft:'1px solid #fde68a', borderRight:'1px solid #fde68a' }}>
+                                  <td key={ci} className={`${padY} text-right tabular-nums${small}`} style={{ paddingLeft:4, paddingRight:6, backgroundColor:'#fffbeb', borderLeft:'1px solid #fde68a', borderRight:'1px solid #fde68a' }}>
                                     {wTotal > 0 ? <span className="text-blue-600">{fmtNum(wTotal)}</span> : <span className="text-gray-300">—</span>}
                                   </td>
                                 );
                               }
                             })}
-                            <td className="py-2 text-right tabular-nums border-l border-gray-200" style={{ paddingLeft:4, paddingRight:8 }}>
+                            <td className={`${padY} text-right tabular-nums${small} border-l border-gray-200`} style={{ paddingLeft:4, paddingRight:8 }}>
                               {qBills > 0 ? <span className="text-blue-600">{fmtNum(qBills)}</span> : <span className="text-gray-300">—</span>}
                             </td>
                           </tr>
@@ -5642,31 +5650,31 @@ export default function SalesReportsPage() {
                           {/* ── Net sales, by source — labels only for now ── */}
                           {plSection === 'summary' && <>
                           {netSalesHeaderRow('Net sales · Lunch', 'lunch')}
-                          {posRow('🟠 Orderbird', lunchMap, lunchForecastMap, lunchQtrTotal, 'lunch')}
+                          {posRow('Orderbird', lunchMap, lunchForecastMap, lunchQtrTotal, 'lunch', true)}
                           {netSalesValueRow('Webshop', webshopMaps.lunch.net, 'lunch')}
                           {netSalesValueRow('Wolt', woltMaps.lunch.net, 'lunch')}
                           {NET_SALES_AFTER_WOLT.map(src => netSalesSourceRow(src, 'lunch'))}
-                          {billsRow('🧾 Bills', billsLunchMap, 'lunch')}
+                          {billsRow('Bills', billsLunchMap, 'lunch', true)}
                           {NET_SALES_AFTER_BILLS.map(src => netSalesSourceRow(src, 'lunch'))}
                           {netSalesTotalRow('total-net-sales-lunch', 'Total net sales · Lunch',
                             netSalesTotalMap(lunchMap, lunchForecastMap, webshopMaps.lunch.net, woltMaps.lunch.net, billsLunchMap), 'lunch')}
                           {netSalesSpacerRow('net-sales-gap')}
                           {netSalesHeaderRow('Net sales · Dinner', 'dinner')}
-                          {posRow('🟠 Orderbird', dinnerMap, dinnerForecastMap, dinnerQtrTotal, 'dinner')}
+                          {posRow('Orderbird', dinnerMap, dinnerForecastMap, dinnerQtrTotal, 'dinner', true)}
                           {netSalesValueRow('Webshop', webshopMaps.dinner.net, 'dinner')}
                           {netSalesValueRow('Wolt', woltMaps.dinner.net, 'dinner')}
                           {NET_SALES_AFTER_WOLT.map(src => netSalesSourceRow(src, 'dinner'))}
-                          {billsRow('🧾 Bills', billsDinnerMap, 'dinner')}
+                          {billsRow('Bills', billsDinnerMap, 'dinner', true)}
                           {NET_SALES_AFTER_BILLS.map(src => netSalesSourceRow(src, 'dinner'))}
                           {netSalesTotalRow('total-net-sales-dinner', 'Total net sales · Dinner',
                             netSalesTotalMap(dinnerMap, dinnerForecastMap, webshopMaps.dinner.net, woltMaps.dinner.net, billsDinnerMap), 'dinner')}
                           {netSalesSpacerRow('net-sales-gap-2')}
                           {netSalesHeaderRow('Net sales · Day')}
-                          {posRow('🟠 Orderbird', orderbirdDayMap, orderbirdDayForecast, orderbirdDayQtr)}
+                          {posRow('Orderbird', orderbirdDayMap, orderbirdDayForecast, orderbirdDayQtr, undefined, true)}
                           {netSalesValueRow('Webshop', webshopMaps.day.net)}
                           {netSalesValueRow('Wolt', woltMaps.day.net)}
                           {NET_SALES_AFTER_WOLT.map(src => netSalesSourceRow(src))}
-                          {billsRow('🧾 Bills', billsDayMap)}
+                          {billsRow('Bills', billsDayMap, undefined, true)}
                           {NET_SALES_AFTER_BILLS.map(src => netSalesSourceRow(src))}
                           {netSalesTotalRow('total-net-sales-day', 'Total net sales · All day',
                             netSalesTotalMap(orderbirdDayMap, orderbirdDayForecast, webshopMaps.day.net, woltMaps.day.net, billsDayMap))}
