@@ -3260,11 +3260,20 @@ export default function SalesReportsPage() {
 
                   <button
                     onClick={handleAddManual}
-                    disabled={!manualForm.date || !manualForm.grossTotal}
+                    // A shift needs a date and a figure, but which figure is up to
+                    // the entry: the P&L reads net sales, so a net-only entry is
+                    // just as complete as a gross one.
+                    disabled={!manualForm.date || (!manualForm.grossTotal && !manualForm.netTotal)}
                     className="w-full py-2 bg-[#1B5E20] text-white text-sm font-bold rounded-lg hover:bg-[#2E7D32] transition-colors disabled:opacity-40"
                   >
                     + Add to queue
                   </button>
+                  {/* Without this the button just sits greyed out with no reason given. */}
+                  {!manualForm.grossTotal && !manualForm.netTotal && (
+                    <p className="text-[10px] text-gray-400 text-center -mt-1">
+                      Enter a Gross Total or a Net Revenue to add this shift
+                    </p>
+                  )}
 
                   {/* Save All button — shown once there are queued entries */}
                   {shiftBatch.some(i => i.status === 'pending') && (
