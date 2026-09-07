@@ -1052,6 +1052,17 @@ export default function SalesReportsPage() {
 
   // Shared controls
   const [location, setLocation] = useState<Location | null>(null);
+
+  /**
+   * "Group" is not a location: it stands for every restaurant added together.
+   *
+   * The daily maps already sum rows that share a date, so dropping the location
+   * filter turns each query into a company-wide one without touching the
+   * aggregation. Only the Summary section is offered — the detail sections
+   * describe one restaurant's shifts and would not mean anything combined.
+   */
+  const GROUP_ID = 'group';
+  const isGroup  = location?.id === GROUP_ID;
   const [year,     setYear]     = useState(new Date().getFullYear());
   const [quarter,  setQuarter]  = useState<number>(Math.ceil((new Date().getMonth() + 1) / 3));
 
@@ -1182,13 +1193,15 @@ export default function SalesReportsPage() {
       const [firstM, , lastM] = QUARTER_MONTHS[quarter - 1];
       const qStart = `${year}-${String(firstM).padStart(2,'0')}-01`;
       const qEnd   = `${year}-${String(lastM).padStart(2,'0')}-${String(daysInMonth(year, lastM)).padStart(2,'0')}`;
-      const { data } = await supabase
+      let q = supabase
         .from('shift_reports')
         .select('id,report_date,z_report_number,shift_type,gross_total,gross_food,gross_beverages,net_total,vat_total,tips,inhouse_total,takeaway_total,cancellations_count,cancellations_total')
-        .eq('location_id', location!.id)
         .gte('report_date', qStart)
         .lte('report_date', qEnd)
         .order('report_date', { ascending: true });
+      // Group covers every restaurant; the day maps sum rows sharing a date.
+      if (!isGroup) q = q.eq('location_id', location!.id);
+      const { data } = await q;
       return (data ?? []) as ShiftRow[];
     },
   });
@@ -1262,12 +1275,13 @@ export default function SalesReportsPage() {
       const [firstM, , lastM] = QUARTER_MONTHS[quarter - 1];
       const qStart = `${year}-${String(firstM).padStart(2,'0')}-01`;
       const qEnd   = `${year}-${String(lastM).padStart(2,'0')}-${String(daysInMonth(year, lastM)).padStart(2,'0')}`;
-      const { data } = await supabase
+      let q = supabase
         .from('outgoing_bills')
         .select('id,event_date,shift_type,net_total,issuing_location')
-        .eq('issuing_location', location!.name)
         .gte('event_date', qStart)
         .lte('event_date', qEnd);
+      if (!isGroup) q = q.eq('issuing_location', location!.name);
+      const { data } = await q;
       return (data ?? []) as { id: string; event_date: string | null; shift_type: 'lunch' | 'dinner' | null; net_total: number }[];
     },
   });
@@ -1280,13 +1294,14 @@ export default function SalesReportsPage() {
       const [firstM, , lastM] = QUARTER_MONTHS[quarter - 1];
       const qStart = `${year}-${String(firstM).padStart(2,'0')}-01`;
       const qEnd   = `${year}-${String(lastM).padStart(2,'0')}-${String(daysInMonth(year, lastM)).padStart(2,'0')}`;
-      const { data } = await supabase
+      let q = supabase
         .from('webshop_orders')
         .select('sale_date,shift,net_cents,counts')
-        .eq('location_id', location!.id)
         .eq('counts', true)          // unpaid checkouts are not sales
         .gte('sale_date', qStart)
         .lte('sale_date', qEnd);
+      if (!isGroup) q = q.eq('location_id', location!.id);
+      const { data } = await q;
       return (data ?? []) as { sale_date: string; shift: 'lunch' | 'dinner'; net_cents: number }[];
     },
   });
@@ -1297,12 +1312,13 @@ export default function SalesReportsPage() {
     enabled: !!location,
     queryFn: async () => {
       const [firstM, , lastM] = QUARTER_MONTHS[quarter - 1];
-      const { data } = await supabase
+      let q = supabase
         .from('wolt_month_credits')
         .select('month, label, net')
-        .eq('location_id', location!.id)
         .gte('month', `${year}-${String(firstM).padStart(2,'0')}-01`)
         .lte('month', `${year}-${String(lastM).padStart(2,'0')}-01`);
+      if (!isGroup) q = q.eq('location_id', location!.id);
+      const { data } = await q;
       return (data ?? []) as { month: string; label: string; net: number }[];
     },
   });
@@ -1337,12 +1353,13 @@ export default function SalesReportsPage() {
       const [firstM, , lastM] = QUARTER_MONTHS[quarter - 1];
       const qStart = `${year}-${String(firstM).padStart(2,'0')}-01`;
       const qEnd   = `${year}-${String(lastM).padStart(2,'0')}-${String(daysInMonth(year, lastM)).padStart(2,'0')}`;
-      const { data } = await supabase
+      let q = supabase
         .from('wolt_shift_sales')
         .select('sale_date,shift,orders,net_sales,refund_est,commission,net_pre_ads,advertising_est,net_final')
-        .eq('location_id', location!.id)
         .gte('sale_date', qStart)
         .lte('sale_date', qEnd);
+      if (!isGroup) q = q.eq('location_id', location!.id);
+      const { data } = await q;
       return (data ?? []) as WoltShiftRowDb[];
     },
   });
@@ -3024,11 +3041,17 @@ export default function SalesReportsPage() {
               <MapPin size={13} className="text-gray-400" />
               <select
                 value={location?.id ?? ''}
-                onChange={e => { const l = locations.find(l => l.id === e.target.value); if (l) setLocation(l); }}
+                onChange={e => {
+                  // Group is not in the locations list — it stands for all of them.
+                  if (e.target.value === GROUP_ID) { setLocation({ id: GROUP_ID, name: 'Group' }); return; }
+                  const l = locations.find(l => l.id === e.target.value);
+                  if (l) setLocation(l);
+                }}
                 className="border border-gray-200 rounded-lg px-3 py-1.5 text-xs font-semibold text-gray-700 bg-white focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 cursor-pointer"
               >
                 <option value="" disabled>Select location</option>
                 {locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+                <option value={GROUP_ID}>Group — all restaurants</option>
               </select>
             </div>
             {/* Year */}
@@ -3071,7 +3094,7 @@ export default function SalesReportsPage() {
                   ['orderbird', '2) Orderbird'],
                   ['wolt',      '3) Wolt'],
                   ['webshop',   '4) Webshop'],
-                ] as const).map(([key, label]) => (
+                ] as const).filter(([key]) => !isGroup || key === 'summary').map(([key, label]) => (
                   <button key={key} onClick={() => setPlSection(key)}
                     className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors ${
                       plSection === key
