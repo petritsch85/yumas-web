@@ -41,6 +41,7 @@ import {
   Settings2,
   ShoppingBag,
   SearchX,
+  CalendarCheck,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase-browser';
 import { Bell, BellOff } from 'lucide-react';
@@ -109,6 +110,7 @@ const NAV_GROUPS: NavGroup[] = [
           { labelKey: 'sidebar.nav.salesReportsPl', href: '/pl-reports/sales-reports', icon: LineChart },
           { labelKey: 'sidebar.nav.wolt',           href: '/pl-reports/sales-reports/wolt', icon: Bike },
           { labelKey: 'sidebar.nav.webshop',        href: '/pl-reports/sales-reports/webshop', icon: ShoppingBag },
+          { labelKey: 'sidebar.nav.openTable',      href: '/pl-reports/sales-reports/opentable', icon: CalendarCheck },
         ],
       },
       { labelKey: 'sidebar.nav.productDetails', href: '/pl-reports/product-details', icon: ShoppingBag, permKey: 'pl_reports' },

@@ -91,7 +91,8 @@
       "bookingSettings": "Einstellungen",
       "wolt": "Wolt",
       "salesReportsPl": "GuV",
-      "webshop": "Webshop"
+      "webshop": "Webshop",
+      "openTable": "OpenTable"
     }
   },
   "topbar": {

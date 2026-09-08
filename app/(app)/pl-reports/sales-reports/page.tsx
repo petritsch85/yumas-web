@@ -3,6 +3,8 @@
 import { useState, useMemo, useCallback, useRef, useEffect, Fragment } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
+import { parseOpenTableCsv, summariseOpenTable, OpenTableParseError } from '@/lib/opentable-csv';
+import type { OpenTableSummary } from '@/lib/opentable-csv';
 import type { WoltInvoiceData } from '@/lib/wolt-invoice';
 import type { WoltShiftBreakdown } from '@/lib/wolt-sales-report';
 import type { WoltServicesData } from '@/lib/wolt-services';
@@ -918,7 +920,7 @@ export default function SalesReportsPage() {
    * under the other, which meant scrolling past a hundred rows to reach Wolt.
    */
   const [plSection, setPlSection] = useState<'summary'|'orderbird'|'wolt'|'webshop'>('summary');
-  const [reportType,  setReportType]  = useState<'weekly'|'shift'|'monthly'|'manual'|'wolt'|'webshop'>('shift');
+  const [reportType,  setReportType]  = useState<'weekly'|'shift'|'monthly'|'manual'|'wolt'|'webshop'|'opentable'>('shift');
 
   /* ── Webshop: one CSV export holding every order ── */
   const [webshopRows,    setWebshopRows]    = useState<Record<string, unknown>[]>([]);
@@ -926,6 +928,12 @@ export default function SalesReportsPage() {
   const [webshopError,   setWebshopError]   = useState<string | null>(null);
   const [webshopParsing, setWebshopParsing] = useState(false);
   const [webshopSaved,   setWebshopSaved]   = useState<number | null>(null);
+  /* OpenTable reservations. The export names no restaurant, so the rows are
+     filed against whichever location is selected above. */
+  const [otRows,    setOtRows]    = useState<Record<string, unknown>[]>([]);
+  const [otSummary, setOtSummary] = useState<OpenTableSummary | null>(null);
+  const [otError,   setOtError]   = useState<string | null>(null);
+  const [otSaved,   setOtSaved]   = useState<number | null>(null);
 
   /* ── Wolt: a five-day document set (invoice + netting + sales report) ──
      Only the self-billing invoice carries the period totals; the other two are
@@ -1443,6 +1451,39 @@ export default function SalesReportsPage() {
       return (data ?? []) as Array<{ name: string; menu_category: string | null; guest_multiplier: number | null }>;
     },
   });
+
+  /* ── OpenTable reservations for the quarter ──────────────────────────────
+     Read-only here: they fill the Bookings line and nothing else. Est. Guests
+     and the revenue forecast stay on their own inputs. */
+  type OtRow = { visit_date: string; shift: string; party_size: number };
+  const { data: openTableData = [] } = useQuery<OtRow[]>({
+    queryKey: ['opentable-bookings', 'pl', location?.id, year, quarter],
+    enabled: !!location && !isGroup,
+    queryFn: async () => {
+      const [firstM, , lastM] = QUARTER_MONTHS[quarter - 1];
+      const qStart = `${year}-${String(firstM).padStart(2,'0')}-01`;
+      const qEnd   = `${year}-${String(lastM).padStart(2,'0')}-${String(daysInMonth(year, lastM)).padStart(2,'0')}`;
+      const { data, error } = await supabase
+        .from('opentable_bookings')
+        .select('visit_date, shift, party_size')
+        .eq('location_id', location!.id)
+        .eq('counts', true)
+        .gte('visit_date', qStart)
+        .lte('visit_date', qEnd);
+      if (error) throw error;
+      return (data ?? []) as OtRow[];
+    },
+  });
+
+  /** Booked covers per date, dinner only — lunch bookings are not reported yet. */
+  const openTableDinnerMap = useMemo<Record<string, number>>(() => {
+    const m: Record<string, number> = {};
+    for (const r of openTableData) {
+      if (r.shift !== 'dinner') continue;
+      m[r.visit_date] = (m[r.visit_date] ?? 0) + (r.party_size ?? 0);
+    }
+    return m;
+  }, [openTableData]);
 
   // ── Shift bookings (manual bookings + walk-ins per day) ───────────────────
   type BookingRow = { booking_date: string; shift_type: string; bookings: number; walk_ins: number | null };
@@ -2026,7 +2067,19 @@ export default function SalesReportsPage() {
     }
     return { lunchBookingsMap: lB, dinnerBookingsMap: dB, lunchWalkInsMap: lW, dinnerWalkInsMap: dW, effectiveLunchGuestsMap: effL, effectiveDinnerGuestsMap: effD };
   }, [bookingsData, lunchGuestsMap, dinnerGuestsMap]);
-  const dinnerQBookings = Object.values(dinnerBookingsMap).reduce((s, v) => s + v, 0);
+  /**
+   * Booked dinner covers as the P&L shows them.
+   *
+   * OpenTable is the source wherever it has reservations for the day. A number
+   * typed into the cell still wins, so a booking taken outside OpenTable — or a
+   * correction — is never overwritten by the next import.
+   */
+  const dinnerBookingsDisplayMap = useMemo<Record<string, number>>(() => {
+    const m: Record<string, number> = { ...openTableDinnerMap };
+    for (const [dk, v] of Object.entries(dinnerBookingsMap)) if (v > 0) m[dk] = v;
+    return m;
+  }, [openTableDinnerMap, dinnerBookingsMap]);
+  const dinnerQBookings = Object.values(dinnerBookingsDisplayMap).reduce((s, v) => s + v, 0);
   const dinnerQWalkIns  = Object.values(dinnerWalkInsMap).reduce((s, v) => s + v, 0);
   const lunchQEffGuests  = Object.values(effectiveLunchGuestsMap).reduce((s, v) => s + v, 0);
   const dinnerQEffGuests = Object.values(effectiveDinnerGuestsMap).reduce((s, v) => s + v, 0);
@@ -2339,12 +2392,74 @@ export default function SalesReportsPage() {
     }
   }, [webshopRows, queryClient]);
 
+  /**
+   * Reads a GuestCenter export.
+   *
+   * Parsed in the browser: unlike the Wolt and webshop imports there is nothing
+   * to look up — the file names no restaurant, so the rows belong to whichever
+   * location is selected.
+   */
+  const handleOpenTableFiles = useCallback((files: File[], locationId?: string) => {
+    setOtError(null); setOtRows([]); setOtSummary(null); setOtSaved(null);
+    const csv = files.find(f => /\.csv$/i.test(f.name));
+    if (!csv) { setOtError('Drop the OpenTable export — a .csv file.'); return; }
+    if (!locationId) { setOtError('Choose a location above first — the export does not name one.'); return; }
+    void csv.text().then(text => {
+      try {
+        const bookings = parseOpenTableCsv(text);
+        setOtRows(bookings.map(b => ({
+          location_id:  locationId,
+          external_key: b.externalKey,
+          visit_date:   b.visitDate,
+          visit_time:   b.visitTime || null,
+          shift:        b.shift,
+          guest_name:   b.guestName || null,
+          phone:        b.phone || null,
+          party_size:   b.partySize,
+          status:       b.status || null,
+          counts:       b.counts,
+          table:        b.table || null,
+          source:       b.source || null,
+          requests:     b.requests || null,
+          notes:        b.notes || null,
+          tags:         b.tags || null,
+          completed_visits: b.completedVisits,
+          file_name:    csv.name,
+        })));
+        setOtSummary(summariseOpenTable(bookings));
+      } catch (e) {
+        setOtError(e instanceof OpenTableParseError ? e.message : 'The export could not be read.');
+      }
+    });
+  }, []);
+
+  /** Saves every reservation. Re-importing an export updates rather than duplicates. */
+  const handleImportOpenTable = useCallback(async () => {
+    if (otRows.length === 0) return;
+    setImporting(true);
+    try {
+      const CHUNK = 500;
+      for (let i = 0; i < otRows.length; i += CHUNK) {
+        const { error } = await supabase
+          .from('opentable_bookings')
+          .upsert(otRows.slice(i, i + CHUNK), { onConflict: 'location_id,external_key' });
+        if (error) { setOtError(error.message); return; }
+      }
+      setOtSaved(otRows.length);
+      setOtRows([]); setOtSummary(null);
+      queryClient.invalidateQueries({ queryKey: ['opentable-bookings'] });
+    } finally {
+      setImporting(false);
+    }
+  }, [otRows, queryClient]);
+
   const resetUpload = useCallback(() => {
     setFileName(null); setWeeklyResult(null); setWeeklyBatch([]); setShiftBatch([]);
     setMonthlyResult(null); setParseError(null); setWeeklyPage(0);
     setWoltSets([]); setWoltError(null); setWoltSaved(null);
     setWoltItemRows([]); setWoltItemSummary(null); setWoltItemsSaved(null);
     setWebshopRows([]); setWebshopSummary(null); setWebshopError(null); setWebshopSaved(null);
+    setOtRows([]); setOtSummary(null); setOtError(null); setOtSaved(null);
   }, []);
 
   const processFile = useCallback((file: File) => {
@@ -2982,6 +3097,7 @@ export default function SalesReportsPage() {
               ['weekly',   '📋', 'Weekly Report',   'KW report covering a full week'],
               ['wolt',     '🛵', 'Wolt Report',     '5-day PDF set, or the purchases export (CSV)'],
               ['webshop',  '🛒', 'Webshop',         'Order export from our own webshop (CSV)'],
+              ['opentable','📅', 'OpenTable',       'GuestCenter reservation export (CSV)'],
               ['manual',   '✏️', 'Manual Entry',    'Type in shift figures directly — no CSV needed'],
             ] as const).map(([t, emoji, label, desc]) => (
               <button key={t} onClick={() => { setReportType(t); resetUpload(); }}
@@ -3122,7 +3238,7 @@ export default function SalesReportsPage() {
               )}
 
               {/* Drop zone */}
-              {reportType !== 'manual' && reportType !== 'wolt' && reportType !== 'webshop' && <div>
+              {reportType !== 'manual' && reportType !== 'wolt' && reportType !== 'webshop' && reportType !== 'opentable' && <div>
                 <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">
                   { `Orderbird Z-Report CSV — ${reportType === 'shift' ? 'Shift' : reportType === 'monthly' ? 'Monthly' : 'Weekly'}`}
                 </label>
@@ -3380,6 +3496,94 @@ export default function SalesReportsPage() {
                       : webshopRows.length === 0 ? 'Drop the export above'
                       : `Save ${webshopRows.length} orders`}
                   </button>
+                </div>
+              )}
+
+              {reportType === 'opentable' && (
+                <div>
+                  <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">
+                    OpenTable export (CSV)
+                  </label>
+                  <div
+                    onDragOver={e => { e.preventDefault(); setIsDragging(true); }}
+                    onDragLeave={() => setIsDragging(false)}
+                    onDrop={e => { e.preventDefault(); setIsDragging(false); handleOpenTableFiles(Array.from(e.dataTransfer.files), location?.id); }}
+                    className={`border-2 border-dashed rounded-xl p-6 text-center transition-colors ${
+                      isDragging ? 'border-[#1B5E20] bg-green-50'
+                      : otError ? 'border-red-300 bg-red-50'
+                      : otSummary ? 'border-green-400 bg-green-50'
+                      : 'border-gray-200 bg-white'
+                    }`}
+                  >
+                    <Upload size={26} className={`mx-auto mb-2 ${otSummary ? 'text-[#1B5E20]' : 'text-gray-300'}`} />
+                    <p className={`text-sm font-semibold mb-1 ${otSummary ? 'text-green-700' : 'text-gray-600'}`}>
+                      {otSummary ? `${otSummary.total} reservations read` : 'Drop the GuestCenter CSV here'}
+                    </p>
+                    <p className="text-xs text-gray-400 mb-3">
+                      {/* The export names no restaurant, so this has to be said plainly. */}
+                      Filed against <span className="font-semibold text-gray-500">{location?.name ?? 'no location yet'}</span> · re-importing updates what is there
+                    </p>
+                    <input type="file" accept=".csv,text/csv" id="opentable-file-input" className="hidden"
+                      onChange={e => { handleOpenTableFiles(Array.from(e.target.files ?? []), location?.id); e.target.value = ''; }} />
+                    <label htmlFor="opentable-file-input"
+                      className="inline-block px-4 py-2 bg-white border border-gray-200 rounded-lg text-xs font-semibold text-gray-600 hover:bg-gray-50 cursor-pointer">
+                      Browse files
+                    </label>
+                  </div>
+
+                  {otSummary && (
+                    <div className="mt-2 grid grid-cols-4 gap-2">
+                      {[
+                        { label: 'Counted',       value: String(otSummary.counted),      tone: 'text-gray-800'  },
+                        { label: 'Cancelled',     value: String(otSummary.cancelled),    tone: 'text-gray-400'  },
+                        { label: '☀️ Lunch covers',  value: String(otSummary.lunchCovers),  tone: 'text-amber-700' },
+                        { label: '🌙 Dinner covers', value: String(otSummary.dinnerCovers), tone: 'text-blue-700'  },
+                      ].map(x => (
+                        <div key={x.label} className="bg-white border border-gray-100 rounded-lg p-2 shadow-sm">
+                          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-0.5">{x.label}</p>
+                          <p className={`text-base font-bold tabular-nums ${x.tone}`}>{x.value}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {otSummary && (
+                    <p className="mt-1.5 text-xs text-gray-400 text-center">
+                      {fmtDate(otSummary.firstDate)} – {fmtDate(otSummary.lastDate)} · only dinner reaches the P&L for now
+                    </p>
+                  )}
+
+                  {otError && (
+                    <div className="mt-2 flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded-lg">
+                      <AlertCircle size={15} className="text-red-500 flex-shrink-0 mt-0.5" />
+                      <p className="text-xs text-red-700">{otError}</p>
+                    </div>
+                  )}
+
+                  {otSaved !== null && (
+                    <div className="mt-2 flex items-start gap-2 p-3 bg-green-50 border border-green-200 rounded-lg">
+                      <FileCheck size={15} className="text-green-600 flex-shrink-0 mt-0.5" />
+                      <p className="text-xs text-green-800">{otSaved} reservations saved.</p>
+                    </div>
+                  )}
+
+                  <button
+                    onClick={handleImportOpenTable}
+                    disabled={otRows.length === 0 || importing}
+                    className={`mt-3 w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-bold transition-colors ${
+                      otRows.length > 0 && !importing
+                        ? 'bg-[#1B5E20] text-white hover:bg-[#2E7D32]'
+                        : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                    }`}
+                  >
+                    {importing ? <Loader2 size={16} className="animate-spin" /> : <DatabaseZap size={16} />}
+                    {importing            ? 'Saving…'
+                      : otRows.length === 0 ? 'Drop the export above'
+                      : `Save ${otRows.length} reservations`}
+                  </button>
+
+                  <p className="mt-3 text-xs text-gray-400 text-center leading-relaxed">
+                    Export from OpenTable → GuestCenter → Reporting → Reservations → Export CSV
+                  </p>
                 </div>
               )}
 
@@ -4051,7 +4255,7 @@ export default function SalesReportsPage() {
               ))}
 
               {/* Empty state */}
-              {reportType !== 'wolt' && reportType !== 'webshop' && !weeklyResult && shiftBatch.length === 0 && !monthlyResult && !parseError && (
+              {reportType !== 'wolt' && reportType !== 'webshop' && reportType !== 'opentable' && !weeklyResult && shiftBatch.length === 0 && !monthlyResult && !parseError && (
                 <div className="flex flex-col items-center justify-center h-64 border-2 border-dashed border-gray-200 rounded-xl gap-3">
                   <Upload size={40} className="text-gray-200" />
                   <p className="text-sm text-gray-400">
@@ -4864,7 +5068,7 @@ export default function SalesReportsPage() {
                         new Intl.NumberFormat('de-DE', { style:'currency', currency:'EUR', minimumFractionDigits:2, maximumFractionDigits:2 }).format(v);
 
                       // ── Inline booking cell ──────────────────────────────
-                      const bookingCell = (date: string, shift: 'lunch' | 'dinner', field: 'bookings' | 'walk_ins', value: number | null) => {
+                      const bookingCell = (date: string, shift: 'lunch' | 'dinner', field: 'bookings' | 'walk_ins', value: number | null, fromOpenTable = false) => {
                         const isEditing = editingBookingCell?.date === date && editingBookingCell?.shift === shift && editingBookingCell?.field === field;
                         if (isEditing) {
                           return (
@@ -4888,23 +5092,23 @@ export default function SalesReportsPage() {
                             onClick={() => setEditingBookingCell({ date, shift, field, draft: value != null ? String(value) : '' })}
                             className="cursor-text block w-full text-right tabular-nums text-[11px] hover:bg-indigo-50/60 rounded"
                             style={{ padding: '0 8px 0 4px', minHeight: 16 }}
-                            title="Click to edit"
+                            title={fromOpenTable ? 'Booked covers from OpenTable — click to override' : 'Click to edit'}
                           >
                             {value != null && value > 0
-                              ? <span className="text-indigo-500 font-medium">{fmtNum(value)}</span>
+                              ? <span className={fromOpenTable ? 'text-blue-500 font-medium' : 'text-indigo-500 font-medium'}>{fmtNum(value)}</span>
                               : <span className="text-gray-200">—</span>}
                           </span>
                         );
                       };
 
-                      const bookingsRow = (label: string, bMap: Record<string, number>, shift: 'lunch' | 'dinner', qTotal: number) => (
+                      const bookingsRow = (label: string, bMap: Record<string, number>, shift: 'lunch' | 'dinner', qTotal: number, otMap: Record<string, number> = {}) => (
                         <tr key={label} className="border-b border-indigo-100 hover:bg-indigo-50/30 group" style={{ backgroundColor: '#f5f3ff' }}>
                           <td className="sticky left-0 z-10 px-4 py-0.5 whitespace-nowrap border-r border-indigo-100 bg-[#f5f3ff] group-hover:bg-indigo-50/30 transition-colors text-[11px] text-indigo-400 italic">{label}</td>
                           {dailyCols.map((col, ci) => {
                             if (col.type === 'day') {
                               return (
                                 <td key={ci} className="py-0.5 tabular-nums" style={{ paddingLeft:0, paddingRight:0, ...colStyle(shift, col.dateKey) }}>
-                                  {bookingCell(col.dateKey, shift, 'bookings', bMap[col.dateKey] ?? null)}
+                                  {bookingCell(col.dateKey, shift, 'bookings', bMap[col.dateKey] ?? null, otMap[col.dateKey] != null)}
                                 </td>
                               );
                             } else {
@@ -5359,7 +5563,7 @@ export default function SalesReportsPage() {
                           {netPerGuestRow('↳ Net Total / Guest · Lunch', lunchNetTotalPGMap, 'lunch', defaultLunchSpend, lunchQMetrics)}
                           {posRow('☀️  Orderbird · Lunch',  lunchMap,  lunchForecastMap,  lunchQtrTotal, 'lunch')}
                           {totalRow('☀️  Total Lunch',  lunchMap,  lunchForecastMap,  deliveryLunchMap,  lunchQtrTotal,  '#f0fdf4', '#1B5E20', billsLunchMap, 'lunch')}
-                          {bookingsRow('↳ Bookings · Dinner',  dinnerBookingsMap, 'dinner', dinnerQBookings)}
+                          {bookingsRow('↳ Bookings · Dinner',  dinnerBookingsDisplayMap, 'dinner', dinnerQBookings, openTableDinnerMap)}
                           {walkInsRow( '↳ Walk-ins · Dinner', dinnerWalkInsMap, dinnerBookingsMap, 'dinner', dinnerQWalkIns)}
                           {estGuestsRow('↳ Est. Guests · Dinner',      effectiveDinnerGuestsMap, 'dinner', dinnerQEffGuests)}
                           {metricRow('↳ Net Food / Guest · Dinner',   dinnerNetFoodPGMap,   dinnerQMetrics.guests > 0 ? dinnerQMetrics.netFood   / dinnerQMetrics.guests : null, 'currency', 'dinner')}
