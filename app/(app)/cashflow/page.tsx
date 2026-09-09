@@ -931,6 +931,9 @@ export default function CashFlowPage() {
 
   const [txPage,    setTxPage]      = useState(1);   // confirmed table
   const [uncPage,   setUncPage]     = useState(1);   // unconfirmed review queue
+  /** Free-text filter. Debounced so a query is not fired on every keystroke. */
+  const [searchInput, setSearchInput] = useState('');
+  const [search,      setSearch]      = useState('');
 
   type AutoMatchRow = {
     txId: string; txDate: string; txCounterparty: string; txAmountCents: number;
@@ -1000,20 +1003,26 @@ export default function CashFlowPage() {
   // review queue would only ever show what happened to land on that page.
   const buildParams = (page: number, confirmed: 'true' | 'false') => {
     const q = new URLSearchParams({ dateFrom, dateTo, page: String(page), confirmed });
+    if (search.trim()) q.set('q', search.trim());
     if (dirFilter !== 'all') q.set('direction', dirFilter);
     if (catFilter !== 'All') q.set('category', catFilter);
     if (locFilter !== 'All') q.set('location', locFilter);
     return q;
   };
 
+  useEffect(() => {
+    const t = setTimeout(() => { setSearch(searchInput); setUncPage(1); setTxPage(1); }, 250);
+    return () => clearTimeout(t);
+  }, [searchInput]);
+
   const { data: uncData, isFetching: uncFetching } = useQuery<TxPage>({
-    queryKey: ['cashflow-tx', 'unconfirmed', dateFrom, dateTo, dirFilter, catFilter, locFilter, uncPage],
+    queryKey: ['cashflow-tx', 'unconfirmed', dateFrom, dateTo, dirFilter, catFilter, locFilter, search, uncPage],
     queryFn: () => fetch(`/api/cashflow/transactions?${buildParams(uncPage, 'false')}`).then(r => r.json()),
     placeholderData: prev => prev,
   });
 
   const { data: txData, isFetching } = useQuery<TxPage>({
-    queryKey: ['cashflow-tx', 'confirmed', dateFrom, dateTo, dirFilter, catFilter, locFilter, txPage],
+    queryKey: ['cashflow-tx', 'confirmed', dateFrom, dateTo, dirFilter, catFilter, locFilter, search, txPage],
     queryFn: () => fetch(`/api/cashflow/transactions?${buildParams(txPage, 'true')}`).then(r => r.json()),
     placeholderData: prev => prev,
   });
@@ -1703,6 +1712,22 @@ export default function CashFlowPage() {
               ))}
             </div>
 
+          <div className="relative">
+            <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+            <input
+              type="text"
+              value={searchInput}
+              onChange={e => setSearchInput(e.target.value)}
+              placeholder="Search counterparty or description…"
+              className="w-64 border border-gray-200 rounded-lg pl-8 pr-7 py-1.5 text-sm text-gray-700 bg-white outline-none focus:border-[#1B5E20]"
+            />
+            {searchInput && (
+              <button onClick={() => setSearchInput('')}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-700">
+                <X size={13} />
+              </button>
+            )}
+          </div>
             <select value={catFilter} onChange={e => { setCatFilter(e.target.value); setTxPage(1); }}
               className="text-sm border border-gray-200 rounded-lg px-2 py-1.5 outline-none focus:border-gray-400">
               <option value="All">All categories</option>

@@ -12,6 +12,7 @@ export async function GET(req: NextRequest) {
   const salesType      = p.get('salesType');
   const counterpartyId = p.get('counterpartyId');
   const confirmed      = p.get('confirmed');   // 'true' | 'false' | null (= both)
+  const search         = (p.get('q') ?? '').trim();
   const keywords       = p.getAll('keyword'); // repeated ?keyword=foo&keyword=bar
   const page           = Math.max(1, parseInt(p.get('page') ?? '1', 10));
   const pageSize       = Math.min(10000, parseInt(p.get('pageSize') ?? '1000', 10));
@@ -38,6 +39,15 @@ export async function GET(req: NextRequest) {
   // column default, so treat NULL as unconfirmed.
   if (confirmed === 'true')  q = q.eq('confirmed', true);
   if (confirmed === 'false') q = q.or('confirmed.is.null,confirmed.eq.false');
+
+  /* Free-text search across the two fields a person actually reads. A bank
+     export names the same money in different ways — a Wolt Capital drawdown
+     arrives as "MIR Lux Capital . Wolt" — so the description has to be
+     searchable too, not just the counterparty. */
+  if (search) {
+    const safe = search.replace(/[%,()]/g, ' ').trim();
+    if (safe) q = q.or(`counterparty.ilike.%${safe}%,description.ilike.%${safe}%`);
+  }
 
   // Counterparty filter: match by pinned id OR by any keyword (ilike)
   if (counterpartyId || keywords.length > 0) {
