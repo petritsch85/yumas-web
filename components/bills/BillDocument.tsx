@@ -13,7 +13,7 @@ const FOOTER_2 = 'Sparkasse Rhein-Nahe  ·  IBAN DE98 5605 0180 0017 1489 25  ·
 const PAYMENT  = 'Die Rechnung ist zahlbar innerhalb von 7 Tagen nach Rechnungseingang.';
 /* A Bewirtungsbeleg documents a bill that is already settled, so asking for
    payment within 7 days would be wrong on its face. */
-const SETTLED  = 'Der Betrag wurde bereits vollständig beglichen. Diese Rechnung dient als Bewirtungsbeleg.';
+const SETTLED  = 'Der Betrag wurde bereits vollständig beglichen.';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 export type LineItem = { qty: number; item: string; unitPrice: number };
@@ -284,13 +284,6 @@ export function BillDocument({ data }: { data: BillData }) {
           </View>
         )}
 
-        {/* ── Bewirtungsbeleg title ─────────────────────────────────── */}
-        {data.docKind === 'bewirtung' && (
-          <View style={{ marginBottom: 10 }}>
-            <Text style={{ fontFamily: 'Courier-Bold', fontSize: 11 }}>BEWIRTUNGSBELEG</Text>
-          </View>
-        )}
-
         {/* ── Stornorechnung title (only for cancellation invoices) ── */}
         {data.storno && (
           <View style={{ marginBottom: 10 }}>
@@ -417,7 +410,32 @@ export function BillDocument({ data }: { data: BillData }) {
               </View>
             )}
             <View style={{ marginTop: 2 }}>
-              <AmtRowBold label="Gesamtbetrag (zu zahlen)" value={ahTotalBrutto + tip} />
+              {hasDeduct ? (
+                <>
+                  <AmtRowBold label="Gesamtbetrag" value={ahTotalBrutto + tip} />
+                  {paid > 0 && (
+                    <View style={s.amountRow}>
+                      <Text>Bereits gezahlt</Text><Text>{fmt(paid)}</Text>
+                    </View>
+                  )}
+                  {anzBrutto > 0 && (
+                    <View style={s.amountRow}>
+                      <Text>{`abzgl. Anzahlung${data.anzahlungRef ? ` (Rg.-Nr. ${data.anzahlungRef})` : ''}`}</Text>
+                      <Text>{fmt(anzBrutto)}</Text>
+                    </View>
+                  )}
+                  {ermaess > 0 && (
+                    <View style={s.amountRow}>
+                      <Text>abzgl. Ermässigung</Text><Text>{fmt(ermaess)}</Text>
+                    </View>
+                  )}
+                  <View style={{ marginTop: 6 }}>
+                    <AmtRowBold label="Restbetrag (zu zahlen)" value={restbetrag} />
+                  </View>
+                </>
+              ) : (
+                <AmtRowBold label="Gesamtbetrag (zu zahlen)" value={ahTotalBrutto + tip} />
+              )}
             </View>
           </View>
         )}
