@@ -590,10 +590,17 @@ export default function OutgoingBillsPage() {
    */
   const [pasteReady, setPasteReady] = useState(false);
 
-  const handleReceiptFile = useCallback((file: File) => {
+  const handleReceiptFile = (file: File) => {
     if (file.type === 'application/pdf') handleOrderbirdPdf(file);
     else handleReceiptImage(file);
-  }, []);
+  };
+
+  /* The paste listener is registered once per tab change, so it must not close
+     over this render's handler — memoising it froze docKind at its first value
+     and every pasted receipt was filled in as an ordinary bill. The ref always
+     holds the current one. */
+  const receiptFileRef = useRef(handleReceiptFile);
+  receiptFileRef.current = handleReceiptFile;
 
   useEffect(() => {
     if (tab !== 'create') return;
@@ -605,11 +612,11 @@ export default function OutgoingBillsPage() {
       const file = image.getAsFile();
       if (!file) return;
       e.preventDefault();
-      handleReceiptFile(file);
+      receiptFileRef.current(file);
     };
     document.addEventListener('paste', onPaste);
     return () => document.removeEventListener('paste', onPaste);
-  }, [tab, extractingReceipt, extractingOrderbird, handleReceiptFile]);
+  }, [tab, extractingReceipt, extractingOrderbird]);
 
   const handleReceiptImage = async (file: File) => {
     setExtractingReceipt(true);
@@ -680,10 +687,12 @@ export default function OutgoingBillsPage() {
         if (asLines.length) setAdHocLines(asLines);
         setInputMode('adhoc');
       } else {
-        // Derive food/drink totals from line items (more reliable than AI aggregates)
-        const chargeable        = items.filter(i => i.category !== 'fee');
-        const computedEssen     = chargeable.reduce((s, i) => i.taxCode === 'B' || i.category === 'food'  ? s + i.total : s, 0);
-        const computedGetraenke = chargeable.reduce((s, i) => i.taxCode === 'A' || i.category === 'drink' ? s + i.total : s, 0);
+        // Derive food/drink totals from line items (more reliable than AI aggregates).
+        // A delivery fee is not food: it goes to the 19% side rather than being
+        // dropped, which would leave the bill short of what the guest paid.
+        const computedEssen     = items.reduce((s, i) => i.taxCode === 'B' || i.category === 'food' ? s + i.total : s, 0);
+        const computedGetraenke = items.reduce((s, i) =>
+          i.taxCode === 'A' || i.category === 'drink' || i.category === 'fee' ? s + i.total : s, 0);
         const essenVal     = computedEssen     > 0 ? computedEssen     : d.essenBrutto;
         const getraenkeVal = computedGetraenke > 0 ? computedGetraenke : d.getraenkeBrutto;
 
