@@ -53,15 +53,69 @@ function splitCSVLines(text: string): string[] {
   return lines;
 }
 
+/**
+ * Reads a booking date.
+ *
+ * Banks differ on the year: some write "31.07.2026", Sparkasse writes
+ * "31.07.26". A two-digit year is read as this century — these are bank
+ * statements, so a date decades in the past is not a case worth handling.
+ */
 function parseGermanDate(s: string): string | null {
-  s = s.trim();
-  // DD/MM/YYYY
-  const slash = s.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
-  if (slash) return `${slash[3]}-${slash[2]}-${slash[1]}`;
-  // DD.MM.YYYY
-  const dot = s.match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
-  if (dot)   return `${dot[3]}-${dot[2]}-${dot[1]}`;
-  return null;
+  const m = s.trim().match(/^(\d{1,2})[./](\d{1,2})[./](\d{2}|\d{4})$/);
+  if (!m) return null;
+  const [, d, mo, y] = m;
+  const year = y.length === 4 ? y : `20${y}`;
+  return `${year}-${mo.padStart(2, '0')}-${d.padStart(2, '0')}`;
+}
+
+/**
+ * Works out which column holds what.
+ *
+ * Bank exports vary in both width and order — one has the date first, the
+ * Sparkasse export puts the account there and the date second, with seventeen
+ * columns in all. Reading the header by name rather than counting positions
+ * means a new export layout is understood instead of silently importing
+ * nothing.
+ */
+const FIELD_ALIASES = {
+  date:         ['buchungstag', 'valutadatum', 'datum', 'date'],
+  description:  ['verwendungszweck', 'buchungstext', 'description', 'reference'],
+  counterparty: ['beguenstigter/zahlungspflichtiger', 'begünstigter/zahlungspflichtiger',
+                 'beguenstigter', 'begünstigter', 'zahlungspflichtiger',
+                 'auftraggeber/empfänger', 'auftraggeber', 'empfänger', 'counterparty'],
+  amount:       ['betrag', 'umsatz', 'amount'],
+} as const;
+
+type FieldMap = { date: number; description: number; counterparty: number; amount: number };
+
+/** Positions used by the export this importer was first written for. */
+const FALLBACK: FieldMap = { date: 0, description: 1, counterparty: 3, amount: 4 };
+
+function mapColumns(headerCols: string[] | null): FieldMap {
+  if (!headerCols) return FALLBACK;
+  const norm = headerCols.map(h => h.trim().toLowerCase().replace(/^"|"$/g, ''));
+  const find = (aliases: readonly string[]) => {
+    for (const a of aliases) {
+      const exact = norm.indexOf(a);
+      if (exact >= 0) return exact;
+    }
+    for (const a of aliases) {
+      const partial = norm.findIndex(h => h.includes(a));
+      if (partial >= 0) return partial;
+    }
+    return -1;
+  };
+  const map: FieldMap = {
+    date:         find(FIELD_ALIASES.date),
+    description:  find(FIELD_ALIASES.description),
+    counterparty: find(FIELD_ALIASES.counterparty),
+    amount:       find(FIELD_ALIASES.amount),
+  };
+  // A header we cannot read is worse than the layout we already know.
+  if (map.date < 0 || map.amount < 0) return FALLBACK;
+  if (map.description  < 0) map.description  = FALLBACK.description;
+  if (map.counterparty < 0) map.counterparty = FALLBACK.counterparty;
+  return map;
 }
 
 // Handles integer cents (already in minor units) OR German decimal euro format "1.234,56"
@@ -106,6 +160,7 @@ export async function POST(req: NextRequest) {
     // Find the header row that contains "Buchungstag" — some bank exports have metadata before it
     const headerIdx = lines.findIndex(l => /Buchungstag/i.test(l));
     const dataLines = headerIdx >= 0 ? lines.slice(headerIdx + 1) : lines.slice(1);
+    const col = mapColumns(headerIdx >= 0 ? parseCSVRow(lines[headerIdx], delimiter) : null);
 
     const admin = getSupabaseAdmin();
 
@@ -135,13 +190,12 @@ export async function POST(req: NextRequest) {
     for (const line of dataLines) {
       const cols = parseCSVRow(line, delimiter);
 
-      // Expected: Buchungstag | Verwendungszweck | Kundenreferenz (End-to-End) | Beguenstigter/Zahlungspflichtiger | Betrag
       if (cols.length < 5) continue;
 
-      const dateStr     = cols[0];
-      const description = cols[1];
-      const counterparty = cols[3];   // col 3 = Beguenstigter/Zahlungspflichtiger
-      const amountStr   = cols[4];    // col 4 = Betrag
+      const dateStr      = cols[col.date]         ?? '';
+      const description  = cols[col.description]  ?? '';
+      const counterparty = cols[col.counterparty] ?? '';
+      const amountStr    = cols[col.amount]       ?? '';
 
       const date = parseGermanDate(dateStr);
       if (!date) continue;
@@ -164,6 +218,21 @@ export async function POST(req: NextRequest) {
         sales_type:   salesType,
         notes:        '',
       });
+    }
+
+    /* A file that yields nothing is a problem to report, not a successful
+       import of zero. Saying which columns were read makes the next unfamiliar
+       export layout diagnosable from the message alone. */
+    if (txRows.length === 0) {
+      await admin.from('cashflow_uploads').delete().eq('id', upload.id);
+      const names = headerIdx >= 0 ? parseCSVRow(lines[headerIdx], delimiter) : [];
+      const used  = (i: number) => (names[i] ? `"${names[i]}"` : `column ${i + 1}`);
+      return NextResponse.json({
+        error:
+          `No transactions could be read. ${dataLines.length} data row${dataLines.length === 1 ? '' : 's'} were found, ` +
+          `but none had both a readable date and amount. ` +
+          `Read the date from ${used(col.date)} and the amount from ${used(col.amount)}.`,
+      }, { status: 422 });
     }
 
     // Insert in batches of 200
