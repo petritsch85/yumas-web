@@ -107,11 +107,13 @@ const STATUS_STYLES: Record<string, string> = {
 const DEFAULT_INTRO_MONTHLY = 'Wir bedanken uns für Ihren Auftrag und stellen Ihnen für die Bestellungen wie folgt eine Rechnung:';
 const makeStornoIntro = (originalRef: string, originalDate: string) =>
   `hiermit stornieren wir die Rechnung mit der Nummer ${originalRef} vom ${originalDate} mit folgenden Positionen:`;
-const makeIntroDinner = (eventDate: string, location?: string) => {
+const makeIntroDinner = (eventDate: string, location?: string, kind: 'invoice' | 'bewirtung' = 'invoice') => {
   const locPart = location && location !== 'Catering' ? ` im Yumas ${location}` : '';
+  // A Bewirtungsbeleg is raised for a delivery order, so the guest did not visit.
+  const what    = kind === 'bewirtung' ? 'Ihre Bestellung' : 'Ihren Besuch';
   return eventDate
-    ? `Wir bedanken uns für Ihren Auftrag und stellen Ihnen für Ihren Besuch am ${eventDate}${locPart} wie folgt eine Rechnung:`
-    : `Wir bedanken uns für Ihren Auftrag und stellen Ihnen für Ihren Besuch${locPart} wie folgt eine Rechnung:`;
+    ? `Wir bedanken uns für Ihren Auftrag und stellen Ihnen für ${what} am ${eventDate}${locPart} wie folgt eine Rechnung:`
+    : `Wir bedanken uns für Ihren Auftrag und stellen Ihnen für ${what}${locPart} wie folgt eine Rechnung:`;
 };
 const makeIntroCatering = (eventDate: string) =>
   eventDate
@@ -353,13 +355,13 @@ export default function OutgoingBillsPage() {
       if (billIssuingLoc === 'Catering') {
         setIntroText(makeIntroCatering(billEventDate));
       } else {
-        setIntroText(makeIntroDinner(billEventDate, billIssuingLoc || undefined));
+        setIntroText(makeIntroDinner(billEventDate, billIssuingLoc || undefined, docKind));
       }
     } else if (billType === 'monthly') {
       setIntroText(DEFAULT_INTRO_MONTHLY);
     }
     // storno: introText is set by applyStornoBill, not overridden here
-  }, [billType, billEventDate, billIssuingLoc]);
+  }, [billType, billEventDate, billIssuingLoc, docKind]);
 
   // Debounced CRM search
   useEffect(() => {
