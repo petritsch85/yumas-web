@@ -2291,6 +2291,9 @@ export default function SalesReportsPage() {
           source_files:             set.files,
           contract:                 set.contract ?? 'self_billing',
           service_fee_pass_through: set.serviceFeePassThrough ?? 0,
+          // Financing, not a cost: stored so the transfer can be tied to the bank.
+          wolt_capital:             set.services?.capital ?? 0,
+          payout_net:               set.services?.payout ?? null,
         }, { onConflict: 'location_id,invoice_number' }).select('id').single();
         if (error) { setWoltError(`${set.source}: ${error.message}`); return; }
 

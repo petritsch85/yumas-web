@@ -173,7 +173,12 @@ function buildSelfDeliverySet(
       );
     }
     data = toInvoiceShape(payout, fees);
-    services = { total: fees.adCampaignNet, adCampaign: fees.adCampaignNet || null, lines: [] };
+    // The self-delivery contract's payout report states its own Zahlungsbetrag
+    // and carries no Wolt Capital line, so there is nothing to withhold here.
+    services = {
+      total: fees.adCampaignNet, adCampaign: fees.adCampaignNet || null, lines: [],
+      capital: 0, payout: null,
+    };
   } catch (e) {
     return { ...base, error: e instanceof Error ? e.message : 'The payout report could not be read.' };
   }

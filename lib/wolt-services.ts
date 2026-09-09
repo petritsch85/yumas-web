@@ -30,6 +30,13 @@ export interface WoltServicesData {
   adCampaign: number | null;
   /** The itemised lines, when the Wolt-to-merchant invoice is present. */
   lines: WoltServiceLine[];
+  /**
+   * Wolt Capital repayment withheld from this period's transfer. Not a cost —
+   * it repays an advance — but the payout cannot be reconciled without it.
+   */
+  capital: number;
+  /** The transfer Wolt states it will make, as printed on the netting report. */
+  payout: number | null;
 }
 
 export class WoltServicesParseError extends Error {}
@@ -122,5 +129,33 @@ export function buildWoltServices(
     total,
     adCampaign: adLines.length > 0 ? round2(adLines.reduce((s, l) => s + l.amount, 0)) : null,
     lines,
+    capital: nettingText ? parseWoltCapital(nettingText) : 0,
+    payout:  nettingText ? parseWoltNettingPayout(nettingText) : null,
   };
+}
+
+/**
+ * What Wolt withholds to repay a Wolt Capital advance.
+ *
+ * The netting report carries it under "Finanzierung Rückzahlungen & Gebühren".
+ * It is not a cost — it repays a loan drawn earlier — but it comes off the
+ * transfer, so a payout can never be tied back to the invoice without it.
+ * Absent on a period with no advance outstanding, which is not an error.
+ */
+export function parseWoltCapital(text: string): number {
+  const m = text.match(new RegExp(
+    String.raw`Wolt capital\s+\d{2}\.\d{2}\.\d{4}\s*-\s*\d{2}\.\d{2}\.\d{4}\s+` + AMOUNT,
+  ));
+  return m ? num(m[1]) : 0;
+}
+
+/**
+ * The transfer Wolt states it will make — the figure that reaches the bank.
+ *
+ * Sales including VAT, less Wolt's own charges including VAT, less any capital
+ * repayment. Read rather than recomputed, so the stored figure is Wolt's own.
+ */
+export function parseWoltNettingPayout(text: string): number | null {
+  const m = text.match(new RegExp(String.raw`Nettoauszahlung\s+` + AMOUNT));
+  return m ? num(m[1]) : null;
 }

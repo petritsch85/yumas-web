@@ -30,6 +30,10 @@ interface WoltPeriod {
   ad_campaign:              number | null;
   net_sales_final:          number;
   service_fee_pass_through: number | null;
+  /** Wolt Capital repayment withheld from the transfer. Financing, not a cost. */
+  wolt_capital:             number | null;
+  /** Nettoauszahlung — what actually reaches the bank. */
+  payout_net:               number | null;
   contract:                 'self_billing' | 'self_delivery' | null;
   check_ok:                 boolean;
   source_files:             { name: string; kind: string }[] | null;
@@ -173,8 +177,10 @@ export default function WoltPage() {
       post: acc.post + Number(p.net_sales_pre_ads),
       ads:  acc.ads  + Number(p.advertising ?? 0),
       fin:  acc.fin  + Number(p.net_sales_final ?? 0),
+      capital: acc.capital + Number(p.wolt_capital ?? 0),
+      payout:  acc.payout  + Number(p.payout_net ?? 0),
     }),
-    { pre: 0, com: 0, post: 0, ads: 0, fin: 0 },
+    { pre: 0, com: 0, post: 0, ads: 0, fin: 0, capital: 0, payout: 0 },
   ), [periods]);
 
   const failing = periods.filter(p => !p.check_ok).length;
@@ -228,21 +234,33 @@ export default function WoltPage() {
                 <th className="px-2 py-2.5 text-center">Check</th>
                 <th className="px-2.5 py-2.5 text-right">Advertising</th>
                 <th className="px-2.5 py-2.5 text-right">Net sales</th>
+                <th className="px-2.5 py-2.5 text-right">
+                  Wolt Capital
+                  <span className="block font-normal normal-case tracking-normal text-[10px] text-gray-400">
+                    repayment
+                  </span>
+                </th>
+                <th className="px-4 py-2.5 text-right">
+                  Paid out
+                  <span className="block font-normal normal-case tracking-normal text-[10px] text-gray-400">
+                    to the bank
+                  </span>
+                </th>
               </tr>
             </thead>
             <tbody>
               {isLoading && (
-                <tr><td colSpan={9} className="px-4 py-10 text-center text-gray-400">
+                <tr><td colSpan={11} className="px-4 py-10 text-center text-gray-400">
                   <Loader2 size={20} className="mx-auto animate-spin" />
                 </td></tr>
               )}
               {error && !isLoading && (
-                <tr><td colSpan={9} className="px-4 py-10 text-center text-sm text-red-600">
+                <tr><td colSpan={11} className="px-4 py-10 text-center text-sm text-red-600">
                   {(error as Error).message}
                 </td></tr>
               )}
               {!isLoading && !error && periods.length === 0 && (
-                <tr><td colSpan={9} className="px-4 py-12 text-center text-sm text-gray-400">
+                <tr><td colSpan={11} className="px-4 py-12 text-center text-sm text-gray-400">
                   <Receipt size={28} className="mx-auto mb-2 text-gray-200" />
                   No Wolt periods yet — upload a document set from Sales Reports → Upload → Wolt Report
                 </td></tr>
@@ -274,6 +292,12 @@ export default function WoltPage() {
                   </td>
                   <td className="px-2.5 py-2.5 text-right tabular-nums text-gray-600">−{fmt(Number(p.advertising ?? 0))}</td>
                   <td className="px-2.5 py-2.5 text-right tabular-nums font-bold text-gray-900">{fmt(Number(p.net_sales_final ?? 0))}</td>
+                  <td className="px-2.5 py-2.5 text-right tabular-nums text-amber-700">
+                    {Number(p.wolt_capital ?? 0) > 0 ? `−${fmt(Number(p.wolt_capital))}` : <span className="text-gray-300">—</span>}
+                  </td>
+                  <td className="px-4 py-2.5 text-right tabular-nums font-semibold text-blue-700">
+                    {p.payout_net != null ? fmt(Number(p.payout_net)) : <span className="text-gray-300">—</span>}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -289,6 +313,8 @@ export default function WoltPage() {
                   <td colSpan={2} />
                   <td className="px-2.5 py-2.5 text-right tabular-nums">−{fmt(totals.ads)}</td>
                   <td className="px-2.5 py-2.5 text-right tabular-nums">{fmt(totals.fin)}</td>
+                  <td className="px-2.5 py-2.5 text-right tabular-nums text-amber-700">−{fmt(totals.capital)}</td>
+                  <td className="px-4 py-2.5 text-right tabular-nums text-blue-700">{fmt(totals.payout)}</td>
                 </tr>
               </tfoot>
             )}

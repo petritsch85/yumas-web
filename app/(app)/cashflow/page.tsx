@@ -43,6 +43,12 @@ type CfTx = {
   /** Many-to-many links — set when one cash flow covers several bills. */
   transaction_bill_links: { id: string; note: string | null; bill: BillRef | null }[] | null;
   confirmed: boolean;
+  /** Wolt sends no incoming bill; its settlement period is the evidence. */
+  wolt_period_id: string | null;
+  wolt_period: {
+    invoice_number: string; restaurant: string | null;
+    period_start: string; period_end: string; payout_net: number | null;
+  } | null;
   counterparty_id: string | null;
   accounting_period: string | null; // "type|start[|end]"
 };
@@ -720,6 +726,20 @@ function TxRow({ tx, onSave, counterparties, onShowDetails, selected, onToggleSe
             // row would still read "No Bill" after a multi-bill link was saved.
             const multi = (tx.transaction_bill_links ?? []).filter(l => l.bill);
 
+            /* A Wolt payout has no incoming bill: the settlement documents in
+               Sales Reports are the evidence, so the period stands in for one. */
+            if (tx.wolt_period) {
+              const w = tx.wolt_period;
+              return (
+                <a
+                  href="/pl-reports/sales-reports/wolt"
+                  title={`Wolt settlement ${w.invoice_number} · ${w.period_start} – ${w.period_end}`}
+                  className="flex items-center gap-1 text-xs font-semibold text-green-700 bg-green-50 border border-green-200 rounded-full px-2 py-0.5 hover:bg-green-100 transition-colors">
+                  <CheckCircle2 size={11} /> Wolt
+                </a>
+              );
+            }
+
             if (tx.bill) {
               return (
                 <div className="flex items-center gap-1">
@@ -917,6 +937,12 @@ export default function CashFlowPage() {
     billId: string; billSupplier: string; billInvoiceNo: string | null;
     billInvoiceDate: string | null; billGross: number; daysDiff: number;
   };
+  type WoltMatchRow = {
+    txId: string; txDate: string; txCounterparty: string; txAmountCents: number;
+    periodId: string; invoiceNumber: string; restaurant: string | null;
+    periodStart: string; periodEnd: string; payout: number; daysDiff: number;
+  };
+  const [woltMatchRows, setWoltMatchRows] = useState<WoltMatchRow[] | null>(null);
   const [autoMatching, setAutoMatching]     = useState(false);
   const [autoMatchRows, setAutoMatchRows]   = useState<AutoMatchRow[] | null>(null);
   const [applyingMatch, setApplyingMatch]   = useState(false);
@@ -931,6 +957,7 @@ export default function CashFlowPage() {
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? 'Auto-match failed');
       setAutoMatchRows(json.matches);
+      setWoltMatchRows(json.woltMatches ?? []);
     } catch (err: any) {
       alert(err.message);
     } finally {
@@ -939,7 +966,7 @@ export default function CashFlowPage() {
   };
 
   const handleApplyAutoMatch = async () => {
-    if (!autoMatchRows?.length) return;
+    if (!autoMatchRows?.length && !woltMatchRows?.length) return;
     setApplyingMatch(true);
     try {
       const res  = await fetch('/api/cashflow/auto-match', {
@@ -949,6 +976,7 @@ export default function CashFlowPage() {
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? 'Apply failed');
       setAutoMatchRows(null);
+      setWoltMatchRows(null);
       qc.invalidateQueries({ queryKey: ['cashflow-tx'] });
     } catch (err: any) {
       alert(err.message);
@@ -1451,15 +1479,51 @@ export default function CashFlowPage() {
               <div>
                 <h2 className="text-base font-bold text-gray-900">Auto-match Preview</h2>
                 <p className="text-xs text-gray-500 mt-0.5">
-                  {autoMatchRows.length === 0
+                  {autoMatchRows.length === 0 && !woltMatchRows?.length
                     ? 'No matches found — all transactions already linked or no amount/date match in bills.'
-                    : `${autoMatchRows.length} bill${autoMatchRows.length !== 1 ? 's' : ''} matched by amount + supplier + date (≤45 days). Review then apply.`}
+                    : [
+                        autoMatchRows.length > 0 && `${autoMatchRows.length} bill${autoMatchRows.length !== 1 ? 's' : ''} by amount + supplier + date (≤45 days)`,
+                        woltMatchRows?.length ? `${woltMatchRows.length} Wolt payout${woltMatchRows.length !== 1 ? 's' : ''} by Nettoauszahlung` : null,
+                      ].filter(Boolean).join(' · ') + '. Review then apply.'}
                 </p>
               </div>
               <button onClick={() => setAutoMatchRows(null)} className="text-gray-400 hover:text-gray-700">
                 <X size={18} />
               </button>
             </div>
+            {(woltMatchRows?.length ?? 0) > 0 && (
+              <div className="px-6 pt-4">
+                <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-2">
+                  Wolt payouts — evidenced by the settlement period, not a bill
+                </p>
+                <table className="w-full text-xs mb-4">
+                  <thead className="bg-gray-50 border-b border-gray-100">
+                    <tr>
+                      <th className="text-left  px-3 py-2 font-semibold text-gray-500 uppercase tracking-wide">Tx Date</th>
+                      <th className="text-right px-3 py-2 font-semibold text-gray-500 uppercase tracking-wide">Amount</th>
+                      <th className="text-left  px-3 py-2 font-semibold text-gray-500 uppercase tracking-wide">→ Period</th>
+                      <th className="text-left  px-3 py-2 font-semibold text-gray-500 uppercase tracking-wide">Restaurant</th>
+                      <th className="text-left  px-3 py-2 font-semibold text-gray-500 uppercase tracking-wide">Invoice</th>
+                      <th className="text-right px-3 py-2 font-semibold text-gray-500 uppercase tracking-wide">Δ Days</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {woltMatchRows!.map(r => (
+                      <tr key={r.txId} className="border-b border-gray-50 hover:bg-gray-50">
+                        <td className="px-3 py-2 text-gray-600">{r.txDate}</td>
+                        <td className="px-3 py-2 text-right font-semibold text-green-700 tabular-nums">
+                          {(r.txAmountCents / 100).toLocaleString('de-DE', { minimumFractionDigits: 2 })} €
+                        </td>
+                        <td className="px-3 py-2 text-gray-700">{r.periodStart} – {r.periodEnd}</td>
+                        <td className="px-3 py-2 text-gray-600">{r.restaurant ?? '—'}</td>
+                        <td className="px-3 py-2 text-gray-400 text-[10px] break-all max-w-[190px]">{r.invoiceNumber}</td>
+                        <td className="px-3 py-2 text-right tabular-nums text-gray-500">{r.daysDiff}d</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
             {autoMatchRows.length > 0 && (
               <div className="overflow-y-auto flex-1">
                 <table className="w-full text-xs">
@@ -1499,11 +1563,14 @@ export default function CashFlowPage() {
                 className="px-4 py-2 text-sm font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50">
                 Cancel
               </button>
-              {autoMatchRows.length > 0 && (
+              {(autoMatchRows.length > 0 || (woltMatchRows?.length ?? 0) > 0) && (
                 <button onClick={handleApplyAutoMatch} disabled={applyingMatch}
                   className="flex items-center gap-2 px-5 py-2 text-sm font-bold bg-[#1B5E20] text-white rounded-lg hover:bg-[#2E7D32] transition-colors disabled:opacity-50">
                   {applyingMatch ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
-                  {applyingMatch ? 'Applying…' : `Apply ${autoMatchRows.length} match${autoMatchRows.length !== 1 ? 'es' : ''}`}
+                  {applyingMatch ? 'Applying…' : (() => {
+                    const n = autoMatchRows.length + (woltMatchRows?.length ?? 0);
+                    return `Apply ${n} match${n !== 1 ? 'es' : ''}`;
+                  })()}
                 </button>
               )}
             </div>
