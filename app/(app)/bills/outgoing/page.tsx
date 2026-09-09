@@ -580,6 +580,37 @@ export default function OutgoingBillsPage() {
       reader.readAsDataURL(file);
     });
 
+  /**
+   * A screenshot on the clipboard is the commonest way a receipt arrives —
+   * a delivery confirmation on screen, a photo sent by a guest. Saving it to
+   * disk first only to pick it back out of a file dialog is a detour.
+   *
+   * Only an actual image on the clipboard is intercepted, so pasting text into
+   * the form's fields keeps working normally.
+   */
+  const [pasteReady, setPasteReady] = useState(false);
+
+  const handleReceiptFile = useCallback((file: File) => {
+    if (file.type === 'application/pdf') handleOrderbirdPdf(file);
+    else handleReceiptImage(file);
+  }, []);
+
+  useEffect(() => {
+    if (tab !== 'create') return;
+    const onPaste = (e: ClipboardEvent) => {
+      if (extractingReceipt || extractingOrderbird) return;
+      const items = Array.from(e.clipboardData?.items ?? []);
+      const image = items.find(i => i.kind === 'file' && i.type.startsWith('image/'));
+      if (!image) return;                      // plain text paste — leave it alone
+      const file = image.getAsFile();
+      if (!file) return;
+      e.preventDefault();
+      handleReceiptFile(file);
+    };
+    document.addEventListener('paste', onPaste);
+    return () => document.removeEventListener('paste', onPaste);
+  }, [tab, extractingReceipt, extractingOrderbird, handleReceiptFile]);
+
   const handleReceiptImage = async (file: File) => {
     setExtractingReceipt(true);
     setReceiptSuccess(false);
@@ -2115,10 +2146,26 @@ export default function OutgoingBillsPage() {
         <div className="max-w-3xl space-y-5">
 
           {/* Receipt import banner */}
-          <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4 flex items-center justify-between gap-4">
+          <div
+            onDragOver={e => { e.preventDefault(); setPasteReady(true); }}
+            onDragLeave={() => setPasteReady(false)}
+            onDrop={e => {
+              e.preventDefault();
+              setPasteReady(false);
+              const file = Array.from(e.dataTransfer.files)[0];
+              if (file) handleReceiptFile(file);
+            }}
+            className={`bg-white rounded-xl border shadow-sm p-4 flex items-center justify-between gap-4 transition-colors ${
+              pasteReady ? 'border-[#1B5E20] bg-green-50' : 'border-gray-200'
+            }`}
+          >
             <div>
               <p className="text-sm font-semibold text-gray-800">Import from receipt</p>
-              <p className="text-xs text-gray-400 mt-0.5">Take a photo or upload a PDF of the POS Kassenbon — amounts, VAT split and date are filled in automatically</p>
+              <p className="text-xs text-gray-400 mt-0.5">
+                Paste a screenshot with <kbd className="px-1 py-0.5 bg-gray-100 border border-gray-200 rounded text-[10px] font-mono text-gray-500">Ctrl</kbd>
+                {' '}<kbd className="px-1 py-0.5 bg-gray-100 border border-gray-200 rounded text-[10px] font-mono text-gray-500">V</kbd>,
+                drop an image here, or take a photo — amounts, VAT split and date are filled in automatically
+              </p>
             </div>
             <div className="flex items-center gap-3 flex-shrink-0">
               {receiptDataUrl && (
@@ -2158,10 +2205,7 @@ export default function OutgoingBillsPage() {
                 className="hidden"
                 onChange={(e) => {
                   const file = e.target.files?.[0];
-                  if (file) {
-                    if (file.type === 'application/pdf') handleOrderbirdPdf(file);
-                    else handleReceiptImage(file);
-                  }
+                  if (file) handleReceiptFile(file);
                   e.target.value = '';
                 }}
               />
