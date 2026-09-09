@@ -51,3 +51,38 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json({ data: data ?? [], count: count ?? 0, page, pageSize });
 }
+
+/**
+ * PATCH /api/cashflow/transactions — applies one change to many rows.
+ *
+ * Confirming a review queue one row at a time means one request and one
+ * refetch per row. This takes the whole selection in a single update so a
+ * batch of twenty settles as fast as one.
+ */
+export async function PATCH(req: NextRequest) {
+  const body = await req.json();
+  const ids: unknown = body.ids;
+
+  if (!Array.isArray(ids) || ids.length === 0) {
+    return NextResponse.json({ error: 'No transactions selected.' }, { status: 400 });
+  }
+  if (ids.some(id => typeof id !== 'string')) {
+    return NextResponse.json({ error: 'Invalid transaction id.' }, { status: 400 });
+  }
+
+  const allowed = ['category', 'location', 'sales_type', 'notes', 'bill_id', 'confirmed', 'counterparty_id', 'accounting_period'] as const;
+  const update: Record<string, string | boolean | null> = {};
+  for (const key of allowed) {
+    if (body.patch?.[key] !== undefined) update[key] = body.patch[key];
+  }
+  if (Object.keys(update).length === 0) return NextResponse.json({ ok: true, updated: 0 });
+
+  const admin = getSupabaseAdmin();
+  const { error } = await admin
+    .from('cashflow_transactions')
+    .update(update)
+    .in('id', ids as string[]);
+
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  return NextResponse.json({ ok: true, updated: ids.length });
+}

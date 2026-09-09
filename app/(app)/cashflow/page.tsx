@@ -615,11 +615,14 @@ function PeriodPicker({ value, onChange, locked }: {
 }
 
 /* ── Row component ──────────────────────────────────────────────────── */
-function TxRow({ tx, onSave, counterparties, onShowDetails }: {
+function TxRow({ tx, onSave, counterparties, onShowDetails, selected, onToggleSelect }: {
   tx: CfTx;
   onSave: (id: string, patch: Record<string, string | boolean | null>) => void;
   counterparties: Counterparty[];
   onShowDetails: () => void;
+  /** Undefined in the settled ledger, where there is nothing to select. */
+  selected?: boolean;
+  onToggleSelect?: (id: string, shiftKey: boolean) => void;
 }) {
   const isIn = tx.direction === 'in';
   const locations = isIn ? IN_LOCATIONS : OUT_LOCATIONS;
@@ -846,15 +849,27 @@ function TxRow({ tx, onSave, counterparties, onShowDetails }: {
 
         {/* Confirm */}
         <td className="py-2 px-2">
-          <button onClick={() => patch('confirmed', !locked)}
-            title={locked ? 'Click to unconfirm and unlock row' : 'Confirm this row'}
-            className={`flex items-center justify-center w-7 h-7 rounded-full border-2 transition-all ${
-              locked
-                ? 'bg-green-600 border-green-600 text-white hover:bg-red-500 hover:border-red-500'
-                : 'bg-white border-gray-300 text-gray-300 hover:border-green-500 hover:text-green-500'
-            }`}>
-            <Check size={13} strokeWidth={3} />
-          </button>
+          <div className="flex items-center gap-2">
+            {onToggleSelect && (
+              <input
+                type="checkbox"
+                checked={!!selected}
+                onChange={e => onToggleSelect(tx.id, (e.nativeEvent as MouseEvent).shiftKey)}
+                onClick={e => e.stopPropagation()}
+                title="Select for Confirm all"
+                className="w-4 h-4 accent-[#1B5E20] cursor-pointer"
+              />
+            )}
+            <button onClick={() => patch('confirmed', !locked)}
+              title={locked ? 'Click to unconfirm and unlock row' : 'Confirm this row'}
+              className={`flex items-center justify-center w-7 h-7 rounded-full border-2 transition-all ${
+                locked
+                  ? 'bg-green-600 border-green-600 text-white hover:bg-red-500 hover:border-red-500'
+                  : 'bg-white border-gray-300 text-gray-300 hover:border-green-500 hover:text-green-500'
+              }`}>
+              <Check size={13} strokeWidth={3} />
+            </button>
+          </div>
         </td>
       </tr>
     </>
@@ -887,6 +902,13 @@ export default function CashFlowPage() {
   const [dirFilter, setDirFilter]   = useState<'all'|'in'|'out'>('all');
   const [catFilter, setCatFilter]   = useState('All');
   const [locFilter, setLocFilter]   = useState('All');
+  /* Rows ticked in the review queue, waiting for "Confirm all". Kept as ids so
+     a refetch that reorders the queue cannot move the selection onto other rows. */
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkBusy,    setBulkBusy]    = useState(false);
+  /* Anchor for shift-click, so a run of rows can be ticked without 20 clicks. */
+  const lastClickedId = useRef<string | null>(null);
+
   const [txPage,    setTxPage]      = useState(1);   // confirmed table
   const [uncPage,   setUncPage]     = useState(1);   // unconfirmed review queue
 
@@ -1058,6 +1080,59 @@ export default function CashFlowPage() {
     patchMut.mutate({ id, patch });
   }, [patchMut]);
 
+  /**
+   * Ticks a row, or a run of them when shift is held.
+   *
+   * The range is taken from the queue as currently sorted, so what gets
+   * selected is what the eye sees between the two clicks.
+   */
+  const toggleSelect = useCallback((id: string, shiftKey: boolean) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      const anchor = lastClickedId.current;
+      if (shiftKey && anchor && anchor !== id) {
+        const ids  = sortedUncTxs.map(t => t.id);
+        const from = ids.indexOf(anchor);
+        const to   = ids.indexOf(id);
+        if (from >= 0 && to >= 0) {
+          const [lo, hi] = from < to ? [from, to] : [to, from];
+          const selecting = !prev.has(id);
+          for (const rid of ids.slice(lo, hi + 1)) {
+            if (selecting) next.add(rid); else next.delete(rid);
+          }
+          return next;
+        }
+      }
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+    lastClickedId.current = id;
+  }, [sortedUncTxs]);
+
+  /** Confirms every ticked row in one request, rather than one refetch per row. */
+  const confirmSelected = useCallback(async () => {
+    const ids = sortedUncTxs.filter(t => selectedIds.has(t.id)).map(t => t.id);
+    if (ids.length === 0) return;
+    setBulkBusy(true);
+    try {
+      const res  = await fetch('/api/cashflow/transactions', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids, patch: { confirmed: true } }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? 'Confirm failed');
+      setSelectedIds(new Set());
+      lastClickedId.current = null;
+      qc.invalidateQueries({ queryKey: ['cashflow-tx'] });
+      qc.invalidateQueries({ queryKey: ['pnl-monthly'] });
+    } catch (err) {
+      alert(`Confirm failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    } finally {
+      setBulkBusy(false);
+    }
+  }, [sortedUncTxs, selectedIds, qc]);
+
   const handleUpload = async (file: File) => {
     if (!periodLabel.trim()) { alert('Please enter a period label first (e.g. Q1-2026).'); return; }
     setUploading(true); setUploadMsg('');
@@ -1138,7 +1213,7 @@ export default function CashFlowPage() {
    * top, the confirmed ledger below — so the row markup and every handler stay
    * in a single place.
    */
-  const renderTxTable = (rows: CfTx[], loading: boolean, emptyText: string) => (
+  const renderTxTable = (rows: CfTx[], loading: boolean, emptyText: string, selectable = false) => (
             <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
               {loading && (
                 <div className="flex items-center justify-center py-8 text-gray-400 gap-2">
@@ -1200,13 +1275,47 @@ export default function CashFlowPage() {
                           );
                         })}
                         <th className="py-2.5 px-2 text-xs font-semibold text-gray-500 uppercase tracking-wide text-left">Notes</th>
-                        <th className="py-2.5 px-2 text-xs font-semibold text-gray-500 uppercase tracking-wide text-left">Confirm</th>
+                        <th className="py-2.5 px-2 text-xs font-semibold text-gray-500 uppercase tracking-wide text-left whitespace-nowrap">
+                          {selectable ? (() => {
+                            const pageIds  = rows.map(r => r.id);
+                            const nSel     = pageIds.filter(id => selectedIds.has(id)).length;
+                            const allOn    = nSel > 0 && nSel === pageIds.length;
+                            return (
+                              <div className="flex items-center gap-2">
+                                <input
+                                  type="checkbox"
+                                  checked={allOn}
+                                  ref={el => { if (el) el.indeterminate = nSel > 0 && !allOn; }}
+                                  onChange={() => setSelectedIds(prev => {
+                                    const next = new Set(prev);
+                                    if (allOn) pageIds.forEach(id => next.delete(id));
+                                    else       pageIds.forEach(id => next.add(id));
+                                    return next;
+                                  })}
+                                  title={allOn ? 'Clear selection' : 'Select every row on this page'}
+                                  className="w-4 h-4 accent-[#1B5E20] cursor-pointer"
+                                />
+                                {nSel > 0 ? (
+                                  <button
+                                    onClick={confirmSelected}
+                                    disabled={bulkBusy}
+                                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#1B5E20] text-white text-xs font-bold normal-case tracking-normal hover:bg-[#2E7D32] disabled:opacity-60 transition-colors">
+                                    {bulkBusy ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} strokeWidth={3} />}
+                                    Confirm {nSel}
+                                  </button>
+                                ) : 'Confirm'}
+                              </div>
+                            );
+                          })() : 'Confirm'}
+                        </th>
                       </tr>
                     </thead>
                     <tbody>
                       {rows.map(tx => (
                         <TxRow key={tx.id} tx={tx} onSave={handleSave} counterparties={counterparties}
-                          onShowDetails={() => setDetailTx(tx)} />
+                          onShowDetails={() => setDetailTx(tx)}
+                          selected={selectable ? selectedIds.has(tx.id) : undefined}
+                          onToggleSelect={selectable ? toggleSelect : undefined} />
                       ))}
                     </tbody>
                   </table>
@@ -1559,7 +1668,7 @@ export default function CashFlowPage() {
               </span>
               <span className="text-xs text-gray-400">awaiting review</span>
             </div>
-            {renderTxTable(sortedUncTxs, uncFetching, 'Nothing to review — every transaction in this period is confirmed.')}
+            {renderTxTable(sortedUncTxs, uncFetching, 'Nothing to review — every transaction in this period is confirmed.', true)}
             {uncPages > 1 && (
               <div className="flex items-center justify-between px-4 py-2 mt-2 bg-white rounded-xl border border-gray-100 shadow-sm">
                 <span className="text-xs text-gray-500">
