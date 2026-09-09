@@ -1474,8 +1474,8 @@ export default function CashFlowPage() {
       {/* Auto-match preview modal */}
       {autoMatchRows !== null && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl mx-4 max-h-[80vh] flex flex-col">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl mx-4 max-h-[85vh] flex flex-col overflow-hidden">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 flex-shrink-0">
               <div>
                 <h2 className="text-base font-bold text-gray-900">Auto-match Preview</h2>
                 <p className="text-xs text-gray-500 mt-0.5">
@@ -1491,41 +1491,47 @@ export default function CashFlowPage() {
                 <X size={18} />
               </button>
             </div>
+            <div className="overflow-y-auto flex-1">
             {(woltMatchRows?.length ?? 0) > 0 && (
               <div className="px-6 pt-4">
                 <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-2">
                   Wolt payouts — evidenced by the settlement period, not a bill
                 </p>
-                <table className="w-full text-xs mb-4">
-                  <thead className="bg-gray-50 border-b border-gray-100">
-                    <tr>
-                      <th className="text-left  px-3 py-2 font-semibold text-gray-500 uppercase tracking-wide">Tx Date</th>
-                      <th className="text-right px-3 py-2 font-semibold text-gray-500 uppercase tracking-wide">Amount</th>
-                      <th className="text-left  px-3 py-2 font-semibold text-gray-500 uppercase tracking-wide">→ Period</th>
-                      <th className="text-left  px-3 py-2 font-semibold text-gray-500 uppercase tracking-wide">Restaurant</th>
-                      <th className="text-left  px-3 py-2 font-semibold text-gray-500 uppercase tracking-wide">Invoice</th>
-                      <th className="text-right px-3 py-2 font-semibold text-gray-500 uppercase tracking-wide">Δ Days</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {woltMatchRows!.map(r => (
-                      <tr key={r.txId} className="border-b border-gray-50 hover:bg-gray-50">
-                        <td className="px-3 py-2 text-gray-600">{r.txDate}</td>
-                        <td className="px-3 py-2 text-right font-semibold text-green-700 tabular-nums">
-                          {(r.txAmountCents / 100).toLocaleString('de-DE', { minimumFractionDigits: 2 })} €
-                        </td>
-                        <td className="px-3 py-2 text-gray-700">{r.periodStart} – {r.periodEnd}</td>
-                        <td className="px-3 py-2 text-gray-600">{r.restaurant ?? '—'}</td>
-                        <td className="px-3 py-2 text-gray-400 text-[10px] break-all max-w-[190px]">{r.invoiceNumber}</td>
-                        <td className="px-3 py-2 text-right tabular-nums text-gray-500">{r.daysDiff}d</td>
+                {/* The columns hold dates, money and a long invoice reference:
+                    every one of them reads worse broken over two lines, so the
+                    table scrolls sideways instead of wrapping. */}
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs mb-4">
+                    <thead className="bg-gray-50 border-b border-gray-100">
+                      <tr className="whitespace-nowrap">
+                        <th className="text-left  px-3 py-2 font-semibold text-gray-500 uppercase tracking-wide">Tx Date</th>
+                        <th className="text-right px-3 py-2 font-semibold text-gray-500 uppercase tracking-wide">Amount</th>
+                        <th className="text-left  px-3 py-2 font-semibold text-gray-500 uppercase tracking-wide">→ Period</th>
+                        <th className="text-left  px-3 py-2 font-semibold text-gray-500 uppercase tracking-wide">Restaurant</th>
+                        <th className="text-left  px-3 py-2 font-semibold text-gray-500 uppercase tracking-wide">Invoice</th>
+                        <th className="text-right px-3 py-2 font-semibold text-gray-500 uppercase tracking-wide">Δ Days</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {woltMatchRows!.map(r => (
+                        <tr key={r.txId} className="border-b border-gray-50 hover:bg-gray-50 whitespace-nowrap">
+                          <td className="px-3 py-2 text-gray-600">{r.txDate}</td>
+                          <td className="px-3 py-2 text-right font-semibold text-green-700 tabular-nums">
+                            {(r.txAmountCents / 100).toLocaleString('de-DE', { minimumFractionDigits: 2 })} €
+                          </td>
+                          <td className="px-3 py-2 text-gray-700">{r.periodStart} – {r.periodEnd}</td>
+                          <td className="px-3 py-2 text-gray-600">{(r.restaurant ?? '—').replace('Yumas ', '')}</td>
+                          <td className="px-3 py-2 text-gray-400 text-[10px]" title={r.invoiceNumber}>{r.invoiceNumber}</td>
+                          <td className="px-3 py-2 text-right tabular-nums text-gray-500">{r.daysDiff}d</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             )}
             {autoMatchRows.length > 0 && (
-              <div className="overflow-y-auto flex-1">
+              <div className="overflow-x-auto">
                 <table className="w-full text-xs">
                   <thead className="bg-gray-50 border-b border-gray-100 sticky top-0">
                     <tr>
@@ -1558,6 +1564,7 @@ export default function CashFlowPage() {
                 </table>
               </div>
             )}
+            </div>
             <div className="flex justify-end gap-3 px-6 py-4 border-t border-gray-100">
               <button onClick={() => setAutoMatchRows(null)}
                 className="px-4 py-2 text-sm font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50">
