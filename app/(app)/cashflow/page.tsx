@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Upload, Loader2, TrendingUp, TrendingDown, Minus,
   Link2, Link2Off, X, Search, CheckCircle2, Check, XCircle,
-  Download, ChevronDown, ChevronUp, FileText, Info, Wand2,
+  Download, ChevronDown, ChevronUp, FileText, Info, Wand2, Trash2,
 } from 'lucide-react';
 
 /* ── Types ─────────────────────────────────────────────────────────── */
@@ -871,6 +871,9 @@ export default function CashFlowPage() {
   const [uploadMsg, setUploadMsg]     = useState('');
   const [showUploadLog, setShowUploadLog]   = useState(false);
   const [downloadingId, setDownloadingId]   = useState<string | null>(null);
+  /* Deleting an upload takes its bank rows with it, so the button asks first. */
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [deletingId,      setDeletingId]      = useState<string | null>(null);
   const [showFormatInfo, setShowFormatInfo] = useState(false);
   const [sortCol, setSortCol] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
@@ -1094,6 +1097,35 @@ export default function CashFlowPage() {
       alert(`Download failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
     } finally {
       setDownloadingId(null);
+    }
+  };
+
+  /**
+   * Removes an upload and every transaction that came in with it.
+   *
+   * The transactions cascade in the database, so this is not recoverable from
+   * the app — which is why the row asks for a second click, and says how many
+   * transactions are at stake before it does anything.
+   */
+  const handleDeleteUpload = async (upload: CfUpload) => {
+    setDeletingId(upload.id);
+    try {
+      const res  = await fetch(`/api/cashflow/uploads/${upload.id}`, { method: 'DELETE' });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? 'Delete failed');
+      setConfirmDeleteId(null);
+      setUploadMsg(
+        json.deletedTransactions > 0
+          ? `Deleted "${upload.filename}" and ${json.deletedTransactions} transaction${json.deletedTransactions === 1 ? '' : 's'}.`
+          : `Deleted "${upload.filename}".`,
+      );
+      qc.invalidateQueries({ queryKey: ['cashflow-uploads'] });
+      qc.invalidateQueries({ queryKey: ['cashflow-tx'] });
+      qc.invalidateQueries({ queryKey: ['pnl-monthly'] });
+    } catch (err) {
+      alert(`Delete failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -1410,20 +1442,52 @@ export default function CashFlowPage() {
                         {u.transaction_count.toLocaleString('de-DE')}
                         {u.transaction_count === 0 && <span className="ml-2 text-xs text-amber-600 font-normal">(parse error?)</span>}
                       </td>
-                      <td className="px-5 py-2.5 text-right">
-                        {u.file_path ? (
-                          <button
-                            onClick={() => handleDownload(u)}
-                            disabled={downloadingId === u.id}
-                            className="flex items-center gap-1.5 ml-auto text-xs text-indigo-600 hover:text-indigo-800 font-medium disabled:opacity-50 transition-colors">
-                            {downloadingId === u.id
-                              ? <Loader2 size={12} className="animate-spin" />
-                              : <Download size={12} />}
-                            Download
-                          </button>
-                        ) : (
-                          <span className="text-xs text-gray-300">—</span>
-                        )}
+                      <td className="px-5 py-2.5">
+                        <div className="flex items-center justify-end gap-4">
+                          {u.file_path ? (
+                            <button
+                              onClick={() => handleDownload(u)}
+                              disabled={downloadingId === u.id}
+                              className="flex items-center gap-1.5 text-xs text-indigo-600 hover:text-indigo-800 font-medium disabled:opacity-50 transition-colors">
+                              {downloadingId === u.id
+                                ? <Loader2 size={12} className="animate-spin" />
+                                : <Download size={12} />}
+                              Download
+                            </button>
+                          ) : (
+                            <span className="text-xs text-gray-300">—</span>
+                          )}
+
+                          {confirmDeleteId === u.id ? (
+                            /* Spelling out what goes: an upload of 1.160 rows and an
+                               empty one from a failed parse look alike in this table. */
+                            <span className="flex items-center gap-2 whitespace-nowrap">
+                              <span className="text-xs text-gray-500">
+                                {u.transaction_count > 0
+                                  ? `Delete ${u.transaction_count.toLocaleString('de-DE')} transaction${u.transaction_count === 1 ? '' : 's'}?`
+                                  : 'Delete this entry?'}
+                              </span>
+                              <button
+                                onClick={() => handleDeleteUpload(u)}
+                                disabled={deletingId === u.id}
+                                className="flex items-center gap-1 text-xs font-bold text-red-600 hover:text-red-800 disabled:opacity-50">
+                                {deletingId === u.id && <Loader2 size={11} className="animate-spin" />}
+                                Yes, delete
+                              </button>
+                              <button
+                                onClick={() => setConfirmDeleteId(null)}
+                                className="text-xs text-gray-400 hover:text-gray-600">Cancel</button>
+                            </span>
+                          ) : (
+                            <button
+                              onClick={() => setConfirmDeleteId(u.id)}
+                              title="Delete this upload and its transactions"
+                              className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-red-600 font-medium transition-colors">
+                              <Trash2 size={12} />
+                              Delete
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))}
