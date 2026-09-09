@@ -1223,6 +1223,10 @@ export default function SalesReportsPage() {
         // Settled at the till, so the money is already in a Z-report. Counting
         // it here as well would double the evening.
         .eq('paid_in_store', false)
+        // A Bewirtungsbeleg (BB…) documents an order that was paid through a
+        // delivery platform and is already in that channel's revenue. A bill
+        // with no number at all is still an ordinary bill, so it stays.
+        .or('invoice_number.is.null,invoice_number.not.ilike.BB%')
         .gte('event_date', qStart)
         .lte('event_date', qEnd);
       if (!isGroup) q = q.eq('issuing_location', location!.name);

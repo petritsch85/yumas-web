@@ -11,6 +11,9 @@ const COMPANY_SENDER  = ['Yumas GmbH', 'Feuerbachstraße 46', '60325 Frankfurt']
 const FOOTER_1 = 'Yumas GmbH  ·  Feuerbachstraße 46  ·  60325 Frankfurt';
 const FOOTER_2 = 'Sparkasse Rhein-Nahe  ·  IBAN DE98 5605 0180 0017 1489 25  ·  Steuernummer: 014 249 10458';
 const PAYMENT  = 'Die Rechnung ist zahlbar innerhalb von 7 Tagen nach Rechnungseingang.';
+/* A Bewirtungsbeleg documents a bill that is already settled, so asking for
+   payment within 7 days would be wrong on its face. */
+const SETTLED  = 'Der Betrag wurde bereits vollständig beglichen. Diese Rechnung dient als Bewirtungsbeleg.';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 export type LineItem = { qty: number; item: string; unitPrice: number };
@@ -62,6 +65,10 @@ export type BillData = {
   anzahlungVat7?   : number;   // deposit VAT 7%
   anzahlungVat19?  : number;   // deposit VAT 19%
   anzahlungRef?    : string;   // invoice number of the deposit bill
+  /** Bewirtungsbeleg: the whole sum was settled before the document was raised. */
+  bereitsGezahlt?  : number;
+  /** Heading and wording change for a Bewirtungsbeleg. */
+  docKind?         : 'invoice' | 'bewirtung';
   ermaessigung?    : number;   // discount amount
   // Catering mode (mutually exclusive with essenBrutto/getraenkeBrutto)
   cateringNetto?        : number;
@@ -228,9 +235,10 @@ export function BillDocument({ data }: { data: BillData }) {
   const anzVat7     = data.anzahlungVat7   ?? 0;
   const anzVat19    = data.anzahlungVat19  ?? 0;
   const ermaess     = data.ermaessigung    ?? 0;
-  const hasDeduct   = anzBrutto > 0 || ermaess > 0;
+  const paid        = data.bereitsGezahlt  ?? 0;
+  const hasDeduct   = anzBrutto > 0 || ermaess > 0 || paid > 0;
   const basePayable = isMonthly ? bruttoMonthly : gesamtBetrag;
-  const restbetrag  = basePayable - anzBrutto - ermaess;
+  const restbetrag  = basePayable - anzBrutto - ermaess - paid;
 
   return (
     <Document>
@@ -276,6 +284,13 @@ export function BillDocument({ data }: { data: BillData }) {
           </View>
         )}
 
+        {/* ── Bewirtungsbeleg title ─────────────────────────────────── */}
+        {data.docKind === 'bewirtung' && (
+          <View style={{ marginBottom: 10 }}>
+            <Text style={{ fontFamily: 'Courier-Bold', fontSize: 11 }}>BEWIRTUNGSBELEG</Text>
+          </View>
+        )}
+
         {/* ── Stornorechnung title (only for cancellation invoices) ── */}
         {data.storno && (
           <View style={{ marginBottom: 10 }}>
@@ -288,7 +303,7 @@ export function BillDocument({ data }: { data: BillData }) {
         {/* ── Date + invoice number ────────────────────────────────── */}
         <View style={s.metaWrap}>
           <Text>Frankfurt, den {data.date}</Text>
-          <Text>Rechnungsnummer {data.invoiceNumber}</Text>
+          <Text>{data.docKind === 'bewirtung' ? 'Belegnummer' : 'Rechnungsnummer'} {data.invoiceNumber}</Text>
         </View>
 
         {/* ── Optional PO / Att ────────────────────────────────────── */}
@@ -466,6 +481,11 @@ export function BillDocument({ data }: { data: BillData }) {
                       </View>
                     </View>
                   )}
+                  {paid > 0 && (
+                    <View style={s.amountRow}>
+                      <Text>Bereits gezahlt</Text><Text>{fmt(paid)}</Text>
+                    </View>
+                  )}
                   {ermaess > 0 && (
                     <View style={s.amountRow}>
                       <Text>abzgl. Ermässigung</Text><Text>{fmt(ermaess)}</Text>
@@ -507,6 +527,11 @@ export function BillDocument({ data }: { data: BillData }) {
                     </View>
                   </View>
                 )}
+                {paid > 0 && (
+                  <View style={s.amountRow}>
+                    <Text>Bereits gezahlt</Text><Text>{fmt(paid)}</Text>
+                  </View>
+                )}
                 {ermaess > 0 && (
                   <View style={s.amountRow}>
                     <Text>abzgl. Ermässigung</Text><Text>{fmt(ermaess)}</Text>
@@ -525,7 +550,9 @@ export function BillDocument({ data }: { data: BillData }) {
         {/* ── Payment terms + Vielen Dank! — centred in remaining space ── */}
         <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
           {!data.storno && (
-            <Text style={{ textAlign: 'center', lineHeight: 1.55, marginBottom: 14 }}>{PAYMENT}</Text>
+            <Text style={{ textAlign: 'center', lineHeight: 1.55, marginBottom: 14 }}>
+              {data.docKind === 'bewirtung' ? SETTLED : PAYMENT}
+            </Text>
           )}
           <Text style={{ textAlign: 'center', fontFamily: 'Courier-Bold', fontSize: 11 }}>Vielen Dank!</Text>
         </View>

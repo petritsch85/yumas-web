@@ -7,10 +7,10 @@ import {
   Upload, FileCheck, AlertCircle, Loader2,
   CheckCircle2, Clock, Banknote, Trash2,
   ChevronDown, Eye, EyeOff, X, Save, Pencil, Download, BookOpen, Send, FileText,
-  FilePlus, Plus, FileDown, Camera, FileUp,
+  FilePlus, Plus, FileDown, Camera, FileUp, ReceiptText,
 } from 'lucide-react';
 import type { BillData, LineItem } from '@/components/bills/BillDocument';
-import { splitAdHocNet, EVENT_EFFECTIVE_RATE, type AdHocVat } from '@/lib/event-vat';
+import { splitAdHocNet, EVENT_EFFECTIVE_RATE, type AdHocVat, netFromGross } from '@/lib/event-vat';
 import { useT } from '@/lib/i18n';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -247,6 +247,10 @@ export default function OutgoingBillsPage() {
   const [leistCity,         setLeistCity]         = useState('');
   const [introText,         setIntroText]         = useState(makeIntroDinner(''));
   const [inputMode,         setInputMode]         = useState<'brutto' | 'netto' | 'pauschale' | 'catering' | 'adhoc'>('brutto');
+  /** 'bewirtung' = Bewirtungsbeleg: own BB sequence, gross positions, already paid. */
+  const [docKind,           setDocKind]           = useState<'invoice' | 'bewirtung'>('invoice');
+  /** Which run the list is showing. The two never share a total. */
+  const [listKind,          setListKind]          = useState<'invoice' | 'bewirtung'>('invoice');
   const [pauschaleTotal,    setPauschaleTotal]    = useState('');
   const [pauschaleIsNetto,  setPauschaleIsNetto]  = useState(false);
   const [essenBrutto,       setEssenBrutto]       = useState('');
@@ -485,8 +489,16 @@ export default function OutgoingBillsPage() {
 
   // Ad Hoc totals (per-line VAT)
   // An event Pauschale line splits 70/30 across the two rates — see lib/event-vat.
+  /* A Bewirtungsbeleg reproduces a receipt that is already priced gross, so the
+     figure typed in is the gross one and the net is derived. Everything
+     downstream — MwSt, totals, the stored bill — stays in net terms. */
+  const adHocNet = useCallback((l: { amount: string; vat: AdHocVat }) => {
+    const v = parseFloat(l.amount) || 0;
+    return docKind === 'bewirtung' ? netFromGross(v, l.vat) : v;
+  }, [docKind]);
+
   const { net7: ahNetto7, net19: ahNetto19 } = splitAdHocNet(
-    adHocLines.map(l => ({ amountNetto: parseFloat(l.amount) || 0, vat: l.vat })),
+    adHocLines.map(l => ({ amountNetto: adHocNet(l), vat: l.vat })),
   );
   const ahMwst7       = ahNetto7  * 0.07;
   const ahMwst19      = ahNetto19 * 0.19;
@@ -749,8 +761,10 @@ export default function OutgoingBillsPage() {
       vat_19:           mwst19,
       gross_total:      brutto,
       tips:             trinkgeldN,
-      total_payable:    finalTotal,
-      status:           'pending',
+      // Already paid when the document is raised, so there is nothing
+      // outstanding and nothing for the P&L's Bills row to collect.
+      total_payable:    docKind === 'bewirtung' ? 0 : finalTotal,
+      status:           docKind === 'bewirtung' ? 'paid' : 'pending',
       file_path:        storagePath,
       uploaded_by:      user?.id ?? null,
     }).select('id').single();
@@ -899,13 +913,16 @@ export default function OutgoingBillsPage() {
         ? cateringLines.filter(l => l.description.trim() || parseFloat(l.amount)).map(l => ({ description: l.description.trim(), amount: parseFloat(l.amount) || 0 }))
         : undefined,
       adHocLines:          inputMode === 'adhoc'
-        ? adHocLines.filter(l => l.description.trim() || parseFloat(l.amount)).map(l => ({ description: l.description.trim(), amountNetto: parseFloat(l.amount) || 0, vat: l.vat }))
+        ? adHocLines.filter(l => l.description.trim() || parseFloat(l.amount)).map(l => ({ description: l.description.trim(), amountNetto: adHocNet(l), vat: l.vat }))
         : undefined,
       anzahlungBrutto:  anzahlungBruttoN > 0          ? anzahlungBruttoN              : undefined,
       anzahlungNetto:   anzahlungNettoN  > 0          ? anzahlungNettoN               : undefined,
       anzahlungVat7:    (anzahlungBill?.vat_7  ?? 0) > 0 ? anzahlungBill!.vat_7      : undefined,
       anzahlungVat19:   (anzahlungBill?.vat_19 ?? 0) > 0 ? anzahlungBill!.vat_19     : undefined,
       anzahlungRef:     anzahlungBill?.invoice_number ?? undefined,
+      docKind:          docKind === 'bewirtung' ? 'bewirtung' : undefined,
+      // The whole sum was taken before the document existed, so nothing is due.
+      bereitsGezahlt:   docKind === 'bewirtung' ? billTotal : undefined,
       ermaessigung:     ermaessigungN > 0 ? ermaessigungN : undefined,
       receiptImageDataUrl: includeReceipt && receiptDataUrl ? receiptDataUrl : undefined,
       storno: billType === 'storno' && stornoSourceBill ? {
@@ -922,23 +939,26 @@ export default function OutgoingBillsPage() {
        ahNetto7, ahNetto19, ahTotalNetto, ahTotalBrutto]);
 
   // Auto-populate next invoice number when bills load
+  /* Bewirtungsbelege carry their own run — BB1-26, BB2-26 — so a receipt for
+     an already-paid order can never take a number out of the invoice sequence. */
   useEffect(() => {
+    const yy     = String(new Date().getFullYear()).slice(-2);
+    const prefix = docKind === 'bewirtung' ? 'BB' : '';
     if (bills.length === 0 && !isLoading) {
-      // No bills yet — start at 1-YY
-      const yy = String(new Date().getFullYear()).slice(-2);
-      setInvoiceNumber(`1-${yy}`);
+      setInvoiceNumber(`${prefix}1-${yy}`);
       return;
     }
-    const yy = String(new Date().getFullYear()).slice(-2);
-    const pattern = new RegExp(`^(\\d+)-${yy}$`);
+    const pattern = new RegExp(`^${prefix}(\\d+)-${yy}$`);
     let max = 0;
     for (const b of bills) {
       if (!b.invoice_number) continue;
+      // An invoice number must not match the BB pattern, or the two runs merge.
+      if (docKind !== 'bewirtung' && b.invoice_number.startsWith('BB')) continue;
       const m = b.invoice_number.match(pattern);
       if (m) max = Math.max(max, parseInt(m[1], 10));
     }
-    setInvoiceNumber(`${max + 1}-${yy}`);
-  }, [bills, isLoading]);
+    setInvoiceNumber(`${prefix}${max + 1}-${yy}`);
+  }, [bills, isLoading, docKind]);
 
   const uniqueMonths: { value: string; label: string }[] = Array.from(
     new Set(bills.map((b) => (b.event_date ?? b.invoice_date)?.slice(0, 7)).filter(Boolean) as string[])
@@ -949,7 +969,12 @@ export default function OutgoingBillsPage() {
       return { value: ym, label: new Date(Number(y), Number(m) - 1, 1).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' }) };
     });
 
+  /* The BB prefix is what separates the two runs — no extra column needed, and
+     a bill can never drift out of the section its number puts it in. */
+  const isBewirtung = (b: { invoice_number: string | null }) => (b.invoice_number ?? '').startsWith('BB');
+
   const filtered = bills.filter((b) => {
+    if (isBewirtung(b) !== (listKind === 'bewirtung')) return false;
     if (filterStatus   !== 'all' && b.status           !== filterStatus)   return false;
     if (filterLocation !== 'all' && b.issuing_location !== filterLocation) return false;
     if (filterMonth    !== 'all') {
@@ -962,7 +987,7 @@ export default function OutgoingBillsPage() {
   // Sort by invoice number descending: parse {seq}-{yy} → sort by year then seq, both desc
   const sortedBills = [...filtered].sort((a, b) => {
     const parse = (inv: string | null) => {
-      const m = inv?.match(/^(\d+)-(\d+)$/);
+      const m = inv?.match(/^(?:BB)?(\d+)-(\d+)$/);
       return m ? parseInt(m[2], 10) * 100000 + parseInt(m[1], 10) : -1;
     };
     return parse(b.invoice_number) - parse(a.invoice_number);
@@ -1768,11 +1793,19 @@ export default function OutgoingBillsPage() {
             </button>
           )}
           <button
-            onClick={() => setTab('create')}
+            onClick={() => { setDocKind('invoice'); setTab('create'); }}
             className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2 bg-white text-[#1B5E20] border border-[#1B5E20] text-sm font-semibold rounded-xl hover:bg-green-50 transition-colors"
           >
             <FilePlus size={15} />
             Create Bill
+          </button>
+          <button
+            onClick={() => { setDocKind('bewirtung'); setInputMode('adhoc'); setTab('create'); }}
+            title="Bewirtungsbeleg — a receipt for an order that is already paid"
+            className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2 bg-white text-violet-700 border border-violet-400 text-sm font-semibold rounded-xl hover:bg-violet-50 transition-colors"
+          >
+            <ReceiptText size={15} />
+            Create BewBel
           </button>
           {canViewAll && (
             <button
@@ -2527,7 +2560,10 @@ export default function OutgoingBillsPage() {
 
                   {/* Line items */}
                   <div>
-                    <label className={labelCls}>Positionen (erscheinen auf der Rechnung)</label>
+                    <label className={labelCls}>
+                      Positionen (erscheinen auf der Rechnung)
+                      {docKind === 'bewirtung' && <span className="ml-2 font-normal text-violet-700">— Beträge brutto, wie auf dem Beleg</span>}
+                    </label>
                     <div className="space-y-2 mt-1">
                       {cateringLines.map((line, idx) => (
                         <div key={line.id} className="flex gap-2 items-center">
@@ -2616,7 +2652,7 @@ export default function OutgoingBillsPage() {
                             type="number"
                             step="0.01"
                             className="flex-shrink-0 w-32 bg-white border border-gray-300 rounded-lg px-3 py-2.5 text-sm text-gray-900 text-right placeholder:text-gray-400 shadow-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/40 focus:border-[#1B5E20] transition-colors"
-                            placeholder="0,00 Netto"
+                            placeholder={docKind === 'bewirtung' ? '0,00 Brutto' : '0,00 Netto'}
                             value={line.amount}
                             onChange={e => setAdHocLines(ls => ls.map(l => l.id === line.id ? { ...l, amount: e.target.value } : l))}
                           />
@@ -3092,6 +3128,26 @@ export default function OutgoingBillsPage() {
               ))}
             </div>
           )}
+
+          {/* Which run — invoices and Bewirtungsbelege never share a list or a total */}
+          <div className="flex items-center gap-2 mb-4">
+            {([
+              ['invoice',   'Rechnungen',       (b: OutgoingBill) => !isBewirtung(b)],
+              ['bewirtung', 'Bewirtungsbelege', (b: OutgoingBill) =>  isBewirtung(b)],
+            ] as const).map(([kind, label, pred]) => (
+              <button key={kind} onClick={() => setListKind(kind)}
+                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold border transition-colors ${
+                  listKind === kind
+                    ? (kind === 'bewirtung' ? 'bg-violet-700 text-white border-violet-700' : 'bg-[#1B5E20] text-white border-[#1B5E20]')
+                    : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'
+                }`}>
+                {label}
+                <span className={`text-xs font-bold px-1.5 py-0.5 rounded-full ${listKind === kind ? 'bg-white/20' : 'bg-gray-100 text-gray-500'}`}>
+                  {bills.filter(pred).length}
+                </span>
+              </button>
+            ))}
+          </div>
 
           {/* Filters */}
           <div className="flex items-center gap-2 mb-4 flex-wrap">

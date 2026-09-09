@@ -52,3 +52,15 @@ export function splitAdHocNet(
 /** How a position's VAT treatment is named on the bill. */
 export const vatLabel = (vat: AdHocVat) =>
   vat === 'event' ? 'Event-Pauschale, 70/30' : `${vat}% MwSt`;
+
+/**
+ * Net behind a gross position.
+ *
+ * A Bewirtungsbeleg is copied from a document that is already priced gross —
+ * a delivery receipt, a till slip — so the position is entered as the guest
+ * paid it and the net is derived, rather than the other way round.
+ */
+export function netFromGross(gross: number, vat: AdHocVat): number {
+  const rate = vat === 'event' ? EVENT_EFFECTIVE_RATE : vat / 100;
+  return gross / (1 + rate);
+}
