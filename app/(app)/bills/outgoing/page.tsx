@@ -629,26 +629,68 @@ export default function OutgoingBillsPage() {
       if (!res.ok) throw new Error(json.error ?? 'Extraction failed');
 
       const d = json.data as unknown as {
+        receiptKind?:     'pos' | 'delivery';
         essenBrutto:      number;
         getraenkeBrutto:  number;
         trinkgeld:        number;
+        subtotal?:        number;
+        documentTotal?:   number;
         eventDate:        string | null;
         issuingLocation:  string | null;
-        lineItems?:       { name: string; qty: number; total: number; taxCode: 'A' | 'B' }[];
+        lineItems?:       { name: string; qty: number; unitPrice?: number; total: number;
+                            taxCode: 'A' | 'B' | null; category?: 'food' | 'drink' | 'fee' }[];
       };
 
-      if (d.lineItems?.length) setReceiptLineItems(d.lineItems);
+      const items = d.lineItems ?? [];
+      // A delivery receipt carries no A/B letter; fall back to the item's category.
+      if (items.length) setReceiptLineItems(
+        items.filter(i => i.category !== 'fee').map(i => ({
+          name: i.name, qty: i.qty, total: i.total,
+          taxCode: (i.taxCode ?? (i.category === 'drink' ? 'A' : 'B')) as 'A' | 'B',
+        })),
+      );
 
-      // Derive food/drink totals from line items (more reliable than AI aggregates)
-      const computedEssen     = d.lineItems?.reduce((s, i) => i.taxCode === 'B' ? s + i.total : s, 0) ?? 0;
-      const computedGetraenke = d.lineItems?.reduce((s, i) => i.taxCode === 'A' ? s + i.total : s, 0) ?? 0;
-      const essenVal     = computedEssen     > 0 ? computedEssen     : d.essenBrutto;
-      const getraenkeVal = computedGetraenke > 0 ? computedGetraenke : d.getraenkeBrutto;
+      /* Read back what the receipt itself says the total was, and refuse to fill
+         the form quietly if the lines do not add up to it. A tax document that
+         is short by one item is worse than one that was never created. */
+      const lineSum   = items.reduce((s, i) => s + (i.total ?? 0), 0);
+      const stated    = d.documentTotal ?? 0;
+      const computed  = lineSum + (d.trinkgeld ?? 0);
+      if (stated > 0 && Math.abs(computed - stated) > 0.02) {
+        const ok = window.confirm(
+          `The lines read from this receipt come to ${fmtEur(computed)}, but the receipt says ${fmtEur(stated)} ` +
+          `— a difference of ${fmtEur(Math.abs(stated - computed))}.\n\n` +
+          `Fill the form in anyway? You will need to correct it by hand.`,
+        );
+        if (!ok) { setExtractingReceipt(false); return; }
+      }
 
-      // Populate form fields
-      setInputMode('brutto');
-      if (essenVal     > 0) setEssenBrutto(String(essenVal));
-      if (getraenkeVal > 0) setGetraenkeBrutto(String(getraenkeVal));
+      if (docKind === 'bewirtung') {
+        /* A Bewirtungsbeleg has to itemise what was eaten, so the positions go
+           in as their own gross lines rather than a food/drink lump. Fees are
+           not food: they carry the standard rate. */
+        const asLines = items
+          .filter(i => (i.total ?? 0) !== 0)
+          .map(i => ({
+            id:          uid(),
+            description: i.qty > 1 ? `${i.qty}× ${i.name}` : i.name,
+            amount:      String(Number((i.total ?? 0).toFixed(2))),
+            vat:         (i.category === 'fee' || i.category === 'drink' || i.taxCode === 'A' ? 19 : 7) as AdHocVat,
+          }));
+        if (asLines.length) setAdHocLines(asLines);
+        setInputMode('adhoc');
+      } else {
+        // Derive food/drink totals from line items (more reliable than AI aggregates)
+        const chargeable        = items.filter(i => i.category !== 'fee');
+        const computedEssen     = chargeable.reduce((s, i) => i.taxCode === 'B' || i.category === 'food'  ? s + i.total : s, 0);
+        const computedGetraenke = chargeable.reduce((s, i) => i.taxCode === 'A' || i.category === 'drink' ? s + i.total : s, 0);
+        const essenVal     = computedEssen     > 0 ? computedEssen     : d.essenBrutto;
+        const getraenkeVal = computedGetraenke > 0 ? computedGetraenke : d.getraenkeBrutto;
+
+        setInputMode('brutto');
+        if (essenVal     > 0) setEssenBrutto(String(essenVal));
+        if (getraenkeVal > 0) setGetraenkeBrutto(String(getraenkeVal));
+      }
       if (d.trinkgeld       > 0) setTrinkgeld(String(d.trinkgeld));
       if (d.issuingLocation)     setBillIssuingLoc(d.issuingLocation);
       if (d.eventDate) {
