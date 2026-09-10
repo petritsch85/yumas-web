@@ -4,6 +4,8 @@ import { useState, useMemo, useCallback, useRef, useEffect, Fragment } from 'rea
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
 import { parseOpenTableCsv, summariseOpenTable, OpenTableParseError } from '@/lib/opentable-csv';
+import { parseGdpduZip, GdpduParseError } from '@/lib/gdpdu';
+import type { GdpduShift, GdpduSummary } from '@/lib/gdpdu';
 import type { OpenTableSummary } from '@/lib/opentable-csv';
 import type { WoltInvoiceData } from '@/lib/wolt-invoice';
 import type { WoltShiftBreakdown } from '@/lib/wolt-sales-report';
@@ -62,7 +64,7 @@ interface WoltLineMaps {
   orders:      Record<string, number>;
 }
 import {
-  Upload, FileCheck, AlertCircle, DatabaseZap,
+  Upload, FileCheck, AlertCircle, DatabaseZap, Info,
   MapPin, CalendarDays, BarChart3, TableProperties,
   ChevronLeft, ChevronRight, TrendingUp, Receipt, Percent, Euro,
   Loader2, SlidersHorizontal, Ban, FileText,
@@ -920,7 +922,7 @@ export default function SalesReportsPage() {
    * under the other, which meant scrolling past a hundred rows to reach Wolt.
    */
   const [plSection, setPlSection] = useState<'summary'|'orderbird'|'wolt'|'webshop'>('summary');
-  const [reportType,  setReportType]  = useState<'weekly'|'shift'|'monthly'|'manual'|'wolt'|'webshop'|'opentable'>('shift');
+  const [reportType,  setReportType]  = useState<'weekly'|'shift'|'monthly'|'manual'|'wolt'|'webshop'|'opentable'|'gdpdu'>('shift');
 
   /* ── Webshop: one CSV export holding every order ── */
   const [webshopRows,    setWebshopRows]    = useState<Record<string, unknown>[]>([]);
@@ -934,6 +936,14 @@ export default function SalesReportsPage() {
   const [otSummary, setOtSummary] = useState<OpenTableSummary | null>(null);
   const [otError,   setOtError]   = useState<string | null>(null);
   const [otSaved,   setOtSaved]   = useState<number | null>(null);
+  /* The Orderbird GDPdU archive — a whole year of bills, rebuilt into shifts. */
+  const [gdShifts,  setGdShifts]  = useState<GdpduShift[]>([]);
+  const [gdSummary, setGdSummary] = useState<GdpduSummary | null>(null);
+  const [gdError,   setGdError]   = useState<string | null>(null);
+  const [gdParsing, setGdParsing] = useState(false);
+  const [gdSaved,   setGdSaved]   = useState<number | null>(null);
+  /** Days already held for this location that the archive would replace. */
+  const [gdExisting, setGdExisting] = useState<{ days: number; shifts: number } | null>(null);
 
   /* ── Wolt: a five-day document set (invoice + netting + sales report) ──
      Only the self-billing invoice carries the period totals; the other two are
@@ -2460,6 +2470,97 @@ export default function SalesReportsPage() {
     }
   }, [otRows, queryClient]);
 
+  /**
+   * Reads a GDPdU archive.
+   *
+   * Parsed in the browser: the file runs to 15 MB compressed and would not
+   * survive a serverless request body limit, and nothing in it needs the
+   * database to interpret.
+   */
+  const handleGdpduFiles = useCallback((files: File[], locationId?: string) => {
+    setGdError(null); setGdShifts([]); setGdSummary(null); setGdSaved(null); setGdExisting(null);
+    const zip = files.find(f => /\.zip$/i.test(f.name));
+    if (!zip) { setGdError('Drop the GDPdU archive — the .zip exactly as Orderbird exported it.'); return; }
+    if (!locationId) { setGdError('Choose a location above first — the archive does not name one.'); return; }
+    setGdParsing(true);
+    void zip.arrayBuffer().then(async buf => {
+      try {
+        const { shifts, summary } = parseGdpduZip(new Uint8Array(buf));
+        setGdShifts(shifts); setGdSummary(summary);
+
+        /* Say what is about to be overwritten before anything is written. The
+           archive is the authority, but replacing a year of a restaurant's
+           sales unannounced would be indefensible. */
+        const { data } = await supabase
+          .from('shift_reports')
+          .select('report_date')
+          .eq('location_id', locationId)
+          .gte('report_date', summary.firstDate)
+          .lte('report_date', summary.lastDate);
+        const rows = (data ?? []) as { report_date: string }[];
+        setGdExisting({ days: new Set(rows.map(r => r.report_date)).size, shifts: rows.length });
+      } catch (e) {
+        setGdError(e instanceof GdpduParseError ? e.message : 'The archive could not be read.');
+      } finally {
+        setGdParsing(false);
+      }
+    });
+  }, []);
+
+  /**
+   * Replaces the covered period with what the archive says.
+   *
+   * Every existing shift on a covered date is deleted first rather than
+   * upserted over: a day can hold a duplicate Z-report, and only a delete
+   * clears it.
+   */
+  const handleImportGdpdu = useCallback(async () => {
+    if (gdShifts.length === 0 || !location) return;
+    setImporting(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      const dates = [...new Set(gdShifts.map(s => s.date))];
+
+      // Delete in chunks: a single .in() with 285 dates makes an unwieldy URL.
+      for (let i = 0; i < dates.length; i += 100) {
+        const { error } = await supabase.from('shift_reports')
+          .delete().eq('location_id', location.id).in('report_date', dates.slice(i, i + 100));
+        if (error) { setGdError(error.message); return; }
+      }
+
+      const rows = gdShifts.map(s => ({
+        location_id: location.id,
+        report_date: s.date,
+        shift_type:  s.shift,
+        // The archive carries no Z-report number; the bills are the record.
+        z_report_number: null,
+        gross_total: s.grossTotal,
+        gross_food: s.grossFood,
+        gross_beverages: s.grossBeverages,
+        net_total: s.netTotal,
+        vat_total: s.vatTotal,
+        tips: s.tips,
+        inhouse_total: s.inhouseTotal,
+        takeaway_total: s.takeawayTotal,
+        cancellations_count: s.cancellationsCount,
+        cancellations_total: s.cancellationsTotal,
+        uploaded_by: user?.id ?? null,
+      }));
+      for (let i = 0; i < rows.length; i += 200) {
+        const { error } = await supabase.from('shift_reports').insert(rows.slice(i, i + 200));
+        if (error) { setGdError(error.message); return; }
+      }
+
+      setGdSaved(rows.length);
+      setGdShifts([]); setGdSummary(null); setGdExisting(null);
+      queryClient.invalidateQueries({ queryKey: ['shift-reports'] });
+      queryClient.invalidateQueries({ queryKey: ['year-shift-rows'] });
+      queryClient.invalidateQueries({ queryKey: ['pnl-monthly'] });
+    } finally {
+      setImporting(false);
+    }
+  }, [gdShifts, location, queryClient]);
+
   const resetUpload = useCallback(() => {
     setFileName(null); setWeeklyResult(null); setWeeklyBatch([]); setShiftBatch([]);
     setMonthlyResult(null); setParseError(null); setWeeklyPage(0);
@@ -2467,6 +2568,7 @@ export default function SalesReportsPage() {
     setWoltItemRows([]); setWoltItemSummary(null); setWoltItemsSaved(null);
     setWebshopRows([]); setWebshopSummary(null); setWebshopError(null); setWebshopSaved(null);
     setOtRows([]); setOtSummary(null); setOtError(null); setOtSaved(null);
+    setGdShifts([]); setGdSummary(null); setGdError(null); setGdSaved(null); setGdExisting(null);
   }, []);
 
   const processFile = useCallback((file: File) => {
@@ -3105,6 +3207,7 @@ export default function SalesReportsPage() {
               ['wolt',     '🛵', 'Wolt Report',     '5-day PDF set, or the purchases export (CSV)'],
               ['webshop',  '🛒', 'Webshop',         'Order export from our own webshop (CSV)'],
               ['opentable','📅', 'OpenTable',       'GuestCenter reservation export (CSV)'],
+              ['gdpdu',    '🗄', 'Orderbird archive','GDPdU tax export (ZIP) — rebuilds historic shifts'],
               ['manual',   '✏️', 'Manual Entry',    'Type in shift figures directly — no CSV needed'],
             ] as const).map(([t, emoji, label, desc]) => (
               <button key={t} onClick={() => { setReportType(t); resetUpload(); }}
@@ -3245,7 +3348,7 @@ export default function SalesReportsPage() {
               )}
 
               {/* Drop zone */}
-              {reportType !== 'manual' && reportType !== 'wolt' && reportType !== 'webshop' && reportType !== 'opentable' && <div>
+              {reportType !== 'manual' && reportType !== 'wolt' && reportType !== 'webshop' && reportType !== 'opentable' && reportType !== 'gdpdu' && <div>
                 <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">
                   { `Orderbird Z-Report CSV — ${reportType === 'shift' ? 'Shift' : reportType === 'monthly' ? 'Monthly' : 'Weekly'}`}
                 </label>
@@ -3503,6 +3606,136 @@ export default function SalesReportsPage() {
                       : webshopRows.length === 0 ? 'Drop the export above'
                       : `Save ${webshopRows.length} orders`}
                   </button>
+                </div>
+              )}
+
+              {reportType === 'gdpdu' && (
+                <div>
+                  <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">
+                    Orderbird GDPdU archive (ZIP)
+                  </label>
+                  <div
+                    onDragOver={e => { e.preventDefault(); setIsDragging(true); }}
+                    onDragLeave={() => setIsDragging(false)}
+                    onDrop={e => { e.preventDefault(); setIsDragging(false); handleGdpduFiles(Array.from(e.dataTransfer.files), location?.id); }}
+                    className={`border-2 border-dashed rounded-xl p-6 text-center transition-colors ${
+                      isDragging ? 'border-[#1B5E20] bg-green-50'
+                      : gdError ? 'border-red-300 bg-red-50'
+                      : gdSummary ? 'border-green-400 bg-green-50'
+                      : 'border-gray-200 bg-white'
+                    }`}
+                  >
+                    {gdParsing
+                      ? <Loader2 size={26} className="mx-auto mb-2 animate-spin text-[#1B5E20]" />
+                      : <Upload size={26} className={`mx-auto mb-2 ${gdSummary ? 'text-[#1B5E20]' : 'text-gray-300'}`} />}
+                    <p className={`text-sm font-semibold mb-1 ${gdSummary ? 'text-green-700' : 'text-gray-600'}`}>
+                      {gdParsing ? 'Reading the archive…'
+                        : gdSummary ? `${gdSummary.invoices.toLocaleString('de-DE')} bills → ${gdSummary.shifts} shifts`
+                        : 'Drop the GDPdU ZIP here'}
+                    </p>
+                    <p className="text-xs text-gray-400 mb-3">
+                      Filed against <span className="font-semibold text-gray-500">{location?.name ?? 'no location yet'}</span> · the archive does not name a restaurant
+                    </p>
+                    <input type="file" accept=".zip,application/zip" id="gdpdu-file-input" className="hidden"
+                      onChange={e => { handleGdpduFiles(Array.from(e.target.files ?? []), location?.id); e.target.value = ''; }} />
+                    <label htmlFor="gdpdu-file-input"
+                      className="inline-block px-4 py-2 bg-white border border-gray-200 rounded-lg text-xs font-semibold text-gray-600 hover:bg-gray-50 cursor-pointer">
+                      Browse files
+                    </label>
+                  </div>
+
+                  {gdSummary && (
+                    <>
+                      <div className="mt-2 grid grid-cols-4 gap-2">
+                        {[
+                          { label: 'Days',      value: String(gdSummary.days),                    tone: 'text-gray-800'  },
+                          { label: 'Gross',     value: fmt(gdSummary.grossTotal),                 tone: 'text-[#1B5E20]' },
+                          { label: 'Net',       value: fmt(gdSummary.netTotal),                   tone: 'text-blue-700'  },
+                          { label: 'Tips',      value: fmt(gdSummary.tips),                       tone: 'text-purple-700'},
+                        ].map(x => (
+                          <div key={x.label} className="bg-white border border-gray-100 rounded-lg p-2 shadow-sm">
+                            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-0.5">{x.label}</p>
+                            <p className={`text-sm font-bold tabular-nums ${x.tone}`}>{x.value}</p>
+                          </div>
+                        ))}
+                      </div>
+                      <p className="mt-1.5 text-xs text-gray-400 text-center">
+                        {fmtDate(gdSummary.firstDate)} – {fmtDate(gdSummary.lastDate)} · food {fmt(gdSummary.grossFood)} · drinks {fmt(gdSummary.grossBeverages)}
+                      </p>
+
+                      {gdSummary.inconsistentInvoices === 0 ? (
+                        <p className="mt-2 text-xs text-green-700 text-center">
+                          ✓ every bill reconciles — net + VAT = gross on all {gdSummary.invoices.toLocaleString('de-DE')}
+                        </p>
+                      ) : (
+                        <p className="mt-2 text-xs text-red-600 text-center">
+                          {gdSummary.inconsistentInvoices} bills do not reconcile — check before saving
+                        </p>
+                      )}
+
+                      {gdSummary.spansVatChange && (
+                        <div className="mt-2 flex items-start gap-2 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                          <Info size={15} className="text-blue-500 flex-shrink-0 mt-0.5" />
+                          <p className="text-xs text-blue-800">
+                            This period spans the 01.01.2026 VAT change, so the same dish appears at 19% before
+                            and 7% after. Food and drinks are split on the menu category instead of the VAT rate,
+                            which keeps the split comparable across the whole archive.
+                          </p>
+                        </div>
+                      )}
+
+                      {gdSummary.unsplitShifts > 0 && (
+                        <p className="mt-2 text-xs text-amber-600 text-center">
+                          {gdSummary.unsplitShifts} shift{gdSummary.unsplitShifts === 1 ? '' : 's'} hold bills with no menu lines
+                          (a voucher, or a flat event charge), so their food/drinks split is left empty
+                        </p>
+                      )}
+
+                      {gdExisting && gdExisting.shifts > 0 && (
+                        <div className="mt-2 flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                          <AlertCircle size={15} className="text-amber-500 flex-shrink-0 mt-0.5" />
+                          <p className="text-xs text-amber-800">
+                            <span className="font-bold">{gdExisting.shifts} existing shifts across {gdExisting.days} days</span> at
+                            {' '}{location?.name} fall inside this period. Saving deletes them and replaces them with
+                            what the archive says — including any duplicated Z-report.
+                          </p>
+                        </div>
+                      )}
+                    </>
+                  )}
+
+                  {gdError && (
+                    <div className="mt-2 flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded-lg">
+                      <AlertCircle size={15} className="text-red-500 flex-shrink-0 mt-0.5" />
+                      <p className="text-xs text-red-700">{gdError}</p>
+                    </div>
+                  )}
+
+                  {gdSaved !== null && (
+                    <div className="mt-2 flex items-start gap-2 p-3 bg-green-50 border border-green-200 rounded-lg">
+                      <FileCheck size={15} className="text-green-600 flex-shrink-0 mt-0.5" />
+                      <p className="text-xs text-green-800">{gdSaved} shifts saved.</p>
+                    </div>
+                  )}
+
+                  <button
+                    onClick={handleImportGdpdu}
+                    disabled={gdShifts.length === 0 || importing}
+                    className={`mt-3 w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-bold transition-colors ${
+                      gdShifts.length > 0 && !importing
+                        ? 'bg-[#1B5E20] text-white hover:bg-[#2E7D32]'
+                        : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                    }`}
+                  >
+                    {importing ? <Loader2 size={16} className="animate-spin" /> : <DatabaseZap size={16} />}
+                    {importing              ? 'Saving…'
+                      : gdShifts.length === 0 ? 'Drop the archive above'
+                      : `Replace ${gdSummary?.days ?? 0} days with ${gdShifts.length} shifts`}
+                  </button>
+
+                  <p className="mt-3 text-xs text-gray-400 text-center leading-relaxed">
+                    Export from MY orderbird → Reports → GDPdU / DSFinV-K export
+                  </p>
                 </div>
               )}
 
@@ -4262,7 +4495,7 @@ export default function SalesReportsPage() {
               ))}
 
               {/* Empty state */}
-              {reportType !== 'wolt' && reportType !== 'webshop' && reportType !== 'opentable' && !weeklyResult && shiftBatch.length === 0 && !monthlyResult && !parseError && (
+              {reportType !== 'wolt' && reportType !== 'webshop' && reportType !== 'opentable' && reportType !== 'gdpdu' && !weeklyResult && shiftBatch.length === 0 && !monthlyResult && !parseError && (
                 <div className="flex flex-col items-center justify-center h-64 border-2 border-dashed border-gray-200 rounded-xl gap-3">
                   <Upload size={40} className="text-gray-200" />
                   <p className="text-sm text-gray-400">
