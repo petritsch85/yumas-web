@@ -1092,20 +1092,6 @@ export default function SalesReportsPage() {
   });
 
   // Monthly reports
-  const { data: monthlyReports = [] } = useQuery({
-    queryKey: ['monthly-reports', location?.id, year],
-    enabled: !!location && activeTab === 'daily',
-    queryFn: async () => {
-      const { data } = await supabase
-        .from('monthly_reports')
-        .select('report_month,report_year,gross_total,gross_food,gross_beverages,net_total,vat_total,tips,inhouse_total,takeaway_total,cancellations_count,cancellations_total')
-        .eq('location_id', location!.id)
-        .eq('report_year', year)
-        .order('report_month', { ascending: true });
-      return (data ?? []) as MonthlyReportData[];
-    },
-  });
-
   // Bills for the selected location — used to populate cost rows in monthly P&L
   type BillRecord = {
     id: string; net_amount: number; category: string | null;
@@ -1142,6 +1128,47 @@ export default function SalesReportsPage() {
       if (!isGroup) q = q.eq('location_id', location!.id);
       const { data } = await q;
       return (data ?? []) as ShiftRow[];
+    },
+  });
+
+  /**
+   * Every shift this location has ever recorded, for the monthly view.
+   *
+   * The monthly P&L reads as a continuous history rather than a year at a
+   * time: a restaurant's trend is the thing being looked at, and a year
+   * dropdown cuts it exactly where the comparison matters.
+   */
+  const { data: allShiftRows = [] } = useQuery({
+    queryKey: ['shift-reports-all', location?.id],
+    enabled: !!location && activeTab === 'daily' && subTab === 'monthly',
+    queryFn: async () => {
+      const all: ShiftRow[] = [];
+      for (let pg = 0; ; pg++) {
+        const { data, error } = await supabase
+          .from('shift_reports')
+          .select('report_date,gross_total,gross_food,gross_beverages,net_total,vat_total,tips,inhouse_total,takeaway_total,cancellations_count,cancellations_total')
+          .eq('location_id', location!.id)
+          .order('report_date')
+          .range(pg * 1000, (pg + 1) * 1000 - 1);
+        if (error) throw error;
+        if (!data?.length) break;
+        all.push(...(data as ShiftRow[]));
+        if (data.length < 1000) break;
+      }
+      return all;
+    },
+  });
+
+  const { data: allMonthlyReports = [] } = useQuery({
+    queryKey: ['monthly-reports-all', location?.id],
+    enabled: !!location && activeTab === 'daily' && subTab === 'monthly',
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('monthly_reports')
+        .select('report_month,report_year,gross_total,gross_food,gross_beverages,net_total,vat_total,tips,inhouse_total,takeaway_total,cancellations_count,cancellations_total')
+        .eq('location_id', location!.id)
+        .order('report_year').order('report_month');
+      return (data ?? []) as MonthlyReportData[];
     },
   });
 
@@ -1541,57 +1568,55 @@ export default function SalesReportsPage() {
    * One row per month, summed from the daily shifts, with an uploaded monthly
    * Z-report winning where one exists — the same rule the weeks follow.
    */
-  /**
-   * Last year's shifts, for the year-on-year comparison.
-   *
-   * A restaurant's months are not comparable to each other — February is short,
-   * August is a holiday — so month-on-month growth mostly measures the calendar.
-   * Against the same month a year earlier, a change is the business changing.
-   */
-  const { data: prevYearShiftRows = [] } = useQuery({
-    queryKey: ['shift-reports-year', location?.id, year - 1],
-    enabled: !!location && activeTab === 'daily' && subTab === 'monthly',
-    queryFn: async () => {
-      const { data } = await supabase
-        .from('shift_reports')
-        .select('report_date,gross_total,net_total')
-        .eq('location_id', location!.id)
-        .gte('report_date', `${year - 1}-01-01`)
-        .lte('report_date', `${year - 1}-12-31`);
-      return (data ?? []) as Pick<ShiftRow, 'report_date'|'gross_total'|'net_total'>[];
-    },
-  });
-
-  /** Last year's months, keyed the same way as this year's. */
-  const prevYearMonthMap = useMemo<Record<number, MonthlyReportData>>(() => {
-    const m: Record<number, MonthlyReportData> = {};
-    for (const r of prevYearShiftRows) {
-      const mn = Number(r.report_date.slice(5, 7));
-      const c = m[mn] ?? (m[mn] = {
-        report_month: mn, report_year: year - 1,
-        gross_total: 0, gross_food: 0, gross_beverages: 0, net_total: 0, vat_total: 0,
-        tips: 0, inhouse_total: 0, takeaway_total: 0,
-        cancellations_count: 0, cancellations_total: 0,
-      });
-      c.gross_total = (c.gross_total ?? 0) + (safeNum(r.gross_total) ?? 0);
-      c.net_total   = (c.net_total   ?? 0) + (safeNum(r.net_total)   ?? 0);
+  /** Bill costs by "YYYY-MM" and category. */
+  const billMonthMap = useMemo<Record<string, Record<string, number>>>(() => {
+    const result: Record<string, Record<string, number>> = {};
+    for (const bill of locationBills) {
+      if (!bill.period_start || !bill.net_amount) continue;
+      const cat = bill.category ?? 'Other';
+      const pStart = new Date(bill.period_start + 'T00:00:00');
+      const pEnd   = bill.period_end ? new Date(bill.period_end + 'T00:00:00') : pStart;
+      const startY = pStart.getFullYear(), startM = pStart.getMonth();
+      const endY   = pEnd.getFullYear(),   endM   = pEnd.getMonth();
+      const totalMonths = Math.max(1, (endY - startY) * 12 + (endM - startM) + 1);
+      const monthlyAmt  = bill.net_amount / totalMonths;
+      // Spread over every month the bill's own period covers, whatever year
+      // that falls in: the monthly P&L is a continuous history, not one year.
+      for (let y = startY; y <= endY; y++) {
+        for (let mo = 1; mo <= 12; mo++) {
+          const thisMStart = new Date(y, mo - 1, 1);
+          if (thisMStart < new Date(startY, startM, 1)) continue;
+          if (thisMStart > new Date(endY, endM, 1)) continue;
+          const key = `${y}-${String(mo).padStart(2, '0')}`;
+          if (!result[key]) result[key] = {};
+          result[key][cat] = (result[key][cat] ?? 0) + monthlyAmt;
+        }
+      }
     }
-    return m;
-  }, [prevYearShiftRows, year]);
+    return result;
+  }, [locationBills]);
 
-  const monthMap = useMemo<Record<number, MonthlyReportData>>(() => {
-    const m: Record<number, MonthlyReportData> = {};
-    for (const r of yearShiftRows) {
-      // The fetch reaches either side of the year for the weekly view; a month
-      // belongs to its calendar year.
-      if (r.report_date.slice(0, 4) !== String(year)) continue;
-      const mn = Number(r.report_date.slice(5, 7));
-      const c = m[mn] ?? (m[mn] = {
-        report_month: mn, report_year: year,
+  /** Every cost category present, for the dynamic rows. */
+  const billCategories = useMemo(() => {
+    const cats = new Set<string>();
+    for (const mo of Object.values(billMonthMap)) for (const cat of Object.keys(mo)) cats.add(cat);
+    return Array.from(cats).sort();
+  }, [billMonthMap]);
+
+  /** Every month with data, keyed "YYYY-MM". Uploaded monthly reports win. */
+  const monthMapAll = useMemo<Record<string, MonthlyReportData>>(() => {
+    const m: Record<string, MonthlyReportData> = {};
+    const touch = (y: number, mn: number) => {
+      const k = `${y}-${String(mn).padStart(2, '0')}`;
+      return m[k] ?? (m[k] = {
+        report_month: mn, report_year: y,
         gross_total: 0, gross_food: 0, gross_beverages: 0, net_total: 0, vat_total: 0,
         tips: 0, inhouse_total: 0, takeaway_total: 0,
         cancellations_count: 0, cancellations_total: 0,
       });
+    };
+    for (const r of allShiftRows) {
+      const c = touch(Number(r.report_date.slice(0, 4)), Number(r.report_date.slice(5, 7)));
       c.gross_total     = (c.gross_total     ?? 0) + (safeNum(r.gross_total)     ?? 0);
       c.gross_food      = (c.gross_food      ?? 0) + (safeNum(r.gross_food)      ?? 0);
       c.gross_beverages = (c.gross_beverages ?? 0) + (safeNum(r.gross_beverages) ?? 0);
@@ -1600,16 +1625,40 @@ export default function SalesReportsPage() {
       c.tips            = (c.tips            ?? 0) + (safeNum(r.tips)            ?? 0);
       c.inhouse_total   = (c.inhouse_total   ?? 0) + (safeNum(r.inhouse_total)   ?? 0);
       c.takeaway_total  = (c.takeaway_total  ?? 0) + (safeNum(r.takeaway_total)  ?? 0);
+      c.cancellations_count = (c.cancellations_count ?? 0) + (safeNum(r.cancellations_count) ?? 0);
+      c.cancellations_total = (c.cancellations_total ?? 0) + (safeNum(r.cancellations_total) ?? 0);
     }
-    for (const r of monthlyReports) m[r.report_month] = r;
+    for (const r of allMonthlyReports) {
+      m[`${r.report_year}-${String(r.report_month).padStart(2, '0')}`] = r;
+    }
     return m;
-  }, [yearShiftRows, monthlyReports, year]);
+  }, [allShiftRows, allMonthlyReports]);
 
-  const yearMonthTotal = useMemo<MonthlyReportData | null>(() => {
-    const rows = Object.values(monthMap);
-    if (!rows.length) return null;
-    return rows.reduce<MonthlyReportData>((acc, m) => ({
-      report_month: 0, report_year: year,
+  /**
+   * The columns: every month from the first with data to the last, in order,
+   * with a full-year subtotal closing each year.
+   */
+  const monthCols = useMemo(() => {
+    const keys = Object.keys(monthMapAll).sort();
+    if (keys.length === 0) return [] as { type: 'month' | 'fy'; year: number; month: number; key: string }[];
+    const firstY = Number(keys[0].slice(0, 4));
+    const lastY  = Number(keys[keys.length - 1].slice(0, 4));
+    const cols: { type: 'month' | 'fy'; year: number; month: number; key: string }[] = [];
+    for (let y = firstY; y <= lastY; y++) {
+      for (let mn = 1; mn <= 12; mn++) {
+        cols.push({ type: 'month', year: y, month: mn, key: `${y}-${String(mn).padStart(2, '0')}` });
+      }
+      cols.push({ type: 'fy', year: y, month: 0, key: `FY${y}` });
+    }
+    return cols;
+  }, [monthMapAll]);
+
+  /** A year's twelve months added together, for its FY column. */
+  const fyTotalFor = useCallback((y: number): MonthlyReportData | null => {
+    const months = Object.entries(monthMapAll).filter(([k]) => k.startsWith(`${y}-`)).map(([, v]) => v);
+    if (months.length === 0) return null;
+    return months.reduce<MonthlyReportData>((acc, m) => ({
+      report_month: 0, report_year: y,
       gross_total:         (acc.gross_total         ?? 0) + (m.gross_total         ?? 0),
       gross_food:          (acc.gross_food          ?? 0) + (m.gross_food          ?? 0),
       gross_beverages:     (acc.gross_beverages     ?? 0) + (m.gross_beverages     ?? 0),
@@ -1620,40 +1669,12 @@ export default function SalesReportsPage() {
       takeaway_total:      (acc.takeaway_total      ?? 0) + (m.takeaway_total      ?? 0),
       cancellations_count: (acc.cancellations_count ?? 0) + (m.cancellations_count ?? 0),
       cancellations_total: (acc.cancellations_total ?? 0) + (m.cancellations_total ?? 0),
-    }), { report_month:0, report_year:year, gross_total:0, gross_food:0, gross_beverages:0, net_total:0, vat_total:0, tips:0, inhouse_total:0, takeaway_total:0, cancellations_count:0, cancellations_total:0 });
-  }, [monthMap, year]);
-
-  // Bills → monthly allocation map: month (1-12) → category → net_amount
-  // Each bill's cost is spread equally across the months it covers
-  const billMonthMap = useMemo<Record<number, Record<string, number>>>(() => {
-    const result: Record<number, Record<string, number>> = {};
-    for (const bill of locationBills) {
-      if (!bill.period_start || !bill.net_amount) continue;
-      const cat = bill.category ?? 'Other';
-      const pStart = new Date(bill.period_start + 'T00:00:00');
-      const pEnd   = bill.period_end ? new Date(bill.period_end + 'T00:00:00') : pStart;
-      const startY = pStart.getFullYear(), startM = pStart.getMonth();
-      const endY   = pEnd.getFullYear(),   endM   = pEnd.getMonth();
-      const totalMonths = Math.max(1, (endY - startY) * 12 + (endM - startM) + 1);
-      const monthlyAmt  = bill.net_amount / totalMonths;
-      for (let mo = 1; mo <= 12; mo++) {
-        const moIdx = mo - 1; // 0-based
-        const thisY = year, thisMStart = new Date(thisY, moIdx, 1);
-        const inRange = thisMStart >= new Date(startY, startM, 1) && thisMStart <= new Date(endY, endM, 1);
-        if (!inRange) continue;
-        if (!result[mo]) result[mo] = {};
-        result[mo][cat] = (result[mo][cat] ?? 0) + monthlyAmt;
-      }
-    }
-    return result;
-  }, [locationBills, year]);
-
-  // Sorted list of bill categories present in this year (for dynamic rows)
-  const billCategories = useMemo(() => {
-    const cats = new Set<string>();
-    for (const mo of Object.values(billMonthMap)) for (const cat of Object.keys(mo)) cats.add(cat);
-    return Array.from(cats).sort();
-  }, [billMonthMap]);
+    }), {
+      report_month: 0, report_year: y, gross_total: 0, gross_food: 0, gross_beverages: 0,
+      net_total: 0, vat_total: 0, tips: 0, inhouse_total: 0, takeaway_total: 0,
+      cancellations_count: 0, cancellations_total: 0,
+    });
+  }, [monthMapAll]);
 
   /**
    * One row per ISO week, summed from the daily shifts.
@@ -3033,20 +3054,26 @@ export default function SalesReportsPage() {
     return <span>{fmtNum(val)}</span>;
   };
 
-  const renderMonthCell = (row: MRow, mn: number) => {
+  const renderMonthValue = (row: MRow, m: MonthlyReportData | null, pm: MonthlyReportData | null) => {
     if (row.type === 'section') return null;
-    // The same month last year, not the month before.
-    const m = monthMap[mn] ?? null, pm = prevYearMonthMap[mn] ?? null;
     const val = row.getValue?.(m, pm) ?? null;
     if (val === null) return <span className="text-gray-300 select-none">—</span>;
     if (row.format === 'currency') return <span className={row.color === 'blue' ? 'text-blue-700' : 'text-gray-900'}>{fmtNum(val)}</span>;
     if (row.format === 'pct')      return <span className="text-gray-500">{val.toFixed(1)}%</span>;
     if (row.format === 'count')    return <span className="text-gray-700">{Math.round(val)}</span>;
     if (row.format === 'pct_delta') {
+      // A year-on-year move is read as a direction, not to a tenth of a percent.
       const s = val >= 0 ? '+' : '', cl = val >= 0 ? 'text-green-600' : 'text-red-500';
-      return <span className={cl}>{s}{val.toFixed(1)}%</span>;
+      return <span className={cl}>{s}{val.toFixed(0)}%</span>;
     }
     return <span>{fmtNum(val)}</span>;
+  };
+
+  /** One month, compared with the same month a year earlier. */
+  const renderMonthCell = (row: MRow, y: number, mn: number) => {
+    const key  = `${y}-${String(mn).padStart(2, '0')}`;
+    const prev = `${y - 1}-${String(mn).padStart(2, '0')}`;
+    return renderMonthValue(row, monthMapAll[key] ?? null, monthMapAll[prev] ?? null);
   };
 
   // ── Save booking / walk-in value ──────────────────────────────────────────
@@ -3134,7 +3161,7 @@ export default function SalesReportsPage() {
 
   const LABEL_W  = 220;
   const COL_W_WK = 76;
-  const COL_W_MN = 90;
+  const COL_W_MN = 72;
   const COL_W_D  = 68;
 
   // ── Render ─────────────────────────────────────────────────────────────────
@@ -3195,14 +3222,14 @@ export default function SalesReportsPage() {
                 <option value={GROUP_ID}>Group — all restaurants</option>
               </select>
             </div>
-            {/* Year */}
-            <select
+            {/* Year — the monthly table spans every year at once, so it has none */}
+            {subTab !== 'monthly' && <select
               value={year}
               onChange={e => setYear(Number(e.target.value))}
               className="border border-gray-200 rounded-lg px-3 py-1.5 text-xs font-semibold text-gray-700 bg-white focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 cursor-pointer"
             >
               {[2024, 2025, 2026, 2027, 2028].map(y => <option key={y} value={y}>{y}</option>)}
-            </select>
+            </select>}
             {/* Quarter (only when on daily sub-tab) */}
             {subTab === 'daily' && (
               <select
@@ -6478,7 +6505,7 @@ export default function SalesReportsPage() {
             <MapPin size={36} className="text-gray-200" />
             <p className="text-sm">Select a location to view the monthly P&amp;L</p>
           </div>
-        ) : Object.keys(monthMap).length === 0 ? (
+        ) : Object.keys(monthMapAll).length === 0 ? (
               <div className="flex flex-col items-center justify-center h-40 text-gray-400 gap-2 border border-dashed border-gray-200 rounded-xl">
                 <TableProperties size={28} className="text-gray-200" />
                 <p className="text-sm font-medium">No monthly reports for {location.name} · {year}</p>
@@ -6491,29 +6518,37 @@ export default function SalesReportsPage() {
             ) : (
               <div className="border border-gray-200 rounded-xl overflow-hidden shadow-sm">
                 <div className="overflow-auto" style={{ maxHeight: 'calc(100vh - 260px)' }}>
-                  <table className="text-xs border-collapse" style={{ minWidth: LABEL_W + 13 * COL_W_MN }}>
+                  <table className="text-xs border-collapse" style={{ minWidth: LABEL_W + monthCols.length * COL_W_MN }}>
                     <thead className="sticky top-0 z-30">
                       <tr style={{ backgroundColor:'#111827' }}>
                         <th className="sticky left-0 z-20 px-4 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider whitespace-nowrap border-r border-gray-700"
                           style={{ backgroundColor:'#111827', minWidth:LABEL_W, width:LABEL_W }}>
-                          METRIC / MONTH · {year}
+                          METRIC / MONTH
                         </th>
-                        {MONTHS.map((mn, i) => {
-                          const hasData  = !!monthMap[i+1];
-                          const isCurMon = year === todayYear && i+1 === todayMonth;
+                        {monthCols.map(col => {
+                          if (col.type === 'fy') {
+                            return (
+                              <th key={col.key} className="py-3 text-right font-bold whitespace-nowrap border-l border-gray-700"
+                                style={{ minWidth:COL_W_MN, width:COL_W_MN, paddingLeft:4, paddingRight:8, color:'#e5e7eb' }}>
+                                FY {col.year}
+                              </th>
+                            );
+                          }
+                          const hasData  = !!monthMapAll[col.key];
+                          const isCurMon = col.year === todayYear && col.month === todayMonth;
                           return (
-                            <th key={mn} className="py-3 text-right font-bold whitespace-nowrap tabular-nums"
-                              style={{ minWidth:COL_W_MN, width:COL_W_MN, paddingLeft:4, paddingRight:10,
+                            <th key={col.key} className="py-3 text-right font-bold whitespace-nowrap tabular-nums"
+                              style={{ minWidth:COL_W_MN, width:COL_W_MN, paddingLeft:4, paddingRight:8,
                                 color: isCurMon ? '#ffffff' : hasData ? '#93c5fd' : '#4b5563',
                                 borderBottom: isCurMon ? '2px solid #3b82f6' : 'none' }}>
-                              {mn}
+                              {MONTHS[col.month - 1]}
+                              {/* The year has to be on the column now that the table spans several. */}
+                              <span className="block font-normal text-[9px] tracking-normal text-gray-500">
+                                {col.year}
+                              </span>
                             </th>
                           );
                         })}
-                        <th className="py-3 text-right font-bold whitespace-nowrap border-l border-gray-700"
-                          style={{ minWidth:COL_W_MN+8, paddingLeft:4, paddingRight:10, color:'#e5e7eb' }}>
-                          FY {year}
-                        </th>
                       </tr>
                     </thead>
                     <tbody>
@@ -6521,7 +6556,7 @@ export default function SalesReportsPage() {
                         if (row.type === 'section') {
                           return (
                             <tr key={i}>
-                              <td colSpan={14} className="sticky left-0 px-4 py-2 text-xs font-bold uppercase tracking-widest"
+                              <td colSpan={monthCols.length + 1} className="sticky left-0 px-4 py-2 text-xs font-bold uppercase tracking-widest"
                                 style={{ backgroundColor:'#f3f4f6', color:'#374151', letterSpacing:'0.08em' }}>
                                 {row.label}
                               </td>
@@ -6538,25 +6573,30 @@ export default function SalesReportsPage() {
                             }`} style={{ backgroundColor:bg }}>
                               {row.label}
                             </td>
-                            {MONTHS.map((_, mi) => {
-                              const isCurMon = year === todayYear && mi+1 === todayMonth;
+                            {monthCols.map(col => {
+                              if (col.type === 'fy') {
+                                const fy = fyTotalFor(col.year);
+                                return (
+                                  <td key={col.key} className={`py-2 text-right tabular-nums border-l border-gray-200 ${isBold ? 'font-bold' : ''}`}
+                                    style={{ paddingLeft:4, paddingRight:8, backgroundColor:'#f8fafc' }}>
+                                    {isPct || !fy ? <span className="text-gray-300">—</span> : (() => {
+                                      const val = row.getValue?.(fy, fyTotalFor(col.year - 1)) ?? null;
+                                      if (val === null) return <span className="text-gray-300">—</span>;
+                                      if (row.format === 'currency') return <span className={row.color === 'blue' ? 'text-blue-700' : 'text-gray-900'}>{fmtNum(val)}</span>;
+                                      if (row.format === 'count')    return <span className="text-gray-700">{Math.round(val)}</span>;
+                                      return <span className="text-gray-300">—</span>;
+                                    })()}
+                                  </td>
+                                );
+                              }
+                              const isCurMon = col.year === todayYear && col.month === todayMonth;
                               return (
-                                <td key={mi} className={`py-2 text-right tabular-nums ${isBold ? 'font-bold' : ''}`}
-                                  style={{ paddingLeft:4, paddingRight:10, backgroundColor: isCurMon ? 'rgba(59,130,246,0.04)' : undefined }}>
-                                  {renderMonthCell(row, mi+1)}
+                                <td key={col.key} className={`py-2 text-right tabular-nums ${isBold ? 'font-bold' : ''}`}
+                                  style={{ paddingLeft:4, paddingRight:8, backgroundColor: isCurMon ? 'rgba(59,130,246,0.04)' : undefined }}>
+                                  {renderMonthCell(row, col.year, col.month)}
                                 </td>
                               );
                             })}
-                            <td className={`py-2 text-right tabular-nums border-l border-gray-200 ${isBold ? 'font-bold' : ''}`}
-                              style={{ paddingLeft:4, paddingRight:10 }}>
-                              {isPct || !yearMonthTotal ? <span className="text-gray-300">—</span> : (() => {
-                                const val = row.getValue?.(yearMonthTotal, null) ?? null;
-                                if (val === null) return <span className="text-gray-300">—</span>;
-                                if (row.format === 'currency') return <span className={row.color === 'blue' ? 'text-blue-700' : 'text-gray-900'}>{fmtNum(val)}</span>;
-                                if (row.format === 'count')    return <span className="text-gray-700">{Math.round(val)}</span>;
-                                return <span className="text-gray-300">—</span>;
-                              })()}
-                            </td>
                           </tr>
                         );
                       })}
@@ -6567,44 +6607,53 @@ export default function SalesReportsPage() {
                       const fmtCost = (v: number | undefined) =>
                         v && v > 0 ? <span className="text-gray-900">{fmtNum(v)}</span> : <span className="text-gray-300">—</span>;
                       // FY totals per category
-                      const fyTotals: Record<string, number> = {};
-                      for (const mo of Object.values(billMonthMap)) for (const [c, v] of Object.entries(mo)) fyTotals[c] = (fyTotals[c] ?? 0) + v;
-                      const fyTotal = Object.values(fyTotals).reduce((s, v) => s + v, 0);
-                      // Gross profit = net revenue - total bill costs
-                      const netByMonth: Record<number, number> = {};
-                      for (let mo = 1; mo <= 12; mo++) netByMonth[mo] = monthMap[mo]?.net_total ?? 0;
+                      /** A year's cost for one category, and for everything. */
+                      const catFY = (cat: string, y: number) =>
+                        Object.entries(billMonthMap)
+                          .filter(([k]) => k.startsWith(`${y}-`))
+                          .reduce((t, [, mo]) => t + (mo[cat] ?? 0), 0);
+                      const costOfMonth = (key: string) =>
+                        Object.values(billMonthMap[key] ?? {}).reduce((t, v) => t + v, 0);
+                      const costOfYear = (y: number) =>
+                        Object.entries(billMonthMap)
+                          .filter(([k]) => k.startsWith(`${y}-`))
+                          .reduce((t, [, mo]) => t + Object.values(mo).reduce((x, v) => x + v, 0), 0);
+                      const netOfMonth = (key: string) => monthMapAll[key]?.net_total ?? 0;
+                      const netOfYear  = (y: number) => fyTotalFor(y)?.net_total ?? 0;
                       return (
                         <>
                           <tbody>
                             <tr>
-                              <td colSpan={14} className="sticky left-0 px-4 py-2 text-xs font-bold uppercase tracking-widest text-white"
+                              <td colSpan={monthCols.length + 1} className="sticky left-0 px-4 py-2 text-xs font-bold uppercase tracking-widest text-white"
                                 style={{ backgroundColor: '#0f172a' }}>
                                 Operating Costs · {location?.name}
                               </td>
                             </tr>
                             {billCategories.map((cat) => {
-                              const fyVal = fyTotals[cat] ?? 0;
                               return (
                                 <tr key={cat} className="border-b border-gray-100 hover:bg-gray-50/60 group" style={{ backgroundColor:'#ffffff' }}>
                                   <td className="sticky left-0 z-10 px-4 py-2 whitespace-nowrap border-r border-gray-100 text-gray-700 group-hover:bg-gray-50 transition-colors"
                                     style={{ backgroundColor:'#ffffff' }}>
                                     {cat}
                                   </td>
-                                  {MONTHS.map((_, mi) => {
-                                    const mo = mi + 1;
-                                    const isCurMon = year === todayYear && mo === todayMonth;
-                                    const val = billMonthMap[mo]?.[cat];
+                                  {monthCols.map(col => {
+                                    if (col.type === 'fy') {
+                                      const v = catFY(cat, col.year);
+                                      return (
+                                        <td key={col.key} className="py-2 text-right tabular-nums border-l border-gray-200"
+                                          style={{ paddingLeft:4, paddingRight:8, backgroundColor:'#f8fafc' }}>
+                                          {v > 0 ? <span className="text-gray-900">{fmtNum(v)}</span> : <span className="text-gray-300">—</span>}
+                                        </td>
+                                      );
+                                    }
+                                    const isCurMon = col.year === todayYear && col.month === todayMonth;
                                     return (
-                                      <td key={mi} className="py-2 text-right tabular-nums"
-                                        style={{ paddingLeft:4, paddingRight:10, backgroundColor: isCurMon ? 'rgba(59,130,246,0.04)' : undefined }}>
-                                        {fmtCost(val)}
+                                      <td key={col.key} className="py-2 text-right tabular-nums"
+                                        style={{ paddingLeft:4, paddingRight:8, backgroundColor: isCurMon ? 'rgba(59,130,246,0.04)' : undefined }}>
+                                        {fmtCost(billMonthMap[col.key]?.[cat])}
                                       </td>
                                     );
                                   })}
-                                  <td className="py-2 text-right tabular-nums border-l border-gray-200"
-                                    style={{ paddingLeft:4, paddingRight:10 }}>
-                                    {fyVal > 0 ? <span className="text-gray-900">{fmtNum(fyVal)}</span> : <span className="text-gray-300">—</span>}
-                                  </td>
                                 </tr>
                               );
                             })}
@@ -6614,21 +6663,17 @@ export default function SalesReportsPage() {
                                 style={{ backgroundColor:'#f8fafc' }}>
                                 Total Operating Costs
                               </td>
-                              {MONTHS.map((_, mi) => {
-                                const mo = mi + 1;
-                                const isCurMon = year === todayYear && mo === todayMonth;
-                                const total = Object.values(billMonthMap[mo] ?? {}).reduce((s, v) => s + v, 0);
+                              {monthCols.map(col => {
+                                const total = col.type === 'fy' ? costOfYear(col.year) : costOfMonth(col.key);
+                                const isCurMon = col.type === 'month' && col.year === todayYear && col.month === todayMonth;
                                 return (
-                                  <td key={mi} className="py-2 text-right font-bold tabular-nums"
-                                    style={{ paddingLeft:4, paddingRight:10, backgroundColor: isCurMon ? 'rgba(59,130,246,0.04)' : undefined }}>
+                                  <td key={col.key} className={`py-2 text-right font-bold tabular-nums ${col.type === 'fy' ? 'border-l border-gray-200' : ''}`}
+                                    style={{ paddingLeft:4, paddingRight:8,
+                                      backgroundColor: col.type === 'fy' ? '#f1f5f9' : isCurMon ? 'rgba(59,130,246,0.04)' : undefined }}>
                                     {total > 0 ? <span className="text-gray-900">{fmtNum(total)}</span> : <span className="text-gray-300">—</span>}
                                   </td>
                                 );
                               })}
-                              <td className="py-2 text-right font-bold tabular-nums border-l border-gray-200"
-                                style={{ paddingLeft:4, paddingRight:10 }}>
-                                {fyTotal > 0 ? <span className="text-gray-900">{fmtNum(fyTotal)}</span> : <span className="text-gray-300">—</span>}
-                              </td>
                             </tr>
                           </tbody>
                           {/* Gross profit (net revenue - operating costs) */}
@@ -6638,60 +6683,40 @@ export default function SalesReportsPage() {
                                 style={{ backgroundColor:'#f0fdf4' }}>
                                 Gross Profit
                               </td>
-                              {MONTHS.map((_, mi) => {
-                                const mo = mi + 1;
-                                const isCurMon = year === todayYear && mo === todayMonth;
-                                const net  = netByMonth[mo];
-                                const cost = Object.values(billMonthMap[mo] ?? {}).reduce((s, v) => s + v, 0);
+                              {monthCols.map(col => {
+                                const net  = col.type === 'fy' ? netOfYear(col.year)  : netOfMonth(col.key);
+                                const cost = col.type === 'fy' ? costOfYear(col.year) : costOfMonth(col.key);
                                 const gp   = net - cost;
+                                const isCurMon = col.type === 'month' && col.year === todayYear && col.month === todayMonth;
                                 return (
-                                  <td key={mi} className="py-2 text-right font-bold tabular-nums"
-                                    style={{ paddingLeft:4, paddingRight:10, backgroundColor: isCurMon ? 'rgba(59,130,246,0.04)' : undefined }}>
+                                  <td key={col.key} className={`py-2 text-right font-bold tabular-nums ${col.type === 'fy' ? 'border-l border-gray-200' : ''}`}
+                                    style={{ paddingLeft:4, paddingRight:8,
+                                      backgroundColor: col.type === 'fy' ? '#ecfdf5' : isCurMon ? 'rgba(59,130,246,0.04)' : undefined }}>
                                     {net > 0
                                       ? <span className={gp >= 0 ? 'text-[#1B5E20]' : 'text-red-600'}>{fmtNum(gp)}</span>
                                       : <span className="text-gray-300">—</span>}
                                   </td>
                                 );
                               })}
-                              <td className="py-2 text-right font-bold tabular-nums border-l border-gray-200"
-                                style={{ paddingLeft:4, paddingRight:10 }}>
-                                {(() => {
-                                  const netFY  = Object.values(netByMonth).reduce((s, v) => s + v, 0);
-                                  const gp     = netFY - fyTotal;
-                                  return netFY > 0
-                                    ? <span className={gp >= 0 ? 'text-[#1B5E20]' : 'text-red-600'}>{fmtNum(gp)}</span>
-                                    : <span className="text-gray-300">—</span>;
-                                })()}
-                              </td>
                             </tr>
                             <tr className="border-b border-gray-100" style={{ backgroundColor:'#f0fdf4' }}>
                               <td className="sticky left-0 z-10 pl-8 pr-4 py-2 text-gray-400 italic whitespace-nowrap border-r border-gray-100"
                                 style={{ backgroundColor:'#f0fdf4', fontSize:'11px' }}>
                                 Gross margin (%)
                               </td>
-                              {MONTHS.map((_, mi) => {
-                                const mo   = mi + 1;
-                                const isCurMon = year === todayYear && mo === todayMonth;
-                                const net  = netByMonth[mo];
-                                const cost = Object.values(billMonthMap[mo] ?? {}).reduce((s, v) => s + v, 0);
-                                const gp   = net - cost;
-                                const pct  = net > 0 ? (gp / net) * 100 : null;
+                              {monthCols.map(col => {
+                                const net  = col.type === 'fy' ? netOfYear(col.year)  : netOfMonth(col.key);
+                                const cost = col.type === 'fy' ? costOfYear(col.year) : costOfMonth(col.key);
+                                const pct  = net > 0 ? ((net - cost) / net) * 100 : null;
+                                const isCurMon = col.type === 'month' && col.year === todayYear && col.month === todayMonth;
                                 return (
-                                  <td key={mi} className="py-2 text-right tabular-nums"
-                                    style={{ paddingLeft:4, paddingRight:10, fontSize:'11px', backgroundColor: isCurMon ? 'rgba(59,130,246,0.04)' : undefined }}>
+                                  <td key={col.key} className={`py-2 text-right tabular-nums ${col.type === 'fy' ? 'border-l border-gray-200' : ''}`}
+                                    style={{ paddingLeft:4, paddingRight:8, fontSize:'11px',
+                                      backgroundColor: col.type === 'fy' ? '#ecfdf5' : isCurMon ? 'rgba(59,130,246,0.04)' : undefined }}>
                                     {pct !== null ? <span className="text-gray-500">{pct.toFixed(1)}%</span> : <span className="text-gray-300">—</span>}
                                   </td>
                                 );
                               })}
-                              <td className="py-2 text-right tabular-nums border-l border-gray-200"
-                                style={{ paddingLeft:4, paddingRight:10, fontSize:'11px' }}>
-                                {(() => {
-                                  const netFY = Object.values(netByMonth).reduce((s, v) => s + v, 0);
-                                  const gpFY  = netFY - fyTotal;
-                                  const pct   = netFY > 0 ? (gpFY / netFY) * 100 : null;
-                                  return pct !== null ? <span className="text-gray-500">{pct.toFixed(1)}%</span> : <span className="text-gray-300">—</span>;
-                                })()}
-                              </td>
                             </tr>
                           </tbody>
                         </>
@@ -6700,12 +6725,15 @@ export default function SalesReportsPage() {
                   </table>
                 </div>
                 <div className="px-4 py-2.5 bg-gray-50 border-t border-gray-100 flex items-center justify-between">
-                  <span className="text-xs text-gray-400">{monthlyReports.length} month{monthlyReports.length !== 1 ? 's' : ''} imported</span>
-                  {yearMonthTotal && (
-                    <span className="text-xs text-gray-400">
-                      Total gross {year}: <span className="font-bold text-[#1B5E20]">{fmt(yearMonthTotal.gross_total ?? 0)}</span>
+                  <span className="text-xs text-gray-400">
+                    {Object.keys(monthMapAll).length} month{Object.keys(monthMapAll).length !== 1 ? 's' : ''} of data
+                  </span>
+                  <span className="text-xs text-gray-400">
+                    Total gross:{' '}
+                    <span className="font-bold text-[#1B5E20]">
+                      {fmt(Object.values(monthMapAll).reduce((t, m) => t + (m.gross_total ?? 0), 0))}
                     </span>
-                  )}
+                  </span>
                 </div>
               </div>
         ))}
