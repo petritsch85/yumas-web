@@ -333,6 +333,24 @@ function isoWeek(dateStr: string): number {
   return Math.ceil(((d.getTime() - y.getTime()) / 86400000 + 1) / 7);
 }
 
+/**
+ * The Monday and Sunday of an ISO week, as "30.03 – 05.04".
+ *
+ * ISO week 1 is the one holding 4 January, so the year's first Monday is found
+ * from that date rather than from 1 January, which can fall in the prior week.
+ */
+function isoWeekRange(year: number, week: number): string {
+  const jan4 = new Date(Date.UTC(year, 0, 4));
+  const week1Monday = new Date(jan4);
+  week1Monday.setUTCDate(jan4.getUTCDate() - ((jan4.getUTCDay() || 7) - 1));
+  const monday = new Date(week1Monday);
+  monday.setUTCDate(week1Monday.getUTCDate() + (week - 1) * 7);
+  const sunday = new Date(monday);
+  sunday.setUTCDate(monday.getUTCDate() + 6);
+  const dm = (d: Date) => `${String(d.getUTCDate()).padStart(2, '0')}.${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+  return `${dm(monday)} – ${dm(sunday)}`;
+}
+
 function currentISOWeek(): number {
   const t = new Date();
   return isoWeek(`${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,'0')}-${String(t.getDate()).padStart(2,'0')}`);
@@ -6214,8 +6232,10 @@ export default function SalesReportsPage() {
             <p className="text-sm">Select a location to view the weekly P&amp;L</p>
           </div>
         ) : (
-          <div className="border border-gray-200 rounded-xl overflow-hidden shadow-sm">
-              <div className="overflow-x-scroll overflow-y-auto scrollbar-always" style={{ maxHeight: 'calc(100vh - 260px)' }}>
+          <div className="flex-1 min-h-0 flex flex-col border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+              {/* Bounded by the flex parent rather than a viewport calculation, so
+                  the horizontal scrollbar sits on screen instead of below the fold. */}
+              <div className="flex-1 min-h-0 overflow-x-scroll overflow-y-auto scrollbar-always">
                 <table className="text-xs border-collapse" style={{ minWidth: LABEL_W + (TOTAL_WEEKS + 1) * COL_W_WK }}>
                   <thead className="sticky top-0 z-30">
                     <tr style={{ backgroundColor:'#111827' }}>
@@ -6234,12 +6254,17 @@ export default function SalesReportsPage() {
                               borderBottom: isCurWk ? '2px solid #3b82f6' : hasFcast ? '1px solid rgba(165,180,252,0.3)' : 'none',
                               fontStyle: hasFcast ? 'italic' : 'normal' }}>
                             KW{kw}
+                            {/* A week number alone does not say when it was. */}
+                            <span className="block font-normal text-[9px] tracking-normal text-gray-500">
+                              {isoWeekRange(year, kw)}
+                            </span>
                           </th>
                         );
                       })}
-                      <th className="py-3 text-right font-bold whitespace-nowrap border-l border-gray-700"
+                      <th className="py-3 text-right font-bold whitespace-nowrap border-l border-gray-700 align-top"
                         style={{ minWidth:COL_W_WK+8, paddingLeft:4, paddingRight:10, color:'#e5e7eb' }}>
                         FY {year}
+                        <span className="block font-normal text-[9px] tracking-normal text-gray-500">full year</span>
                       </th>
                     </tr>
                   </thead>
