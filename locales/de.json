@@ -92,7 +92,9 @@
       "wolt": "Wolt",
       "salesReportsPl": "GuV",
       "webshop": "Webshop",
-      "openTable": "OpenTable"
+      "openTable": "OpenTable",
+      "analysis": "Analyse",
+      "analysisSales": "Umsatz"
     }
   },
   "topbar": {

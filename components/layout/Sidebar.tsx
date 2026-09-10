@@ -113,6 +113,11 @@ const NAV_GROUPS: NavGroup[] = [
           { labelKey: 'sidebar.nav.openTable',      href: '/pl-reports/sales-reports/opentable', icon: CalendarCheck },
         ],
       },
+      { labelKey: 'sidebar.nav.analysis', href: '/pl-reports/analysis/sales', icon: TrendingUp, permKey: 'pl_reports',
+        children: [
+          { labelKey: 'sidebar.nav.analysisSales', href: '/pl-reports/analysis/sales', icon: TrendingUp },
+        ],
+      },
       { labelKey: 'sidebar.nav.productDetails', href: '/pl-reports/product-details', icon: ShoppingBag, permKey: 'pl_reports' },
     ],
   },
