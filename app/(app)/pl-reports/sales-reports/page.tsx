@@ -2590,7 +2590,29 @@ export default function SalesReportsPage() {
     setGdParsing(true);
     void zip.arrayBuffer().then(async buf => {
       try {
-        const { shifts, summary } = parseGdpduZip(new Uint8Array(buf));
+        /* Which shifts this restaurant is shut for, so a handful of early
+           bills on an evening-only day do not become a lunch shift. Both the
+           recurring pattern and one-off closures count. */
+        const [{ data: fcSettings }, { data: closures }] = await Promise.all([
+          supabase.from('forecast_settings').select('shift_type, closed_weekdays').eq('location_id', locationId),
+          supabase.from('closure_days').select('closure_date, shift_type').eq('location_id', locationId),
+        ]);
+        const DOW = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+        const recurring = new Set<string>();
+        for (const r of (fcSettings ?? []) as { shift_type: string; closed_weekdays: string[] | null }[]) {
+          for (const d of r.closed_weekdays ?? []) recurring.add(`${r.shift_type}|${d}`);
+        }
+        const specific = new Set<string>();
+        for (const c of (closures ?? []) as { closure_date: string; shift_type: string }[]) {
+          for (const sh of c.shift_type === 'all' ? ['lunch', 'dinner'] : [c.shift_type]) {
+            specific.add(`${sh}|${c.closure_date}`);
+          }
+        }
+        const isShiftClosed = (date: string, shift: 'lunch' | 'dinner') =>
+          specific.has(`${shift}|${date}`) ||
+          recurring.has(`${shift}|${DOW[new Date(date + 'T12:00:00Z').getUTCDay()]}`);
+
+        const { shifts, summary } = parseGdpduZip(new Uint8Array(buf), isShiftClosed);
         setGdShifts(shifts); setGdSummary(summary);
 
         /* Say what is about to be overwritten before anything is written. The
@@ -3794,6 +3816,13 @@ export default function SalesReportsPage() {
                             which keeps the split comparable across the whole archive.
                           </p>
                         </div>
+                      )}
+
+                      {gdSummary.reassignedShifts > 0 && (
+                        <p className="mt-2 text-xs text-gray-500 text-center">
+                          {gdSummary.reassignedShifts} shift{gdSummary.reassignedShifts === 1 ? '' : 's'} moved to the
+                          other shift because {location?.name} was shut for the one their bills fell in
+                        </p>
                       )}
 
                       {gdSummary.unsplitShifts > 0 && (

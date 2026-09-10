@@ -10,6 +10,16 @@
  *
  *  - `journal_entries.csv` is by far the largest file (50 MB of TSE signatures)
  *    and holds nothing commercial, so it is never decoded.
+ *  - A service runs past midnight. The till rolls to the next date at 00:00,
+ *    so a Saturday night's last drinks are stamped Sunday at 00:30 — which,
+ *    read by the clock alone, becomes a Sunday lunch. Trade before 06:00
+ *    therefore belongs to the previous day's dinner. The archive shows why the
+ *    hour is safe: 231 bills fall before 04:00, none between 04:00 and 11:00.
+ *  - A bill is timed, not labelled. Splitting purely on the clock invents a
+ *    lunch shift out of a handful of early bills on a day the restaurant only
+ *    opens in the evening — prep sales, a staff meal, a till opened early. So
+ *    a shift the restaurant was shut for hands its takings to the shift that
+ *    was open, exactly as the Wolt and webshop imports already do.
  *  - The VAT rate does NOT identify food. German restaurant VAT moved from 19%
  *    to 7% on in-house sales on 1 January 2026, so a period spanning that date
  *    has the same dish at both rates. Food and drinks are therefore split on
@@ -62,6 +72,8 @@ export interface GdpduSummary {
    * charge — so food and drinks could not be split and are left at zero.
    */
   unsplitShifts: number;
+  /** Shifts moved to the other shift because the restaurant was shut for theirs. */
+  reassignedShifts: number;
 }
 
 export interface GdpduResult {
@@ -73,6 +85,14 @@ export class GdpduParseError extends Error {}
 
 /** Lunch runs until 14:30, matching every other import in the app. */
 export const LUNCH_END_MINUTES = 14 * 60 + 30;
+
+/**
+ * When one trading day ends and the next begins.
+ *
+ * Not midnight: a service that runs late would otherwise have its last hour
+ * counted as the next morning's lunch.
+ */
+export const DAY_START_MINUTES = 6 * 60;
 
 /** The date German restaurant VAT on in-house sales moved from 19% to 7%. */
 export const VAT_CHANGE_DATE = '2026-01-01';
@@ -108,8 +128,30 @@ const idx = (header: string[], name: string) => header.indexOf(name);
 /** "19:42:11" → 1182. */
 const minutesOf = (time: string) => Number(time.slice(0, 2)) * 60 + Number(time.slice(3, 5));
 
-const shiftOf = (time: string): GdpduShiftType =>
-  minutesOf(time) <= LUNCH_END_MINUTES ? 'lunch' : 'dinner';
+/** The previous calendar day, as "YYYY-MM-DD". */
+function previousDay(date: string): string {
+  const d = new Date(date + 'T12:00:00Z');
+  d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * The trading day and shift a timestamp belongs to.
+ *
+ * Before 06:00 the service is the previous evening's, still running. After
+ * that the ordinary 14:30 split applies.
+ */
+function tradingSlot(date: string, time: string): { date: string; shift: GdpduShiftType } {
+  const mins = minutesOf(time);
+  if (mins < DAY_START_MINUTES) return { date: previousDay(date), shift: 'dinner' };
+  return { date, shift: mins <= LUNCH_END_MINUTES ? 'lunch' : 'dinner' };
+}
+
+/** The bucket key for a timestamp. */
+const slotKey = (date: string, time: string) => {
+  const slot = tradingSlot(date, time);
+  return `${slot.date}|${slot.shift}`;
+};
 
 /** Amounts are integer cents throughout the archive. */
 const cents = (v: string) => {
@@ -147,7 +189,14 @@ const emptyBucket = (): Bucket => ({
  *
  * @param zipBytes the .zip exactly as Orderbird produced it
  */
-export function parseGdpduZip(zipBytes: Uint8Array): GdpduResult {
+export function parseGdpduZip(
+  zipBytes: Uint8Array,
+  /**
+   * Whether a shift was closed on a date. Without it the split is purely by
+   * the clock, which is right for a weekday and wrong for a weekend evening.
+   */
+  isShiftClosed?: (date: string, shift: GdpduShiftType) => boolean,
+): GdpduResult {
   let files: Record<string, Uint8Array>;
   try {
     files = unzipSync(zipBytes, {
@@ -191,10 +240,11 @@ export function parseGdpduZip(zipBytes: Uint8Array): GdpduResult {
   const invoiceKey = new Map<string, string>();
 
   let inconsistent = 0;
+  let reassigned = 0;
   for (const r of inv.rows) {
     const date = r[iDate], time = r[iTime];
     if (!date || !time) continue;
-    const key = `${date}|${shiftOf(time)}`;
+    const key = slotKey(date, time);
     invoiceKey.set(r[iId], key);
     const b = bucket(key);
     const gross = cents(r[iTotal]), net = cents(r[iNet]), vat = cents(r[iTax]);
@@ -224,7 +274,7 @@ export function parseGdpduZip(zipBytes: Uint8Array): GdpduResult {
     if (cDate >= 0 && cTime >= 0 && cType >= 0 && cGross >= 0) {
       for (const r of pos.rows) {
         if (!r[cDate] || !r[cTime]) continue;
-        const b = bucket(`${r[cDate]}|${shiftOf(r[cTime])}`);
+        const b = bucket(slotKey(r[cDate], r[cTime]));
         if (r[cType] === 'TAKEAWAY') b.takeaway += cents(r[cGross]);
         else                         b.inhouse  += cents(r[cGross]);
       }
@@ -247,7 +297,7 @@ export function parseGdpduZip(zipBytes: Uint8Array): GdpduResult {
         const value = Number(r[oQty] || 0) * cents(r[oPrice]);
         if (oId >= 0) orderValue.set(r[oId], value);
         if (oCancelled >= 0 && r[oCancelled] === '1') continue;
-        const b = bucket(`${r[oDate]}|${shiftOf(r[oTime])}`);
+        const b = bucket(slotKey(r[oDate], r[oTime]));
         if (oKind >= 0 && isBeverage(r[oKind])) b.beverages += value;
         else                                    b.food      += value;
       }
@@ -262,7 +312,7 @@ export function parseGdpduZip(zipBytes: Uint8Array): GdpduResult {
     if (cDate >= 0 && cTime >= 0) {
       for (const r of can.rows) {
         if (!r[cDate] || !r[cTime]) continue;
-        const b = bucket(`${r[cDate]}|${shiftOf(r[cTime])}`);
+        const b = bucket(slotKey(r[cDate], r[cTime]));
         b.cancelCount += 1;
         if (cOrder >= 0) b.cancelTotal += orderValue.get(r[cOrder]) ?? 0;
       }
@@ -273,6 +323,25 @@ export function parseGdpduZip(zipBytes: Uint8Array): GdpduResult {
      The food/drinks split is measured on menu prices, which sit above the
      bill's gross once a discount is applied. Scaling it onto the gross keeps
      the two parts summing to the whole, as every other import does. */
+  /* Money taken during a shift the restaurant was shut for belongs to the
+     shift that was open. Where both were shut it stays put: the takings are
+     real, and moving them would only hide that the day is unexplained. */
+  if (isShiftClosed) {
+    for (const key of [...buckets.keys()]) {
+      const [date, shift] = key.split('|') as [string, GdpduShiftType];
+      const other: GdpduShiftType = shift === 'lunch' ? 'dinner' : 'lunch';
+      if (!isShiftClosed(date, shift) || isShiftClosed(date, other)) continue;
+      const from = buckets.get(key)!;
+      const to   = bucket(`${date}|${other}`);
+      to.invoices += from.invoices; to.gross += from.gross; to.net += from.net; to.vat += from.vat;
+      to.tips += from.tips; to.inhouse += from.inhouse; to.takeaway += from.takeaway;
+      to.food += from.food; to.beverages += from.beverages;
+      to.cancelCount += from.cancelCount; to.cancelTotal += from.cancelTotal;
+      buckets.delete(key);
+      reassigned += 1;
+    }
+  }
+
   const shifts: GdpduShift[] = [];
   for (const [key, b] of buckets) {
     const [date, shift] = key.split('|') as [string, GdpduShiftType];
@@ -322,6 +391,7 @@ export function parseGdpduZip(zipBytes: Uint8Array): GdpduResult {
       cancellationsTotal: sum(s => s.cancellationsTotal),
       inconsistentInvoices: inconsistent,
       unsplitShifts: shifts.filter(s => s.grossTotal > 0 && s.grossFood === 0 && s.grossBeverages === 0).length,
+      reassignedShifts: reassigned,
       spansVatChange: firstDate < VAT_CHANGE_DATE && lastDate >= VAT_CHANGE_DATE,
     },
   };
