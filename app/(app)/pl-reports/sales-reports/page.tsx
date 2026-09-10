@@ -861,7 +861,7 @@ type MRow = {
 const MONTHLY_ROWS: MRow[] = [
   { type:'section', label:'REVENUE' },
   { type:'bold',   label:'Total Gross Revenue',      color:'blue',  format:'currency',  getValue:(m)=>safeNum(m?.gross_total) },
-  { type:'pct',    label:'Revenue growth (%)',        color:'black', format:'pct_delta', getValue:(m,pm)=>growth(safeNum(m?.gross_total), safeNum(pm?.gross_total)) },
+  { type:'pct',    label:'Y/Y Sales growth (%)',       color:'black', format:'pct_delta', getValue:(m,pm)=>growth(safeNum(m?.gross_total), safeNum(pm?.gross_total)) },
   { type:'normal', label:'Food Revenue (7% VAT)',     color:'blue',  format:'currency',  getValue:(m)=>safeNum(m?.gross_food) },
   { type:'pct',    label:'Food share (%)',            color:'black', format:'pct',       getValue:(m)=>pct(safeNum(m?.gross_food), safeNum(m?.gross_total)) },
   { type:'normal', label:'Drinks Revenue (19% VAT)',  color:'blue',  format:'currency',  getValue:(m)=>safeNum(m?.gross_beverages) },
@@ -869,7 +869,7 @@ const MONTHLY_ROWS: MRow[] = [
   { type:'normal', label:'Tips',                      color:'blue',  format:'currency',  getValue:(m)=>safeNum(m?.tips) },
   { type:'section', label:'NET REVENUE' },
   { type:'bold',   label:'Net Revenue',               color:'blue',  format:'currency',  getValue:(m)=>safeNum(m?.net_total) },
-  { type:'pct',    label:'Net growth (%)',            color:'black', format:'pct_delta', getValue:(m,pm)=>growth(safeNum(m?.net_total), safeNum(pm?.net_total)) },
+  { type:'pct',    label:'Y/Y Net growth (%)',        color:'black', format:'pct_delta', getValue:(m,pm)=>growth(safeNum(m?.net_total), safeNum(pm?.net_total)) },
   { type:'normal', label:'VAT',                       color:'blue',  format:'currency',  getValue:(m)=>safeNum(m?.vat_total) },
   { type:'pct',    label:'Effective VAT rate (%)',    color:'black', format:'pct',       getValue:(m)=>pct(safeNum(m?.vat_total), safeNum(m?.net_total)) },
   { type:'section', label:'CHANNEL MIX' },
@@ -1541,6 +1541,44 @@ export default function SalesReportsPage() {
    * One row per month, summed from the daily shifts, with an uploaded monthly
    * Z-report winning where one exists — the same rule the weeks follow.
    */
+  /**
+   * Last year's shifts, for the year-on-year comparison.
+   *
+   * A restaurant's months are not comparable to each other — February is short,
+   * August is a holiday — so month-on-month growth mostly measures the calendar.
+   * Against the same month a year earlier, a change is the business changing.
+   */
+  const { data: prevYearShiftRows = [] } = useQuery({
+    queryKey: ['shift-reports-year', location?.id, year - 1],
+    enabled: !!location && activeTab === 'daily' && subTab === 'monthly',
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('shift_reports')
+        .select('report_date,gross_total,net_total')
+        .eq('location_id', location!.id)
+        .gte('report_date', `${year - 1}-01-01`)
+        .lte('report_date', `${year - 1}-12-31`);
+      return (data ?? []) as Pick<ShiftRow, 'report_date'|'gross_total'|'net_total'>[];
+    },
+  });
+
+  /** Last year's months, keyed the same way as this year's. */
+  const prevYearMonthMap = useMemo<Record<number, MonthlyReportData>>(() => {
+    const m: Record<number, MonthlyReportData> = {};
+    for (const r of prevYearShiftRows) {
+      const mn = Number(r.report_date.slice(5, 7));
+      const c = m[mn] ?? (m[mn] = {
+        report_month: mn, report_year: year - 1,
+        gross_total: 0, gross_food: 0, gross_beverages: 0, net_total: 0, vat_total: 0,
+        tips: 0, inhouse_total: 0, takeaway_total: 0,
+        cancellations_count: 0, cancellations_total: 0,
+      });
+      c.gross_total = (c.gross_total ?? 0) + (safeNum(r.gross_total) ?? 0);
+      c.net_total   = (c.net_total   ?? 0) + (safeNum(r.net_total)   ?? 0);
+    }
+    return m;
+  }, [prevYearShiftRows, year]);
+
   const monthMap = useMemo<Record<number, MonthlyReportData>>(() => {
     const m: Record<number, MonthlyReportData> = {};
     for (const r of yearShiftRows) {
@@ -2997,7 +3035,8 @@ export default function SalesReportsPage() {
 
   const renderMonthCell = (row: MRow, mn: number) => {
     if (row.type === 'section') return null;
-    const m = monthMap[mn] ?? null, pm = monthMap[mn-1] ?? null;
+    // The same month last year, not the month before.
+    const m = monthMap[mn] ?? null, pm = prevYearMonthMap[mn] ?? null;
     const val = row.getValue?.(m, pm) ?? null;
     if (val === null) return <span className="text-gray-300 select-none">—</span>;
     if (row.format === 'currency') return <span className={row.color === 'blue' ? 'text-blue-700' : 'text-gray-900'}>{fmtNum(val)}</span>;
