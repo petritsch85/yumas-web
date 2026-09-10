@@ -1179,16 +1179,18 @@ export default function SalesReportsPage() {
   // Shift reports for full year — used in weekly summary (lunch/dinner split by KW)
   const { data: yearShiftRows = [] } = useQuery({
     queryKey: ['shift-reports-year', location?.id, year],
-    enabled: !!location && activeTab === 'daily' && subTab === 'weekly',
+    enabled: !!location && activeTab === 'daily' && (subTab === 'weekly' || subTab === 'monthly'),
     queryFn: async () => {
+      // Every column the weekly and monthly sections read: those tables are
+      // built from the shifts themselves, not from a separate upload.
       const { data } = await supabase
         .from('shift_reports')
-        .select('report_date,shift_type,net_total,z_report_number')
+        .select('report_date,shift_type,z_report_number,net_total,gross_total,gross_food,gross_beverages,vat_total,tips,inhouse_total,takeaway_total')
         .eq('location_id', location!.id)
         .gte('report_date', `${year}-01-01`)
         .lte('report_date', `${year}-12-31`)
         .order('report_date', { ascending: true });
-      return (data ?? []) as Pick<ShiftRow, 'report_date'|'shift_type'|'net_total'|'z_report_number'>[];
+      return (data ?? []) as ShiftRow[];
     },
   });
 
@@ -1564,11 +1566,32 @@ export default function SalesReportsPage() {
 
   // ── Derived data ───────────────────────────────────────────────────────────
 
+  /**
+   * One row per month, summed from the daily shifts, with an uploaded monthly
+   * Z-report winning where one exists — the same rule the weeks follow.
+   */
   const monthMap = useMemo<Record<number, MonthlyReportData>>(() => {
     const m: Record<number, MonthlyReportData> = {};
+    for (const r of yearShiftRows) {
+      const mn = Number(r.report_date.slice(5, 7));
+      const c = m[mn] ?? (m[mn] = {
+        report_month: mn, report_year: year,
+        gross_total: 0, gross_food: 0, gross_beverages: 0, net_total: 0, vat_total: 0,
+        tips: 0, inhouse_total: 0, takeaway_total: 0,
+        cancellations_count: 0, cancellations_total: 0,
+      });
+      c.gross_total     = (c.gross_total     ?? 0) + (safeNum(r.gross_total)     ?? 0);
+      c.gross_food      = (c.gross_food      ?? 0) + (safeNum(r.gross_food)      ?? 0);
+      c.gross_beverages = (c.gross_beverages ?? 0) + (safeNum(r.gross_beverages) ?? 0);
+      c.net_total       = (c.net_total       ?? 0) + (safeNum(r.net_total)       ?? 0);
+      c.vat_total       = (c.vat_total       ?? 0) + (safeNum(r.vat_total)       ?? 0);
+      c.tips            = (c.tips            ?? 0) + (safeNum(r.tips)            ?? 0);
+      c.inhouse_total   = (c.inhouse_total   ?? 0) + (safeNum(r.inhouse_total)   ?? 0);
+      c.takeaway_total  = (c.takeaway_total  ?? 0) + (safeNum(r.takeaway_total)  ?? 0);
+    }
     for (const r of monthlyReports) m[r.report_month] = r;
     return m;
-  }, [monthlyReports]);
+  }, [yearShiftRows, monthlyReports, year]);
 
   const yearMonthTotal = useMemo<MonthlyReportData | null>(() => {
     const rows = Object.values(monthMap);
@@ -1620,17 +1643,45 @@ export default function SalesReportsPage() {
     return Array.from(cats).sort();
   }, [billMonthMap]);
 
+  /**
+   * One row per ISO week, summed from the daily shifts.
+   *
+   * The weekly P&L used to read only uploaded weekly Z-reports, so every
+   * section below the summary sat empty for any restaurant that had never
+   * uploaded one — which is all of them. The shifts already hold every figure
+   * those rows want, so the week is derived from them instead. An uploaded
+   * weekly report still wins where one exists: it is the till's own statement.
+   */
   const weekMap = useMemo<Record<number, WeekData>>(() => {
     const m: Record<number, WeekData> = {};
+    for (const r of yearShiftRows) {
+      const kw = isoWeek(r.report_date);
+      const w = m[kw] ?? (m[kw] = {
+        week_start: r.report_date, week_end: r.report_date,
+        total_revenue: 0, gross_food: 0, gross_drinks: 0, net_revenue: 0,
+        tax_total: 0, tips: 0, inhouse_revenue: 0, takeaway_revenue: 0,
+      });
+      if (r.report_date < w.week_start)        w.week_start = r.report_date;
+      if (!w.week_end || r.report_date > w.week_end) w.week_end = r.report_date;
+      w.total_revenue    += safeNum(r.gross_total)     ?? 0;
+      w.gross_food       += safeNum(r.gross_food)      ?? 0;
+      w.gross_drinks     += safeNum(r.gross_beverages) ?? 0;
+      w.net_revenue      += safeNum(r.net_total)       ?? 0;
+      w.tax_total        += safeNum(r.vat_total)       ?? 0;
+      w.tips             += safeNum(r.tips)            ?? 0;
+      w.inhouse_revenue  += safeNum(r.inhouse_total)   ?? 0;
+      w.takeaway_revenue += safeNum(r.takeaway_total)  ?? 0;
+    }
     for (const imp of weeklyImports) if (imp.week_start) m[isoWeek(imp.week_start)] = imp;
     return m;
-  }, [weeklyImports]);
+  }, [yearShiftRows, weeklyImports]);
 
   const cwk = currentISOWeek();
 
   const yearTotal = useMemo<WeekData | null>(() => {
-    if (!weeklyImports.length) return null;
-    return weeklyImports.reduce<WeekData>((acc, w) => ({
+    const weeks = Object.values(weekMap);
+    if (!weeks.length) return null;
+    return weeks.reduce<WeekData>((acc, w) => ({
       week_start:'', week_end:null,
       total_revenue:    acc.total_revenue    + (safeNum(w.total_revenue)    ?? 0),
       gross_food:       acc.gross_food       + (safeNum(w.gross_food)       ?? 0),
@@ -1641,7 +1692,7 @@ export default function SalesReportsPage() {
       inhouse_revenue:  acc.inhouse_revenue  + (safeNum(w.inhouse_revenue)  ?? 0),
       takeaway_revenue: acc.takeaway_revenue + (safeNum(w.takeaway_revenue) ?? 0),
     }), { week_start:'', week_end:null, total_revenue:0, gross_food:0, gross_drinks:0, net_revenue:0, tax_total:0, tips:0, inhouse_revenue:0, takeaway_revenue:0 });
-  }, [weeklyImports]);
+  }, [weekMap]);
 
   // Split shifts per day into lunch / dinner using explicit shift_type when set
   const { lunchMap, dinnerMap, totalMap } = useMemo(() => {
@@ -6394,7 +6445,7 @@ export default function SalesReportsPage() {
             <MapPin size={36} className="text-gray-200" />
             <p className="text-sm">Select a location to view the monthly P&amp;L</p>
           </div>
-        ) : monthlyReports.length === 0 ? (
+        ) : Object.keys(monthMap).length === 0 ? (
               <div className="flex flex-col items-center justify-center h-40 text-gray-400 gap-2 border border-dashed border-gray-200 rounded-xl">
                 <TableProperties size={28} className="text-gray-200" />
                 <p className="text-sm font-medium">No monthly reports for {location.name} · {year}</p>
