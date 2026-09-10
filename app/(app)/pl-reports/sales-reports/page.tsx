@@ -6307,15 +6307,19 @@ export default function SalesReportsPage() {
                     </tr>
                     {([
                       { label: '☀️  Lunch · Net Revenue',  wMap: lunchWeekCombinedMap,  fMap: lunchWeekIsForecastMap,  fy: lunchFYNet,  bold: false, cntMap: lunchWeekCombinedCountMap },
-                      { label: '     Revenue / Day',        wMap: lunchWeekCombinedMap,  fMap: lunchWeekIsForecastMap,  fy: 0,           bold: false, cntMap: lunchWeekCombinedCountMap,  perDay: true },
+                      // The shift count sits above the average it divides by, so a
+                      // week short of a holiday reads as fewer shifts rather than a slump.
+                      { label: '     # of Shifts',         wMap: lunchWeekCombinedMap,  fMap: lunchWeekIsForecastMap,  fy: 0,           bold: false, cntMap: lunchWeekCombinedCountMap,  countOnly: true },
+                      { label: '     Net Sales / Shift',   wMap: lunchWeekCombinedMap,  fMap: lunchWeekIsForecastMap,  fy: 0,           bold: false, cntMap: lunchWeekCombinedCountMap,  perDay: true },
                       { label: '🌙  Dinner · Net Revenue', wMap: dinnerWeekCombinedMap, fMap: dinnerWeekIsForecastMap, fy: dinnerFYNet, bold: false, cntMap: dinnerWeekCombinedCountMap },
-                      { label: '     Revenue / Day',        wMap: dinnerWeekCombinedMap, fMap: dinnerWeekIsForecastMap, fy: 0,           bold: false, cntMap: dinnerWeekCombinedCountMap, perDay: true },
+                      { label: '     # of Shifts',         wMap: dinnerWeekCombinedMap, fMap: dinnerWeekIsForecastMap, fy: 0,           bold: false, cntMap: dinnerWeekCombinedCountMap, countOnly: true },
+                      { label: '     Net Sales / Shift',   wMap: dinnerWeekCombinedMap, fMap: dinnerWeekIsForecastMap, fy: 0,           bold: false, cntMap: dinnerWeekCombinedCountMap, perDay: true },
                       { label: '∑   Total · Net Revenue',  wMap: totalWeekCombinedMap,  fMap: totalWeekIsForecastMap,  fy: totalFYNet,  bold: true,  cntMap: null },
-                    ] as { label: string; wMap: Record<number,number>; fMap: Record<number,boolean>; fy: number; bold: boolean; perDay?: boolean; cntMap: Record<number,number>|null }[]).map((row, i) => {
+                    ] as { label: string; wMap: Record<number,number>; fMap: Record<number,boolean>; fy: number; bold: boolean; perDay?: boolean; countOnly?: boolean; cntMap: Record<number,number>|null }[]).map((row, i) => {
                       const bg = row.bold ? '#f0fdf4' : '#ffffff';
                       return (
                         <tr key={i} className="border-b border-gray-100 hover:bg-gray-50/60 group" style={{ backgroundColor: bg }}>
-                          <td className={`sticky left-0 z-10 px-4 py-2 whitespace-nowrap border-r border-gray-100 group-hover:bg-gray-50 transition-colors ${row.bold ? 'font-bold text-gray-900' : row.perDay ? 'pl-8 text-gray-400 italic text-[11px]' : 'text-gray-700'}`}
+                          <td className={`sticky left-0 z-10 px-4 py-2 whitespace-nowrap border-r border-gray-100 group-hover:bg-gray-50 transition-colors ${row.bold ? 'font-bold text-gray-900' : (row.perDay || row.countOnly) ? 'pl-8 text-gray-400 italic text-[11px]' : 'text-gray-700'}`}
                             style={{ backgroundColor: bg }}>
                             {row.label}
                           </td>
@@ -6324,7 +6328,12 @@ export default function SalesReportsPage() {
                             const val        = row.wMap[kw] ?? null;
                             const isForecast = (row.fMap as Record<number,boolean>)[kw] ?? false;
                             let cell: React.ReactNode;
-                            if (row.perDay) {
+                            if (row.countOnly) {
+                              const cnt = row.cntMap?.[kw] ?? null;
+                              cell = cnt && cnt > 0
+                                ? <span className={`text-[11px] ${isForecast ? 'italic text-gray-500' : 'text-gray-500'}`}>{cnt}</span>
+                                : <span className="text-gray-300">—</span>;
+                            } else if (row.perDay) {
                               const cnt = row.cntMap?.[kw] ?? null;
                               if (val !== null && val > 0 && cnt && cnt > 0)
                                 cell = <span className={`text-[11px] ${isForecast ? 'italic text-gray-900' : 'text-gray-900'}`}>{fmtNum(val / cnt)}</span>;
@@ -6347,9 +6356,17 @@ export default function SalesReportsPage() {
                           })}
                           <td className={`py-2 text-right tabular-nums border-l border-gray-200 ${row.bold ? 'font-bold' : ''}`}
                             style={{ paddingLeft:4, paddingRight:10 }}>
-                            {row.fy > 0
-                              ? <span className={row.bold ? 'text-[#1B5E20]' : 'text-blue-700'}>{fmtNum(row.fy)}</span>
-                              : <span className="text-gray-300">—</span>}
+                            {(() => {
+                              if (row.countOnly) {
+                                const total = Object.values(row.cntMap ?? {}).reduce((t, n) => t + n, 0);
+                                return total > 0
+                                  ? <span className="text-[11px] text-gray-500">{total}</span>
+                                  : <span className="text-gray-300">—</span>;
+                              }
+                              return row.fy > 0
+                                ? <span className={row.bold ? 'text-[#1B5E20]' : 'text-blue-700'}>{fmtNum(row.fy)}</span>
+                                : <span className="text-gray-300">—</span>;
+                            })()}
                           </td>
                         </tr>
                       );
