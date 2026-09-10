@@ -23,7 +23,10 @@ type BillRef = {
   supplier_name: string;
   invoice_number: string | null;
   gross_amount: number;
-  file_path: string | null;
+  /** The invoice's own split. Null on a bill whose figures were never read. */
+  net_amount: number | null;
+  vat_amount: number | null;
+  file_path?: string | null;
 };
 
 type CfTx = {
@@ -100,6 +103,57 @@ function defaultVatRate(cat: string | null): number {
   if (cat.startsWith('S - ')) return 10;
   return 0;
 }
+
+/**
+ * The VAT on a transaction.
+ *
+ * A category default is a guess: it assumes 19% on anything bought from a
+ * supplier. A real supplier invoice mixes rates — food at 7%, everything else
+ * at 19% — so the guess can be far out. One Nacho Kings bill nets 1.137,64
+ * where a flat 19% would say 1.022,92, a difference of 114,72 on a single
+ * payment.
+ *
+ * So where a bill is linked, its own figures decide. The rate is applied as a
+ * ratio rather than copied, because the payment and the invoice need not be
+ * the same amount — a part payment, or a rounding — and the row must always
+ * satisfy netto + VAT = brutto.
+ */
+function vatOf(tx: CfTx): { rate: number; vatCents: number; nettoCents: number; fromBill: boolean; billOdd: boolean } {
+  const linked: BillRef[] = tx.bill
+    ? [tx.bill]
+    : (tx.transaction_bill_links ?? []).map(l => l.bill).filter((b): b is BillRef => !!b);
+
+  const billGross = linked.reduce((s, b) => s + (Number(b.gross_amount) || 0), 0);
+  const billNet   = linked.reduce((s, b) => s + (Number(b.net_amount)   || 0), 0);
+
+  const fallback = () => {
+    const rate = defaultVatRate(tx.category);
+    const vatCents = rate === 0 ? 0 : Math.round(tx.amount_cents * rate / (100 + rate));
+    return { rate, vatCents, nettoCents: tx.amount_cents - vatCents, fromBill: false };
+  };
+
+  if (linked.length > 0 && billGross > 0 && billNet > 0) {
+    const vatShare = (billGross - billNet) / billGross;
+    /* A German invoice cannot carry negative VAT, nor more than 19%. Outside
+       that range the bill was read wrong, so the category default stands in and
+       the row is marked rather than quietly showing a negative rate. */
+    if (vatShare < 0 || vatShare > 0.20) return { ...fallback(), billOdd: true };
+    const vatCents = Math.round(tx.amount_cents * vatShare);
+    return {
+      rate: ((billGross - billNet) / billNet) * 100,
+      vatCents,
+      nettoCents: tx.amount_cents - vatCents,
+      fromBill: true,
+      billOdd: false,
+    };
+  }
+
+  return { ...fallback(), billOdd: false };
+}
+
+/** A blended rate off a real invoice rarely lands on a whole number. */
+const fmtRate = (rate: number) =>
+  `${Number.isInteger(Math.round(rate * 10) / 10) ? Math.round(rate) : (Math.round(rate * 10) / 10).toLocaleString('de-DE', { minimumFractionDigits: 1 })}%`;
 
 function catChip(cat: string): string {
   if (cat.startsWith('C - ')) return C_CHIP;
@@ -189,10 +243,8 @@ function TxDetailsModal({ tx, all, uploads, counterparties, onClose }: {
 
   const upload   = uploads.find(u => u.id === tx.upload_id);
   const resolved = matchCounterparty(tx.counterparty, counterparties);
-  const vatRate  = defaultVatRate(tx.category);
+  const { rate: vatRate, vatCents: vat, nettoCents: net } = vatOf(tx);
   const gross    = tx.amount_cents;
-  const vat      = Math.round(gross - gross / (1 + vatRate / 100));
-  const net      = gross - vat;
 
   // Same counterparty and same amount, within ±31 days — i.e. the charge the
   // user is trying to explain.
@@ -239,7 +291,7 @@ function TxDetailsModal({ tx, all, uploads, counterparties, onClose }: {
             <Row label="Matched to">{resolved ? resolved.name : <span className="text-amber-600">Not matched</span>}</Row>
             <Row label="Direction">{tx.direction === 'in' ? 'Incoming' : 'Outgoing'}</Row>
             <Row label="Amount (brutto)">{eur(gross)}</Row>
-            <Row label={`VAT (${vatRate}%)`}>{eur(vat)}</Row>
+            <Row label={`VAT (${fmtRate(vatRate)})`}>{eur(vat)}</Row>
             <Row label="Amount (netto)">{eur(net)}</Row>
             <Row label="Category">{tx.category || dash}</Row>
             <Row label="Location">{tx.location || dash}</Row>
@@ -793,16 +845,18 @@ function TxRow({ tx, onSave, counterparties, onShowDetails, selected, onToggleSe
 
         {/* VAT %, VAT €, Netto */}
         {(() => {
-          const rate     = defaultVatRate(tx.category);
-          const vatCents = rate === 0 ? 0 : Math.round(tx.amount_cents * rate / (100 + rate));
-          const nettoCents = tx.amount_cents - vatCents;
+          const { rate, vatCents, nettoCents, fromBill, billOdd } = vatOf(tx);
           return (
             <>
-              <td className="py-2 px-2 text-right whitespace-nowrap text-xs text-gray-500 tabular-nums">
-                {rate}%
+              <td className="py-2 px-2 text-right whitespace-nowrap text-xs tabular-nums"
+                title={billOdd  ? 'The linked bill has an impossible VAT split — showing the category rate until the bill is corrected'
+                     : fromBill ? 'Rate taken from the linked bill'
+                                : 'Assumed from the category — no bill linked'}>
+                <span className={fromBill ? 'text-blue-600 font-medium' : 'text-gray-500'}>{fmtRate(rate)}</span>
+                {billOdd && <span className="ml-1 text-amber-500">⚠</span>}
               </td>
               <td className="py-2 px-2 text-right whitespace-nowrap text-xs text-gray-500 tabular-nums">
-                {rate === 0 ? '—' : eur(vatCents)}
+                {vatCents === 0 ? '—' : eur(vatCents)}
               </td>
               <td className={`py-2 px-2 text-right whitespace-nowrap text-xs tabular-nums font-medium ${isIn ? 'text-green-700' : 'text-red-700'}`}>
                 {isIn ? '+' : '−'} {eur(nettoCents)}
@@ -1062,16 +1116,13 @@ export default function CashFlowPage() {
         case 'vatpct':       av = defaultVatRate(a.category); bv = defaultVatRate(b.category); break;
         case 'vateur': {
           const ra = defaultVatRate(a.category), rb = defaultVatRate(b.category);
-          av = ra === 0 ? 0 : Math.round(a.amount_cents * ra / (100 + ra));
-          bv = rb === 0 ? 0 : Math.round(b.amount_cents * rb / (100 + rb));
+          av = vatOf(a).vatCents;
+          bv = vatOf(b).vatCents;
           break;
         }
         case 'netto': {
-          const ra = defaultVatRate(a.category), rb = defaultVatRate(b.category);
-          const va = ra === 0 ? 0 : Math.round(a.amount_cents * ra / (100 + ra));
-          const vb = rb === 0 ? 0 : Math.round(b.amount_cents * rb / (100 + rb));
-          av = (a.direction === 'in' ? 1 : -1) * (a.amount_cents - va);
-          bv = (b.direction === 'in' ? 1 : -1) * (b.amount_cents - vb);
+          av = (a.direction === 'in' ? 1 : -1) * vatOf(a).nettoCents;
+          bv = (b.direction === 'in' ? 1 : -1) * vatOf(b).nettoCents;
           break;
         }
         case 'category':          av = a.category          ?? ''; bv = b.category          ?? ''; break;
