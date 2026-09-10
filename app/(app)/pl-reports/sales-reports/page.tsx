@@ -351,6 +351,19 @@ function isoWeekRange(year: number, week: number): string {
   return `${dm(monday)} – ${dm(sunday)}`;
 }
 
+/**
+ * The year an ISO week belongs to, which is not always the calendar year.
+ *
+ * KW1 of 2026 runs 29.12.2025 – 04.01.2026, so three of its days carry a 2025
+ * date. Bucketing those by calendar year would drop them from the 2026 column
+ * and add them to KW1 of 2025 — a week eleven months earlier.
+ */
+function isoWeekYear(dateStr: string): number {
+  const d = new Date(dateStr + 'T12:00:00Z');
+  d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
+  return d.getUTCFullYear();
+}
+
 function currentISOWeek(): number {
   const t = new Date();
   return isoWeek(`${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,'0')}-${String(t.getDate()).padStart(2,'0')}`);
@@ -397,7 +410,17 @@ type DayCol  = { type: 'day';  dateKey: string; day: number; month: number; dow:
 type WeekCol = { type: 'week'; label: string; wDateKeys: string[] };
 type DailyCol = DayCol | WeekCol;
 const PAGE_SIZE = 30;
-const TOTAL_WEEKS = 52;
+/**
+ * How many ISO weeks a year holds — 52, or 53 when 1 January is a Thursday
+ * (or a Wednesday in a leap year). 2026 is such a year: KW53 runs
+ * 28.12.2026 – 03.01.2027, and a fixed 52 would drop those days entirely.
+ */
+function isoWeeksInYear(year: number): number {
+  const dec28 = new Date(Date.UTC(year, 11, 28));
+  dec28.setUTCDate(dec28.getUTCDate() + 4 - (dec28.getUTCDay() || 7));
+  const jan1 = new Date(Date.UTC(dec28.getUTCFullYear(), 0, 1));
+  return Math.ceil(((dec28.getTime() - jan1.getTime()) / 86400000 + 1) / 7);
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SHIFT AGGREGATION HELPERS
@@ -1187,8 +1210,10 @@ export default function SalesReportsPage() {
         .from('shift_reports')
         .select('report_date,shift_type,z_report_number,net_total,gross_total,gross_food,gross_beverages,vat_total,tips,inhouse_total,takeaway_total')
         .eq('location_id', location!.id)
-        .gte('report_date', `${year}-01-01`)
-        .lte('report_date', `${year}-12-31`)
+        // A week can straddle the turn of the year, so the fetch reaches a
+        // little either side and the rows are bucketed by ISO week-year below.
+        .gte('report_date', `${year - 1}-12-22`)
+        .lte('report_date', `${year + 1}-01-07`)
         .order('report_date', { ascending: true });
       return (data ?? []) as ShiftRow[];
     },
@@ -1573,6 +1598,9 @@ export default function SalesReportsPage() {
   const monthMap = useMemo<Record<number, MonthlyReportData>>(() => {
     const m: Record<number, MonthlyReportData> = {};
     for (const r of yearShiftRows) {
+      // The fetch reaches either side of the year for the weekly view; a month
+      // belongs to its calendar year.
+      if (r.report_date.slice(0, 4) !== String(year)) continue;
       const mn = Number(r.report_date.slice(5, 7));
       const c = m[mn] ?? (m[mn] = {
         report_month: mn, report_year: year,
@@ -1655,6 +1683,7 @@ export default function SalesReportsPage() {
   const weekMap = useMemo<Record<number, WeekData>>(() => {
     const m: Record<number, WeekData> = {};
     for (const r of yearShiftRows) {
+      if (isoWeekYear(r.report_date) !== year) continue;
       const kw = isoWeek(r.report_date);
       const w = m[kw] ?? (m[kw] = {
         week_start: r.report_date, week_end: r.report_date,
@@ -1674,9 +1703,11 @@ export default function SalesReportsPage() {
     }
     for (const imp of weeklyImports) if (imp.week_start) m[isoWeek(imp.week_start)] = imp;
     return m;
-  }, [yearShiftRows, weeklyImports]);
+  }, [yearShiftRows, weeklyImports, year]);
 
   const cwk = currentISOWeek();
+  /** 52 for most years, 53 for one like 2026 — see isoWeeksInYear. */
+  const totalWeeks = isoWeeksInYear(year);
 
   const yearTotal = useMemo<WeekData | null>(() => {
     const weeks = Object.values(weekMap);
@@ -6287,14 +6318,14 @@ export default function SalesReportsPage() {
               {/* Bounded by the flex parent rather than a viewport calculation, so
                   the horizontal scrollbar sits on screen instead of below the fold. */}
               <div className="flex-1 min-h-0 overflow-x-scroll overflow-y-auto scrollbar-always">
-                <table className="text-xs border-collapse" style={{ minWidth: LABEL_W + (TOTAL_WEEKS + 1) * COL_W_WK }}>
+                <table className="text-xs border-collapse" style={{ minWidth: LABEL_W + (totalWeeks + 1) * COL_W_WK }}>
                   <thead className="sticky top-0 z-30">
                     <tr style={{ backgroundColor:'#111827' }}>
                       <th className="sticky left-0 z-20 px-4 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider whitespace-nowrap border-r border-gray-700"
                         style={{ backgroundColor:'#111827', minWidth:LABEL_W, width:LABEL_W }}>
                         METRIC / PERIOD · {year}
                       </th>
-                      {Array.from({ length: TOTAL_WEEKS }, (_, i) => i+1).map(kw => {
+                      {Array.from({ length: totalWeeks }, (_, i) => i+1).map(kw => {
                         const hasWeek    = !!weekMap[kw];
                         const hasFcast   = !hasWeek && !!weekForecastNetMap[kw];
                         const isCurWk   = kw === cwk;
@@ -6322,7 +6353,7 @@ export default function SalesReportsPage() {
                   {/* ── Weekly summary (lunch / dinner / total net revenue) ── */}
                   <tbody>
                     <tr>
-                      <td colSpan={TOTAL_WEEKS + 2}
+                      <td colSpan={totalWeeks + 2}
                         className="sticky left-0 px-4 py-2 text-xs font-bold uppercase tracking-widest text-white"
                         style={{ backgroundColor: '#0f172a' }}>
                         Summary
@@ -6342,7 +6373,7 @@ export default function SalesReportsPage() {
                             style={{ backgroundColor: bg }}>
                             {row.label}
                           </td>
-                          {Array.from({ length: TOTAL_WEEKS }, (_, j) => j + 1).map(kw => {
+                          {Array.from({ length: totalWeeks }, (_, j) => j + 1).map(kw => {
                             const isCurWk = kw === cwk;
                             const val        = row.wMap[kw] ?? null;
                             const isForecast = (row.fMap as Record<number,boolean>)[kw] ?? false;
@@ -6380,14 +6411,14 @@ export default function SalesReportsPage() {
                   </tbody>
 
                   {/* Spacer */}
-                  <tbody><tr><td colSpan={TOTAL_WEEKS + 2} style={{ height: 12, backgroundColor:'#f9fafb' }} /></tr></tbody>
+                  <tbody><tr><td colSpan={totalWeeks + 2} style={{ height: 12, backgroundColor:'#f9fafb' }} /></tr></tbody>
 
                   <tbody>
                     {WEEKLY_ROWS.map((row, i) => {
                       if (row.type === 'section') {
                         return (
                           <tr key={i}>
-                            <td colSpan={TOTAL_WEEKS + 2} className="sticky left-0 px-4 py-2 text-xs font-bold uppercase tracking-widest"
+                            <td colSpan={totalWeeks + 2} className="sticky left-0 px-4 py-2 text-xs font-bold uppercase tracking-widest"
                               style={{ backgroundColor:'#f3f4f6', color:'#374151', letterSpacing:'0.08em' }}>
                               {row.label}
                             </td>
@@ -6404,7 +6435,7 @@ export default function SalesReportsPage() {
                           }`} style={{ backgroundColor:bg }}>
                             {row.label}
                           </td>
-                          {Array.from({ length: TOTAL_WEEKS }, (_, j) => j+1).map(kw => {
+                          {Array.from({ length: totalWeeks }, (_, j) => j+1).map(kw => {
                             const isCurWk = kw === cwk;
                             return (
                               <td key={kw} className={`py-2 text-right tabular-nums ${isBold ? 'font-bold' : ''}`}
