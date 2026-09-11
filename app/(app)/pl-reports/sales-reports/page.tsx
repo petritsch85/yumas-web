@@ -6546,8 +6546,10 @@ export default function SalesReportsPage() {
                 </button>
               </div>
             ) : (
-              <div className="border border-gray-200 rounded-xl overflow-hidden shadow-sm">
-                <div className="overflow-auto" style={{ maxHeight: 'calc(100vh - 260px)' }}>
+              <div className="flex-1 min-h-0 flex flex-col border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+                {/* Bounded by the flex parent, as the daily and weekly tables are, so
+                    the horizontal scrollbar sits on screen rather than below the fold. */}
+                <div className="flex-1 min-h-0 overflow-x-scroll overflow-y-auto scrollbar-always">
                   <table className="text-xs border-collapse" style={{ minWidth: LABEL_W + monthCols.length * COL_W_MN }}>
                     <thead className="sticky top-0 z-30">
                       <tr style={{ backgroundColor:'#111827' }}>
