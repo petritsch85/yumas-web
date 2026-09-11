@@ -2409,6 +2409,7 @@ export default function SalesReportsPage() {
           // Financing, not a cost: stored so the transfer can be tied to the bank.
           wolt_capital:             set.services?.capital ?? 0,
           payout_net:               set.services?.payout ?? null,
+          sales_vat:                set.services?.salesVat ?? null,
         }, { onConflict: 'location_id,invoice_number' }).select('id').single();
         if (error) { setWoltError(`${set.source}: ${error.message}`); return; }
 

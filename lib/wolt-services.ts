@@ -37,6 +37,13 @@ export interface WoltServicesData {
   capital: number;
   /** The transfer Wolt states it will make, as printed on the netting report. */
   payout: number | null;
+  /**
+   * The VAT on our own sales for the period, as the netting report prints it
+   * against our invoice. A Wolt payout nets sales, fees and financing into
+   * one transfer, so the VAT on the money received is not one rate; this is
+   * the VAT on the sales themselves, which is what the cash-flow ledger books.
+   */
+  salesVat: number | null;
 }
 
 export class WoltServicesParseError extends Error {}
@@ -129,8 +136,9 @@ export function buildWoltServices(
     total,
     adCampaign: adLines.length > 0 ? round2(adLines.reduce((s, l) => s + l.amount, 0)) : null,
     lines,
-    capital: nettingText ? parseWoltCapital(nettingText) : 0,
-    payout:  nettingText ? parseWoltNettingPayout(nettingText) : null,
+    capital:  nettingText ? parseWoltCapital(nettingText) : 0,
+    payout:   nettingText ? parseWoltNettingPayout(nettingText) : null,
+    salesVat: nettingText ? parseWoltNettingSalesVat(nettingText) : null,
   };
 }
 
@@ -147,6 +155,21 @@ export function parseWoltCapital(text: string): number {
     String.raw`Wolt capital\s+\d{2}\.\d{2}\.\d{4}\s*-\s*\d{2}\.\d{2}\.\d{4}\s+` + AMOUNT,
   ));
   return m ? num(m[1]) : 0;
+}
+
+/**
+ * The VAT on our sales invoice, from the netting report's merchant block.
+ *
+ * The block lists our self-billing invoice as net, VAT and gross before its
+ * "Summe" line. The invoice number in between can contain spaces, so the
+ * three amounts are matched as the last triple before the total rather than
+ * by position after the number.
+ */
+export function parseWoltNettingSalesVat(text: string): number | null {
+  const block = text.split(/Verkaufsdokumente des H[äa]ndlers/)[1]?.split(/Summe/)[0];
+  if (!block) return null;
+  const m = block.match(new RegExp(AMOUNT + String.raw`\s+` + AMOUNT + String.raw`\s+` + AMOUNT + String.raw`\s*$`));
+  return m ? num(m[2]) : null;
 }
 
 /**

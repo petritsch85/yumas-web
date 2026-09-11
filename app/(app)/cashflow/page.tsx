@@ -51,6 +51,8 @@ type CfTx = {
   wolt_period: {
     invoice_number: string; restaurant: string | null;
     period_start: string; period_end: string; payout_net: number | null;
+    /** Our net sales for the period, and the VAT on them. */
+    net_sales_pre_ads: number | null; sales_vat: number | null;
   } | null;
   counterparty_id: string | null;
   accounting_period: string | null; // "type|start[|end]"
@@ -119,6 +121,23 @@ function defaultVatRate(cat: string | null): number {
  * satisfy netto + VAT = brutto.
  */
 function vatOf(tx: CfTx): { rate: number; vatCents: number; nettoCents: number; fromBill: boolean; billOdd: boolean } {
+  /* A Wolt payout is booked as the sales it settles: VAT is the VAT on those
+     sales and netto is their net, taken from the settlement period. The
+     transfer itself is smaller — Wolt nets its fees and any capital repayment
+     off before paying — so here netto + VAT will not equal brutto. That is a
+     deliberate choice: the ledger shows the revenue the payout represents. */
+  const wp = tx.wolt_period;
+  if (wp && wp.sales_vat != null && wp.net_sales_pre_ads != null && Number(wp.net_sales_pre_ads) > 0) {
+    const net = Number(wp.net_sales_pre_ads), vat = Number(wp.sales_vat);
+    return {
+      rate: (vat / net) * 100,
+      vatCents: Math.round(vat * 100),
+      nettoCents: Math.round(net * 100),
+      fromBill: true,
+      billOdd: false,
+    };
+  }
+
   const linked: BillRef[] = tx.bill
     ? [tx.bill]
     : (tx.transaction_bill_links ?? []).map(l => l.bill).filter((b): b is BillRef => !!b);

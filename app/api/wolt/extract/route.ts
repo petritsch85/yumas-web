@@ -178,6 +178,12 @@ function buildSelfDeliverySet(
     services = {
       total: fees.adCampaignNet, adCampaign: fees.adCampaignNet || null, lines: [],
       capital: 0, payout: null,
+      // The payout report prints our sales net and gross; the difference is
+      // the VAT on them.
+      salesVat: Math.round((
+        (payout.goodsGross + payout.servicesGross + payout.correctionsGross) -
+        (payout.goodsNet + payout.deliveryNet + payout.correctionsNet)
+      ) * 100) / 100,
     };
   } catch (e) {
     return { ...base, error: e instanceof Error ? e.message : 'The payout report could not be read.' };
