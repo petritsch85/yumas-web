@@ -15,11 +15,12 @@
  *    read by the clock alone, becomes a Sunday lunch. Trade before 06:00
  *    therefore belongs to the previous day's dinner. The archive shows why the
  *    hour is safe: 231 bills fall before 04:00, none between 04:00 and 11:00.
- *  - A bill is timed, not labelled. Splitting purely on the clock invents a
- *    lunch shift out of a handful of early bills on a day the restaurant only
- *    opens in the evening — prep sales, a staff meal, a till opened early. So
- *    a shift the restaurant was shut for hands its takings to the shift that
- *    was open, exactly as the Wolt and webshop imports already do.
+ *  - The bills are the record, and the opening hours in the settings are not.
+ *    Those describe today: Eschborn's settings say lunch is closed on Friday,
+ *    yet the archive holds forty-one Friday lunches at full trade before that
+ *    changed. Reassigning by the settings would have folded every one into
+ *    dinner. Once the trading day is cut correctly, no closed-day shift is
+ *    left to explain — so the bills' own timestamps decide, and nothing else.
  *  - The VAT rate does NOT identify food. German restaurant VAT moved from 19%
  *    to 7% on in-house sales on 1 January 2026, so a period spanning that date
  *    has the same dish at both rates. Food and drinks are therefore split on
@@ -72,8 +73,6 @@ export interface GdpduSummary {
    * charge — so food and drinks could not be split and are left at zero.
    */
   unsplitShifts: number;
-  /** Shifts moved to the other shift because the restaurant was shut for theirs. */
-  reassignedShifts: number;
 }
 
 export interface GdpduResult {
@@ -189,14 +188,7 @@ const emptyBucket = (): Bucket => ({
  *
  * @param zipBytes the .zip exactly as Orderbird produced it
  */
-export function parseGdpduZip(
-  zipBytes: Uint8Array,
-  /**
-   * Whether a shift was closed on a date. Without it the split is purely by
-   * the clock, which is right for a weekday and wrong for a weekend evening.
-   */
-  isShiftClosed?: (date: string, shift: GdpduShiftType) => boolean,
-): GdpduResult {
+export function parseGdpduZip(zipBytes: Uint8Array): GdpduResult {
   let files: Record<string, Uint8Array>;
   try {
     files = unzipSync(zipBytes, {
@@ -240,7 +232,6 @@ export function parseGdpduZip(
   const invoiceKey = new Map<string, string>();
 
   let inconsistent = 0;
-  let reassigned = 0;
   for (const r of inv.rows) {
     const date = r[iDate], time = r[iTime];
     if (!date || !time) continue;
@@ -323,25 +314,6 @@ export function parseGdpduZip(
      The food/drinks split is measured on menu prices, which sit above the
      bill's gross once a discount is applied. Scaling it onto the gross keeps
      the two parts summing to the whole, as every other import does. */
-  /* Money taken during a shift the restaurant was shut for belongs to the
-     shift that was open. Where both were shut it stays put: the takings are
-     real, and moving them would only hide that the day is unexplained. */
-  if (isShiftClosed) {
-    for (const key of [...buckets.keys()]) {
-      const [date, shift] = key.split('|') as [string, GdpduShiftType];
-      const other: GdpduShiftType = shift === 'lunch' ? 'dinner' : 'lunch';
-      if (!isShiftClosed(date, shift) || isShiftClosed(date, other)) continue;
-      const from = buckets.get(key)!;
-      const to   = bucket(`${date}|${other}`);
-      to.invoices += from.invoices; to.gross += from.gross; to.net += from.net; to.vat += from.vat;
-      to.tips += from.tips; to.inhouse += from.inhouse; to.takeaway += from.takeaway;
-      to.food += from.food; to.beverages += from.beverages;
-      to.cancelCount += from.cancelCount; to.cancelTotal += from.cancelTotal;
-      buckets.delete(key);
-      reassigned += 1;
-    }
-  }
-
   const shifts: GdpduShift[] = [];
   for (const [key, b] of buckets) {
     const [date, shift] = key.split('|') as [string, GdpduShiftType];
@@ -391,7 +363,6 @@ export function parseGdpduZip(
       cancellationsTotal: sum(s => s.cancellationsTotal),
       inconsistentInvoices: inconsistent,
       unsplitShifts: shifts.filter(s => s.grossTotal > 0 && s.grossFood === 0 && s.grossBeverages === 0).length,
-      reassignedShifts: reassigned,
       spansVatChange: firstDate < VAT_CHANGE_DATE && lastDate >= VAT_CHANGE_DATE,
     },
   };
