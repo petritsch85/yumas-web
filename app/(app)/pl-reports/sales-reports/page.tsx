@@ -1232,11 +1232,18 @@ export default function SalesReportsPage() {
    * paid, completed orders; bills are event invoices not settled at the till.
    */
   type ChannelSums = { orderbird: number; webshop: number; wolt: number; bills: number };
-  type MonthSummary = { lunch: ChannelSums; dinner: ChannelSums; day: ChannelSums };
+  type MonthSummary = {
+    lunch: ChannelSums; dinner: ChannelSums; day: ChannelSums;
+    /** Days the till ran that shift — the denominator for net sales per shift. */
+    shifts: { lunch: Set<string>; dinner: Set<string> };
+  };
   const monthlySummary = useMemo<Record<string, MonthSummary>>(() => {
     const out: Record<string, MonthSummary> = {};
     const zero = (): ChannelSums => ({ orderbird: 0, webshop: 0, wolt: 0, bills: 0 });
-    const at = (key: string) => out[key] ?? (out[key] = { lunch: zero(), dinner: zero(), day: zero() });
+    const at = (key: string) => out[key] ?? (out[key] = {
+      lunch: zero(), dinner: zero(), day: zero(),
+      shifts: { lunch: new Set(), dinner: new Set() },
+    });
     const add = (date: string, shift: 'lunch' | 'dinner' | null, ch: keyof ChannelSums, v: number) => {
       if (!date || !Number.isFinite(v)) return;
       const m = at(date.slice(0, 7));
@@ -1244,7 +1251,13 @@ export default function SalesReportsPage() {
       m.day[ch] += v;
     };
 
-    for (const r of allShiftRows) add(r.report_date, r.shift_type, 'orderbird', safeNum(r.net_total) ?? 0);
+    for (const r of allShiftRows) {
+      add(r.report_date, r.shift_type, 'orderbird', safeNum(r.net_total) ?? 0);
+      // A shift counts once per day, however many Z-reports it produced.
+      if (r.shift_type === 'lunch' || r.shift_type === 'dinner') {
+        at(r.report_date.slice(0, 7)).shifts[r.shift_type].add(r.report_date);
+      }
+    }
     for (const r of allWebshopRows) add(r.sale_date, r.shift, 'webshop', r.net_cents / 100);
     for (const r of allWoltRows)    add(r.sale_date, r.shift, 'wolt', Number(r.net_final ?? 0));
     for (const b of allOutgoingBills) if (b.event_date) add(b.event_date, b.shift_type, 'bills', Number(b.net_total ?? 0));
@@ -6706,18 +6719,25 @@ export default function SalesReportsPage() {
 
                       const num = (v: number, cls: string) =>
                         v > 0 ? <span className={cls}>{fmtNum(v)}</span> : <span className="text-gray-300">—</span>;
+                      const shiftsIn = (mk: string, sh: 'lunch' | 'dinner') => monthlySummary[mk]?.shifts[sh].size ?? 0;
+                      const shiftsFy = (y: number, sh: 'lunch' | 'dinner') =>
+                        Object.entries(monthlySummary).filter(([k]) => k.startsWith(`${y}-`))
+                          .reduce((t, [, m]) => t + m.shifts[sh].size, 0);
+                      /** Average over the shifts actually worked, so a short month is not a slump. */
+                      const perShift = (total: number, shifts: number) => (shifts > 0 ? total / shifts : 0);
 
                       /** One row across every column, given a value per month and per year. */
                       const line = (
                         key: string, label: string,
                         month: (mk: string) => number, fy: (y: number) => number,
-                        opts: { header?: boolean; total?: boolean; placeholder?: boolean } = {},
+                        opts: { header?: boolean; total?: boolean; placeholder?: boolean; derived?: boolean; count?: boolean } = {},
                       ) => {
                         const bg = opts.header ? '#eef2ff' : opts.total ? '#f0fdf4' : '#ffffff';
-                        const labelCls = opts.header ? 'text-xs font-bold text-gray-800'
-                                       : opts.total  ? 'text-xs font-bold text-[#1B5E20]'
-                                                     : 'text-[11px] text-gray-600 pl-8';
-                        const valCls = opts.total ? 'font-bold text-[#1B5E20]' : 'text-blue-700';
+                        const labelCls = opts.header  ? 'text-xs font-bold text-gray-800'
+                                       : opts.total   ? 'text-xs font-bold text-[#1B5E20]'
+                                       : opts.derived ? 'text-[11px] text-gray-400 italic pl-8'
+                                                      : 'text-[11px] text-gray-600 pl-8';
+                        const valCls = opts.total ? 'font-bold text-[#1B5E20]' : opts.derived ? 'text-gray-500' : 'text-blue-700';
                         return (
                           <tr key={key} className={`border-b ${opts.header ? 'border-gray-200' : 'border-gray-100'} hover:bg-gray-50/60 group`} style={{ backgroundColor: bg }}>
                             <td className={`sticky left-0 z-10 px-4 ${opts.header ? 'py-1.5' : 'py-1'} whitespace-nowrap border-r border-gray-100 group-hover:bg-gray-50 transition-colors ${labelCls}`}
@@ -6733,7 +6753,9 @@ export default function SalesReportsPage() {
                                   className={`${opts.header ? 'py-1.5' : 'py-1'} text-right tabular-nums text-xs ${col.type === 'fy' ? 'border-l border-gray-200' : ''}`}
                                   style={{ paddingLeft:4, paddingRight:8,
                                     backgroundColor: col.type === 'fy' ? (opts.total ? '#ecfdf5' : '#f8fafc') : isCurMon ? 'rgba(59,130,246,0.04)' : undefined }}>
-                                  {opts.header ? null : num(v, valCls)}
+                                  {opts.header ? null
+                                    : opts.count ? (v > 0 ? <span className={valCls}>{v}</span> : <span className="text-gray-300">—</span>)
+                                    : num(v, valCls)}
                                 </td>
                               );
                             })}
@@ -6751,6 +6773,16 @@ export default function SalesReportsPage() {
                         line(`${sh}-bi`,   'Bills',     mk => cell(mk, sh, 'bills'),     y => fyCell(y, sh, 'bills')),
                         line(`${sh}-tg`,   'Too Good To Go', () => 0, () => 0, { placeholder: true }),
                         line(`${sh}-tot`,  totalLabel, mk => cellTotal(mk, sh), y => fyTotal(y, sh), { total: true }),
+                        /* A month's takings mean little without the shifts behind them: a
+                           short month and a slow one look the same until you divide. */
+                        ...(sh === 'day' ? [] : [
+                          line(`${sh}-n`,   '# of Shifts',
+                            mk => shiftsIn(mk, sh), y => shiftsFy(y, sh), { derived: true, count: true }),
+                          line(`${sh}-avg`, 'Av. net sales / Shift',
+                            mk => perShift(cellTotal(mk, sh), shiftsIn(mk, sh)),
+                            y  => perShift(fyTotal(y, sh),   shiftsFy(y, sh)),
+                            { derived: true }),
+                        ]),
                         <tr key={`${sh}-gap`}><td colSpan={monthCols.length + 1} style={{ height: 8, backgroundColor: '#f9fafb' }} /></tr>,
                       ];
 
