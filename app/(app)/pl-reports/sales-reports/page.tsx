@@ -6697,12 +6697,17 @@ export default function SalesReportsPage() {
                           .reduce((t, [, m]) => t + m.shifts[sh].size, 0);
                       /** Average over the shifts actually worked, so a short month is not a slump. */
                       const perShift = (total: number, shifts: number) => (shifts > 0 ? total / shifts : 0);
+                      /** The same month a year earlier: "2026-03" → "2025-03". */
+                      const yearAgo = (mk: string) => `${Number(mk.slice(0, 4)) - 1}${mk.slice(4)}`;
+                      /** Percentage change, or NaN when either side is missing. */
+                      const yoy = (now: number, before: number) =>
+                        now > 0 && before > 0 ? ((now - before) / before) * 100 : NaN;
 
                       /** One row across every column, given a value per month and per year. */
                       const line = (
                         key: string, label: string,
                         month: (mk: string) => number, fy: (y: number) => number,
-                        opts: { header?: boolean; total?: boolean; placeholder?: boolean; derived?: boolean; count?: boolean } = {},
+                        opts: { header?: boolean; total?: boolean; placeholder?: boolean; derived?: boolean; count?: boolean; pctDelta?: boolean } = {},
                       ) => {
                         const bg = opts.header ? '#eef2ff' : opts.total ? '#f0fdf4' : '#ffffff';
                         const labelCls = opts.header  ? 'text-xs font-bold text-gray-800'
@@ -6727,6 +6732,9 @@ export default function SalesReportsPage() {
                                     backgroundColor: col.type === 'fy' ? (opts.total ? '#ecfdf5' : '#f8fafc') : isCurMon ? 'rgba(59,130,246,0.04)' : undefined }}>
                                   {opts.header ? null
                                     : opts.count ? (v > 0 ? <span className={valCls}>{v}</span> : <span className="text-gray-300">—</span>)
+                                    : opts.pctDelta ? (Number.isFinite(v)
+                                        ? <span className={v >= 0 ? 'text-green-600' : 'text-red-500'}>{v >= 0 ? '+' : ''}{v.toFixed(0)}%</span>
+                                        : <span className="text-gray-300">—</span>)
                                     : num(v, valCls)}
                                 </td>
                               );
@@ -6754,6 +6762,14 @@ export default function SalesReportsPage() {
                             mk => perShift(cellTotal(mk, sh), shiftsIn(mk, sh)),
                             y  => perShift(fyTotal(y, sh),   shiftsFy(y, sh)),
                             { derived: true }),
+                          /* Growth in what a shift earns, against the same month a year
+                             earlier — the number the two rows above exist to produce. */
+                          line(`${sh}-yoy`, 'Y/Y Sales growth (%)',
+                            mk => yoy(perShift(cellTotal(mk, sh), shiftsIn(mk, sh)),
+                                      perShift(cellTotal(yearAgo(mk), sh), shiftsIn(yearAgo(mk), sh))),
+                            y  => yoy(perShift(fyTotal(y, sh),     shiftsFy(y, sh)),
+                                      perShift(fyTotal(y - 1, sh), shiftsFy(y - 1, sh))),
+                            { derived: true, pctDelta: true }),
                         ]),
                         <tr key={`${sh}-gap`}><td colSpan={monthCols.length + 1} style={{ height: 8, backgroundColor: '#f9fafb' }} /></tr>,
                       ];
