@@ -1146,7 +1146,7 @@ export default function SalesReportsPage() {
       for (let pg = 0; ; pg++) {
         const { data, error } = await supabase
           .from('shift_reports')
-          .select('report_date,gross_total,gross_food,gross_beverages,net_total,vat_total,tips,inhouse_total,takeaway_total,cancellations_count,cancellations_total')
+          .select('report_date,shift_type,gross_total,gross_food,gross_beverages,net_total,vat_total,tips,inhouse_total,takeaway_total,cancellations_count,cancellations_total')
           .eq('location_id', location!.id)
           .order('report_date')
           .range(pg * 1000, (pg + 1) * 1000 - 1);
@@ -1158,6 +1158,112 @@ export default function SalesReportsPage() {
       return all;
     },
   });
+
+  /**
+   * The delivery and event channels across every year, for the monthly
+   * summary. Each is the same table and the same filters the daily summary
+   * reads for a quarter; only the date bounds differ.
+   */
+  const monthlyTabOn = !!location && activeTab === 'daily' && subTab === 'monthly';
+
+  const { data: allWoltRows = [] } = useQuery({
+    queryKey: ['wolt-shift-sales-all', location?.id],
+    enabled: monthlyTabOn,
+    queryFn: async () => {
+      const all: { sale_date: string; shift: 'lunch' | 'dinner'; net_sales: number; net_final: number | null }[] = [];
+      for (let pg = 0; ; pg++) {
+        const { data } = await supabase.from('wolt_shift_sales')
+          .select('sale_date,shift,net_sales,net_final').eq('location_id', location!.id)
+          .order('sale_date').range(pg * 1000, (pg + 1) * 1000 - 1);
+        if (!data?.length) break;
+        all.push(...(data as typeof all));
+        if (data.length < 1000) break;
+      }
+      return all;
+    },
+  });
+
+  const { data: allWoltCredits = [] } = useQuery({
+    queryKey: ['wolt-month-credits-all', location?.id],
+    enabled: monthlyTabOn,
+    queryFn: async () => {
+      const { data } = await supabase.from('wolt_month_credits')
+        .select('month,net').eq('location_id', location!.id);
+      return (data ?? []) as { month: string; net: number }[];
+    },
+  });
+
+  const { data: allWebshopRows = [] } = useQuery({
+    queryKey: ['webshop-orders-all', location?.id],
+    enabled: monthlyTabOn,
+    queryFn: async () => {
+      const all: { sale_date: string; shift: 'lunch' | 'dinner'; net_cents: number }[] = [];
+      for (let pg = 0; ; pg++) {
+        const { data } = await supabase.from('webshop_orders')
+          .select('sale_date,shift,net_cents').eq('location_id', location!.id).eq('counts', true)
+          .order('sale_date').range(pg * 1000, (pg + 1) * 1000 - 1);
+        if (!data?.length) break;
+        all.push(...(data as typeof all));
+        if (data.length < 1000) break;
+      }
+      return all;
+    },
+  });
+
+  const { data: allOutgoingBills = [] } = useQuery({
+    queryKey: ['outgoing-bills-all', location?.name],
+    enabled: monthlyTabOn,
+    queryFn: async () => {
+      const { data } = await supabase.from('outgoing_bills')
+        .select('event_date,shift_type,net_total')
+        .eq('issuing_location', location!.name)
+        .eq('paid_in_store', false)
+        .or('invoice_number.is.null,invoice_number.not.ilike.BB%');
+      return (data ?? []) as { event_date: string | null; shift_type: 'lunch' | 'dinner' | null; net_total: number }[];
+    },
+  });
+
+  /**
+   * Net sales per month, per shift, per channel — the daily summary rolled up.
+   *
+   * Orderbird is the till; Wolt is the settled figure after refunds, fees and
+   * advertising, with the month's Wolt+ credit spread across its shifts by
+   * their share of sales, exactly as the daily view does; the webshop counts
+   * paid, completed orders; bills are event invoices not settled at the till.
+   */
+  type ChannelSums = { orderbird: number; webshop: number; wolt: number; bills: number };
+  type MonthSummary = { lunch: ChannelSums; dinner: ChannelSums; day: ChannelSums };
+  const monthlySummary = useMemo<Record<string, MonthSummary>>(() => {
+    const out: Record<string, MonthSummary> = {};
+    const zero = (): ChannelSums => ({ orderbird: 0, webshop: 0, wolt: 0, bills: 0 });
+    const at = (key: string) => out[key] ?? (out[key] = { lunch: zero(), dinner: zero(), day: zero() });
+    const add = (date: string, shift: 'lunch' | 'dinner' | null, ch: keyof ChannelSums, v: number) => {
+      if (!date || !Number.isFinite(v)) return;
+      const m = at(date.slice(0, 7));
+      if (shift) m[shift][ch] += v;
+      m.day[ch] += v;
+    };
+
+    for (const r of allShiftRows) add(r.report_date, r.shift_type, 'orderbird', safeNum(r.net_total) ?? 0);
+    for (const r of allWebshopRows) add(r.sale_date, r.shift, 'webshop', r.net_cents / 100);
+    for (const r of allWoltRows)    add(r.sale_date, r.shift, 'wolt', Number(r.net_final ?? 0));
+    for (const b of allOutgoingBills) if (b.event_date) add(b.event_date, b.shift_type, 'bills', Number(b.net_total ?? 0));
+
+    // Wolt+ credits are income for the whole month, shared out by sales.
+    for (const c of allWoltCredits) {
+      const mk = c.month.slice(0, 7);
+      const inMonth = allWoltRows.filter(r => r.sale_date.startsWith(mk));
+      const base = inMonth.reduce((t, r) => t + Number(r.net_sales), 0);
+      if (base <= 0) continue;
+      const m = at(mk);
+      for (const r of inMonth) {
+        const share = Number(c.net) * (Number(r.net_sales) / base);
+        m[r.shift].wolt += share;
+        m.day.wolt += share;
+      }
+    }
+    return out;
+  }, [allShiftRows, allWebshopRows, allWoltRows, allWoltCredits, allOutgoingBills]);
 
   const { data: allMonthlyReports = [] } = useQuery({
     queryKey: ['monthly-reports-all', location?.id],
@@ -6583,6 +6689,86 @@ export default function SalesReportsPage() {
                         })}
                       </tr>
                     </thead>
+                    {/* ── 1) Summary — the daily net-sales blocks, by month ── */}
+                    {(() => {
+                      type Ch = 'orderbird' | 'webshop' | 'wolt' | 'bills';
+                      type Sh = 'lunch' | 'dinner' | 'day';
+                      const cell = (mk: string, sh: Sh, ch: Ch) => monthlySummary[mk]?.[sh][ch] ?? 0;
+                      const fyCell = (y: number, sh: Sh, ch: Ch) =>
+                        Object.entries(monthlySummary).filter(([k]) => k.startsWith(`${y}-`))
+                          .reduce((t, [, m]) => t + m[sh][ch], 0);
+                      const totalOf = (sums: { orderbird: number; webshop: number; wolt: number; bills: number }) =>
+                        sums.orderbird + sums.webshop + sums.wolt + sums.bills;
+                      const cellTotal = (mk: string, sh: Sh) => monthlySummary[mk] ? totalOf(monthlySummary[mk][sh]) : 0;
+                      const fyTotal   = (y: number, sh: Sh) =>
+                        Object.entries(monthlySummary).filter(([k]) => k.startsWith(`${y}-`))
+                          .reduce((t, [, m]) => t + totalOf(m[sh]), 0);
+
+                      const num = (v: number, cls: string) =>
+                        v > 0 ? <span className={cls}>{fmtNum(v)}</span> : <span className="text-gray-300">—</span>;
+
+                      /** One row across every column, given a value per month and per year. */
+                      const line = (
+                        key: string, label: string,
+                        month: (mk: string) => number, fy: (y: number) => number,
+                        opts: { header?: boolean; total?: boolean; placeholder?: boolean } = {},
+                      ) => {
+                        const bg = opts.header ? '#eef2ff' : opts.total ? '#f0fdf4' : '#ffffff';
+                        const labelCls = opts.header ? 'text-xs font-bold text-gray-800'
+                                       : opts.total  ? 'text-xs font-bold text-[#1B5E20]'
+                                                     : 'text-[11px] text-gray-600 pl-8';
+                        const valCls = opts.total ? 'font-bold text-[#1B5E20]' : 'text-blue-700';
+                        return (
+                          <tr key={key} className={`border-b ${opts.header ? 'border-gray-200' : 'border-gray-100'} hover:bg-gray-50/60 group`} style={{ backgroundColor: bg }}>
+                            <td className={`sticky left-0 z-10 px-4 ${opts.header ? 'py-1.5' : 'py-1'} whitespace-nowrap border-r border-gray-100 group-hover:bg-gray-50 transition-colors ${labelCls}`}
+                              style={{ backgroundColor: bg }}>
+                              {label}
+                            </td>
+                            {monthCols.map(col => {
+                              const isCurMon = col.type === 'month' && col.year === todayYear && col.month === todayMonth;
+                              const v = opts.header || opts.placeholder ? 0
+                                      : col.type === 'fy' ? fy(col.year) : month(col.key);
+                              return (
+                                <td key={col.key}
+                                  className={`${opts.header ? 'py-1.5' : 'py-1'} text-right tabular-nums text-xs ${col.type === 'fy' ? 'border-l border-gray-200' : ''}`}
+                                  style={{ paddingLeft:4, paddingRight:8,
+                                    backgroundColor: col.type === 'fy' ? (opts.total ? '#ecfdf5' : '#f8fafc') : isCurMon ? 'rgba(59,130,246,0.04)' : undefined }}>
+                                  {opts.header ? null : num(v, valCls)}
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        );
+                      };
+
+                      /* The same rows, in the same order, as the daily summary. */
+                      const block = (sh: Sh, title: string, totalLabel: string) => [
+                        line(`${sh}-hdr`, title, () => 0, () => 0, { header: true }),
+                        line(`${sh}-ob`,   'Orderbird', mk => cell(mk, sh, 'orderbird'), y => fyCell(y, sh, 'orderbird')),
+                        line(`${sh}-ws`,   'Webshop',   mk => cell(mk, sh, 'webshop'),   y => fyCell(y, sh, 'webshop')),
+                        line(`${sh}-wo`,   'Wolt',      mk => cell(mk, sh, 'wolt'),      y => fyCell(y, sh, 'wolt')),
+                        line(`${sh}-li`,   'Lieferando', () => 0, () => 0, { placeholder: true }),
+                        line(`${sh}-bi`,   'Bills',     mk => cell(mk, sh, 'bills'),     y => fyCell(y, sh, 'bills')),
+                        line(`${sh}-tg`,   'Too Good To Go', () => 0, () => 0, { placeholder: true }),
+                        line(`${sh}-tot`,  totalLabel, mk => cellTotal(mk, sh), y => fyTotal(y, sh), { total: true }),
+                        <tr key={`${sh}-gap`}><td colSpan={monthCols.length + 1} style={{ height: 8, backgroundColor: '#f9fafb' }} /></tr>,
+                      ];
+
+                      return (
+                        <tbody>
+                          <tr>
+                            <td colSpan={monthCols.length + 1} className="sticky left-0 px-4 py-2 text-xs font-bold uppercase tracking-widest text-white"
+                              style={{ backgroundColor: '#0f172a' }}>
+                              1) Summary
+                            </td>
+                          </tr>
+                          {block('lunch',  'Net sales · Lunch',  'Total net sales · Lunch')}
+                          {block('dinner', 'Net sales · Dinner', 'Total net sales · Dinner')}
+                          {block('day',    'Net sales · Day',    'Total net sales · All day')}
+                        </tbody>
+                      );
+                    })()}
+
                     <tbody>
                       {MONTHLY_ROWS.map((row, i) => {
                         if (row.type === 'section') {
