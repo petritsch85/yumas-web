@@ -659,8 +659,25 @@ function parseMonthlyCSV(raw: string): MonthlyParseResult {
 const LUNCH_KEYWORDS  = /burrito|bowl|taco|enchilada|nacho|quesadilla/i;
 const DINNER_KEYWORDS = /cocktail|beer|bier|wine|wein|gin|rum|tequila|vodka|whisky|whiskey|spirit|prosecco|sekt|shot|aperol|campari|margarita|mojito|negroni/i;
 
-function classifyShiftType(r: ShiftParseResult): { type: 'lunch' | 'dinner'; confidence: ShiftConfidence } {
-  if (r.grossTotal === 0) return { type: 'dinner', confidence: 'low' };
+function classifyShiftType(
+  r: ShiftParseResult,
+  /**
+   * Whether a shift is closed on a date. The scores below read the sales mix
+   * alone, so a quiet evening with little at the bar looks like a lunch — which
+   * is how a Saturday dinner Z-report at Taunus was once filed as lunch, on a
+   * day Taunus serves no lunch. A Z-report is one shift, so a report on a day
+   * that shift is shut can only be the other one.
+   */
+  isShiftClosed?: (date: string, shift: 'lunch' | 'dinner') => boolean,
+): { type: 'lunch' | 'dinner'; confidence: ShiftConfidence } {
+  const byHours = (type: 'lunch' | 'dinner', confidence: ShiftConfidence) => {
+    if (!isShiftClosed || !r.date) return { type, confidence };
+    const other: 'lunch' | 'dinner' = type === 'lunch' ? 'dinner' : 'lunch';
+    if (isShiftClosed(r.date, type) && !isShiftClosed(r.date, other)) return { type: other, confidence: 'high' as ShiftConfidence };
+    return { type, confidence };
+  };
+
+  if (r.grossTotal === 0) return byHours('dinner', 'low');
 
   let lunchScore  = 0;
   let dinnerScore = 0;
@@ -691,7 +708,7 @@ function classifyShiftType(r: ShiftParseResult): { type: 'lunch' | 'dinner'; con
   const diff = Math.abs(lunchScore - dinnerScore);
   const confidence: ShiftConfidence = diff >= 3 ? 'high' : diff >= 1 ? 'medium' : 'low';
 
-  return { type, confidence };
+  return byHours(type, confidence);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2805,7 +2822,12 @@ export default function SalesReportsPage() {
         const r = parseShiftCSV(content ?? '');
         if (r.error) { setParseError(r.error); return; }
         setParseError(null);
-        const { type: detectedType, confidence } = classifyShiftType(r);
+        const DOW = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+        const closedOn = (sh: 'lunch' | 'dinner') => new Set(forecastSettings.find(x => x.shift_type === sh)?.closed_weekdays ?? []);
+        const isShiftClosed = (date: string, sh: 'lunch' | 'dinner') =>
+          closedOn(sh).has(DOW[new Date(date + 'T12:00:00Z').getUTCDay()]) ||
+          closureDays.some(c => c.closure_date === date && (c.shift_type === sh || c.shift_type === 'all'));
+        const { type: detectedType, confidence } = classifyShiftType(r, forecastSettings.length ? isShiftClosed : undefined);
         setShiftBatch(prev => [...prev, { fileName: file.name, result: r, detectedType, confidence, status: 'pending' }]);
       } else if (reportType === 'weekly') {
         const r = parseWeeklyCSV(content ?? '');
@@ -2820,7 +2842,7 @@ export default function SalesReportsPage() {
       }
     };
     reader.readAsText(file, 'UTF-8');
-  }, [reportType]);
+  }, [reportType, forecastSettings, closureDays]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault(); setIsDragging(false);
