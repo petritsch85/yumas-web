@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabase-browser';
 import { parseOpenTableCsv, summariseOpenTable, OpenTableParseError } from '@/lib/opentable-csv';
 import { parseGdpduZip, GdpduParseError } from '@/lib/gdpdu';
 import { isoWeek, isoWeekYear, isoWeekRange, isoWeeksInYear, currentISOWeek } from '@/lib/iso-week';
+import { shiftClosedCheckerFor } from '@/lib/opening-hours';
 import type { GdpduShift, GdpduSummary } from '@/lib/gdpdu';
 import type { OpenTableSummary } from '@/lib/opentable-csv';
 import type { WoltInvoiceData } from '@/lib/wolt-invoice';
@@ -260,6 +261,8 @@ type ClosureDay = {
   closure_date: string;
   shift_type:   'lunch' | 'dinner' | 'all';
   reason:       string | null;
+  /** 'closed' shuts the shift that day; 'open' opens one the weekly pattern shuts. */
+  kind:         'closed' | 'open';
 };
 
 type ForecastOverride = {
@@ -1547,7 +1550,7 @@ export default function SalesReportsPage() {
     queryFn: async () => {
       const { data } = await supabase
         .from('closure_days')
-        .select('id,closure_date,shift_type,reason')
+        .select('id,closure_date,shift_type,reason,kind')
         .eq('location_id', location!.id)
         .order('closure_date', { ascending: true });
       return (data ?? []) as ClosureDay[];
@@ -2015,27 +2018,30 @@ export default function SalesReportsPage() {
 
   // O(1) lookup set for closed shifts: "lunch:2026-05-01", "dinner:2026-05-01"
   // Includes both specific closure dates AND recurring weekday closures from forecast_settings
+  /**
+   * Whether a shift is closed on a date, for this location. One rule, shared
+   * with the Z-report classifier and the Wolt and webshop imports, so an
+   * exception opened here is honoured everywhere.
+   */
+  const isShiftClosedOn = useMemo(() => {
+    if (!location) return () => false;
+    return shiftClosedCheckerFor(
+      location.id,
+      forecastSettings.map(f => ({ location_id: location.id, shift_type: f.shift_type, closed_weekdays: f.closed_weekdays ?? null })),
+      closureDays.map(c => ({ location_id: location.id, closure_date: c.closure_date, shift_type: c.shift_type, kind: c.kind })),
+    );
+  }, [location, forecastSettings, closureDays]);
+
+  // O(1) lookup set for the columns on screen: "lunch:2026-05-01"
   const closureSet = useMemo(() => {
     const s = new Set<string>();
-    // Specific date closures from the closures table
-    for (const c of closureDays) {
-      if (c.shift_type === 'lunch'  || c.shift_type === 'all') s.add(`lunch:${c.closure_date}`);
-      if (c.shift_type === 'dinner' || c.shift_type === 'all') s.add(`dinner:${c.closure_date}`);
-    }
-    // Recurring weekday closures from forecast_settings (only when settings exist for this location)
-    if (forecastSettings.length > 0) {
-      const dowKeys = ['sun','mon','tue','wed','thu','fri','sat'];
-      const lunchClosed  = new Set(forecastSettings.find(s => s.shift_type === 'lunch')?.closed_weekdays  ?? []);
-      const dinnerClosed = new Set(forecastSettings.find(s => s.shift_type === 'dinner')?.closed_weekdays ?? []);
-      for (const col of dailyCols) {
-        if (col.type !== 'day') continue;
-        const dow = dowKeys[new Date(col.dateKey + 'T12:00:00Z').getUTCDay()];
-        if (lunchClosed.has(dow))  s.add(`lunch:${col.dateKey}`);
-        if (dinnerClosed.has(dow)) s.add(`dinner:${col.dateKey}`);
-      }
+    for (const col of dailyCols) {
+      if (col.type !== 'day') continue;
+      if (isShiftClosedOn(col.dateKey, 'lunch'))  s.add(`lunch:${col.dateKey}`);
+      if (isShiftClosedOn(col.dateKey, 'dinner')) s.add(`dinner:${col.dateKey}`);
     }
     return s;
-  }, [closureDays, forecastSettings, dailyCols]);
+  }, [isShiftClosedOn, dailyCols]);
 
   // Override map: "lunch:2026-04-25" → ForecastOverride
   const overrideMap = useMemo(() => {
@@ -2822,12 +2828,7 @@ export default function SalesReportsPage() {
         const r = parseShiftCSV(content ?? '');
         if (r.error) { setParseError(r.error); return; }
         setParseError(null);
-        const DOW = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
-        const closedOn = (sh: 'lunch' | 'dinner') => new Set(forecastSettings.find(x => x.shift_type === sh)?.closed_weekdays ?? []);
-        const isShiftClosed = (date: string, sh: 'lunch' | 'dinner') =>
-          closedOn(sh).has(DOW[new Date(date + 'T12:00:00Z').getUTCDay()]) ||
-          closureDays.some(c => c.closure_date === date && (c.shift_type === sh || c.shift_type === 'all'));
-        const { type: detectedType, confidence } = classifyShiftType(r, forecastSettings.length ? isShiftClosed : undefined);
+        const { type: detectedType, confidence } = classifyShiftType(r, forecastSettings.length ? isShiftClosedOn : undefined);
         setShiftBatch(prev => [...prev, { fileName: file.name, result: r, detectedType, confidence, status: 'pending' }]);
       } else if (reportType === 'weekly') {
         const r = parseWeeklyCSV(content ?? '');
@@ -2842,7 +2843,7 @@ export default function SalesReportsPage() {
       }
     };
     reader.readAsText(file, 'UTF-8');
-  }, [reportType, forecastSettings, closureDays]);
+  }, [reportType, forecastSettings, isShiftClosedOn]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault(); setIsDragging(false);
@@ -3147,6 +3148,23 @@ export default function SalesReportsPage() {
     } catch (e: any) { alert(`Could not add closure: ${e.message}`); }
     finally { setAddingClosure(false); }
   }, [location, closureForm, refetchClosures]);
+
+  /**
+   * Opens a shift the weekly pattern shuts, on one date — an event on a Sunday.
+   * Stored as an 'open' row in closure_days, which the shared rule ranks above
+   * the pattern, so the day stops being shaded and any Wolt or webshop order
+   * that evening stays on the shift it was actually served by.
+   */
+  const handleOpenShift = useCallback(async (date: string, shift: 'lunch' | 'dinner') => {
+    if (!location) return;
+    try {
+      const { error } = await supabase.from('closure_days').insert({
+        location_id: location.id, closure_date: date, shift_type: shift, kind: 'open', reason: 'Opened for this day',
+      });
+      if (error) throw error;
+      await refetchClosures();
+    } catch (e: any) { alert(`Could not open the shift: ${e.message}`); }
+  }, [location, refetchClosures]);
 
   const handleDeleteClosure = useCallback(async (id: string) => {
     try {
@@ -4822,8 +4840,10 @@ export default function SalesReportsPage() {
                   ) : (
                     <div className="space-y-1.5 max-h-48 overflow-y-auto">
                       {closureDays.map(c => (
-                        <div key={c.id} className="flex items-center justify-between gap-3 py-1.5 px-3 rounded-lg bg-red-50 hover:bg-red-100 transition-colors">
-                          <span className="text-sm font-semibold text-red-900 tabular-nums">
+                        <div key={c.id} className={`flex items-center justify-between gap-3 py-1.5 px-3 rounded-lg transition-colors ${
+                          c.kind === 'open' ? 'bg-green-50 hover:bg-green-100' : 'bg-red-50 hover:bg-red-100'
+                        }`}>
+                          <span className={`text-sm font-semibold tabular-nums ${c.kind === 'open' ? 'text-green-900' : 'text-red-900'}`}>
                             {new Date(c.closure_date + 'T00:00:00').toLocaleDateString('en-GB', { weekday:'short', day:'numeric', month:'short', year:'numeric' })}
                           </span>
                           <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
@@ -4833,6 +4853,9 @@ export default function SalesReportsPage() {
                           }`}>
                             {c.shift_type === 'all' ? '🚫 All day' : c.shift_type === 'lunch' ? '☀️ Lunch' : '🌙 Dinner'}
                           </span>
+                          {c.kind === 'open' && (
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-green-200 text-green-800">OPENED</span>
+                          )}
                           {c.reason && <span className="text-xs text-red-600 flex-1 truncate">{c.reason}</span>}
                           <button onClick={() => handleDeleteClosure(c.id)}
                             className="text-red-400 hover:text-red-700 font-bold text-sm leading-none flex-shrink-0 transition-colors"
@@ -6137,6 +6160,42 @@ export default function SalesReportsPage() {
                 </div>
 
                 <div className="p-6 space-y-4">
+                  {/* ── Open a shift the weekly pattern shuts, for this day only ── */}
+                  {(() => {
+                    const dow = ['sun','mon','tue','wed','thu','fri','sat'][new Date(activeDayKey + 'T12:00:00Z').getUTCDay()];
+                    const shutByPattern = (sh: 'lunch' | 'dinner') =>
+                      (forecastSettings.find(f => f.shift_type === sh)?.closed_weekdays ?? []).includes(dow);
+                    const openRow = (sh: 'lunch' | 'dinner') =>
+                      closureDays.find(c => c.kind === 'open' && c.closure_date === activeDayKey && (c.shift_type === sh || c.shift_type === 'all'));
+                    const rows = (['lunch', 'dinner'] as const).filter(sh => shutByPattern(sh)).map(sh => {
+                      const open = openRow(sh);
+                      return (
+                        <div key={sh} className={`flex items-center justify-between gap-3 px-4 py-2.5 rounded-xl border ${
+                          open ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-200'
+                        }`}>
+                          <div className="text-xs">
+                            <span className="font-semibold text-gray-800">{sh === 'lunch' ? '☀️ Lunch' : '🌙 Dinner'}</span>
+                            <span className="text-gray-500 ml-2">
+                              {open ? 'opened for this day' : `normally closed on ${dowLabel}s`}
+                            </span>
+                          </div>
+                          {open ? (
+                            <button onClick={() => handleDeleteClosure(open.id)}
+                              className="text-xs font-semibold text-gray-500 hover:text-red-600 transition-colors">
+                              Undo
+                            </button>
+                          ) : (
+                            <button onClick={() => handleOpenShift(activeDayKey, sh)}
+                              className="px-3 py-1 rounded-lg bg-[#1B5E20] text-white text-xs font-bold hover:bg-[#2E7D32] transition-colors">
+                              Open {sh} for this day
+                            </button>
+                          )}
+                        </div>
+                      );
+                    });
+                    return rows.length > 0 ? <div className="space-y-2">{rows}</div> : null;
+                  })()}
+
                   {dayShifts.length === 0 && !dayDelivery && (
                     <p className="text-sm text-gray-400 text-center py-6">No data stored for this day.</p>
                   )}

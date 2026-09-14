@@ -3,11 +3,11 @@ import { getSupabaseAdmin } from '@/lib/supabase-admin';
 import { parseWebshopCsv, aggregateWebshopShifts, WebshopParseError } from '@/lib/webshop-csv';
 import type { WebshopOrder, WebshopShift } from '@/lib/webshop-csv';
 import { matchLocation } from '@/lib/wolt-set';
+import { buildShiftClosedChecker } from '@/lib/opening-hours';
+import type { ClosedWeekdayRow, ClosureRow } from '@/lib/opening-hours';
 
 export const runtime = 'nodejs';
 
-interface ClosedWeekdayRow { location_id: string; shift_type: string; closed_weekdays: string[] | null }
-interface ClosureDayRow   { location_id: string; closure_date: string; shift_type: string }
 
 const DOW = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
 
@@ -44,7 +44,7 @@ export async function POST(req: Request) {
   const [{ data: locationRows }, { data: settings }, { data: closures }] = await Promise.all([
     admin.from('locations').select('id, name').eq('is_active', true),
     admin.from('forecast_settings').select('location_id, shift_type, closed_weekdays'),
-    admin.from('closure_days').select('location_id, closure_date, shift_type'),
+    admin.from('closure_days').select('location_id, closure_date, shift_type, kind'),
   ]);
   const locations = (locationRows ?? []) as { id: string; name: string }[];
 
@@ -67,21 +67,13 @@ export async function POST(req: Request) {
 
   // Same closed-shift handling as the Wolt import: an order timed to a shift
   // the restaurant was shut for was prepared by the shift that was open.
-  const recurring = new Set<string>();
-  for (const r of (settings ?? []) as ClosedWeekdayRow[]) {
-    for (const day of r.closed_weekdays ?? []) recurring.add(`${r.location_id}|${r.shift_type}|${day}`);
-  }
-  const specific = new Set<string>();
-  for (const c of (closures ?? []) as ClosureDayRow[]) {
-    for (const shift of c.shift_type === 'all' ? ['lunch', 'dinner'] : [c.shift_type]) {
-      specific.add(`${c.location_id}|${shift}|${c.closure_date}`);
-    }
-  }
+  const closedChecker = buildShiftClosedChecker(
+    (settings ?? []) as ClosedWeekdayRow[],
+    (closures ?? []) as ClosureRow[],
+  );
   const isShiftClosed = (venue: string, date: string, shift: WebshopShift) => {
     const locationId = venueToLocation.get(venue)?.id;
-    if (!locationId) return false;
-    if (specific.has(`${locationId}|${shift}|${date}`)) return true;
-    return recurring.has(`${locationId}|${shift}|${DOW[new Date(date + 'T12:00:00Z').getUTCDay()]}`);
+    return locationId ? closedChecker(locationId, date, shift) : false;
   };
 
   const { totals, reassigned } = aggregateWebshopShifts(orders, isShiftClosed);

@@ -8,6 +8,8 @@ import { buildWoltServices, WoltServicesParseError } from '@/lib/wolt-services';
 import { matchLocation, ordersMatchPeriod } from '@/lib/wolt-set';
 import { isPayoutReport, parseWoltPayoutReport, parseWoltFeeInvoice, toInvoiceShape } from '@/lib/wolt-payout';
 import type { WoltSetFile, WoltSetResult } from '@/lib/wolt-set';
+import { buildShiftClosedChecker } from '@/lib/opening-hours';
+import type { ClosedWeekdayRow, ClosureRow, ShiftType } from '@/lib/opening-hours';
 
 // pdf text extraction needs the Node runtime, not the edge one.
 export const runtime = 'nodejs';
@@ -105,11 +107,11 @@ export async function POST(req: Request) {
   // Closed shifts, so orders are never booked to a shift that never ran.
   const [{ data: settings }, { data: closures }] = await Promise.all([
     admin.from('forecast_settings').select('location_id, shift_type, closed_weekdays'),
-    admin.from('closure_days').select('location_id, closure_date, shift_type'),
+    admin.from('closure_days').select('location_id, closure_date, shift_type, kind'),
   ]);
-  const closedChecker = buildClosedChecker(
+  const closedChecker = buildShiftClosedChecker(
     (settings  ?? []) as ClosedWeekdayRow[],
-    (closures  ?? []) as ClosureDayRow[],
+    (closures  ?? []) as ClosureRow[],
   );
 
   const sets: WoltSetResult[] = [];
@@ -138,7 +140,7 @@ function buildSelfDeliverySet(
   payoutDoc: Doc,
   docs: Doc[],
   locations: { id: string; name: string }[],
-  isClosed: (locationId: string, date: string, shift: string) => boolean,
+  isClosed: (locationId: string, date: string, shift: ShiftType) => boolean,
 ): WoltSetResult {
   const warnings = base.warnings;
   const feeDoc = docs.find(d => d.kind === 'wolt_invoice');
@@ -249,8 +251,6 @@ function buildSelfDeliverySet(
 }
 
 /** Parses and validates one document set. Never throws — it reports instead. */
-interface ClosedWeekdayRow { location_id: string; shift_type: string; closed_weekdays: string[] | null }
-interface ClosureDayRow   { location_id: string; closure_date: string; shift_type: string }
 
 const DOW = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
 
@@ -259,29 +259,11 @@ const DOW = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
  * combining the recurring weekday closures with one-off closure dates — the
  * same two sources the P&L shades its closed shifts from.
  */
-function buildClosedChecker(settings: ClosedWeekdayRow[], closures: ClosureDayRow[]) {
-  const recurring = new Set<string>();
-  for (const r of settings) {
-    for (const day of r.closed_weekdays ?? []) recurring.add(`${r.location_id}|${r.shift_type}|${day}`);
-  }
-  const specific = new Set<string>();
-  for (const c of closures) {
-    for (const shift of c.shift_type === 'all' ? ['lunch', 'dinner'] : [c.shift_type]) {
-      specific.add(`${c.location_id}|${shift}|${c.closure_date}`);
-    }
-  }
-  return (locationId: string, date: string, shift: string) => {
-    if (specific.has(`${locationId}|${shift}|${date}`)) return true;
-    const dow = DOW[new Date(date + 'T12:00:00Z').getUTCDay()];
-    return recurring.has(`${locationId}|${shift}|${dow}`);
-  };
-}
-
 function buildSet(
   source: string,
   docs: Doc[],
   locations: { id: string; name: string }[],
-  isClosed: (locationId: string, date: string, shift: string) => boolean,
+  isClosed: (locationId: string, date: string, shift: ShiftType) => boolean,
 ): WoltSetResult {
   const files: WoltSetFile[] = docs.map(d => ({ name: d.name, kind: d.kind }));
   const warnings: string[] = [];
