@@ -1,6 +1,8 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
+import { buildRunsCsv, buildLinesCsv, buildDeliveryExportZip } from '@/lib/delivery-export';
+import type { ExportRun, ExportReceipt, ExportLine } from '@/lib/delivery-export';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
 import {
@@ -647,11 +649,83 @@ export default function DeliveryReportsPage() {
   });
 
   /* ─── Render ─────────────────────────────────────────────────────────── */
+  const [exporting, setExporting] = useState(false);
+
+  /**
+   * Every run and every line since the beginning, fetched fresh — the page's
+   * own queries hold one run at a time. Deleted runs are left out.
+   */
+  const exportAll = useCallback(async () => {
+    setExporting(true);
+    try {
+      const { data: runs, error: runErr } = await supabase
+        .from('delivery_runs')
+        .select('id, delivery_date, status, lists_checked_at, lists_checked_by, list_confirmed_eschborn_at, list_confirmed_taunus_at, list_confirmed_westend_at, packing_started_at, packed_by, packing_finished_at, packing_duration_seconds, items_packed_count, delivery_started_at, delivery_started_by, delivery_finished_at, delivery_finished_by, store_packing_finished_at, skipped_stores, delivery_snapshot, store_notes, store_inventory_comments')
+        .is('deleted_at', null)
+        .order('delivery_date');
+      if (runErr) throw runErr;
+      const runRows = (runs ?? []) as ExportRun[];
+      const runIds  = runRows.map(r => r.id);
+
+      const lines: ExportLine[] = [];
+      for (let pg = 0; ; pg++) {
+        const { data, error } = await supabase
+          .from('delivery_run_lines')
+          .select('run_id, location_name, section, item_name, unit, target_qty, standard_target_qty, reported_qty, delivery_qty, packed_qty, is_packed')
+          .in('run_id', runIds)
+          .range(pg * 1000, (pg + 1) * 1000 - 1);
+        if (error) throw error;
+        if (!data?.length) break;
+        lines.push(...(data as ExportLine[]));
+        if (data.length < 1000) break;
+      }
+
+      const { data: receipts } = await supabase
+        .from('store_delivery_receipts')
+        .select('run_id, location_name, received_at, received_by, items_confirmed_count')
+        .in('run_id', runIds);
+
+      const ids = new Set<string>();
+      for (const r of runRows) for (const k of [r.lists_checked_by, r.packed_by, r.delivery_started_by, r.delivery_finished_by]) if (k) ids.add(k);
+      for (const r of (receipts ?? []) as ExportReceipt[]) if (r.received_by) ids.add(r.received_by);
+      const names: Record<string, string> = {};
+      if (ids.size) {
+        const { data: profiles } = await supabase.from('profiles').select('id, full_name').in('id', [...ids]);
+        for (const pr of profiles ?? []) names[pr.id] = pr.full_name;
+      }
+      const nameOf = (id: string | null) => (id ? (names[id] ?? 'Unknown') : '');
+      const dateOf = new Map(runRows.map(r => [r.id, r.delivery_date]));
+
+      const { bytes, filename } = buildDeliveryExportZip(
+        buildRunsCsv(runRows, (receipts ?? []) as ExportReceipt[], nameOf),
+        buildLinesCsv(lines, id => dateOf.get(id)),
+      );
+      const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: 'application/zip' }));
+      const a = document.createElement('a');
+      a.href = url; a.download = filename; a.click();
+      URL.revokeObjectURL(url);
+    } catch (e: any) {
+      alert(`Export failed: ${e?.message ?? 'unknown error'}`);
+    } finally {
+      setExporting(false);
+    }
+  }, []);
+
   return (
     <div className="max-w-3xl">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">{t('delivery.reports')}</h1>
-        <p className="text-sm text-gray-500 mt-0.5">Step-by-step log of each delivery run</p>
+      <div className="mb-6 flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">{t('delivery.reports')}</h1>
+          <p className="text-sm text-gray-500 mt-0.5">Step-by-step log of each delivery run</p>
+        </div>
+        <button
+          onClick={exportAll}
+          disabled={exporting}
+          title="Every run since the start — one CSV of runs, one of item lines — zipped for Excel"
+          className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium border bg-white border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-60 transition-colors whitespace-nowrap"
+        >
+          {exporting ? 'Exporting…' : '⬇ Export All'}
+        </button>
       </div>
 
       {/* ── Run selector — split Upcoming / Past ── */}
