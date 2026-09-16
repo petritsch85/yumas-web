@@ -291,15 +291,45 @@ export default function OutgoingBillsPage() {
   const [stornoSearch,     setStornoSearch]     = useState('');
   const [stornoSourceBill, setStornoSourceBill] = useState<OutgoingBill | null>(null);
 
+  type ReceiptItem = { name: string; qty: number; total: number; taxCode: 'A' | 'B' };
+
+  /** Pushes the lines' sums into the form, so an edit is never lost on save. */
+  const applyReceiptLines = (next: ReceiptItem[]) => {
+    const r2 = (n: number) => Math.round(n * 100) / 100;
+    setEssenBrutto(String(r2(next.reduce((s, i) => i.taxCode === 'B' ? s + i.total : s, 0))));
+    setGetraenkeBrutto(String(r2(next.reduce((s, i) => i.taxCode === 'A' ? s + i.total : s, 0))));
+    return next;
+  };
+
   const moveReceiptItem = useCallback((idx: number, to: 'A' | 'B') => {
-    setReceiptLineItems((prev) => {
-      const next = prev.map((item, i) => i === idx ? { ...item, taxCode: to } : item);
-      const essen     = next.reduce((s, i) => i.taxCode === 'B' ? s + i.total : s, 0);
-      const getraenke = next.reduce((s, i) => i.taxCode === 'A' ? s + i.total : s, 0);
-      setEssenBrutto(String(essen));
-      setGetraenkeBrutto(String(getraenke));
-      return next;
-    });
+    setReceiptLineItems(prev => applyReceiptLines(prev.map((item, i) => i === idx ? { ...item, taxCode: to } : item)));
+  }, []);
+
+  /**
+   * Corrects one line the reader got wrong.
+   *
+   * A quantity change re-prices the line from its unit price: the reader
+   * turning "2x Corona 11,00" into 7x with a total of 38,50 is a misread
+   * count, and 38,50 / 7 is still the right price for one. A total typed in
+   * directly is taken as it stands.
+   */
+  const updateReceiptItem = useCallback((idx: number, patch: Partial<ReceiptItem>) => {
+    setReceiptLineItems(prev => applyReceiptLines(prev.map((item, i) => {
+      if (i !== idx) return item;
+      if (patch.qty !== undefined && patch.total === undefined && item.qty > 0 && patch.qty >= 0) {
+        const unit = item.total / item.qty;
+        return { ...item, qty: patch.qty, total: Math.round(unit * patch.qty * 100) / 100 };
+      }
+      return { ...item, ...patch };
+    })));
+  }, []);
+
+  const removeReceiptItem = useCallback((idx: number) => {
+    setReceiptLineItems(prev => applyReceiptLines(prev.filter((_, i) => i !== idx)));
+  }, []);
+
+  const addReceiptItem = useCallback((taxCode: 'A' | 'B') => {
+    setReceiptLineItems(prev => applyReceiptLines([...prev, { name: '', qty: 1, total: 0, taxCode }]));
   }, []);
 
   // Customer CRM search
@@ -3521,85 +3551,72 @@ export default function OutgoingBillsPage() {
               </div>
               <div className="px-6 py-5 overflow-y-auto space-y-5 flex-1">
 
-                {/* Essen (B / 7%) */}
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <p className="text-xs font-bold text-gray-500 uppercase tracking-wider">Essen (B · 7% MwSt)</p>
-                    <p className="text-sm font-bold text-gray-800">{fmtEur(essenSum)}</p>
-                  </div>
-                  <table className="w-full text-xs border-collapse">
-                    <thead>
-                      <tr className="bg-gray-50">
-                        <th className="text-left px-2 py-1.5 font-semibold text-gray-500 border border-gray-200">Item</th>
-                        <th className="text-center px-2 py-1.5 font-semibold text-gray-500 border border-gray-200 w-12">Qty</th>
-                        <th className="text-right px-2 py-1.5 font-semibold text-gray-500 border border-gray-200 w-24">Total</th>
-                        <th className="border border-gray-200 w-8"></th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {essenItems.map((item) => (
-                        <tr key={item.idx} className="border-b border-gray-100 last:border-0">
-                          <td className="px-2 py-1.5 text-gray-700 border border-gray-200">{item.name}</td>
-                          <td className="px-2 py-1.5 text-center text-gray-500 border border-gray-200">{item.qty}×</td>
-                          <td className="px-2 py-1.5 text-right tabular-nums text-gray-800 border border-gray-200">{fmtEur(item.total)}</td>
-                          <td className="px-1 py-1.5 text-center border border-gray-200">
-                            <button
-                              type="button"
-                              title="Move to Getränke"
-                              onClick={() => moveReceiptItem(item.idx, 'A')}
-                              className="text-blue-500 hover:text-blue-700 hover:bg-blue-50 rounded px-1 py-0.5 transition-colors"
-                            >↓</button>
+                {([
+                  { code: 'B' as const, title: 'Essen (B · 7% MwSt)',     items: essenItems,     sum: essenSum,     totalLabel: 'Total Essen Brutto',    totalCls: 'bg-green-50', sumCls: 'text-[#1B5E20]', moveTo: 'A' as const, moveTitle: 'Move to Getränke', arrow: '↓', arrowCls: 'text-blue-500 hover:text-blue-700 hover:bg-blue-50' },
+                  { code: 'A' as const, title: 'Getränke (A · 19% MwSt)', items: getraenkeItems, sum: getraenkeSum, totalLabel: 'Total Getränke Brutto', totalCls: 'bg-blue-50',  sumCls: 'text-blue-700',  moveTo: 'B' as const, moveTitle: 'Move to Essen',    arrow: '↑', arrowCls: 'text-green-600 hover:text-green-800 hover:bg-green-50' },
+                ]).map(sec => (
+                  <div key={sec.code}>
+                    <div className="flex items-center justify-between mb-2">
+                      <p className="text-xs font-bold text-gray-500 uppercase tracking-wider">{sec.title}</p>
+                      <p className="text-sm font-bold text-gray-800">{fmtEur(sec.sum)}</p>
+                    </div>
+                    <table className="w-full text-xs border-collapse">
+                      <thead>
+                        <tr className="bg-gray-50">
+                          <th className="text-left px-2 py-1.5 font-semibold text-gray-500 border border-gray-200">Item</th>
+                          <th className="text-center px-2 py-1.5 font-semibold text-gray-500 border border-gray-200 w-14">Qty</th>
+                          <th className="text-right px-2 py-1.5 font-semibold text-gray-500 border border-gray-200 w-24">Total €</th>
+                          <th className="border border-gray-200 w-14"></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {sec.items.map(item => (
+                          <tr key={item.idx} className="border-b border-gray-100 last:border-0">
+                            {/* Every cell is a field: the reader gets names, counts and
+                                totals wrong, and moving a line between the two blocks
+                                is not enough to fix any of those. */}
+                            <td className="border border-gray-200 p-0">
+                              <input type="text" value={item.name}
+                                onChange={e => updateReceiptItem(item.idx, { name: e.target.value })}
+                                className="w-full px-2 py-1.5 text-gray-700 bg-transparent outline-none focus:bg-amber-50" />
+                            </td>
+                            <td className="border border-gray-200 p-0">
+                              <input type="number" min="0" step="1" value={item.qty}
+                                onChange={e => updateReceiptItem(item.idx, { qty: Math.max(0, parseInt(e.target.value, 10) || 0) })}
+                                className="w-full px-1 py-1.5 text-center text-gray-600 bg-transparent outline-none focus:bg-amber-50 tabular-nums" />
+                            </td>
+                            <td className="border border-gray-200 p-0">
+                              <input type="number" min="0" step="0.01" value={item.total}
+                                onChange={e => updateReceiptItem(item.idx, { total: Math.max(0, parseFloat(e.target.value) || 0) })}
+                                className="w-full px-2 py-1.5 text-right text-gray-800 bg-transparent outline-none focus:bg-amber-50 tabular-nums" />
+                            </td>
+                            <td className="px-1 py-1 text-center border border-gray-200 whitespace-nowrap">
+                              <button type="button" title={sec.moveTitle}
+                                onClick={() => moveReceiptItem(item.idx, sec.moveTo)}
+                                className={`rounded px-1 py-0.5 transition-colors ${sec.arrowCls}`}>{sec.arrow}</button>
+                              <button type="button" title="Remove line"
+                                onClick={() => removeReceiptItem(item.idx)}
+                                className="ml-1 rounded px-1 py-0.5 text-gray-300 hover:text-red-500 hover:bg-red-50 transition-colors">✕</button>
+                            </td>
+                          </tr>
+                        ))}
+                        <tr className={`${sec.totalCls} font-semibold`}>
+                          <td className="px-2 py-1.5 text-gray-700 border border-gray-200" colSpan={2}>{sec.totalLabel}</td>
+                          <td className={`px-2 py-1.5 text-right tabular-nums border border-gray-200 ${sec.sumCls}`}>{fmtEur(sec.sum)}</td>
+                          <td className="border border-gray-200 text-center">
+                            <button type="button" title="Add a line"
+                              onClick={() => addReceiptItem(sec.code)}
+                              className="text-gray-400 hover:text-[#1B5E20] font-bold px-1 transition-colors">+</button>
                           </td>
                         </tr>
-                      ))}
-                      <tr className="bg-green-50 font-semibold">
-                        <td className="px-2 py-1.5 text-gray-700 border border-gray-200" colSpan={2}>Total Essen Brutto</td>
-                        <td className="px-2 py-1.5 text-right tabular-nums text-[#1B5E20] border border-gray-200">{fmtEur(essenSum)}</td>
-                        <td className="border border-gray-200"></td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-
-                {/* Getränke (A / 19%) */}
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <p className="text-xs font-bold text-gray-500 uppercase tracking-wider">Getränke (A · 19% MwSt)</p>
-                    <p className="text-sm font-bold text-gray-800">{fmtEur(getraenkeSum)}</p>
+                      </tbody>
+                    </table>
                   </div>
-                  <table className="w-full text-xs border-collapse">
-                    <thead>
-                      <tr className="bg-gray-50">
-                        <th className="text-left px-2 py-1.5 font-semibold text-gray-500 border border-gray-200">Item</th>
-                        <th className="text-center px-2 py-1.5 font-semibold text-gray-500 border border-gray-200 w-12">Qty</th>
-                        <th className="text-right px-2 py-1.5 font-semibold text-gray-500 border border-gray-200 w-24">Total</th>
-                        <th className="border border-gray-200 w-8"></th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {getraenkeItems.map((item) => (
-                        <tr key={item.idx} className="border-b border-gray-100 last:border-0">
-                          <td className="px-2 py-1.5 text-gray-700 border border-gray-200">{item.name}</td>
-                          <td className="px-2 py-1.5 text-center text-gray-500 border border-gray-200">{item.qty}×</td>
-                          <td className="px-2 py-1.5 text-right tabular-nums text-gray-800 border border-gray-200">{fmtEur(item.total)}</td>
-                          <td className="px-1 py-1.5 text-center border border-gray-200">
-                            <button
-                              type="button"
-                              title="Move to Essen"
-                              onClick={() => moveReceiptItem(item.idx, 'B')}
-                              className="text-green-600 hover:text-green-800 hover:bg-green-50 rounded px-1 py-0.5 transition-colors"
-                            >↑</button>
-                          </td>
-                        </tr>
-                      ))}
-                      <tr className="bg-blue-50 font-semibold">
-                        <td className="px-2 py-1.5 text-gray-700 border border-gray-200" colSpan={2}>Total Getränke Brutto</td>
-                        <td className="px-2 py-1.5 text-right tabular-nums text-blue-700 border border-gray-200">{fmtEur(getraenkeSum)}</td>
-                        <td className="border border-gray-200"></td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
+                ))}
+                <p className="text-[11px] text-gray-400">
+                  Changing a quantity re-prices the line from its unit price; type a total to set it directly.
+                  The form's Essen and Getränke figures follow every edit.
+                </p>
 
                 {/* Grand total */}
                 <div className="border-t-2 border-gray-200 pt-3 flex items-center justify-between">
