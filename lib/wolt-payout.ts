@@ -287,8 +287,12 @@ export function toInvoiceShape(
   // pass-through excluded from sales too; credits are reported separately,
   // since netting one into commission makes the rate meaningless.
   const commission            = round2(fees.provisionNet + fees.platformFeeNet);
+  // The payout report prints Wolt's invoice unsigned. When monthly credits
+  // outweigh the fees the invoice is a credit note — its own total is negative
+  // — and Wolt adds it to the payout instead of deducting it.
+  const invoiceSign = fees.totalNet < 0 ? -1 : 1;
   const expectedPayout = round2(
-    payout.goodsGross + payout.servicesGross + payout.correctionsGross - payout.woltInvoiceGross,
+    payout.goodsGross + payout.servicesGross + payout.correctionsGross - invoiceSign * payout.woltInvoiceGross,
   );
 
   return {
