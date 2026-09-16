@@ -2,8 +2,9 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
-import { useState, useEffect } from 'react';
-import { ChevronDown, ChevronRight, Trash2, Pencil, X, Check, RotateCcw, AlertTriangle, Link2 } from 'lucide-react';
+import { useState, useCallback, useEffect } from 'react';
+import { ChevronDown, ChevronRight, Trash2, Pencil, X, Check, RotateCcw, AlertTriangle, Link2, Download, Loader2 } from 'lucide-react';
+import { buildInventoryCsv, inventoryCsvFilename } from '@/lib/inventory-export';
 import { useT } from '@/lib/i18n';
 
 type DataItem = { section: string; name: string; unit: string; quantity: number };
@@ -96,6 +97,57 @@ export default function CurrentInventoryPage() {
   const [confirmPermDeleteId, setConfirmPermDeleteId] = useState<string | null>(null);
   const [deleteError, setDeleteError]           = useState<string | null>(null);
   const [showTrash, setShowTrash]               = useState(false);
+  const [exporting, setExporting]               = useState(false);
+
+  /**
+   * Every report since the beginning, as one CSV — ignoring the filters on
+   * screen, since "all" should mean all. Fetched fresh rather than from the
+   * page's query, which is bounded by the date range and the row cap.
+   */
+  const exportAll = useCallback(async () => {
+    setExporting(true);
+    try {
+      type Row = Pick<SubmissionRow, 'id' | 'location_name' | 'submitted_at' | 'submitted_by' | 'data' | 'comment' | 'edited_at' | 'linked_delivery_date'> & { duration_seconds: number | null };
+      const rows: Row[] = [];
+      for (let pg = 0; ; pg++) {
+        const { data, error } = await supabase
+          .from('inventory_submissions')
+          .select('id, location_name, submitted_at, submitted_by, duration_seconds, data, comment, edited_at, linked_delivery_date')
+          .is('deleted_at', null)
+          .order('submitted_at')
+          .range(pg * 500, (pg + 1) * 500 - 1);
+        if (error) throw error;
+        if (!data?.length) break;
+        rows.push(...(data as Row[]));
+        if (data.length < 500) break;
+      }
+
+      const userIds = [...new Set(rows.map(r => r.submitted_by).filter(Boolean))] as string[];
+      const names: Record<string, string> = {};
+      if (userIds.length) {
+        const { data: profiles } = await supabase.from('profiles').select('id, full_name').in('id', userIds);
+        for (const pr of profiles ?? []) names[pr.id] = pr.full_name;
+      }
+
+      const csv = buildInventoryCsv(rows.map(r => ({
+        id: r.id, location_name: r.location_name, submitted_at: r.submitted_at,
+        submitterName: r.submitted_by ? (names[r.submitted_by] ?? 'Unknown') : 'Unknown',
+        duration_seconds: r.duration_seconds,
+        linked_delivery_date: r.linked_delivery_date, edited_at: r.edited_at, comment: r.comment,
+        data: r.data ?? [],
+      })));
+
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+      const url  = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = inventoryCsvFilename(); a.click();
+      URL.revokeObjectURL(url);
+    } catch (e: any) {
+      alert(`Export failed: ${e?.message ?? 'unknown error'}`);
+    } finally {
+      setExporting(false);
+    }
+  }, []);
   const [editingId, setEditingId]           = useState<string | null>(null);
   const [editDraft, setEditDraft]           = useState<Record<string, number>>({});
   const [editError, setEditError]           = useState<string | null>(null);
@@ -359,6 +411,16 @@ export default function CurrentInventoryPage() {
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold text-gray-900">{t('inventory.counts.title')}</h1>
         {isManager && (
+          <div className="flex items-center gap-2">
+          <button
+            onClick={exportAll}
+            disabled={exporting}
+            title="Every report since the start, one row per counted item — for Excel"
+            className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium border bg-white border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-60 transition-colors"
+          >
+            {exporting ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+            {exporting ? 'Exporting…' : 'Export All'}
+          </button>
           <button
             onClick={() => { setShowTrash(v => !v); setDeleteError(null); setConfirmPermDeleteId(null); }}
             className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors border ${
@@ -375,6 +437,7 @@ export default function CurrentInventoryPage() {
               </span>
             )}
           </button>
+          </div>
         )}
       </div>
 
