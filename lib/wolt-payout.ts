@@ -222,11 +222,14 @@ export function parseWoltFeeInvoice(text: string, ...others: (string | undefined
   while ((c = creditRe.exec(text)) !== null) {
     const monthIndex = MONTHS.indexOf(c[2].toLowerCase());
     if (monthIndex === -1) continue;
-    credits.push({
-      month: `${c[3]}-${String(monthIndex + 1).padStart(2, '0')}-01`,
-      label: `${c[1]} - ${c[2]} ${c[3]}`,
-      net:   Math.abs(parseGermanNumber(c[4])),
-    });
+    const month = `${c[3]}-${String(monthIndex + 1).padStart(2, '0')}-01`;
+    const label = `${c[1]} - ${c[2]} ${c[3]}`;
+    const net   = Math.abs(parseGermanNumber(c[4]));
+    // Wolt may list the same refund more than once on one invoice; it is
+    // stored as one credit per month and label, so the lines are combined.
+    const same = credits.find(x => x.month === month && x.label === label);
+    if (same) same.net = round2(same.net + net);
+    else credits.push({ month, label, net });
   }
 
   const restaurant = findRestaurant(text, ...others);
