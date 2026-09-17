@@ -13,6 +13,7 @@ import type { WoltInvoiceData } from '@/lib/wolt-invoice';
 import type { WoltShiftBreakdown } from '@/lib/wolt-sales-report';
 import type { WoltServicesData } from '@/lib/wolt-services';
 import type { WoltSetResult, WoltCoverageIssue } from '@/lib/wolt-set';
+import type { LieferandoSetResult } from '@/lib/lieferando-statement';
 
 /** What the Wolt purchases import reports back. */
 interface WoltPurchaseSummary {
@@ -928,8 +929,8 @@ export default function SalesReportsPage() {
    * Which numbered section of the daily P&L is on screen. They used to run one
    * under the other, which meant scrolling past a hundred rows to reach Wolt.
    */
-  const [plSection, setPlSection] = useState<'summary'|'orderbird'|'wolt'|'webshop'>('summary');
-  const [reportType,  setReportType]  = useState<'weekly'|'shift'|'monthly'|'manual'|'wolt'|'webshop'|'opentable'|'gdpdu'>('shift');
+  const [plSection, setPlSection] = useState<'summary'|'orderbird'|'wolt'|'webshop'|'lieferando'>('summary');
+  const [reportType,  setReportType]  = useState<'weekly'|'shift'|'monthly'|'manual'|'wolt'|'webshop'|'opentable'|'gdpdu'|'lieferando'>('shift');
 
   /* ── Webshop: one CSV export holding every order ── */
   const [webshopRows,    setWebshopRows]    = useState<Record<string, unknown>[]>([]);
@@ -962,6 +963,11 @@ export default function SalesReportsPage() {
   /** "3 of 12" while a folder of zips is being read. */
   const [woltProgress, setWoltProgress] = useState<{ done: number; total: number } | null>(null);
   const [woltSaved,   setWoltSaved]    = useState<number | null>(null);
+  // Lieferando — one statement PDF per week, read the same way
+  const [lfSets,    setLfSets]    = useState<LieferandoSetResult[]>([]);
+  const [lfError,   setLfError]   = useState<string | null>(null);
+  const [lfParsing, setLfParsing] = useState(false);
+  const [lfSaved,   setLfSaved]   = useState<number | null>(null);
   /* The purchases export — order items, uploaded through the same Wolt card. */
   const [woltItemRows,    setWoltItemRows]    = useState<Record<string, unknown>[]>([]);
   const [woltItemSummary, setWoltItemSummary] = useState<WoltPurchaseSummary | null>(null);
@@ -1203,6 +1209,23 @@ export default function SalesReportsPage() {
     },
   });
 
+  const { data: allLieferandoRows = [] } = useQuery({
+    queryKey: ['lieferando-shift-sales-all', location?.id],
+    enabled: monthlyTabOn,
+    queryFn: async () => {
+      const all: { sale_date: string; shift: 'lunch' | 'dinner'; net_final: number | null }[] = [];
+      for (let pg = 0; ; pg++) {
+        const { data } = await supabase.from('lieferando_shift_sales')
+          .select('sale_date,shift,net_final').eq('location_id', location!.id)
+          .order('sale_date').range(pg * 1000, (pg + 1) * 1000 - 1);
+        if (!data?.length) break;
+        all.push(...(data as typeof all));
+        if (data.length < 1000) break;
+      }
+      return all;
+    },
+  });
+
   const { data: allWoltCredits = [] } = useQuery({
     queryKey: ['wolt-month-credits-all', location?.id],
     enabled: monthlyTabOn,
@@ -1251,7 +1274,7 @@ export default function SalesReportsPage() {
    * their share of sales, exactly as the daily view does; the webshop counts
    * paid, completed orders; bills are event invoices not settled at the till.
    */
-  type ChannelSums = { orderbird: number; webshop: number; wolt: number; bills: number };
+  type ChannelSums = { orderbird: number; webshop: number; wolt: number; lieferando: number; bills: number };
   type MonthSummary = {
     lunch: ChannelSums; dinner: ChannelSums; day: ChannelSums;
     /** Days the till ran that shift — the denominator for net sales per shift. */
@@ -1259,7 +1282,7 @@ export default function SalesReportsPage() {
   };
   const monthlySummary = useMemo<Record<string, MonthSummary>>(() => {
     const out: Record<string, MonthSummary> = {};
-    const zero = (): ChannelSums => ({ orderbird: 0, webshop: 0, wolt: 0, bills: 0 });
+    const zero = (): ChannelSums => ({ orderbird: 0, webshop: 0, wolt: 0, lieferando: 0, bills: 0 });
     const at = (key: string) => out[key] ?? (out[key] = {
       lunch: zero(), dinner: zero(), day: zero(),
       shifts: { lunch: new Set(), dinner: new Set() },
@@ -1280,6 +1303,7 @@ export default function SalesReportsPage() {
     }
     for (const r of allWebshopRows) add(r.sale_date, r.shift, 'webshop', r.net_cents / 100);
     for (const r of allWoltRows)    add(r.sale_date, r.shift, 'wolt', Number(r.net_final ?? 0));
+    for (const r of allLieferandoRows) add(r.sale_date, r.shift, 'lieferando', Number(r.net_final ?? 0));
     for (const b of allOutgoingBills) if (b.event_date) add(b.event_date, b.shift_type, 'bills', Number(b.net_total ?? 0));
 
     // Wolt+ credits are income for the whole month, shared out by sales.
@@ -1296,7 +1320,7 @@ export default function SalesReportsPage() {
       }
     }
     return out;
-  }, [allShiftRows, allWebshopRows, allWoltRows, allWoltCredits, allOutgoingBills]);
+  }, [allShiftRows, allWebshopRows, allWoltRows, allLieferandoRows, allWoltCredits, allOutgoingBills]);
 
   const { data: allMonthlyReports = [] } = useQuery({
     queryKey: ['monthly-reports-all', location?.id],
@@ -1542,6 +1566,50 @@ export default function SalesReportsPage() {
 
     return { lunch, dinner, day };
   }, [woltShiftRows, woltCreditRows]);
+
+  // Lieferando sales, cut into days and shifts on import — same columns as Wolt
+  const { data: lieferandoShiftRows = [] } = useQuery({
+    queryKey: ['lieferando-shift-sales', 'pl', location?.id, year, quarter],
+    enabled: !!location,
+    queryFn: async () => {
+      const [firstM, , lastM] = QUARTER_MONTHS[quarter - 1];
+      const qStart = `${year}-${String(firstM).padStart(2,'0')}-01`;
+      const qEnd   = `${year}-${String(lastM).padStart(2,'0')}-${String(daysInMonth(year, lastM)).padStart(2,'0')}`;
+      let q = supabase
+        .from('lieferando_shift_sales')
+        .select('sale_date,shift,orders,net_sales,refund_est,commission,net_pre_ads,advertising_est,net_final')
+        .gte('sale_date', qStart)
+        .lte('sale_date', qEnd);
+      if (!isGroup) q = q.eq('location_id', location!.id);
+      const { data } = await q;
+      return (data ?? []) as WoltShiftRowDb[];
+    },
+  });
+
+  /** The Lieferando P&L lines, per shift — no monthly credits to spread here. */
+  const lieferandoMaps = useMemo(() => {
+    const empty = (): WoltLineMaps => ({
+      preRefunds: {}, refunds: {}, preCom: {}, commission: {},
+      preAds: {}, advertising: {}, net: {}, orders: {},
+    });
+    const lunch = empty(), dinner = empty(), day = empty();
+    const add = (m: WoltLineMaps, r: WoltShiftRowDb) => {
+      const k = r.sale_date;
+      m.preRefunds[k]  = (m.preRefunds[k]  ?? 0) + Number(r.net_sales);
+      m.refunds[k]     = (m.refunds[k]     ?? 0) - Number(r.refund_est);
+      m.preCom[k]      = (m.preCom[k]      ?? 0) + Number(r.net_sales) + Number(r.refund_est);
+      m.commission[k]  = (m.commission[k]  ?? 0) + Number(r.commission);
+      m.preAds[k]      = (m.preAds[k]      ?? 0) + Number(r.net_pre_ads);
+      m.advertising[k] = (m.advertising[k] ?? 0) + Number(r.advertising_est ?? 0);
+      m.net[k]         = (m.net[k]         ?? 0) + Number(r.net_final ?? 0);
+      m.orders[k]      = (m.orders[k]      ?? 0) + Number(r.orders ?? 0);
+    };
+    for (const r of lieferandoShiftRows) {
+      add(r.shift === 'lunch' ? lunch : dinner, r);
+      add(day, r);
+    }
+    return { lunch, dinner, day };
+  }, [lieferandoShiftRows]);
 
   // Closure days — fetch all for this location (across all years)
   const { data: closureDays = [], refetch: refetchClosures } = useQuery({
@@ -2485,6 +2553,113 @@ export default function SalesReportsPage() {
     }
   }, [woltItemRows, queryClient]);
 
+  /** Reads Lieferando statement PDFs, one request per file. */
+  const parseLieferandoFiles = useCallback(async (files: File[]) => {
+    const usable = files.filter(f => /\.(pdf|zip)$/i.test(f.name));
+    if (usable.length === 0) { setLfError('Drop the Lieferando statement PDFs (TAKEAWAY_EXPORT).'); return; }
+    setLfParsing(true); setLfError(null); setLfSets([]); setLfSaved(null);
+    const collected: LieferandoSetResult[] = [];
+    try {
+      for (const file of usable) {
+        const fd = new FormData();
+        fd.append('files', file);
+        try {
+          const res  = await fetch('/api/lieferando/extract', { method: 'POST', body: fd });
+          const json = await res.json();
+          if (!res.ok) collected.push({ source: file.name, warnings: [], error: json.error ?? 'Could not be read.' });
+          else collected.push(...(json.sets as LieferandoSetResult[]));
+        } catch (e) {
+          collected.push({ source: file.name, warnings: [], error: e instanceof Error ? e.message : 'Could not be read.' });
+        }
+        setLfSets([...collected].sort((x, y) => (x.data?.periodStart ?? '').localeCompare(y.data?.periodStart ?? '')));
+      }
+    } finally {
+      setLfParsing(false);
+    }
+  }, []);
+
+  const lfImportable = useMemo(() => lfSets.filter(s => !s.error && s.data && s.breakdown), [lfSets]);
+
+  /**
+   * Saves every statement that reconciled. The period is upserted on its
+   * invoice number; its orders and shift rows are rebuilt, not merged.
+   */
+  const handleImportLieferando = useCallback(async () => {
+    if (lfImportable.length === 0) return;
+    setImporting(true);
+    let saved = 0;
+    try {
+      for (const set of lfImportable) {
+        const locationId = set.locationId!;
+        const d = set.data!;
+        const { data: period, error } = await supabase.from('lieferando_periods').upsert({
+          location_id:     locationId,
+          invoice_number:  d.invoiceNumber,
+          invoice_date:    d.invoiceDate,
+          period_start:    d.periodStart,
+          period_end:      d.periodEnd,
+          restaurant:      d.restaurant,
+          customer_number: d.customerNumber,
+          order_count:      d.orderCount,
+          order_value_gross: d.orderValueGross,
+          net_sales_pre_commission: d.netSalesPreCommission,
+          vat_rate_assumed: d.vatRateAssumed,
+          service_fee_rate: d.serviceFeeRate,
+          service_fee:      d.serviceFee,
+          admin_fee:        d.adminFee,
+          top_rank:         d.topRank,
+          other_fees:       d.otherFees,
+          refunds:          d.refunds,
+          commission:       d.commission,
+          net_sales_pre_ads: d.netSalesPreAds,
+          advertising:      d.advertising,
+          net_sales_final:  d.netSalesFinal,
+          fees_net:         d.feesNet,
+          fees_vat:         d.feesVat,
+          invoice_gross:    d.invoiceGross,
+          tips:             d.tips,
+          payout:           d.payout,
+          check_ok:         d.checkOk,
+          source_file:      set.source,
+        }, { onConflict: 'location_id,invoice_number' }).select('id').single();
+        if (error || !period) { setLfError(`${set.source}: ${error?.message ?? 'not saved'}`); return; }
+
+        const { error: delOrders } = await supabase.from('lieferando_orders').delete().eq('period_id', period.id);
+        if (delOrders) { setLfError(`${set.source}: ${delOrders.message}`); return; }
+        const { error: insOrders } = await supabase.from('lieferando_orders').upsert(
+          d.orders.map(o => ({
+            period_id: period.id, location_id: locationId,
+            order_number: o.orderNumber, ordered_at: o.orderedAt, sale_date: o.saleDate,
+            shift: o.shift, gross: o.gross, tip: o.tip, online_paid: o.onlinePaid,
+          })),
+          { onConflict: 'location_id,order_number' },
+        );
+        if (insOrders) { setLfError(`${set.source}: ${insOrders.message}`); return; }
+
+        const { error: delRows } = await supabase.from('lieferando_shift_sales').delete().eq('period_id', period.id);
+        if (delRows) { setLfError(`${set.source}: ${delRows.message}`); return; }
+        const { error: insRows } = await supabase.from('lieferando_shift_sales').upsert(
+          set.breakdown!.map(r => ({
+            period_id: period.id, location_id: locationId,
+            sale_date: r.date, shift: r.shift, orders: r.orders, gross: r.gross,
+            net_sales: r.netSales, refund_est: r.refundEst, commission: r.commission,
+            net_pre_ads: r.netPreAds, advertising_est: r.advertisingEst, net_final: r.netFinal,
+          })),
+          { onConflict: 'location_id,sale_date,shift' },
+        );
+        if (insRows) { setLfError(`${set.source}: ${insRows.message}`); return; }
+        saved += 1;
+      }
+      setLfSets([]); setLfSaved(saved);
+      queryClient.invalidateQueries({ queryKey: ['lieferando-periods'] });
+      queryClient.invalidateQueries({ queryKey: ['lieferando-shift-sales'] });
+      queryClient.invalidateQueries({ queryKey: ['lieferando-shift-sales-all'] });
+      queryClient.invalidateQueries({ queryKey: ['lieferando-orders'] });
+    } finally {
+      setImporting(false);
+    }
+  }, [lfImportable, queryClient]);
+
   const handleWoltFiles = useCallback((files: File[]) => {
     // A CSV in this card is the purchases export; zips and PDFs are the
     // five-day document sets. Same channel, so one drop zone serves both.
@@ -2815,6 +2990,7 @@ export default function SalesReportsPage() {
     setMonthlyResult(null); setParseError(null); setWeeklyPage(0);
     setWoltSets([]); setWoltError(null); setWoltSaved(null);
     setWoltItemRows([]); setWoltItemSummary(null); setWoltItemsSaved(null);
+    setLfSets([]); setLfError(null); setLfSaved(null);
     setWebshopRows([]); setWebshopSummary(null); setWebshopError(null); setWebshopSaved(null);
     setOtRows([]); setOtSummary(null); setOtError(null); setOtSaved(null);
     setGdShifts([]); setGdSummary(null); setGdError(null); setGdSaved(null); setGdExisting(null);
@@ -3423,6 +3599,7 @@ export default function SalesReportsPage() {
                   ['orderbird', '2) Orderbird'],
                   ['wolt',      '3) Wolt'],
                   ['webshop',   '4) Webshop'],
+                  ['lieferando', '5) Lieferando'],
                 ] as const).filter(([key]) => !isGroup || key === 'summary').map(([key, label]) => (
                   <button key={key} onClick={() => setPlSection(key)}
                     className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors ${
@@ -3478,6 +3655,7 @@ export default function SalesReportsPage() {
               ['monthly',  '📅', 'Monthly Report',  'Full-month Z-report aggregate'],
               ['weekly',   '📋', 'Weekly Report',   'KW report covering a full week'],
               ['wolt',     '🛵', 'Wolt Report',     '5-day PDF set, or the purchases export (CSV)'],
+              ['lieferando','🍕', 'Lieferando',      'Weekly statement PDF (TAKEAWAY_EXPORT)'],
               ['webshop',  '🛒', 'Webshop',         'Order export from our own webshop (CSV)'],
               ['opentable','📅', 'OpenTable',       'GuestCenter reservation export (CSV)'],
               ['gdpdu',    '🗄', 'Orderbird archive','GDPdU tax export (ZIP) — rebuilds historic shifts'],
@@ -3621,7 +3799,7 @@ export default function SalesReportsPage() {
               )}
 
               {/* Drop zone */}
-              {reportType !== 'manual' && reportType !== 'wolt' && reportType !== 'webshop' && reportType !== 'opentable' && reportType !== 'gdpdu' && <div>
+              {reportType !== 'manual' && reportType !== 'wolt' && reportType !== 'lieferando' && reportType !== 'webshop' && reportType !== 'opentable' && reportType !== 'gdpdu' && <div>
                 <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">
                   { `Orderbird Z-Report CSV — ${reportType === 'shift' ? 'Shift' : reportType === 'monthly' ? 'Monthly' : 'Weekly'}`}
                 </label>
@@ -3813,6 +3991,72 @@ export default function SalesReportsPage() {
                     {importing                     ? 'Saving…'
                       : woltImportable.length === 0 ? 'Drop the Wolt files above'
                       : `Save ${woltImportable.length} period${woltImportable.length === 1 ? '' : 's'}`}
+                  </button>
+                </div>
+              )}
+
+              {/* ── Lieferando: the weekly statement ── */}
+              {reportType === 'lieferando' && (
+                <div>
+                  <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">
+                    Lieferando statements (PDF)
+                  </label>
+                  <div
+                    onDragOver={e => { e.preventDefault(); setIsDragging(true); }}
+                    onDragLeave={() => setIsDragging(false)}
+                    onDrop={e => { e.preventDefault(); setIsDragging(false); void parseLieferandoFiles(Array.from(e.dataTransfer.files)); }}
+                    className={`border-2 border-dashed rounded-xl p-6 text-center transition-colors ${
+                      isDragging ? 'border-[#1B5E20] bg-green-50'
+                      : lfError ? 'border-red-300 bg-red-50'
+                      : lfSets.length > 0 ? 'border-green-400 bg-green-50'
+                      : 'border-gray-200 bg-white'
+                    }`}
+                  >
+                    {lfParsing
+                      ? <Loader2 size={26} className="mx-auto mb-2 animate-spin text-[#1B5E20]" />
+                      : <Upload size={26} className={`mx-auto mb-2 ${lfSets.length > 0 ? 'text-[#1B5E20]' : 'text-gray-300'}`} />}
+                    <p className={`text-sm font-semibold mb-1 ${lfSets.length > 0 ? 'text-green-700' : 'text-gray-600'}`}>
+                      {lfParsing ? 'Reading the statements…'
+                        : lfSets.length > 0 ? `${lfSets.length} week${lfSets.length === 1 ? '' : 's'} read`
+                        : 'Drop the Lieferando statements here'}
+                    </p>
+                    <p className="text-xs text-gray-400 mb-3">
+                      One PDF per week — the TAKEAWAY_EXPORT file, as many at once as you like
+                    </p>
+                    <input type="file" accept=".pdf,.zip,application/pdf,application/zip" multiple id="lieferando-file-input" className="hidden"
+                      onChange={e => { void parseLieferandoFiles(Array.from(e.target.files ?? [])); e.target.value = ''; }} />
+                    <label htmlFor="lieferando-file-input"
+                      className="inline-block px-4 py-2 bg-white border border-gray-200 rounded-lg text-xs font-semibold text-gray-600 hover:bg-gray-50 cursor-pointer">
+                      Browse files
+                    </label>
+                  </div>
+
+                  {lfError && (
+                    <div className="mt-2 flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded-lg">
+                      <AlertCircle size={15} className="text-red-500 flex-shrink-0 mt-0.5" />
+                      <p className="text-xs text-red-700">{lfError}</p>
+                    </div>
+                  )}
+                  {lfSaved !== null && (
+                    <div className="mt-2 flex items-start gap-2 p-3 bg-green-50 border border-green-200 rounded-lg">
+                      <FileCheck size={15} className="text-green-600 flex-shrink-0 mt-0.5" />
+                      <p className="text-xs text-green-800">{lfSaved} week{lfSaved === 1 ? '' : 's'} saved.</p>
+                    </div>
+                  )}
+
+                  <button
+                    onClick={handleImportLieferando}
+                    disabled={lfImportable.length === 0 || importing}
+                    className={`mt-3 w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-bold transition-colors ${
+                      lfImportable.length > 0 && !importing
+                        ? 'bg-[#1B5E20] text-white hover:bg-[#2E7D32]'
+                        : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                    }`}
+                  >
+                    {importing ? <Loader2 size={16} className="animate-spin" /> : <DatabaseZap size={16} />}
+                    {importing ? 'Saving…'
+                      : lfImportable.length === 0 ? 'Drop the Lieferando statements above'
+                      : `Save ${lfImportable.length} week${lfImportable.length === 1 ? '' : 's'}`}
                   </button>
                 </div>
               )}
@@ -4727,6 +4971,88 @@ export default function SalesReportsPage() {
                 </div>
               ))}
 
+              {/* ── Lieferando preview ── */}
+              {reportType === 'lieferando' && (lfSets.length > 0 ? (
+                <div className="space-y-4">
+                  <div className="bg-white border border-gray-100 rounded-xl shadow-sm overflow-hidden">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="bg-gray-50 border-b border-gray-100 text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+                          <th className="px-4 py-2 text-left">Week</th>
+                          <th className="px-2 py-2 text-left">Location</th>
+                          <th className="px-2 py-2 text-right">Orders</th>
+                          <th className="px-2 py-2 text-right">Net sales · pre com, Ads</th>
+                          <th className="px-2 py-2 text-right">Commission</th>
+                          <th className="px-2 py-2 text-right">Advertising</th>
+                          <th className="px-2 py-2 text-right">Net sales</th>
+                          <th className="px-4 py-2 text-right">Paid out</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {lfSets.map((set, i) => (
+                          <Fragment key={`${set.source}-${i}`}>
+                            <tr className={`border-b border-gray-50 ${set.error ? 'bg-red-50/60' : ''}`}>
+                              <td className="px-4 py-2 whitespace-nowrap font-semibold text-gray-800">
+                                {set.data
+                                  ? <>{toDe(set.data.periodStart)} – {toDe(set.data.periodEnd)}</>
+                                  : <span className="text-gray-400">{set.source}</span>}
+                              </td>
+                              <td className="px-2 py-2 whitespace-nowrap text-gray-500">
+                                {set.locationName ?? <span className="text-gray-300">—</span>}
+                              </td>
+                              {set.error || !set.data ? (
+                                <td colSpan={6} className="px-2 py-2 text-red-700">{set.error ?? 'Could not be read.'}</td>
+                              ) : (
+                                <>
+                                  <td className="px-2 py-2 text-right tabular-nums text-gray-400">{set.data.orderCount}</td>
+                                  <td className="px-2 py-2 text-right tabular-nums text-gray-700">{fmt(set.data.netSalesPreCommission - set.data.refunds)}</td>
+                                  <td className="px-2 py-2 text-right tabular-nums text-gray-500">−{fmt(set.data.commission)}</td>
+                                  <td className="px-2 py-2 text-right tabular-nums text-gray-500">−{fmt(set.data.advertising)}</td>
+                                  <td className="px-2 py-2 text-right tabular-nums font-bold text-gray-900">{fmt(set.data.netSalesFinal)}</td>
+                                  <td className="px-4 py-2 text-right tabular-nums text-blue-700">
+                                    {set.data.payout != null ? fmt(set.data.payout) : '—'}
+                                  </td>
+                                </>
+                              )}
+                            </tr>
+                            {set.warnings.length > 0 && (
+                              <tr className="border-b border-gray-50">
+                                <td colSpan={8} className="px-4 py-1 text-[11px] text-amber-700 bg-amber-50/50">
+                                  {set.warnings.join(' · ')}
+                                </td>
+                              </tr>
+                            )}
+                          </Fragment>
+                        ))}
+                      </tbody>
+                      {lfImportable.length > 0 && (
+                        <tfoot>
+                          <tr className="bg-gray-50 font-bold text-gray-900 border-t border-gray-200">
+                            <td className="px-4 py-2" colSpan={2}>{lfImportable.length} week{lfImportable.length === 1 ? '' : 's'} ready</td>
+                            <td className="px-2 py-2 text-right tabular-nums">{lfImportable.reduce((t, x) => t + x.data!.orderCount, 0)}</td>
+                            <td className="px-2 py-2 text-right tabular-nums">{fmt(lfImportable.reduce((t, x) => t + x.data!.netSalesPreCommission - x.data!.refunds, 0))}</td>
+                            <td className="px-2 py-2 text-right tabular-nums">−{fmt(lfImportable.reduce((t, x) => t + x.data!.commission, 0))}</td>
+                            <td className="px-2 py-2 text-right tabular-nums">−{fmt(lfImportable.reduce((t, x) => t + x.data!.advertising, 0))}</td>
+                            <td className="px-2 py-2 text-right tabular-nums">{fmt(lfImportable.reduce((t, x) => t + x.data!.netSalesFinal, 0))}</td>
+                            <td className="px-4 py-2 text-right tabular-nums text-blue-700">{fmt(lfImportable.reduce((t, x) => t + (x.data!.payout ?? 0), 0))}</td>
+                          </tr>
+                        </tfoot>
+                      )}
+                    </table>
+                  </div>
+                  <p className="text-xs text-gray-400">
+                    Net sales take the order value at 7% VAT — Lieferando states no VAT split. Commission is the
+                    14% service fee plus the per-order admin fee; TopRank is advertising. Each week is checked
+                    before it can be saved: order value plus tips less Lieferando&apos;s invoice must equal the payout.
+                  </p>
+                </div>
+              ) : !lfError && (
+                <div className="flex flex-col items-center justify-center h-64 border-2 border-dashed border-gray-200 rounded-xl gap-3">
+                  <Upload size={40} className="text-gray-200" />
+                  <p className="text-sm text-gray-400">Drop the Lieferando statements to preview every week</p>
+                </div>
+              ))}
+
               {/* ── Webshop preview ── */}
               {reportType === 'webshop' && (webshopSummary ? (
                 <div className="bg-white border border-gray-100 rounded-xl shadow-sm overflow-hidden">
@@ -4768,7 +5094,7 @@ export default function SalesReportsPage() {
               ))}
 
               {/* Empty state */}
-              {reportType !== 'wolt' && reportType !== 'webshop' && reportType !== 'opentable' && reportType !== 'gdpdu' && !weeklyResult && shiftBatch.length === 0 && !monthlyResult && !parseError && (
+              {reportType !== 'wolt' && reportType !== 'lieferando' && reportType !== 'webshop' && reportType !== 'opentable' && reportType !== 'gdpdu' && !weeklyResult && shiftBatch.length === 0 && !monthlyResult && !parseError && (
                 <div className="flex flex-col items-center justify-center h-64 border-2 border-dashed border-gray-200 rounded-xl gap-3">
                   <Upload size={40} className="text-gray-200" />
                   <p className="text-sm text-gray-400">
@@ -5003,10 +5329,10 @@ export default function SalesReportsPage() {
             return out;
           };
 
-          const WOLT_BLOCKS: [string, string, keyof typeof woltMaps][] = [
-            ['wolt-lunch',  'Wolt · Lunch',   'lunch'],
-            ['wolt-dinner', 'Wolt · Dinner',  'dinner'],
-            ['wolt-day',    'Wolt · All day', 'day'],
+          const platformBlocks = (prefix: string, name: string): [string, string, keyof typeof woltMaps][] => [
+            [`${prefix}-lunch`,  `${name} · Lunch`,   'lunch'],
+            [`${prefix}-dinner`, `${name} · Dinner`,  'dinner'],
+            [`${prefix}-day`,    `${name} · All day`, 'day'],
           ];
 
           // label, bold, which line of woltMaps it reads, whether it is a deduction
@@ -5255,36 +5581,37 @@ export default function SalesReportsPage() {
             </>
           );
 
-          const woltTbody = () => (
+          /** The same seven lines and ratios for any delivery platform. */
+          const platformTbody = (banner: string, blocks: ReturnType<typeof platformBlocks>, maps: typeof woltMaps) => (
             <tbody>
-              {sectionBannerRow('3) Wolt')}
-              {WOLT_BLOCKS.map(([blockKey, blockLabel, blockShift], bi) => (
+              {sectionBannerRow(banner)}
+              {blocks.map(([blockKey, blockLabel, blockShift], bi) => (
                 <Fragment key={blockKey}>
                   {bi > 0 && <tr><td colSpan={totalCols} style={{ height: 10, backgroundColor: '#f9fafb' }} /></tr>}
                   <tr className="border-b border-gray-200 hover:bg-gray-50/60 group" style={{ backgroundColor: '#eef2ff' }}>
                     <td className="sticky left-0 z-10 px-4 py-1.5 whitespace-nowrap border-r border-gray-100 bg-[#eef2ff] group-hover:bg-gray-50 transition-colors text-xs font-bold text-gray-800">{blockLabel}</td>
                     {woltEmptyCells()}
                   </tr>
-                  {woltCountRow(`${blockKey}-orders`, '# Orders', woltMaps[blockShift].orders)}
+                  {woltCountRow(`${blockKey}-orders`, '# Orders', maps[blockShift].orders)}
                   {woltRatioRow(`${blockKey}-per-order`, 'Net sales / order',
-                    woltMaps[blockShift].preRefunds, woltMaps[blockShift].orders)}
+                    maps[blockShift].preRefunds, maps[blockShift].orders)}
                   {WOLT_ROWS.map(([label, bold, line, deduction]) => (
-                    woltLineRow(`${blockKey}-${line}`, label, woltMaps[blockShift][line], { bold, deduction })
+                    woltLineRow(`${blockKey}-${line}`, label, maps[blockShift][line], { bold, deduction })
                   ))}
                   <tr key={`${blockKey}-gap`}><td colSpan={totalCols} style={{ height: 6, backgroundColor: '#ffffff' }} /></tr>
                   {woltPercentRow(`${blockKey}-ref-pct`, 'Refunds as % of sales',
-                    woltMaps[blockShift].refunds, woltMaps[blockShift].preRefunds)}
+                    maps[blockShift].refunds, maps[blockShift].preRefunds)}
                   {woltPercentRow(`${blockKey}-com-pct`, 'Commission as % of sales',
-                    woltMaps[blockShift].commission, woltMaps[blockShift].preRefunds)}
+                    maps[blockShift].commission, maps[blockShift].preRefunds)}
                   {woltPercentRow(`${blockKey}-ads-pct`, 'Advertising as % of sales',
-                    woltMaps[blockShift].advertising, woltMaps[blockShift].preRefunds)}
+                    maps[blockShift].advertising, maps[blockShift].preRefunds)}
                   {woltPercentRow(`${blockKey}-total-pct`, 'Total cost (%)',
                     sumMaps(
-                      woltMaps[blockShift].refunds,
-                      woltMaps[blockShift].commission,
-                      woltMaps[blockShift].advertising,
+                      maps[blockShift].refunds,
+                      maps[blockShift].commission,
+                      maps[blockShift].advertising,
                     ),
-                    woltMaps[blockShift].preRefunds,
+                    maps[blockShift].preRefunds,
                     { bold: true })}
                 </Fragment>
               ))}
@@ -5762,7 +6089,7 @@ export default function SalesReportsPage() {
                       const netSalesTotalMap = (
                         posMap: typeof lunchMap, fcastMap: Record<string, number>,
                         webshopNet: Record<string, number>, woltNet: Record<string, number>,
-                        billsMap: Record<string, number>,
+                        billsMap: Record<string, number>, lieferandoNet: Record<string, number> = {},
                       ) => {
                         const m: Record<string, number> = {};
                         for (const col of dailyCols) {
@@ -5772,7 +6099,7 @@ export default function SalesReportsPage() {
                           const orderbird = actual > 0
                             ? actual
                             : (k >= todayKey ? (fcastMap[k] ?? 0) : 0);
-                          const total = orderbird + (webshopNet[k] ?? 0) + (woltNet[k] ?? 0) + (billsMap[k] ?? 0);
+                          const total = orderbird + (webshopNet[k] ?? 0) + (woltNet[k] ?? 0) + (lieferandoNet[k] ?? 0) + (billsMap[k] ?? 0);
                           if (total !== 0) m[k] = total;
                         }
                         return m;
@@ -5820,9 +6147,6 @@ export default function SalesReportsPage() {
                       // not in this placeholder list — see the render block below.
                       // Orderbird is rendered by posRow (live POS data), so it is not in this
                       // placeholder list — see the render block below.
-                      // Webshop and Wolt both render from their own figures now.
-                      const NET_SALES_AFTER_WOLT = ['Lieferando'];
-
                       const NET_SALES_AFTER_BILLS  = ['Too Good To Go'];
 
                       // Lunch + Dinner per date, for the all-day block.
@@ -6044,31 +6368,31 @@ export default function SalesReportsPage() {
                           {posRow('Orderbird', lunchMap, lunchForecastMap, lunchQtrTotal, 'lunch', true)}
                           {netSalesValueRow('Webshop', webshopMaps.lunch.net, 'lunch')}
                           {netSalesValueRow('Wolt', woltMaps.lunch.net, 'lunch')}
-                          {NET_SALES_AFTER_WOLT.map(src => netSalesSourceRow(src, 'lunch'))}
+                          {netSalesValueRow('Lieferando', lieferandoMaps.lunch.net, 'lunch')}
                           {billsRow('Bills', billsLunchMap, 'lunch', true)}
                           {NET_SALES_AFTER_BILLS.map(src => netSalesSourceRow(src, 'lunch'))}
                           {netSalesTotalRow('total-net-sales-lunch', 'Total net sales · Lunch',
-                            netSalesTotalMap(lunchMap, lunchForecastMap, webshopMaps.lunch.net, woltMaps.lunch.net, billsLunchMap), 'lunch')}
+                            netSalesTotalMap(lunchMap, lunchForecastMap, webshopMaps.lunch.net, woltMaps.lunch.net, billsLunchMap, lieferandoMaps.lunch.net), 'lunch')}
                           {netSalesSpacerRow('net-sales-gap')}
                           {netSalesHeaderRow('Net sales · Dinner', 'dinner')}
                           {posRow('Orderbird', dinnerMap, dinnerForecastMap, dinnerQtrTotal, 'dinner', true)}
                           {netSalesValueRow('Webshop', webshopMaps.dinner.net, 'dinner')}
                           {netSalesValueRow('Wolt', woltMaps.dinner.net, 'dinner')}
-                          {NET_SALES_AFTER_WOLT.map(src => netSalesSourceRow(src, 'dinner'))}
+                          {netSalesValueRow('Lieferando', lieferandoMaps.dinner.net, 'dinner')}
                           {billsRow('Bills', billsDinnerMap, 'dinner', true)}
                           {NET_SALES_AFTER_BILLS.map(src => netSalesSourceRow(src, 'dinner'))}
                           {netSalesTotalRow('total-net-sales-dinner', 'Total net sales · Dinner',
-                            netSalesTotalMap(dinnerMap, dinnerForecastMap, webshopMaps.dinner.net, woltMaps.dinner.net, billsDinnerMap), 'dinner')}
+                            netSalesTotalMap(dinnerMap, dinnerForecastMap, webshopMaps.dinner.net, woltMaps.dinner.net, billsDinnerMap, lieferandoMaps.dinner.net), 'dinner')}
                           {netSalesSpacerRow('net-sales-gap-2')}
                           {netSalesHeaderRow('Net sales · Day')}
                           {posRow('Orderbird', orderbirdDayMap, orderbirdDayForecast, orderbirdDayQtr, undefined, true)}
                           {netSalesValueRow('Webshop', webshopMaps.day.net)}
                           {netSalesValueRow('Wolt', woltMaps.day.net)}
-                          {NET_SALES_AFTER_WOLT.map(src => netSalesSourceRow(src))}
+                          {netSalesValueRow('Lieferando', lieferandoMaps.day.net)}
                           {billsRow('Bills', billsDayMap, undefined, true)}
                           {NET_SALES_AFTER_BILLS.map(src => netSalesSourceRow(src))}
                           {netSalesTotalRow('total-net-sales-day', 'Total net sales · All day',
-                            netSalesTotalMap(orderbirdDayMap, orderbirdDayForecast, webshopMaps.day.net, woltMaps.day.net, billsDayMap))}
+                            netSalesTotalMap(orderbirdDayMap, orderbirdDayForecast, webshopMaps.day.net, woltMaps.day.net, billsDayMap, lieferandoMaps.day.net))}
                           {netSalesSpacerRow('net-sales-gap-3')}
                           </>}
 
@@ -6105,7 +6429,8 @@ export default function SalesReportsPage() {
                     </>
                   )}
 
-                  {plSection === 'wolt'    && woltTbody()}
+                  {plSection === 'wolt'       && platformTbody('3) Wolt', platformBlocks('wolt', 'Wolt'), woltMaps)}
+                  {plSection === 'lieferando' && platformTbody('5) Lieferando', platformBlocks('lieferando', 'Lieferando'), lieferandoMaps)}
                   {plSection === 'webshop' && webshopTbody()}
                 </table>
               </div>
@@ -6757,14 +7082,14 @@ export default function SalesReportsPage() {
                     </thead>
                     {/* ── 1) Summary — the daily net-sales blocks, by month ── */}
                     {(() => {
-                      type Ch = 'orderbird' | 'webshop' | 'wolt' | 'bills';
+                      type Ch = 'orderbird' | 'webshop' | 'wolt' | 'lieferando' | 'bills';
                       type Sh = 'lunch' | 'dinner' | 'day';
                       const cell = (mk: string, sh: Sh, ch: Ch) => monthlySummary[mk]?.[sh][ch] ?? 0;
                       const fyCell = (y: number, sh: Sh, ch: Ch) =>
                         Object.entries(monthlySummary).filter(([k]) => k.startsWith(`${y}-`))
                           .reduce((t, [, m]) => t + m[sh][ch], 0);
-                      const totalOf = (sums: { orderbird: number; webshop: number; wolt: number; bills: number }) =>
-                        sums.orderbird + sums.webshop + sums.wolt + sums.bills;
+                      const totalOf = (sums: { orderbird: number; webshop: number; wolt: number; lieferando: number; bills: number }) =>
+                        sums.orderbird + sums.webshop + sums.wolt + sums.lieferando + sums.bills;
                       const cellTotal = (mk: string, sh: Sh) => monthlySummary[mk] ? totalOf(monthlySummary[mk][sh]) : 0;
                       const fyTotal   = (y: number, sh: Sh) =>
                         Object.entries(monthlySummary).filter(([k]) => k.startsWith(`${y}-`))
@@ -6830,7 +7155,7 @@ export default function SalesReportsPage() {
                         line(`${sh}-ob`,   'Orderbird', mk => cell(mk, sh, 'orderbird'), y => fyCell(y, sh, 'orderbird')),
                         line(`${sh}-ws`,   'Webshop',   mk => cell(mk, sh, 'webshop'),   y => fyCell(y, sh, 'webshop')),
                         line(`${sh}-wo`,   'Wolt',      mk => cell(mk, sh, 'wolt'),      y => fyCell(y, sh, 'wolt')),
-                        line(`${sh}-li`,   'Lieferando', () => 0, () => 0, { placeholder: true }),
+                        line(`${sh}-li`,   'Lieferando', mk => cell(mk, sh, 'lieferando'), y => fyCell(y, sh, 'lieferando')),
                         line(`${sh}-bi`,   'Bills',     mk => cell(mk, sh, 'bills'),     y => fyCell(y, sh, 'bills')),
                         line(`${sh}-tg`,   'Too Good To Go', () => 0, () => 0, { placeholder: true }),
                         line(`${sh}-tot`,  totalLabel, mk => cellTotal(mk, sh), y => fyTotal(y, sh), { total: true }),
