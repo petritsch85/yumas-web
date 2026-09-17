@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase-admin';
 
 type WoltMatch = {
+  /** Which delivery platform's settlement the payout ties to. */
+  platform:       'wolt' | 'lieferando';
   txId:           string;
   txDate:         string;
   txCounterparty: string;
@@ -206,6 +208,7 @@ export async function POST(req: NextRequest) {
       const payout = best.payout_net != null ? Number(best.payout_net) : Number(best.reported_endbetrag);
 
       woltMatches.push({
+        platform: 'wolt',
         txId: tx.id, txDate: tx.date, txCounterparty: tx.counterparty, txAmountCents: tx.amount_cents,
         periodId: best.id, invoiceNumber: best.invoice_number, restaurant: best.restaurant,
         periodStart: best.period_start, periodEnd: best.period_end, payout,
@@ -217,7 +220,64 @@ export async function POST(req: NextRequest) {
     // The Wolt columns may not exist before the migration; bill matching stands alone.
   }
 
-  if (!apply) return NextResponse.json({ matches, woltMatches });
+  /* ── Lieferando payouts, the same way ──
+     The weekly statement carries the Auszahlung. Lieferando does not pay out
+     every week: a transfer can settle several weeks, and its amount is stated
+     on the last of them, so that is the week the transaction links to. */
+  const lieferandoMatches: WoltMatch[] = [];
+  try {
+    const inTxs = await fetchAll((page, size) =>
+      admin.from('cashflow_transactions')
+        .select('id, date, counterparty, amount_cents, direction')
+        .is('lieferando_period_id', null)
+        .eq('direction', 'in')
+        // The bank names the payer Takeaway.com / Stichting Derdengelden, not Lieferando.
+        .or('counterparty.ilike.%lieferando%,counterparty.ilike.%yourdelivery%,counterparty.ilike.%takeaway%,counterparty.ilike.%derdengelden%')
+        .order('date', { ascending: false })
+        .range(page * size, (page + 1) * size - 1)
+    );
+    const periods = await fetchAll((page, size) =>
+      admin.from('lieferando_periods')
+        .select('id, invoice_number, restaurant, period_start, period_end, payout')
+        .not('payout', 'is', null)
+        .range(page * size, (page + 1) * size - 1)
+    );
+    const takenRows = await fetchAll((page, size) =>
+      admin.from('cashflow_transactions')
+        .select('lieferando_period_id')
+        .not('lieferando_period_id', 'is', null)
+        .range(page * size, (page + 1) * size - 1)
+    );
+    const taken = new Set(takenRows.map(r => r.lieferando_period_id as string));
+    const usedPeriods = new Set<string>();
+
+    for (const tx of inTxs) {
+      const amt = tx.amount_cents / 100;
+      const txTime = new Date(tx.date).getTime();
+      const candidates = periods.filter(p => {
+        if (taken.has(p.id) || usedPeriods.has(p.id)) return false;
+        if (Math.abs(Number(p.payout) - amt) > 0.005) return false;
+        // The statement is dated the Sunday after the week; the transfer follows within days.
+        const days = (txTime - new Date(p.period_end).getTime()) / 86400000;
+        return days >= -1 && days <= 21;
+      });
+      if (candidates.length === 0) continue;
+      const best = candidates.reduce((a, b) =>
+        Math.abs(txTime - new Date(a.period_end).getTime()) <= Math.abs(txTime - new Date(b.period_end).getTime()) ? a : b);
+      lieferandoMatches.push({
+        platform: 'lieferando',
+        txId: tx.id, txDate: tx.date, txCounterparty: tx.counterparty, txAmountCents: tx.amount_cents,
+        periodId: best.id, invoiceNumber: best.invoice_number, restaurant: best.restaurant,
+        periodStart: best.period_start, periodEnd: best.period_end, payout: Number(best.payout),
+        daysDiff: Math.round((txTime - new Date(best.period_end).getTime()) / 86400000),
+      });
+      usedPeriods.add(best.id);
+    }
+  } catch {
+    // Before the migration the column is missing; the other matches stand alone.
+  }
+
+  if (!apply) return NextResponse.json({ matches, woltMatches: [...woltMatches, ...lieferandoMatches] });
 
   // 5. Apply matches
   const errors: string[] = [];
@@ -236,6 +296,13 @@ export async function POST(req: NextRequest) {
       .eq('id', w.txId);
     if (error) errors.push(error.message);
   }
+  for (const l of lieferandoMatches) {
+    const { error } = await admin
+      .from('cashflow_transactions')
+      .update({ lieferando_period_id: l.periodId })
+      .eq('id', l.txId);
+    if (error) errors.push(error.message);
+  }
 
-  return NextResponse.json({ applied: matches.length, appliedWolt: woltMatches.length, errors });
+  return NextResponse.json({ applied: matches.length, appliedWolt: woltMatches.length + lieferandoMatches.length, errors });
 }

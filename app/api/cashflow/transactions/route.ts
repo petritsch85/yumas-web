@@ -23,7 +23,7 @@ export async function GET(req: NextRequest) {
     // wolt_period stands in for a bill on a Wolt payout: the settlement
     // documents in Sales Reports are the evidence, and Wolt issues no invoice
     // that would ever be filed under incoming bills.
-    .select('*, bill:bills(id, supplier_name, invoice_number, gross_amount, net_amount, vat_amount, file_path), transaction_bill_links(id, note, bill:bills(id, supplier_name, invoice_number, gross_amount, net_amount, vat_amount)), wolt_period:wolt_periods(invoice_number, restaurant, period_start, period_end, payout_net, net_sales_pre_ads, sales_vat)', { count: 'exact' })
+    .select('*, bill:bills(id, supplier_name, invoice_number, gross_amount, net_amount, vat_amount, file_path), transaction_bill_links(id, note, bill:bills(id, supplier_name, invoice_number, gross_amount, net_amount, vat_amount)), wolt_period:wolt_periods(invoice_number, restaurant, period_start, period_end, payout_net, net_sales_pre_ads, sales_vat), lieferando_period:lieferando_periods(id, location_id, invoice_number, restaurant, period_start, period_end, payout)', { count: 'exact' })
     .order('date', { ascending: false })
     .order('created_at', { ascending: false })
     .range((page - 1) * pageSize, page * pageSize - 1);
@@ -61,6 +61,32 @@ export async function GET(req: NextRequest) {
 
   const { data, count, error } = await q;
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  /* A Lieferando transfer can settle several weeks: the statement that carries
+     the Auszahlung is linked, and every earlier week without a payout of its
+     own belongs to the same transfer. Their sales are summed so the ledger
+     shows the revenue the payout represents, as it does for Wolt. */
+  const lfTxs = (data ?? []).filter((t: any) => t.lieferando_period);
+  if (lfTxs.length) {
+    const { data: weeks } = await admin
+      .from('lieferando_periods')
+      .select('id, location_id, period_start, period_end, payout, net_sales_pre_ads, order_value_gross, net_sales_pre_commission')
+      .order('period_start');
+    const byLoc = new Map<string, any[]>();
+    for (const w of weeks ?? []) byLoc.set(w.location_id, [...(byLoc.get(w.location_id) ?? []), w]);
+    for (const t of lfTxs) {
+      const lp = t.lieferando_period;
+      const list = byLoc.get(lp.location_id) ?? [];
+      const i = list.findIndex(w => w.id === lp.id);
+      const covered = i < 0 ? [] : [list[i]];
+      for (let j = i - 1; j >= 0 && list[j].payout == null; j--) covered.unshift(list[j]);
+      lp.weeks = covered.length;
+      lp.from  = covered[0]?.period_start ?? lp.period_start;
+      lp.to    = lp.period_end;
+      lp.net_sales_pre_ads = covered.reduce((s, w) => s + Number(w.net_sales_pre_ads), 0);
+      lp.sales_vat = covered.reduce((s, w) => s + Number(w.order_value_gross) - Number(w.net_sales_pre_commission), 0);
+    }
+  }
 
   return NextResponse.json({ data: data ?? [], count: count ?? 0, page, pageSize });
 }

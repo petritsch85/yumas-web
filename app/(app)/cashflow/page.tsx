@@ -54,6 +54,15 @@ type CfTx = {
     /** Our net sales for the period, and the VAT on them. */
     net_sales_pre_ads: number | null; sales_vat: number | null;
   } | null;
+  /** Lieferando likewise: the week whose statement carried the payout, with
+   *  the earlier weeks it settled rolled in by the API. */
+  lieferando_period_id: string | null;
+  lieferando_period: {
+    invoice_number: string; restaurant: string | null;
+    period_start: string; period_end: string; payout: number | null;
+    weeks: number; from: string; to: string;
+    net_sales_pre_ads: number; sales_vat: number;
+  } | null;
   counterparty_id: string | null;
   accounting_period: string | null; // "type|start[|end]"
 };
@@ -133,6 +142,17 @@ function vatOf(tx: CfTx): { rate: number; vatCents: number; nettoCents: number; 
       rate: (vat / net) * 100,
       vatCents: Math.round(vat * 100),
       nettoCents: Math.round(net * 100),
+      fromBill: true,
+      billOdd: false,
+    };
+  }
+
+  const lp = tx.lieferando_period;
+  if (lp && lp.net_sales_pre_ads > 0) {
+    return {
+      rate: (lp.sales_vat / lp.net_sales_pre_ads) * 100,
+      vatCents: Math.round(lp.sales_vat * 100),
+      nettoCents: Math.round(lp.net_sales_pre_ads * 100),
       fromBill: true,
       billOdd: false,
     };
@@ -811,6 +831,18 @@ function TxRow({ tx, onSave, counterparties, onShowDetails, selected, onToggleSe
               );
             }
 
+            if (tx.lieferando_period) {
+              const l = tx.lieferando_period;
+              return (
+                <a
+                  href="/pl-reports/sales-reports/lieferando"
+                  title={`Lieferando statement ${l.invoice_number} · ${l.from} – ${l.to}${l.weeks > 1 ? ` (${l.weeks} weeks)` : ''}`}
+                  className="flex items-center gap-1 text-xs font-semibold text-orange-700 bg-orange-50 border border-orange-200 rounded-full px-2 py-0.5 hover:bg-orange-100 transition-colors">
+                  <CheckCircle2 size={11} /> Lieferando{l.weeks > 1 ? ` ×${l.weeks}` : ''}
+                </a>
+              );
+            }
+
             if (tx.bill) {
               return (
                 <div className="flex items-center gap-1">
@@ -1014,6 +1046,7 @@ export default function CashFlowPage() {
     billInvoiceDate: string | null; billGross: number; daysDiff: number;
   };
   type WoltMatchRow = {
+    platform: 'wolt' | 'lieferando';
     txId: string; txDate: string; txCounterparty: string; txAmountCents: number;
     periodId: string; invoiceNumber: string; restaurant: string | null;
     periodStart: string; periodEnd: string; payout: number; daysDiff: number;
@@ -1562,7 +1595,7 @@ export default function CashFlowPage() {
                     ? 'No matches found — all transactions already linked or no amount/date match in bills.'
                     : [
                         autoMatchRows.length > 0 && `${autoMatchRows.length} bill${autoMatchRows.length !== 1 ? 's' : ''} by amount + supplier + date (≤45 days)`,
-                        woltMatchRows?.length ? `${woltMatchRows.length} Wolt payout${woltMatchRows.length !== 1 ? 's' : ''} by Nettoauszahlung` : null,
+                        woltMatchRows?.length ? `${woltMatchRows.length} delivery payout${woltMatchRows.length !== 1 ? 's' : ''} by settlement amount` : null,
                       ].filter(Boolean).join(' · ') + '. Review then apply.'}
                 </p>
               </div>
@@ -1574,7 +1607,7 @@ export default function CashFlowPage() {
             {(woltMatchRows?.length ?? 0) > 0 && (
               <div className="px-6 pt-4">
                 <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-2">
-                  Wolt payouts — evidenced by the settlement period, not a bill
+                  Wolt &amp; Lieferando payouts — evidenced by the settlement period, not a bill
                 </p>
                 {/* The columns hold dates, money and a long invoice reference:
                     every one of them reads worse broken over two lines, so the
@@ -1585,6 +1618,7 @@ export default function CashFlowPage() {
                       <tr className="whitespace-nowrap">
                         <th className="text-left  px-3 py-2 font-semibold text-gray-500 uppercase tracking-wide">Tx Date</th>
                         <th className="text-right px-3 py-2 font-semibold text-gray-500 uppercase tracking-wide">Amount</th>
+                        <th className="text-left  px-3 py-2 font-semibold text-gray-500 uppercase tracking-wide">Platform</th>
                         <th className="text-left  px-3 py-2 font-semibold text-gray-500 uppercase tracking-wide">→ Period</th>
                         <th className="text-left  px-3 py-2 font-semibold text-gray-500 uppercase tracking-wide">Restaurant</th>
                         <th className="text-left  px-3 py-2 font-semibold text-gray-500 uppercase tracking-wide">Invoice</th>
@@ -1597,6 +1631,9 @@ export default function CashFlowPage() {
                           <td className="px-3 py-2 text-gray-600">{r.txDate}</td>
                           <td className="px-3 py-2 text-right font-semibold text-green-700 tabular-nums">
                             {(r.txAmountCents / 100).toLocaleString('de-DE', { minimumFractionDigits: 2 })} €
+                          </td>
+                          <td className={`px-3 py-2 font-semibold ${r.platform === 'lieferando' ? 'text-orange-700' : 'text-green-700'}`}>
+                            {r.platform === 'lieferando' ? 'Lieferando' : 'Wolt'}
                           </td>
                           <td className="px-3 py-2 text-gray-700">{r.periodStart} – {r.periodEnd}</td>
                           <td className="px-3 py-2 text-gray-600">{(r.restaurant ?? '—').replace('Yumas ', '')}</td>
