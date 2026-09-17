@@ -529,13 +529,13 @@ export default function OutgoingBillsPage() {
     return docKind === 'bewirtung' ? netFromGross(v, l.vat) : v;
   }, [docKind]);
 
-  const { net7: ahNetto7, net19: ahNetto19 } = splitAdHocNet(
+  const { net0: ahNetto0, net7: ahNetto7, net19: ahNetto19 } = splitAdHocNet(
     adHocLines.map(l => ({ amountNetto: adHocNet(l), vat: l.vat })),
   );
   const ahMwst7       = ahNetto7  * 0.07;
   const ahMwst19      = ahNetto19 * 0.19;
-  const ahTotalNetto  = ahNetto7  + ahNetto19;
-  const ahTotalBrutto = ahNetto7 * 1.07 + ahNetto19 * 1.19;
+  const ahTotalNetto  = ahNetto0 + ahNetto7  + ahNetto19;
+  const ahTotalBrutto = ahNetto0 + ahNetto7 * 1.07 + ahNetto19 * 1.19;
 
   // Live totals (dinner: driven by brutto or netto inputs + mwst rates)
   const mwstEssenRate     = (parseFloat(mwstEssen)    || 7)  / 100;
@@ -1296,7 +1296,7 @@ export default function OutgoingBillsPage() {
           compactTotals:    bd.compactTotals === true,
           adHocLines: (bd.adHocLines ?? []).map(l => ({
             description: l.description ?? '', amountNetto: String(l.amountNetto ?? 0),
-            vat: (l.vat === 'event' ? 'event' : l.vat === 7 ? 7 : 19) as AdHocVat,
+            vat: (l.vat === 'event' ? 'event' : l.vat === 0 ? 0 : l.vat === 7 ? 7 : 19) as AdHocVat,
           })),
           cateringDescription: bd.cateringDescription ?? '',
           cateringLines: (bd.cateringLines ?? []).map(l => ({
@@ -1319,22 +1319,23 @@ export default function OutgoingBillsPage() {
     const tip = num(a.trinkgeld);
 
     if (a.mode === 'adhoc') {
-      const { net7: n7, net19: n19 } = splitAdHocNet(
+      const { net0: n0, net7: n7, net19: n19 } = splitAdHocNet(
         a.adHocLines.map(l => ({ amountNetto: num(l.amountNetto), vat: l.vat })),
       );
-      const brutto = n7 * 1.07 + n19 * 1.19;
+      const brutto = n0 + n7 * 1.07 + n19 * 1.19;
       return {
         rows: [
+          ['Ohne MwSt',        n0,        n0  > 0],
           ['Netto (7% MwSt)',  n7,        n7  > 0],
           ['Netto (19% MwSt)', n19,       n19 > 0],
-          ['Gesamt Netto',     n7 + n19,  true],
+          ['Gesamt Netto',     n0 + n7 + n19, true],
           ['MwSt 7%',          n7 * 0.07, n7  > 0],
           ['MwSt 19%',         n19 * 0.19, n19 > 0],
           ['Gesamt Brutto',    brutto,    true],
           ['Trinkgeld',        tip,       tip > 0],
           ['Gesamtbetrag',     brutto + tip, true],
         ] as [string, number, boolean][],
-        netFood: n7, netDrinks: n19, netTotal: n7 + n19,
+        netFood: n7, netDrinks: n19, netTotal: n0 + n7 + n19,
         vat7: n7 * 0.07, vat19: n19 * 0.19,
         gross: brutto, tips: tip, payable: brutto + tip,
       };
@@ -1667,9 +1668,9 @@ export default function OutgoingBillsPage() {
                                                   className={fldRow + ' w-28 flex-none text-right'}
                                                   onChange={e => setEditAmounts(a => a ? { ...a, adHocLines: a.adHocLines.map((x, j) => j === i ? { ...x, amountNetto: e.target.value } : x) } : a)} />
                                                 <div className="flex gap-1">
-                                                  {([7, 19, 'event'] as const).map(v => (
+                                                  {([0, 7, 19, 'event'] as const).map(v => (
                                                     <button key={v} type="button"
-                                                      title={v === 'event' ? 'Event-Pauschale — 70% Essen (7%), 30% Getränke (19%)' : undefined}
+                                                      title={v === 'event' ? 'Event-Pauschale — 70% Essen (7%), 30% Getränke (19%)' : v === 0 ? 'Ohne MwSt' : undefined}
                                                       onClick={() => setEditAmounts(a => a ? { ...a, adHocLines: a.adHocLines.map((x, j) => j === i ? { ...x, vat: v } : x) } : a)}
                                                       className={`px-2 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
                                                         ln.vat === v ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
@@ -2787,8 +2788,14 @@ export default function OutgoingBillsPage() {
                           <div className="flex rounded-lg border border-gray-300 overflow-hidden text-xs font-semibold flex-shrink-0">
                             <button
                               type="button"
+                              title="Ohne MwSt"
+                              onClick={() => setAdHocLines(ls => ls.map(l => l.id === line.id ? { ...l, vat: 0 } : l))}
+                              className={`px-2.5 py-1.5 transition-colors ${line.vat === 0 ? 'bg-[#1B5E20] text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}
+                            >0%</button>
+                            <button
+                              type="button"
                               onClick={() => setAdHocLines(ls => ls.map(l => l.id === line.id ? { ...l, vat: 7 } : l))}
-                              className={`px-2.5 py-1.5 transition-colors ${line.vat === 7 ? 'bg-[#1B5E20] text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}
+                              className={`px-2.5 py-1.5 transition-colors border-l border-gray-300 ${line.vat === 7 ? 'bg-[#1B5E20] text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}
                             >7%</button>
                             <button
                               type="button"
@@ -2866,7 +2873,7 @@ export default function OutgoingBillsPage() {
                     Netto-Beträge eingeben · MwSt wird automatisch berechnet · Negative Beträge = Rabatte
                   </p>
                   <p className="text-xs text-violet-700 mt-0.5">
-                    Event = Pauschale 70% Essen (7%) / 30% Getränke (19%) ={' '}
+                    0% = ohne MwSt · Event = Pauschale 70% Essen (7%) / 30% Getränke (19%) ={' '}
                     {(EVENT_EFFECTIVE_RATE * 100).toFixed(1).replace('.', ',')}% effektiv
                   </p>
                 </div>

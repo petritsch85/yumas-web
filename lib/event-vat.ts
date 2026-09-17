@@ -17,7 +17,7 @@ export const VAT_FOOD  = 0.07;
 export const VAT_DRINK = 0.19;
 
 /** The VAT treatment of one ad-hoc position. */
-export type AdHocVat = 7 | 19 | 'event';
+export type AdHocVat = 0 | 7 | 19 | 'event';
 
 /** Effective rate on an event Pauschale: 10.6%. */
 export const EVENT_EFFECTIVE_RATE =
@@ -33,8 +33,9 @@ export const EVENT_EFFECTIVE_RATE =
  */
 export function splitAdHocNet(
   lines: { amountNetto: number; vat: AdHocVat }[],
-): { net7: number; net19: number } {
-  let net7 = 0;
+): { net0: number; net7: number; net19: number } {
+  let net0  = 0;
+  let net7  = 0;
   let net19 = 0;
   for (const line of lines) {
     if (line.vat === 'event') {
@@ -42,16 +43,20 @@ export function splitAdHocNet(
       net19 += line.amountNetto * EVENT_DRINK_SHARE;
     } else if (line.vat === 7) {
       net7  += line.amountNetto;
+    } else if (line.vat === 0) {
+      // Outside VAT altogether — a deposit passed on, an outlay, an exempt
+      // service. Counts towards the total, carries no tax.
+      net0  += line.amountNetto;
     } else {
       net19 += line.amountNetto;
     }
   }
-  return { net7, net19 };
+  return { net0, net7, net19 };
 }
 
 /** How a position's VAT treatment is named on the bill. */
 export const vatLabel = (vat: AdHocVat) =>
-  vat === 'event' ? 'Event-Pauschale, 70/30' : `${vat}% MwSt`;
+  vat === 'event' ? 'Event-Pauschale, 70/30' : vat === 0 ? 'ohne MwSt' : `${vat}% MwSt`;
 
 /**
  * Net behind a gross position.

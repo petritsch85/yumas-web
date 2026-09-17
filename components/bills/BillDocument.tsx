@@ -196,13 +196,13 @@ export function BillDocument({ data }: { data: BillData }) {
   const ahLines       = data.adHocLines ?? [];
   // An event Pauschale line lands in both bases, 70/30, so the bill still shows
   // a single MwSt line per rate however the positions were entered.
-  const { net7: ahNetto7, net19: ahNetto19 } = splitAdHocNet(ahLines);
+  const { net0: ahNetto0, net7: ahNetto7, net19: ahNetto19 } = splitAdHocNet(ahLines);
   const ahMwst7       = ahNetto7  * 0.07;
   const ahMwst19      = ahNetto19 * 0.19;
   const ahBrutto7     = ahNetto7  * 1.07;
   const ahBrutto19    = ahNetto19 * 1.19;
-  const ahTotalNetto  = ahNetto7  + ahNetto19;
-  const ahTotalBrutto = ahBrutto7 + ahBrutto19;
+  const ahTotalNetto  = ahNetto0 + ahNetto7  + ahNetto19;
+  const ahTotalBrutto = ahNetto0 + ahBrutto7 + ahBrutto19;
 
   // Hide the Essen/Getränke split lines, leaving only the Gesamt rows
   const compact = data.compactTotals === true;
@@ -400,6 +400,7 @@ export function BillDocument({ data }: { data: BillData }) {
             </View>
             {/* Brutto breakdown */}
             <View style={s.groupGap}>
+              {ahNetto0   > 0 && <AmtRow label="Ohne MwSt"          value={ahNetto0} />}
               {ahBrutto7  > 0 && <AmtRow label="Brutto (7% MwSt)"  value={ahBrutto7} />}
               {ahBrutto19 > 0 && <AmtRow label="Brutto (19% MwSt)" value={ahBrutto19} />}
               <AmtRowBold label="Gesamt Brutto" value={ahTotalBrutto} />
