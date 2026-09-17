@@ -2630,7 +2630,7 @@ export default function SalesReportsPage() {
           d.orders.map(o => ({
             period_id: period.id, location_id: locationId,
             order_number: o.orderNumber, ordered_at: o.orderedAt, sale_date: o.saleDate,
-            shift: o.shift, gross: o.gross, tip: o.tip, online_paid: o.onlinePaid,
+            shift: o.shift, gross: o.gross, tip: o.tip, refund: o.refund, online_paid: o.onlinePaid,
           })),
           { onConflict: 'location_id,order_number' },
         );

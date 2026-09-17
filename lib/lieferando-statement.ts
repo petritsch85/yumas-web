@@ -45,6 +45,8 @@ export interface LieferandoOrder {
   shift:       'lunch' | 'dinner';
   gross:       number;
   tip:         number;
+  /** A Rückbuchung on this order — gross, held positive. */
+  refund:      number;
   onlinePaid:  boolean;
 }
 
@@ -132,6 +134,12 @@ export function parseLieferandoStatement(text: string): LieferandoStatement {
   }
   const warnings: string[] = [];
 
+  if (!/Bestellungen im Wert von/.test(text)) {
+    const item = text.match(/Folgende Leistungen stellen wir Ihnen in Rechnung:\s*\n([^\n]+)/);
+    throw new LieferandoParseError(
+      `Not a weekly statement — this is a Lieferando invoice for "${item?.[1]?.trim() ?? 'something else'}". It carries no orders, so it belongs in Bills, not here.`,
+    );
+  }
   const invoiceNumber = need(text, /Rechnungsnummer:\s*(\d+)/, 'the invoice number')[1];
   const invoiceDate   = isoDate(need(text, /Datum:\s*(\d{2}-\d{2}-\d{4})/, 'the invoice date')[1]);
   const customerNumber = need(text, /Kundennummer:\s*(\d+)/, 'the customer number')[1];
@@ -154,7 +162,9 @@ export function parseLieferandoStatement(text: string): LieferandoStatement {
   const topRank  = optional(text, new RegExp(String.raw`TopRank:[^\n]*€\s*` + AMOUNT));
   // "Servicegebühr: € 0,64 x 15 € 9,60" — the per-order admin fee for online payments
   const adminFee = optional(text, new RegExp(String.raw`Servicegebühr:\s*€\s*[\d,]+ x \d+\s*€\s*` + AMOUNT));
-  const refunds  = Math.abs(optional(text, new RegExp(String.raw`Rückerstattung(?:en)?[^\n]*€\s*` + AMOUNT)));
+  // "Rückbuchung 1 Bestellungen im Wert von € -8,00" — the summary of refunds;
+  // the order list carries each one as a negative line.
+  const refundsStated = Math.abs(optional(text, new RegExp(String.raw`Rückbuchung(?:en)?\s+\d+ Bestellungen im Wert von €\s*` + AMOUNT)));
 
   const feesNet      = num(need(text, new RegExp(String.raw`Zwischensumme\s*€\s*` + AMOUNT), 'the Zwischensumme')[1]);
   const feesVat      = num(need(text, new RegExp(String.raw`MwSt\.\s*\(19% von €\s*[\d.,]+\)\s*€\s*` + AMOUNT), 'the fee VAT')[1]);
@@ -175,24 +185,46 @@ export function parseLieferandoStatement(text: string): LieferandoStatement {
 
   // ── Orders ──
   // "07-09-2026, 10:25:58 GHH4HV 29,50 *" — the star marks online payment.
+  // A busy week is printed two orders to a line, so the pattern is not
+  // anchored to line ends. A refund is a negative line under the order's own
+  // number, dated when it was booked.
   const orders: LieferandoOrder[] = [];
-  const orderRe = new RegExp(String.raw`^(\d{2}-\d{2}-\d{4}), (\d{2}:\d{2}:\d{2}) ([A-Z0-9]{5,8}) ` + AMOUNT + String.raw`( \*)?\s*$`, 'gm');
+  const refundLines: { orderNumber: string; saleDate: string; time: string; amount: number }[] = [];
+  const orderRe = new RegExp(String.raw`(\d{2}-\d{2}-\d{4}), (\d{2}:\d{2}:\d{2}) ([A-Z0-9]{5,8}) ` + AMOUNT + String.raw`( \*)?`, 'g');
   // The tips section lists orders again with the tip amount; it comes after
   // "Trinkgelder erhalten", so split there.
   const [orderPart, tipPart] = text.split(/Trinkgelder erhalten von/);
   let m: RegExpExecArray | null;
   while ((m = orderRe.exec(orderPart)) !== null) {
     const saleDate = isoDate(m[1]);
+    const amount = num(m[4]);
+    if (amount < 0) { refundLines.push({ orderNumber: m[3], saleDate, time: m[2], amount: -amount }); continue; }
     const [hh, mm] = m[2].split(':').map(Number);
     orders.push({
       orderNumber: m[3],
       orderedAt:   `${saleDate}T${m[2]}`,
       saleDate,
       shift:       hh * 60 + mm <= LUNCH_END_MINUTES ? 'lunch' : 'dinner',
-      gross:       num(m[4]),
+      gross:       amount,
       tip:         0,
+      refund:      0,
       onlinePaid:  !!m[5],
     });
+  }
+  for (const r of refundLines) {
+    const o = orders.find(x => x.orderNumber === r.orderNumber);
+    if (o) { o.refund = round2(o.refund + r.amount); continue; }
+    // A refund for an order from an earlier week: keep it, with no sale behind it.
+    const [hh, mm] = r.time.split(':').map(Number);
+    orders.push({
+      orderNumber: r.orderNumber, orderedAt: `${r.saleDate}T${r.time}`, saleDate: r.saleDate,
+      shift: hh * 60 + mm <= LUNCH_END_MINUTES ? 'lunch' : 'dinner',
+      gross: 0, tip: 0, refund: r.amount, onlinePaid: true,
+    });
+  }
+  const refundsGross = round2(refundLines.reduce((t, r) => t + r.amount, 0));
+  if (Math.abs(refundsGross - refundsStated) > 0.011) {
+    warnings.push(`Refund lines add to ${refundsGross.toFixed(2)} but the statement says ${refundsStated.toFixed(2)}.`);
   }
   if (tipPart) {
     const tipRe = new RegExp(String.raw`^(\d{2}-\d{2}-\d{4}), \d{2}:\d{2}:\d{2} ([A-Z0-9]{5,8}) ` + AMOUNT + String.raw`\s*$`, 'gm');
@@ -202,10 +234,11 @@ export function parseLieferandoStatement(text: string): LieferandoStatement {
     }
   }
 
-  const listedGross = round2(orders.reduce((t, o) => t + o.gross, 0));
-  if (orders.length !== orderCount || Math.abs(listedGross - orderValueGross) > 0.011) {
+  const sold = orders.filter(o => o.gross > 0);
+  const listedGross = round2(sold.reduce((t, o) => t + o.gross, 0));
+  if (sold.length !== orderCount || Math.abs(listedGross - orderValueGross) > 0.011) {
     throw new LieferandoParseError(
-      `The order list (${orders.length} orders, ${listedGross.toFixed(2)}) does not match the invoice header (${orderCount} orders, ${orderValueGross.toFixed(2)}).`,
+      `The order list (${sold.length} orders, ${listedGross.toFixed(2)}) does not match the invoice header (${orderCount} orders, ${orderValueGross.toFixed(2)}).`,
     );
   }
   const outside = orders.filter(o => o.saleDate < periodStart || o.saleDate > periodEnd);
@@ -213,7 +246,7 @@ export function parseLieferandoStatement(text: string): LieferandoStatement {
 
   // ── The P&L figures ──
   const netSalesPreCommission = round2(orderValueGross / (1 + LIEFERANDO_VAT_RATE));
-  const refundsNet     = round2(refunds / (1 + LIEFERANDO_VAT_RATE));
+  const refundsNet     = round2(refundsGross / (1 + LIEFERANDO_VAT_RATE));
   const commission     = round2(serviceFee + adminFee + otherFees);
   const netSalesPreAds = round2(netSalesPreCommission - refundsNet - commission);
   const advertising    = topRank;
@@ -221,7 +254,7 @@ export function parseLieferandoStatement(text: string): LieferandoStatement {
 
   // Order value and tips are held by Lieferando; the invoice is taken out of
   // them and the rest is transferred.
-  const expectedPayout = round2(orderValueGross + tips - refunds - invoiceGross);
+  const expectedPayout = round2(orderValueGross + tips - refundsGross - invoiceGross);
   const checkOk = payout === null ? false : Math.abs(expectedPayout - payout) < 0.011;
 
   return {
@@ -256,12 +289,16 @@ export function buildLieferandoBreakdown(st: LieferandoStatement): LieferandoShi
       refundEst: 0, commission: 0, netPreAds: 0, advertisingEst: 0, netFinal: 0,
     };
     const share = o.gross / totalGross;
-    r.orders     += 1;
+    if (o.gross > 0) {
+      r.orders     += 1;
+      r.commission += perOrderAdmin;
+      r.advertisingEst += perOrderAds;
+    }
     r.gross      += o.gross;
     r.netSales   += o.gross / (1 + st.vatRateAssumed);
-    r.refundEst  -= st.refunds * share;
-    r.commission += o.gross * (st.serviceFeeRate ?? 0) + perOrderAdmin + st.otherFees * share;
-    r.advertisingEst += perOrderAds;
+    // Refunds are dated on the statement, so they land on their own day.
+    r.refundEst  -= o.refund / (1 + st.vatRateAssumed);
+    r.commission += o.gross * (st.serviceFeeRate ?? 0) + st.otherFees * share;
     byKey.set(k, r);
   }
 

@@ -74,6 +74,8 @@ create table if not exists public.lieferando_orders (
   shift        text not null check (shift in ('lunch', 'dinner')),
   gross        numeric(12,2) not null,
   tip          numeric(12,2) not null default 0,
+  -- A Rückbuchung on this order, gross, held positive
+  refund       numeric(12,2) not null default 0,
   online_paid  boolean not null default true,
 
   unique (location_id, order_number)
