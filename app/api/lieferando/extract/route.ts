@@ -91,7 +91,7 @@ export async function POST(req: Request) {
       data, breakdown: buildLieferandoBreakdown(data),
       warnings: data.warnings,
       error: data.checkOk ? undefined
-        : `The payout does not reconcile: order value plus tips less the invoice should equal the Auszahlung of ${data.payout ?? '—'}.`,
+        : `The payout does not reconcile: the balance Lieferando holds less the invoices it settled should equal the Auszahlung of ${data.payout ?? '—'}.`,
     });
   }
 
