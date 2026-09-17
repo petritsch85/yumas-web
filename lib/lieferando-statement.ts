@@ -8,7 +8,9 @@
  * show both channels with one set of lines:
  *
  *   Net sales · pre refunds   order value net of VAT
- *   Refunds                   what Lieferando deducted for refunds
+ *   Refunds                   what Lieferando deducted for refunds (Rückbuchungen)
+ *   Stamp cards               the part of an order paid with a Lieferando stamp
+ *                             card — a loyalty discount the restaurant funds
  *   Net sales · pre com, Ads
  *   Commission                service fee (14% of order value) + admin fee per order
  *   Net sales · pre Ads
@@ -47,6 +49,8 @@ export interface LieferandoOrder {
   tip:         number;
   /** A Rückbuchung on this order — gross, held positive. */
   refund:      number;
+  /** The part of this order paid with a stamp card — gross, held positive. */
+  stampCard:   number;
   onlinePaid:  boolean;
 }
 
@@ -69,6 +73,8 @@ export interface LieferandoStatement {
   topRank:        number;
   otherFees:      number;
   refunds:        number;
+  /** Stamp-card redemptions, net of VAT, held positive. */
+  stampCards:     number;
 
   commission:     number;
   netSalesPreAds: number;
@@ -104,6 +110,8 @@ export interface LieferandoShiftRow {
   gross:  number;
   netSales:       number;
   refundEst:      number;
+  /** Stamp-card redemptions on this shift, net. Negative. */
+  stampCardEst:   number;
   commission:     number;
   netPreAds:      number;
   advertisingEst: number;
@@ -194,9 +202,13 @@ export function parseLieferandoStatement(text: string): LieferandoStatement {
   // 1 Rückerstattung im Wert von € -38,50" — the refund summaries; the order
   // list carries each one as a negative line.
   const listPart = text.split(/Einzelauflistung/)[1] ?? '';
-  let refundsStated = 0;
-  for (const m of listPart.matchAll(new RegExp(String.raw`(?:Rückbuchung|Rückerstattung|Stempelkarte bezahlt)[^\n]*?im Wert von €\s*` + AMOUNT, 'g'))) {
+  let refundsStated = 0, stampStated = 0;
+  for (const m of listPart.matchAll(new RegExp(String.raw`(?:Rückbuchung|Rückerstattung)[^\n]*?im Wert von €\s*` + AMOUNT, 'g'))) {
     refundsStated = round2(refundsStated + Math.abs(num(m[1])));
+  }
+  // "davon mit Stempelkarte bezahlt ** 4 Bestellungen im Wert von € 77,09"
+  for (const m of listPart.matchAll(new RegExp(String.raw`Stempelkarte bezahlt[^\n]*?im Wert von €\s*` + AMOUNT, 'g'))) {
+    stampStated = round2(stampStated + Math.abs(num(m[1])));
   }
   // The balance Lieferando holds — this week's payments plus whatever was
   // carried over — and every invoice it settled out of it this week. Lieferando
@@ -229,6 +241,9 @@ export function parseLieferandoStatement(text: string): LieferandoStatement {
   // number, dated when it was booked.
   const orders: LieferandoOrder[] = [];
   const refundLines: { orderNumber: string; saleDate: string; time: string; amount: number }[] = [];
+  // "24-08-2026, 12:37:42 CMQCHQ -11,00 **" — the same order, the part paid
+  // with a stamp card. Not a refund: the guest ate, and paid with stamps.
+  const stampLines:  { orderNumber: string; amount: number }[] = [];
   const orderRe = new RegExp(String.raw`(\d{2}-\d{2}-\d{4}), (\d{2}:\d{2}:\d{2}) ([A-Z0-9]{5,8}) ` + AMOUNT + String.raw`( \*\*| \*| /)?`, 'g');
   // The tips section lists orders again with the tip amount; it comes after
   // "Trinkgelder erhalten", so split there.
@@ -237,6 +252,7 @@ export function parseLieferandoStatement(text: string): LieferandoStatement {
   while ((m = orderRe.exec(orderPart)) !== null) {
     const saleDate = isoDate(m[1]);
     const amount = num(m[4]);
+    if (amount < 0 && m[5] === ' **') { stampLines.push({ orderNumber: m[3], amount: -amount }); continue; }
     if (amount < 0) { refundLines.push({ orderNumber: m[3], saleDate, time: m[2], amount: -amount }); continue; }
     const [hh, mm] = m[2].split(':').map(Number);
     orders.push({
@@ -247,6 +263,7 @@ export function parseLieferandoStatement(text: string): LieferandoStatement {
       gross:       amount,
       tip:         0,
       refund:      0,
+      stampCard:   0,
       onlinePaid:  m[5] === ' *',
     });
   }
@@ -262,8 +279,17 @@ export function parseLieferandoStatement(text: string): LieferandoStatement {
     orders.push({
       orderNumber: r.orderNumber, orderedAt: `${r.saleDate}T${r.time}`, saleDate: inPeriod ? r.saleDate : periodStart,
       shift: hh * 60 + mm <= LUNCH_END_MINUTES ? 'lunch' : 'dinner',
-      gross: 0, tip: 0, refund: r.amount, onlinePaid: true,
+      gross: 0, tip: 0, refund: r.amount, stampCard: 0, onlinePaid: true,
     });
+  }
+  for (const sc of stampLines) {
+    const o = orders.find(x => x.orderNumber === sc.orderNumber);
+    if (o) o.stampCard = round2(o.stampCard + sc.amount);
+    else warnings.push(`Stamp-card line on order ${sc.orderNumber} has no order behind it.`);
+  }
+  const stampGross = round2(stampLines.reduce((t, x) => t + x.amount, 0));
+  if (Math.abs(stampGross - stampStated) > 0.011) {
+    warnings.push(`Stamp-card lines add to ${stampGross.toFixed(2)} but the statement says ${stampStated.toFixed(2)}.`);
   }
   const refundsGross = round2(refundLines.reduce((t, r) => t + r.amount, 0));
   if (Math.abs(refundsGross - refundsStated) > 0.011) {
@@ -290,15 +316,16 @@ export function parseLieferandoStatement(text: string): LieferandoStatement {
   // ── The P&L figures ──
   const netSalesPreCommission = round2(orderValueGross / (1 + LIEFERANDO_VAT_RATE));
   const refundsNet     = round2(refundsGross / (1 + LIEFERANDO_VAT_RATE));
+  const stampNet       = round2(stampGross   / (1 + LIEFERANDO_VAT_RATE));
   const commission     = round2(serviceFee + adminFee + otherFees);
-  const netSalesPreAds = round2(netSalesPreCommission - refundsNet - commission);
+  const netSalesPreAds = round2(netSalesPreCommission - refundsNet - stampNet - commission);
   const advertising    = topRank;
   const netSalesFinal  = round2(netSalesPreAds - advertising);
 
   // Order value and tips are held by Lieferando; invoices are taken out of the
   // balance and the rest is transferred — though not every week. When nothing
   // was paid out the balance simply carries into the next statement.
-  const ownWeek = round2(orderValueGross + tips - refundsGross);
+  const ownWeek = round2(orderValueGross + tips - refundsGross - stampGross);
   if (balance > 0 && balance < ownWeek - 0.011) {
     warnings.push(`The balance Lieferando holds (${balance.toFixed(2)}) is less than this week's takings (${ownWeek.toFixed(2)}).`);
   }
@@ -324,7 +351,7 @@ export function parseLieferandoStatement(text: string): LieferandoStatement {
     invoiceNumber, invoiceDate, periodStart, periodEnd,
     restaurant: restaurantName, customerNumber,
     orderCount, orderValueGross, netSalesPreCommission, vatRateAssumed: LIEFERANDO_VAT_RATE,
-    serviceFeeRate, serviceFee, adminFee, topRank, otherFees, refunds: refundsNet,
+    serviceFeeRate, serviceFee, adminFee, topRank, otherFees, refunds: refundsNet, stampCards: stampNet,
     commission, netSalesPreAds, advertising, netSalesFinal,
     feesNet, feesVat, invoiceGross, tips, payout, checkOk,
     orders, warnings,
@@ -349,7 +376,7 @@ export function buildLieferandoBreakdown(st: LieferandoStatement): LieferandoShi
     const k = `${o.saleDate}|${o.shift}`;
     const r = byKey.get(k) ?? {
       date: o.saleDate, shift: o.shift, orders: 0, gross: 0, netSales: 0,
-      refundEst: 0, commission: 0, netPreAds: 0, advertisingEst: 0, netFinal: 0,
+      refundEst: 0, stampCardEst: 0, commission: 0, netPreAds: 0, advertisingEst: 0, netFinal: 0,
     };
     const share = o.gross / totalGross;
     if (o.gross > 0) {
@@ -360,7 +387,8 @@ export function buildLieferandoBreakdown(st: LieferandoStatement): LieferandoShi
     r.gross      += o.gross;
     r.netSales   += o.gross / (1 + st.vatRateAssumed);
     // Refunds are dated on the statement, so they land on their own day.
-    r.refundEst  -= o.refund / (1 + st.vatRateAssumed);
+    r.refundEst  -= o.refund    / (1 + st.vatRateAssumed);
+    r.stampCardEst -= o.stampCard / (1 + st.vatRateAssumed);
     r.commission += o.gross * (st.serviceFeeRate ?? 0) + st.otherFees * share;
     byKey.set(k, r);
   }
@@ -369,7 +397,7 @@ export function buildLieferandoBreakdown(st: LieferandoStatement): LieferandoShi
 
   // Round, then push any cent of drift onto the largest shift so the columns
   // tie to the statement.
-  const tie = (field: 'netSales' | 'refundEst' | 'commission' | 'advertisingEst', target: number) => {
+  const tie = (field: 'netSales' | 'refundEst' | 'stampCardEst' | 'commission' | 'advertisingEst', target: number) => {
     for (const r of rows) r[field] = round2(r[field]);
     const drift = round2(target - rows.reduce((t, r) => t + r[field], 0));
     if (drift !== 0 && rows.length) {
@@ -379,12 +407,13 @@ export function buildLieferandoBreakdown(st: LieferandoStatement): LieferandoShi
   };
   tie('netSales',       st.netSalesPreCommission);
   tie('refundEst',     -st.refunds);
+  tie('stampCardEst',  -st.stampCards);
   tie('commission',     st.commission);
   tie('advertisingEst', st.advertising);
 
   for (const r of rows) {
     r.gross     = round2(r.gross);
-    r.netPreAds = round2(r.netSales + r.refundEst - r.commission);
+    r.netPreAds = round2(r.netSales + r.refundEst + r.stampCardEst - r.commission);
     r.netFinal  = round2(r.netPreAds - r.advertisingEst);
   }
   return rows;

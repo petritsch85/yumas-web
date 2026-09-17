@@ -32,6 +32,7 @@ interface LieferandoPeriod {
   top_rank:        number;
   other_fees:      number;
   refunds:         number;
+  stamp_cards:     number;
   commission:      number;
   net_sales_pre_ads: number;
   advertising:     number;
@@ -52,6 +53,7 @@ interface LieferandoShiftSale {
   gross:       number;
   net_sales:   number;
   refund_est:  number;
+  stamp_card_est: number;
   commission:  number;
   net_pre_ads: number;
   advertising_est: number;
@@ -66,6 +68,8 @@ interface LieferandoOrderRow {
   shift:        'lunch' | 'dinner';
   gross:        number;
   tip:          number;
+  refund:       number;
+  stamp_card:   number;
 }
 
 const fmt = (n: number) =>
@@ -114,7 +118,7 @@ export default function LieferandoPage() {
     queryKey: ['lieferando-orders', locationId],
     queryFn: async () => {
       let q = supabase.from('lieferando_orders')
-        .select('id,order_number,ordered_at,sale_date,shift,gross,tip')
+        .select('id,order_number,ordered_at,sale_date,shift,gross,tip,refund,stamp_card')
         .order('ordered_at', { ascending: false }).limit(1000);
       if (locationId) q = q.eq('location_id', locationId);
       const { data, error } = await q;
@@ -139,6 +143,7 @@ export default function LieferandoPage() {
       gross:  acc.gross  + Number(p.order_value_gross),
       pre:    acc.pre    + Number(p.net_sales_pre_commission),
       ref:    acc.ref    + Number(p.refunds),
+      stamp:  acc.stamp  + Number(p.stamp_cards ?? 0),
       com:    acc.com    + Number(p.commission),
       post:   acc.post   + Number(p.net_sales_pre_ads),
       ads:    acc.ads    + Number(p.advertising),
@@ -147,7 +152,7 @@ export default function LieferandoPage() {
       inv:    acc.inv    + Number(p.invoice_gross),
       payout: acc.payout + Number(p.payout ?? 0),
     }),
-    { orders: 0, gross: 0, pre: 0, ref: 0, com: 0, post: 0, ads: 0, fin: 0, tips: 0, inv: 0, payout: 0 },
+    { orders: 0, gross: 0, pre: 0, ref: 0, stamp: 0, com: 0, post: 0, ads: 0, fin: 0, tips: 0, inv: 0, payout: 0 },
   ), [periods]);
 
   const failing = periods.filter(p => !p.check_ok).length;
@@ -193,6 +198,11 @@ export default function LieferandoPage() {
                   Order value
                   <span className="block font-normal normal-case tracking-normal text-[10px] text-gray-400">gross</span>
                 </th>
+                <th className="px-2.5 py-2.5 text-right">Refunds</th>
+                <th className="px-2.5 py-2.5 text-right">
+                  Stamp cards
+                  <span className="block font-normal normal-case tracking-normal text-[10px] text-gray-400">loyalty</span>
+                </th>
                 <th className="px-2.5 py-2.5 text-right">Net sales · pre com, Ads</th>
                 <th className="px-2.5 py-2.5 text-right">
                   Service fee
@@ -223,17 +233,17 @@ export default function LieferandoPage() {
             </thead>
             <tbody>
               {isLoading && (
-                <tr><td colSpan={15} className="px-4 py-10 text-center text-gray-400">
+                <tr><td colSpan={17} className="px-4 py-10 text-center text-gray-400">
                   <Loader2 size={20} className="mx-auto animate-spin" />
                 </td></tr>
               )}
               {error && !isLoading && (
-                <tr><td colSpan={15} className="px-4 py-10 text-center text-sm text-red-600">
+                <tr><td colSpan={17} className="px-4 py-10 text-center text-sm text-red-600">
                   {(error as Error).message}
                 </td></tr>
               )}
               {!isLoading && !error && periods.length === 0 && (
-                <tr><td colSpan={15} className="px-4 py-12 text-center text-sm text-gray-400">
+                <tr><td colSpan={17} className="px-4 py-12 text-center text-sm text-gray-400">
                   <Receipt size={28} className="mx-auto mb-2 text-gray-200" />
                   No Lieferando weeks yet — upload a statement from Sales Reports → Upload → Lieferando
                 </td></tr>
@@ -249,8 +259,10 @@ export default function LieferandoPage() {
                   </td>
                   <td className="px-2.5 py-2.5 text-right tabular-nums text-gray-500">{p.order_count}</td>
                   <td className="px-2.5 py-2.5 text-right tabular-nums text-gray-400">{fmt(Number(p.order_value_gross))}</td>
+                  <td className="px-2.5 py-2.5 text-right tabular-nums text-gray-400">{Number(p.refunds) > 0 ? `−${fmt(Number(p.refunds))}` : '—'}</td>
+                  <td className="px-2.5 py-2.5 text-right tabular-nums text-gray-400">{Number(p.stamp_cards ?? 0) > 0 ? `−${fmt(Number(p.stamp_cards))}` : '—'}</td>
                   <td className="px-2.5 py-2.5 text-right tabular-nums font-semibold text-gray-900">
-                    {fmt(Number(p.net_sales_pre_commission) - Number(p.refunds))}
+                    {fmt(Number(p.net_sales_pre_commission) - Number(p.refunds) - Number(p.stamp_cards ?? 0))}
                   </td>
                   <td className="px-2.5 py-2.5 text-right tabular-nums text-gray-500">−{fmt(Number(p.service_fee))}</td>
                   <td className="px-2.5 py-2.5 text-right tabular-nums text-gray-500">−{fmt(Number(p.admin_fee))}</td>
@@ -277,7 +289,9 @@ export default function LieferandoPage() {
                   <td className="px-4 py-2.5" colSpan={2}>{periods.length} week{periods.length === 1 ? '' : 's'}</td>
                   <td className="px-2.5 py-2.5 text-right tabular-nums">{totals.orders}</td>
                   <td className="px-2.5 py-2.5 text-right tabular-nums text-gray-500">{fmt(totals.gross)}</td>
-                  <td className="px-2.5 py-2.5 text-right tabular-nums">{fmt(totals.pre - totals.ref)}</td>
+                  <td className="px-2.5 py-2.5 text-right tabular-nums text-gray-500">−{fmt(totals.ref)}</td>
+                  <td className="px-2.5 py-2.5 text-right tabular-nums text-gray-500">−{fmt(totals.stamp)}</td>
+                  <td className="px-2.5 py-2.5 text-right tabular-nums">{fmt(totals.pre - totals.ref - totals.stamp)}</td>
                   <td colSpan={2} />
                   <td className="px-2.5 py-2.5 text-right tabular-nums">−{fmt(totals.com)}</td>
                   <td className="px-2.5 py-2.5 text-right tabular-nums">{fmt(totals.post)}</td>
@@ -299,7 +313,9 @@ export default function LieferandoPage() {
         take the whole order value at <strong>7%</strong> — the rate on delivered food, and the rate Wolt
         reports on Eschborn&apos;s orders. Fees are net; Lieferando adds 19% VAT on the invoice, which we
         reclaim. Commission is the service fee plus the per-order admin fee; TopRank is paid ranking, so it
-        counts as advertising. The payout is order value plus tips less the invoice, which is the check.
+        counts as advertising. Stamp cards are the part of an order the guest paid with Lieferando&apos;s
+        loyalty stamps — a discount the restaurant funds, so it comes off net sales like a refund, but it is
+        not one. The payout is the balance Lieferando holds less the invoices it settled, which is the check.
         {periods.length > 0 && totals.pre > 0 && (
           <> Over these weeks commission ran at <strong>{pct(totals.com / totals.pre)}</strong> of net sales
           and advertising at <strong>{pct(totals.ads / totals.pre)}</strong>.</>
@@ -322,6 +338,7 @@ export default function LieferandoPage() {
                 <th className="px-2.5 py-2.5 text-right">Orders</th>
                 <th className="px-2.5 py-2.5 text-right">Net sales · pre refunds</th>
                 <th className="px-2.5 py-2.5 text-right">Refunds</th>
+                <th className="px-2.5 py-2.5 text-right">Stamp cards</th>
                 <th className="px-2.5 py-2.5 text-right">Net sales · pre com, Ads</th>
                 <th className="px-2.5 py-2.5 text-right">Commission</th>
                 <th className="px-2.5 py-2.5 text-right">Net · pre Ads</th>
@@ -331,7 +348,7 @@ export default function LieferandoPage() {
             </thead>
             <tbody>
               {days.length === 0 && (
-                <tr><td colSpan={10} className="px-4 py-12 text-center text-sm text-gray-400">
+                <tr><td colSpan={11} className="px-4 py-12 text-center text-sm text-gray-400">
                   No daily breakdown yet
                 </td></tr>
               )}
@@ -343,7 +360,8 @@ export default function LieferandoPage() {
                     <td className="px-2.5 py-2 text-right tabular-nums text-gray-400">{r.orders}</td>
                     <td className="px-2.5 py-2 text-right tabular-nums text-gray-700">{fmt(Number(r.net_sales))}</td>
                     <td className="px-2.5 py-2 text-right tabular-nums text-gray-400">{fmt(Number(r.refund_est))}</td>
-                    <td className="px-2.5 py-2 text-right tabular-nums text-gray-700">{fmt(Number(r.net_sales) + Number(r.refund_est))}</td>
+                    <td className="px-2.5 py-2 text-right tabular-nums text-gray-400">{fmt(Number(r.stamp_card_est ?? 0))}</td>
+                    <td className="px-2.5 py-2 text-right tabular-nums text-gray-700">{fmt(Number(r.net_sales) + Number(r.refund_est) + Number(r.stamp_card_est ?? 0))}</td>
                     <td className="px-2.5 py-2 text-right tabular-nums text-gray-600">−{fmt(Number(r.commission))}</td>
                     <td className="px-2.5 py-2 text-right tabular-nums text-gray-700">{fmt(Number(r.net_pre_ads))}</td>
                     <td className="px-2.5 py-2 text-right tabular-nums text-gray-400">−{fmt(Number(r.advertising_est))}</td>
@@ -359,7 +377,8 @@ export default function LieferandoPage() {
                   <td className="px-2.5 py-2.5 text-right tabular-nums">{shifts.reduce((s, r) => s + r.orders, 0)}</td>
                   <td className="px-2.5 py-2.5 text-right tabular-nums">{fmt(shifts.reduce((s, r) => s + Number(r.net_sales), 0))}</td>
                   <td className="px-2.5 py-2.5 text-right tabular-nums">{fmt(shifts.reduce((s, r) => s + Number(r.refund_est), 0))}</td>
-                  <td className="px-2.5 py-2.5 text-right tabular-nums">{fmt(shifts.reduce((s, r) => s + Number(r.net_sales) + Number(r.refund_est), 0))}</td>
+                  <td className="px-2.5 py-2.5 text-right tabular-nums">{fmt(shifts.reduce((s, r) => s + Number(r.stamp_card_est ?? 0), 0))}</td>
+                  <td className="px-2.5 py-2.5 text-right tabular-nums">{fmt(shifts.reduce((s, r) => s + Number(r.net_sales) + Number(r.refund_est) + Number(r.stamp_card_est ?? 0), 0))}</td>
                   <td className="px-2.5 py-2.5 text-right tabular-nums">−{fmt(shifts.reduce((s, r) => s + Number(r.commission), 0))}</td>
                   <td className="px-2.5 py-2.5 text-right tabular-nums">{fmt(shifts.reduce((s, r) => s + Number(r.net_pre_ads), 0))}</td>
                   <td className="px-2.5 py-2.5 text-right tabular-nums">−{fmt(shifts.reduce((s, r) => s + Number(r.advertising_est), 0))}</td>
@@ -388,12 +407,14 @@ export default function LieferandoPage() {
               <th className="px-2.5 py-2.5 text-left">Order #</th>
               <th className="px-2.5 py-2.5 text-left">Shift</th>
               <th className="px-2.5 py-2.5 text-right">Gross €</th>
+              <th className="px-2.5 py-2.5 text-right">Refund €</th>
+              <th className="px-2.5 py-2.5 text-right">Stamp card €</th>
               <th className="px-4 py-2.5 text-right">Tip €</th>
             </tr>
           </thead>
           <tbody>
             {orders.length === 0 && (
-              <tr><td colSpan={5} className="px-4 py-12 text-center text-sm text-gray-400">No orders yet</td></tr>
+              <tr><td colSpan={7} className="px-4 py-12 text-center text-sm text-gray-400">No orders yet</td></tr>
             )}
             {orders.map(o => (
               <tr key={o.id} className="border-b border-gray-50 hover:bg-gray-50/60">
@@ -403,6 +424,8 @@ export default function LieferandoPage() {
                 <td className="px-2.5 py-2 font-mono text-xs text-gray-500">{o.order_number}</td>
                 <td className="px-2.5 py-2 text-gray-500">{o.shift === 'lunch' ? '☀️ Lunch' : '🌙 Dinner'}</td>
                 <td className="px-2.5 py-2 text-right tabular-nums text-gray-800">{fmt(Number(o.gross))}</td>
+                <td className="px-2.5 py-2 text-right tabular-nums text-red-500">{Number(o.refund) > 0 ? `−${fmt(Number(o.refund))}` : <span className="text-gray-300">—</span>}</td>
+                <td className="px-2.5 py-2 text-right tabular-nums text-orange-600">{Number(o.stamp_card) > 0 ? `−${fmt(Number(o.stamp_card))}` : <span className="text-gray-300">—</span>}</td>
                 <td className="px-4 py-2 text-right tabular-nums text-gray-400">{Number(o.tip) > 0 ? fmt(Number(o.tip)) : '—'}</td>
               </tr>
             ))}

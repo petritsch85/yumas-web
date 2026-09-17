@@ -40,6 +40,8 @@ interface WoltShiftRowDb {
   orders:          number;
   net_sales:       number;
   refund_est:      number;
+  /** Lieferando only: stamp-card redemptions, negative. Absent on Wolt rows. */
+  stamp_card_est?: number | null;
   commission:      number;
   net_pre_ads:     number;
   advertising_est: number;
@@ -58,6 +60,8 @@ interface WoltLineMaps {
   preRefunds:  Record<string, number>;
   /** Refunds, held positive so the row can print its own minus sign. */
   refunds:     Record<string, number>;
+  /** Stamp-card redemptions (Lieferando), held positive. Empty on Wolt. */
+  stampCards:  Record<string, number>;
   preCom:      Record<string, number>;
   commission:  Record<string, number>;
   preAds:      Record<string, number>;
@@ -1513,7 +1517,7 @@ export default function SalesReportsPage() {
    */
   const woltMaps = useMemo(() => {
     const empty = (): WoltLineMaps => ({
-      preRefunds: {}, refunds: {}, preCom: {}, commission: {},
+      preRefunds: {}, refunds: {}, stampCards: {}, preCom: {}, commission: {},
       preAds: {}, advertising: {}, net: {}, orders: {},
     });
     const lunch = empty(), dinner = empty(), day = empty();
@@ -1577,7 +1581,7 @@ export default function SalesReportsPage() {
       const qEnd   = `${year}-${String(lastM).padStart(2,'0')}-${String(daysInMonth(year, lastM)).padStart(2,'0')}`;
       let q = supabase
         .from('lieferando_shift_sales')
-        .select('sale_date,shift,orders,net_sales,refund_est,commission,net_pre_ads,advertising_est,net_final')
+        .select('sale_date,shift,orders,net_sales,refund_est,stamp_card_est,commission,net_pre_ads,advertising_est,net_final')
         .gte('sale_date', qStart)
         .lte('sale_date', qEnd);
       if (!isGroup) q = q.eq('location_id', location!.id);
@@ -1589,15 +1593,17 @@ export default function SalesReportsPage() {
   /** The Lieferando P&L lines, per shift — no monthly credits to spread here. */
   const lieferandoMaps = useMemo(() => {
     const empty = (): WoltLineMaps => ({
-      preRefunds: {}, refunds: {}, preCom: {}, commission: {},
+      preRefunds: {}, refunds: {}, stampCards: {}, preCom: {}, commission: {},
       preAds: {}, advertising: {}, net: {}, orders: {},
     });
     const lunch = empty(), dinner = empty(), day = empty();
     const add = (m: WoltLineMaps, r: WoltShiftRowDb) => {
       const k = r.sale_date;
+      const stamp = Number(r.stamp_card_est ?? 0);
       m.preRefunds[k]  = (m.preRefunds[k]  ?? 0) + Number(r.net_sales);
       m.refunds[k]     = (m.refunds[k]     ?? 0) - Number(r.refund_est);
-      m.preCom[k]      = (m.preCom[k]      ?? 0) + Number(r.net_sales) + Number(r.refund_est);
+      m.stampCards[k]  = (m.stampCards[k]  ?? 0) - stamp;
+      m.preCom[k]      = (m.preCom[k]      ?? 0) + Number(r.net_sales) + Number(r.refund_est) + stamp;
       m.commission[k]  = (m.commission[k]  ?? 0) + Number(r.commission);
       m.preAds[k]      = (m.preAds[k]      ?? 0) + Number(r.net_pre_ads);
       m.advertising[k] = (m.advertising[k] ?? 0) + Number(r.advertising_est ?? 0);
@@ -2610,6 +2616,7 @@ export default function SalesReportsPage() {
           top_rank:         d.topRank,
           other_fees:       d.otherFees,
           refunds:          d.refunds,
+          stamp_cards:      d.stampCards,
           commission:       d.commission,
           net_sales_pre_ads: d.netSalesPreAds,
           advertising:      d.advertising,
@@ -2630,7 +2637,7 @@ export default function SalesReportsPage() {
           d.orders.map(o => ({
             period_id: period.id, location_id: locationId,
             order_number: o.orderNumber, ordered_at: o.orderedAt, sale_date: o.saleDate,
-            shift: o.shift, gross: o.gross, tip: o.tip, refund: o.refund, online_paid: o.onlinePaid,
+            shift: o.shift, gross: o.gross, tip: o.tip, refund: o.refund, stamp_card: o.stampCard, online_paid: o.onlinePaid,
           })),
           { onConflict: 'location_id,order_number' },
         );
@@ -2642,7 +2649,7 @@ export default function SalesReportsPage() {
           set.breakdown!.map(r => ({
             period_id: period.id, location_id: locationId,
             sale_date: r.date, shift: r.shift, orders: r.orders, gross: r.gross,
-            net_sales: r.netSales, refund_est: r.refundEst, commission: r.commission,
+            net_sales: r.netSales, refund_est: r.refundEst, stamp_card_est: r.stampCardEst, commission: r.commission,
             net_pre_ads: r.netPreAds, advertising_est: r.advertisingEst, net_final: r.netFinal,
           })),
           { onConflict: 'location_id,sale_date,shift' },
@@ -5005,7 +5012,7 @@ export default function SalesReportsPage() {
                               ) : (
                                 <>
                                   <td className="px-2 py-2 text-right tabular-nums text-gray-400">{set.data.orderCount}</td>
-                                  <td className="px-2 py-2 text-right tabular-nums text-gray-700">{fmt(set.data.netSalesPreCommission - set.data.refunds)}</td>
+                                  <td className="px-2 py-2 text-right tabular-nums text-gray-700">{fmt(set.data.netSalesPreCommission - set.data.refunds - set.data.stampCards)}</td>
                                   <td className="px-2 py-2 text-right tabular-nums text-gray-500">−{fmt(set.data.commission)}</td>
                                   <td className="px-2 py-2 text-right tabular-nums text-gray-500">−{fmt(set.data.advertising)}</td>
                                   <td className="px-2 py-2 text-right tabular-nums font-bold text-gray-900">{fmt(set.data.netSalesFinal)}</td>
@@ -5030,7 +5037,7 @@ export default function SalesReportsPage() {
                           <tr className="bg-gray-50 font-bold text-gray-900 border-t border-gray-200">
                             <td className="px-4 py-2" colSpan={2}>{lfImportable.length} week{lfImportable.length === 1 ? '' : 's'} ready</td>
                             <td className="px-2 py-2 text-right tabular-nums">{lfImportable.reduce((t, x) => t + x.data!.orderCount, 0)}</td>
-                            <td className="px-2 py-2 text-right tabular-nums">{fmt(lfImportable.reduce((t, x) => t + x.data!.netSalesPreCommission - x.data!.refunds, 0))}</td>
+                            <td className="px-2 py-2 text-right tabular-nums">{fmt(lfImportable.reduce((t, x) => t + x.data!.netSalesPreCommission - x.data!.refunds - x.data!.stampCards, 0))}</td>
                             <td className="px-2 py-2 text-right tabular-nums">−{fmt(lfImportable.reduce((t, x) => t + x.data!.commission, 0))}</td>
                             <td className="px-2 py-2 text-right tabular-nums">−{fmt(lfImportable.reduce((t, x) => t + x.data!.advertising, 0))}</td>
                             <td className="px-2 py-2 text-right tabular-nums">{fmt(lfImportable.reduce((t, x) => t + x.data!.netSalesFinal, 0))}</td>
@@ -5595,12 +5602,18 @@ export default function SalesReportsPage() {
                   {woltCountRow(`${blockKey}-orders`, '# Orders', maps[blockShift].orders)}
                   {woltRatioRow(`${blockKey}-per-order`, 'Net sales / order',
                     maps[blockShift].preRefunds, maps[blockShift].orders)}
-                  {WOLT_ROWS.map(([label, bold, line, deduction]) => (
-                    woltLineRow(`${blockKey}-${line}`, label, maps[blockShift][line], { bold, deduction })
-                  ))}
+                  {WOLT_ROWS.flatMap(([label, bold, line, deduction]) => [
+                    woltLineRow(`${blockKey}-${line}`, label, maps[blockShift][line], { bold, deduction }),
+                    /* Lieferando's stamp cards sit under Refunds; Wolt has none, so no row. */
+                    ...(line === 'refunds' && Object.keys(maps[blockShift].stampCards).length > 0
+                      ? [woltLineRow(`${blockKey}-stamp`, 'Stamp cards', maps[blockShift].stampCards, { deduction: true })]
+                      : []),
+                  ])}
                   <tr key={`${blockKey}-gap`}><td colSpan={totalCols} style={{ height: 6, backgroundColor: '#ffffff' }} /></tr>
                   {woltPercentRow(`${blockKey}-ref-pct`, 'Refunds as % of sales',
                     maps[blockShift].refunds, maps[blockShift].preRefunds)}
+                  {Object.keys(maps[blockShift].stampCards).length > 0 && woltPercentRow(`${blockKey}-stamp-pct`, 'Stamp cards as % of sales',
+                    maps[blockShift].stampCards, maps[blockShift].preRefunds)}
                   {woltPercentRow(`${blockKey}-com-pct`, 'Commission as % of sales',
                     maps[blockShift].commission, maps[blockShift].preRefunds)}
                   {woltPercentRow(`${blockKey}-ads-pct`, 'Advertising as % of sales',
@@ -5608,6 +5621,7 @@ export default function SalesReportsPage() {
                   {woltPercentRow(`${blockKey}-total-pct`, 'Total cost (%)',
                     sumMaps(
                       maps[blockShift].refunds,
+                      maps[blockShift].stampCards,
                       maps[blockShift].commission,
                       maps[blockShift].advertising,
                     ),
