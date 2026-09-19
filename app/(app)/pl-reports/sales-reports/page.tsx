@@ -112,6 +112,8 @@ type ShiftRow = {
   takeaway_total:      number;
   cancellations_count: number;
   cancellations_total: number;
+  /** A note on the shift — an event, a problem, why the number looks odd. */
+  comment?:            string | null;
 };
 
 type DayAgg = {
@@ -1066,6 +1068,10 @@ export default function SalesReportsPage() {
   const [savingEdit,         setSavingEdit]         = useState(false);
   const [confirmDeleteId,    setConfirmDeleteId]    = useState<string | null>(null);
   const [reassignId,         setReassignId]         = useState<string | null>(null);
+  // Shift comments — written in the day pop-up, flagged on the summary
+  const [commentEditId,      setCommentEditId]      = useState<string | null>(null);
+  const [commentDraft,       setCommentDraft]       = useState('');
+  const [savingComment,      setSavingComment]      = useState(false);
   const [reassignDate,       setReassignDate]       = useState('');
   const [savingReassign,     setSavingReassign]     = useState(false);
   const [confirmDelDelivery,    setConfirmDelDelivery]    = useState(false);
@@ -1150,7 +1156,7 @@ export default function SalesReportsPage() {
       const qEnd   = `${year}-${String(lastM).padStart(2,'0')}-${String(daysInMonth(year, lastM)).padStart(2,'0')}`;
       let q = supabase
         .from('shift_reports')
-        .select('id,report_date,z_report_number,shift_type,gross_total,gross_food,gross_beverages,net_total,vat_total,tips,inhouse_total,takeaway_total,cancellations_count,cancellations_total')
+        .select('id,report_date,z_report_number,shift_type,gross_total,gross_food,gross_beverages,net_total,vat_total,tips,inhouse_total,takeaway_total,cancellations_count,cancellations_total,comment')
         .gte('report_date', qStart)
         .lte('report_date', qEnd)
         .order('report_date', { ascending: true });
@@ -3208,6 +3214,32 @@ export default function SalesReportsPage() {
       cancellations_total: String(shift.cancellations_total ?? 0),
     });
   }, []);
+
+  /** Saves a shift's comment; an empty box clears it. */
+  const handleSaveComment = useCallback(async (id: string, override?: string) => {
+    setSavingComment(true);
+    try {
+      const text = (override ?? commentDraft).trim();
+      const { error } = await supabase.from('shift_reports').update({ comment: text || null }).eq('id', id);
+      if (error) throw error;
+      queryClient.invalidateQueries({ queryKey: ['shift-reports'] });
+      setCommentEditId(null); setCommentDraft('');
+    } catch (e: any) { alert(`Save failed: ${e.message}`); }
+    finally { setSavingComment(false); }
+  }, [commentDraft, queryClient]);
+
+  /** Comments by "lunch:2026-09-18" / "dinner:…" / "day:…", for the flag on the summary. */
+  const shiftComments = useMemo(() => {
+    const m: Record<string, string[]> = {};
+    for (const r of shiftRows) {
+      const c = r.comment?.trim();
+      if (!c) continue;
+      const label = `${r.shift_type === 'lunch' ? '☀️' : '🌙'} ${c}`;
+      if (r.shift_type) (m[`${r.shift_type}:${r.report_date}`] ??= []).push(c);
+      (m[`day:${r.report_date}`] ??= []).push(label);
+    }
+    return m;
+  }, [shiftRows]);
 
   const handleDeleteShift = useCallback(async (id: string) => {
     try {
@@ -5803,8 +5835,11 @@ export default function SalesReportsPage() {
                                 const fcast    = fcastMap[col.dateKey] ?? null;
                                 const hasActual = actual > 0;
                                 const showFcast = !hasActual && isFuture && fcast !== null && fcast > 0;
+                                const notes = shiftComments[`${shift ?? 'day'}:${col.dateKey}`];
                                 return (
                                   <td key={ci} className={`${padY} text-right tabular-nums${small}`} style={{ paddingLeft:4, paddingRight:8, ...colStyle(shift, col.dateKey) }}>
+                                    {/* A comment on the shift: a marker, with the note on hover — open the day to read it. */}
+                                    {notes && <span title={notes.join('\n')} className="mr-1 cursor-help text-[10px]">💬</span>}
                                     {hasActual ? <span className="text-blue-700">{fmtNum(actual)}</span>
                                       : showFcast ? <span className="text-amber-500 italic text-[10px]">{fmtNum(fcast!)}</span>
                                       : <span className="text-gray-300">—</span>}
@@ -6666,6 +6701,52 @@ export default function SalesReportsPage() {
                                 </div>
                               ))}
                             </div>
+
+                            {/* ── Comment ── */}
+                            {commentEditId === shift.id ? (
+                              <div className="mt-3 pt-3 border-t border-gray-100">
+                                <textarea
+                                  autoFocus
+                                  value={commentDraft}
+                                  onChange={e => setCommentDraft(e.target.value)}
+                                  rows={3}
+                                  placeholder="What happened on this shift? An event, a problem, why the number looks odd…"
+                                  className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-400 resize-y"
+                                />
+                                <div className="flex items-center justify-end gap-2 mt-2">
+                                  {shift.comment && (
+                                    <button onClick={() => void handleSaveComment(shift.id, '')}
+                                      className="mr-auto text-xs font-semibold text-red-500 hover:text-red-700 transition-colors">
+                                      Remove comment
+                                    </button>
+                                  )}
+                                  <button onClick={() => { setCommentEditId(null); setCommentDraft(''); }}
+                                    className="px-3 py-1.5 text-xs font-semibold border border-gray-200 rounded-lg text-gray-500 hover:bg-gray-50 transition-colors">
+                                    Cancel
+                                  </button>
+                                  <button onClick={() => handleSaveComment(shift.id)} disabled={savingComment}
+                                    className="px-3 py-1.5 text-xs font-bold bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50">
+                                    {savingComment ? 'Saving…' : 'Save comment'}
+                                  </button>
+                                </div>
+                              </div>
+                            ) : shift.comment ? (
+                              <div className="mt-3 pt-3 border-t border-gray-100 flex items-start gap-2">
+                                <span className="text-sm">💬</span>
+                                <p className="flex-1 text-sm text-gray-700 whitespace-pre-wrap">{shift.comment}</p>
+                                <button onClick={() => { setCommentEditId(shift.id); setCommentDraft(shift.comment ?? ''); }}
+                                  className="text-xs font-semibold text-gray-400 hover:text-indigo-600 transition-colors">
+                                  Edit
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="mt-2 pt-2 border-t border-gray-100">
+                                <button onClick={() => { setCommentEditId(shift.id); setCommentDraft(''); }}
+                                  className="text-xs font-semibold text-gray-400 hover:text-indigo-600 transition-colors">
+                                  💬 Add comment
+                                </button>
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>
