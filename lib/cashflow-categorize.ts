@@ -57,8 +57,9 @@ export function classifyTransaction(
       desc.includes('miete yumas')
     ) return { category: 'C - Rent', salesType: 'Other' };
 
-    if (cp.includes('opentable'))  return { category: 'C - OpenTable',   salesType: 'Other' };
-    if (cp.includes('orderbird'))  return { category: 'C - Orderbird',   salesType: 'Other' };
+    // The booking system and the till both bill as software subscriptions.
+    if (cp.includes('opentable'))  return { category: 'C - Software',    salesType: 'Other' };
+    if (cp.includes('orderbird'))  return { category: 'C - Software',    salesType: 'Other' };
 
     if (
       cp.includes('nientiedt') ||

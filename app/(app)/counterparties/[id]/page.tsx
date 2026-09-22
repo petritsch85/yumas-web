@@ -39,7 +39,7 @@ type Bill = {
 };
 
 const C_CATEGORIES = [
-  'C - Personnel','C - Suppliers','C - Rent','C - OpenTable','C - Orderbird',
+  'C - Personnel','C - Suppliers','C - Rent',
   'C - Tax Advisor','C - Insurance','C - Energy','C - Marketing','C - Software',
   'C - Financing','C - Amazon','C - Other',
 ];
