@@ -740,10 +740,30 @@ export default function CounterpartiesPage() {
     () => counterparties.filter(cp => cp.category === 'C - Suppliers'),
     [counterparties],
   );
-  const otherCps = useMemo(
-    () => counterparties.filter(cp => cp.category !== 'C - Suppliers'),
-    [counterparties],
-  );
+  /**
+   * Everything that is not a supplier, one table per category.
+   *
+   * A counterparty is looked up by what it is — the energy company, the
+   * delivery platform — so the categories are the sections. "Other" is the
+   * bucket for the ones that fit nowhere, and it sorts last however many
+   * sections there are; an uncategorised row lands there too.
+   */
+  const otherGroups = useMemo(() => {
+    const byCat = new Map<string, Counterparty[]>();
+    for (const cp of counterparties) {
+      if (cp.category === 'C - Suppliers') continue;
+      const key = cp.category || 'C - Other';
+      byCat.set(key, [...(byCat.get(key) ?? []), cp]);
+    }
+    const label = (c: string) => c.replace(/^[CS] - /, '');
+    return [...byCat.entries()]
+      .map(([category, rows]) => ({ category, label: label(category), rows }))
+      .sort((a, b) => {
+        // The two "Other" buckets sit at the bottom, sales below costs.
+        const rank = (c: string) => (c === 'C - Other' ? 2 : c === 'S - Other' ? 3 : c.startsWith('S - ') ? 1 : 0);
+        return rank(a.category) - rank(b.category) || a.label.localeCompare(b.label);
+      });
+  }, [counterparties]);
 
   const showAssigned = (count: number) => {
     if (count > 0) {
@@ -962,21 +982,27 @@ export default function CounterpartiesPage() {
             )}
           </section>
 
-          <section>
-            <div className="flex items-baseline gap-2 mb-2">
-              <h2 className="text-sm font-bold text-gray-900">Other</h2>
-              <span className="text-xs font-semibold text-gray-600 bg-gray-100 border border-gray-200 rounded-full px-2 py-0.5">
-                {otherCps.length}
-              </span>
+          {otherGroups.length === 0 && (
+            <div className="flex items-center justify-center h-16 border border-dashed border-gray-200 rounded-xl">
+              <p className="text-xs text-gray-400">Nothing here — every counterparty is a supplier</p>
             </div>
-            {otherCps.length === 0 ? (
-              <div className="flex items-center justify-center h-16 border border-dashed border-gray-200 rounded-xl">
-                <p className="text-xs text-gray-400">Nothing here — every counterparty is a supplier</p>
+          )}
+          {otherGroups.map(g => (
+            <section key={g.category}>
+              <div className="flex items-baseline gap-2 mb-2">
+                <h2 className="text-sm font-bold text-gray-900">{g.label}</h2>
+                <span className={`text-xs font-semibold rounded-full px-2 py-0.5 border ${
+                  g.category.startsWith('S - ')
+                    ? 'text-green-700 bg-green-50 border-green-200'
+                    : 'text-gray-600 bg-gray-100 border-gray-200'
+                }`}>
+                  {g.rows.length}
+                </span>
+                <span className="text-[11px] text-gray-400">{g.category}</span>
               </div>
-            ) : (
-              cpTable(otherCps)
-            )}
-          </section>
+              {cpTable(g.rows)}
+            </section>
+          ))}
         </div>
       )}
     </div>
