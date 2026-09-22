@@ -48,7 +48,7 @@ type Bill = {
 
 const C_CATEGORIES = [
   'C - Personnel','C - Suppliers','C - Rent','C - OpenTable','C - Orderbird',
-  'C - Tax Advisor','C - Insurance','C - Energy','C - Marketing',
+  'C - Tax Advisor','C - Insurance','C - Energy','C - Marketing','C - Software',
   'C - Financing','C - Amazon','C - Other',
 ];
 const S_CATEGORIES = ['S - In House','S - Delivery','S - Catering','S - Other'];
