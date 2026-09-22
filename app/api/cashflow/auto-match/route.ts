@@ -121,7 +121,17 @@ export async function POST(req: NextRequest) {
       if (Math.abs(b.gross_amount - txGross) > 0.01) return false;
       const bLower = b.supplier_name.toLowerCase();
       if (resolvedSupplier) {
-        if (!bLower.includes(resolvedSupplier) && !resolvedSupplier.includes(bLower)) return false;
+        /* The bill's supplier goes through the same keywords as the bank's
+           counterparty. A bill headed "vertical cloud solution GmbH" and a
+           transfer to the same name both resolve to Gastromatic; comparing the
+           resolved name against the raw one would miss it, because neither
+           string contains the other. */
+        const resolvedBill = matchedSupplier(b.supplier_name);
+        if (resolvedBill) {
+          if (resolvedBill !== resolvedSupplier) return false;
+        } else if (!bLower.includes(resolvedSupplier) && !resolvedSupplier.includes(bLower)) {
+          return false;
+        }
       } else {
         const txLower = tx.counterparty.toLowerCase();
         if (!bLower.split(' ').some((w: string) => w.length > 3 && txLower.includes(w))) return false;
