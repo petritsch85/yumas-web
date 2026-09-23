@@ -32,6 +32,11 @@ type CfTx = {
   counterparty_id: string | null;
   bill: { id: string; supplier_name: string; invoice_number: string | null } | null;
   transaction_bill_links: BillLink[];
+  /** Settlement documents standing in for a bill. */
+  nexi_payout:       { payment_number: string; payout_date: string } | null;
+  nexi_statement:    { invoice_number: string; period_start: string; period_end: string } | null;
+  wolt_period:       { invoice_number: string; period_start: string; period_end: string } | null;
+  lieferando_period: { invoice_number: string; period_start: string; period_end: string } | null;
 };
 
 type Bill = {
@@ -517,6 +522,18 @@ function CpPanel({ cp }: { cp: Counterparty }) {
                                 const linkedCount   = embeddedLinks.length > 0 ? embeddedLinks.length : queryLinks.length;
                                 if (tx.bill) return (
                                   <span title={tx.bill.supplier_name + (tx.bill.invoice_number ? ' · ' + tx.bill.invoice_number : '')} className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-green-100"><Check size={11} className="text-green-600" /></span>
+                                );
+                                /* A settlement is evidence like a bill: the Nexi transfer this
+                                   credit is, the debit that collects its fees, or a delivery
+                                   platform's payout. */
+                                const settlement =
+                                  tx.nexi_payout       ? `Nexi transfer ${tx.nexi_payout.payment_number} of ${fmtDate(tx.nexi_payout.payout_date)}`
+                                  : tx.nexi_statement  ? `Nexi fees ${fmtDate(tx.nexi_statement.period_start)} – ${fmtDate(tx.nexi_statement.period_end)}`
+                                  : tx.wolt_period     ? `Wolt settlement ${tx.wolt_period.invoice_number}`
+                                  : tx.lieferando_period ? `Lieferando statement ${tx.lieferando_period.invoice_number}`
+                                  : null;
+                                if (settlement) return (
+                                  <span title={settlement} className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-green-100"><Check size={11} className="text-green-600" /></span>
                                 );
                                 if (linkedCount > 0) return (
                                   <button onClick={() => setActiveLinkTx(tx)} title="Edit bill links"
