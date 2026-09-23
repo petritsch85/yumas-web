@@ -825,8 +825,8 @@ function TxRow({ tx, onSave, counterparties, onShowDetails, selected, onToggleSe
                 <a
                   href="/pl-reports/sales-reports/wolt"
                   title={`Wolt settlement ${w.invoice_number} · ${w.period_start} – ${w.period_end}`}
-                  className="flex items-center gap-1 text-xs font-semibold text-green-700 bg-green-50 border border-green-200 rounded-full px-2 py-0.5 hover:bg-green-100 transition-colors">
-                  <CheckCircle2 size={11} /> Wolt
+                  className="flex items-center justify-center w-6 h-6 rounded-full bg-green-50 border border-green-200 text-green-600 hover:bg-green-100 transition-colors">
+                  <CheckCircle2 size={13} />
                 </a>
               );
             }
@@ -837,8 +837,8 @@ function TxRow({ tx, onSave, counterparties, onShowDetails, selected, onToggleSe
                 <a
                   href="/pl-reports/sales-reports/lieferando"
                   title={`Lieferando statement ${l.invoice_number} · ${l.from} – ${l.to}${l.weeks > 1 ? ` (${l.weeks} weeks)` : ''}`}
-                  className="flex items-center gap-1 text-xs font-semibold text-orange-700 bg-orange-50 border border-orange-200 rounded-full px-2 py-0.5 hover:bg-orange-100 transition-colors">
-                  <CheckCircle2 size={11} /> Lieferando{l.weeks > 1 ? ` ×${l.weeks}` : ''}
+                  className="flex items-center justify-center w-6 h-6 rounded-full bg-green-50 border border-green-200 text-green-600 hover:bg-green-100 transition-colors">
+                  <CheckCircle2 size={13} />
                 </a>
               );
             }
