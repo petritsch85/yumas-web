@@ -2,7 +2,7 @@
 
 import { useState, useMemo, Fragment } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Pencil, Trash2, X, Check, ChevronDown, ChevronUp, Tag, TrendingUp, TrendingDown, Minus, Link2 } from 'lucide-react';
+import { Plus, Pencil, Trash2, X, Check, ChevronDown, ChevronUp, Tag, TrendingUp, TrendingDown, Minus, Link2, Upload, Loader2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase-browser';
 
 type Counterparty = {
@@ -813,6 +813,52 @@ export default function CounterpartiesPage() {
   const toggleExpand = (id: string) =>
     setExpandedId(prev => prev === id ? null : id);
 
+  /*
+   * Nexi settles a day's card payments as one transfer, so its credits reach
+   * the bank with no invoice behind them. The monthly statement is the
+   * evidence, and it is uploaded here — on the counterparty it belongs to —
+   * rather than in Bills, where it would sit as a document nothing points at.
+   */
+  const [nexiBusy, setNexiBusy] = useState(false);
+  const [nexiMsg,  setNexiMsg]  = useState<{ ok: boolean; text: string } | null>(null);
+
+  const uploadNexi = async (files: File[]) => {
+    const usable = files.filter(f => /\.(pdf|zip)$/i.test(f.name));
+    if (usable.length === 0) return;
+    setNexiBusy(true); setNexiMsg(null);
+    try {
+      const fd = new FormData();
+      for (const f of usable) fd.append('files', f);
+      const res  = await fetch('/api/nexi/extract', { method: 'POST', body: fd });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? 'The statement could not be read.');
+      const rows: { source: string; data?: { payoutCount: number; periodStart: string; periodEnd: string }; matched?: number; unmatched?: number; warnings: string[]; error?: string }[] = json.results ?? [];
+      const failed = rows.filter(r => r.error);
+      const ok     = rows.filter(r => !r.error);
+      const linked = ok.reduce((t, r) => t + (r.matched ?? 0), 0);
+      const left   = ok.reduce((t, r) => t + (r.unmatched ?? 0), 0);
+      const notes  = ok.flatMap(r => r.warnings);
+      setNexiMsg({
+        ok: failed.length === 0,
+        text: [
+          ok.length ? `${ok.length} statement${ok.length === 1 ? '' : 's'} read · ${linked} cash flow${linked === 1 ? '' : 's'} matched${left ? `, ${left} still unmatched` : ''}.` : '',
+          ...failed.map(r => `${r.source}: ${r.error}`),
+          ...notes,
+        ].filter(Boolean).join(' '),
+      });
+      qc.invalidateQueries({ queryKey: ['counterparties'] });
+      qc.invalidateQueries({ queryKey: ['cashflow-tx'] });
+    } catch (e) {
+      setNexiMsg({ ok: false, text: e instanceof Error ? e.message : 'Upload failed.' });
+    } finally {
+      setNexiBusy(false);
+    }
+  };
+
+  /** True for the acquirer whose statements this page accepts. */
+  const takesStatements = (cp: Counterparty) =>
+    /nexi/i.test(cp.name) || cp.keywords.some(k => /nexi/i.test(k));
+
   /** One counterparty card. Rendered by both the Suppliers and Other sections. */
   const CP_COLS = 6;
 
@@ -882,6 +928,18 @@ export default function CounterpartiesPage() {
           </td>
 
           <td className="px-2 py-1.5 text-right whitespace-nowrap">
+            {takesStatements(cp) && (
+              <>
+                <input type="file" accept=".pdf,.zip,application/pdf,application/zip" multiple
+                  id={`nexi-upload-${cp.id}`} className="hidden"
+                  onChange={e => { void uploadNexi(Array.from(e.target.files ?? [])); e.target.value = ''; }} />
+                <label htmlFor={`nexi-upload-${cp.id}`}
+                  title="Upload the monthly Nexi settlement — its transfers are matched to the cash flows"
+                  className="inline-flex p-1 text-gray-400 hover:text-[#1B5E20] hover:bg-green-50 rounded transition-colors cursor-pointer align-middle">
+                  {nexiBusy ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
+                </label>
+              </>
+            )}
             <button onClick={() => { setEditingId(cp.id); setExpandedId(null); }}
               className="p-1 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded transition-colors">
               <Pencil size={13} />
@@ -941,6 +999,15 @@ export default function CounterpartiesPage() {
           </button>
         )}
       </div>
+
+      {nexiMsg && (
+        <div className={`mb-4 px-4 py-2.5 border rounded-lg text-sm font-medium flex items-start gap-2 ${
+          nexiMsg.ok ? 'bg-green-50 border-green-200 text-green-800' : 'bg-red-50 border-red-200 text-red-800'
+        }`}>
+          <span className="flex-1">{nexiMsg.text}</span>
+          <button onClick={() => setNexiMsg(null)} className="opacity-60 hover:opacity-100"><X size={14} /></button>
+        </div>
+      )}
 
       {assignedMsg && (
         <div className="mb-4 px-4 py-2.5 bg-green-50 border border-green-200 rounded-lg text-sm font-medium text-green-800">

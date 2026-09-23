@@ -23,7 +23,7 @@ export async function GET(req: NextRequest) {
     // wolt_period stands in for a bill on a Wolt payout: the settlement
     // documents in Sales Reports are the evidence, and Wolt issues no invoice
     // that would ever be filed under incoming bills.
-    .select('*, bill:bills(id, supplier_name, invoice_number, gross_amount, net_amount, vat_amount, file_path), transaction_bill_links(id, note, bill:bills(id, supplier_name, invoice_number, gross_amount, net_amount, vat_amount)), wolt_period:wolt_periods(invoice_number, restaurant, period_start, period_end, payout_net, net_sales_pre_ads, sales_vat), lieferando_period:lieferando_periods(id, location_id, invoice_number, restaurant, period_start, period_end, payout)', { count: 'exact' })
+    .select('*, bill:bills(id, supplier_name, invoice_number, gross_amount, net_amount, vat_amount, file_path), transaction_bill_links(id, note, bill:bills(id, supplier_name, invoice_number, gross_amount, net_amount, vat_amount)), wolt_period:wolt_periods(invoice_number, restaurant, period_start, period_end, payout_net, net_sales_pre_ads, sales_vat), lieferando_period:lieferando_periods(id, location_id, invoice_number, restaurant, period_start, period_end, payout), nexi_payout:nexi_payouts(payment_number, payout_date, amount, statement:nexi_statements(invoice_number, period_start, period_end))', { count: 'exact' })
     .order('date', { ascending: false })
     .order('created_at', { ascending: false })
     .range((page - 1) * pageSize, page * pageSize - 1);

@@ -63,6 +63,13 @@ type CfTx = {
     weeks: number; from: string; to: string;
     net_sales_pre_ads: number; sales_vat: number;
   } | null;
+  /** Nexi bundles a day's card payments into one transfer; the monthly
+   *  settlement lists it, and stands in for a bill the same way. */
+  nexi_payout_id: string | null;
+  nexi_payout: {
+    payment_number: string; payout_date: string; amount: number;
+    statement: { invoice_number: string; period_start: string; period_end: string } | null;
+  } | null;
   counterparty_id: string | null;
   accounting_period: string | null; // "type|start[|end]"
 };
@@ -840,6 +847,17 @@ function TxRow({ tx, onSave, counterparties, onShowDetails, selected, onToggleSe
                   className="flex items-center justify-center w-6 h-6 rounded-full bg-green-50 border border-green-200 text-green-600 hover:bg-green-100 transition-colors">
                   <CheckCircle2 size={13} />
                 </a>
+              );
+            }
+
+            if (tx.nexi_payout) {
+              const n = tx.nexi_payout;
+              return (
+                <span
+                  title={`Nexi transfer ${n.payment_number} of ${n.payout_date}${n.statement ? ` · settlement ${n.statement.invoice_number}` : ''}`}
+                  className="flex items-center justify-center w-6 h-6 rounded-full bg-green-50 border border-green-200 text-green-600">
+                  <CheckCircle2 size={13} />
+                </span>
               );
             }
 
