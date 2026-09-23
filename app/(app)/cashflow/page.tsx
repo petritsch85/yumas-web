@@ -973,7 +973,7 @@ function TxRow({ tx, onSave, counterparties, onShowDetails, selected, onToggleSe
           ) : (
             <select
               value={tx.category}
-              onChange={e => patch('category', e.target.value)}
+              onChange={e => onSave(tx.id, { category: e.target.value, category_manual: true })}
               className={`text-xs font-medium px-1.5 py-0.5 rounded-full border-0 outline-none cursor-pointer ${chipClass}`}
             >
               <optgroup label="── Cost (C) ──">

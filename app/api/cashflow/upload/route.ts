@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase-admin';
 import { classifyTransaction } from '@/lib/cashflow-categorize';
+import { counterpartyFor } from '@/lib/counterparty-category';
 
 // Auto-detect delimiter: German bank CSVs use semicolons, others use commas
 function detectDelimiter(sample: string): string {
@@ -164,6 +165,13 @@ export async function POST(req: NextRequest) {
 
     const admin = getSupabaseAdmin();
 
+    /* The counterparties as defined, so a bank line lands in the category a
+       person chose for whoever it is, rather than in whatever the keyword
+       rules make of the bank's wording. */
+    const { data: cpRows } = await admin
+      .from('counterparties').select('id, name, category, keywords');
+    const knownCounterparties = cpRows ?? [];
+
     // Create upload record first (file_path added separately — column may not exist before migration)
     const { data: upload, error: uploadErr } = await admin
       .from('cashflow_uploads')
@@ -204,7 +212,12 @@ export async function POST(req: NextRequest) {
       if (amountCents === null) continue;
 
       const direction = amountCents >= 0 ? 'in' : 'out';
-      const { category, salesType } = classifyTransaction(counterparty, description, direction);
+      const guess = classifyTransaction(counterparty, description, direction);
+      /* A defined counterparty outranks the keyword rules: it carries the
+         category a person chose, and the rules only read the bank's wording. */
+      const cp = counterpartyFor({ counterparty }, knownCounterparties);
+      const category  = cp?.category ?? guess.category;
+      const salesType = guess.salesType;
 
       txRows.push({
         upload_id:    upload.id,

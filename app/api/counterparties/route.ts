@@ -34,6 +34,43 @@ async function autoAssignTransactions(
   return matched.length;
 }
 
+/**
+ * Moves this counterparty's transactions onto its category.
+ *
+ * Rows whose category a person set by hand are left alone — one Nexi line a
+ * month is the fee for the service, not takings.
+ */
+async function applyCategory(
+  admin: SupabaseClient,
+  counterpartyId: string,
+  category: string | null,
+  keywords: string[],
+  name: string,
+): Promise<number> {
+  if (!category) return 0;
+  const terms = keywords.length > 0 ? keywords : [name];
+  const { data: txs } = await admin
+    .from('cashflow_transactions')
+    .select('id, counterparty, counterparty_id, category')
+    .eq('category_manual', false);
+  const matched = (txs ?? []).filter(tx => {
+    if (tx.category === category) return false;
+    if (tx.counterparty_id === counterpartyId) return true;
+    if (tx.counterparty_id) return false;
+    const raw = (tx.counterparty ?? '').toLowerCase();
+    return terms.some(kw => kw && raw.includes(kw.toLowerCase()));
+  }).map(tx => tx.id);
+  if (!matched.length) return 0;
+
+  // Supabase caps an IN list, so the update goes in chunks.
+  for (let i = 0; i < matched.length; i += 200) {
+    await admin.from('cashflow_transactions')
+      .update({ category })
+      .in('id', matched.slice(i, i + 200));
+  }
+  return matched.length;
+}
+
 export async function GET() {
   const admin = getSupabaseAdmin();
   const { data, error } = await admin
@@ -66,5 +103,6 @@ export async function POST(req: NextRequest) {
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
   const assigned = await autoAssignTransactions(admin, data.id, kws, name.trim());
-  return NextResponse.json({ ...data, assigned });
+  const recategorised = await applyCategory(admin, data.id, data.category, kws, name.trim());
+  return NextResponse.json({ ...data, assigned, recategorised });
 }

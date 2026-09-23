@@ -109,7 +109,7 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid transaction id.' }, { status: 400 });
   }
 
-  const allowed = ['category', 'location', 'sales_type', 'notes', 'bill_id', 'confirmed', 'counterparty_id', 'accounting_period'] as const;
+  const allowed = ['category', 'category_manual', 'location', 'sales_type', 'notes', 'bill_id', 'confirmed', 'counterparty_id', 'accounting_period'] as const;
   const update: Record<string, string | boolean | null> = {};
   for (const key of allowed) {
     if (body.patch?.[key] !== undefined) update[key] = body.patch[key];
