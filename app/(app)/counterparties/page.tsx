@@ -752,15 +752,17 @@ export default function CounterpartiesPage() {
     const byCat = new Map<string, Counterparty[]>();
     for (const cp of counterparties) {
       if (cp.category === 'C - Suppliers') continue;
-      const key = cp.category || 'C - Other';
+      // Every sales category is one table: there are only a handful of them,
+      // and they are read together — who pays us, and on what terms.
+      const key = (cp.category || 'C - Other').startsWith('S - ') ? 'sales' : (cp.category || 'C - Other');
       byCat.set(key, [...(byCat.get(key) ?? []), cp]);
     }
-    const label = (c: string) => c.replace(/^[CS] - /, '');
+    const label = (c: string) => (c === 'sales' ? 'Sales' : c.replace(/^[CS] - /, ''));
     return [...byCat.entries()]
       .map(([category, rows]) => ({ category, label: label(category), rows }))
       .sort((a, b) => {
-        // The two "Other" buckets sit at the bottom, sales below costs.
-        const rank = (c: string) => (c === 'C - Other' ? 2 : c === 'S - Other' ? 3 : c.startsWith('S - ') ? 1 : 0);
+        // Costs first, then "Other", with Sales last.
+        const rank = (c: string) => (c === 'sales' ? 2 : c === 'C - Other' ? 1 : 0);
         return rank(a.category) - rank(b.category) || a.label.localeCompare(b.label);
       });
   }, [counterparties]);
@@ -992,13 +994,13 @@ export default function CounterpartiesPage() {
               <div className="flex items-baseline gap-2 mb-2">
                 <h2 className="text-sm font-bold text-gray-900">{g.label}</h2>
                 <span className={`text-xs font-semibold rounded-full px-2 py-0.5 border ${
-                  g.category.startsWith('S - ')
+                  g.category === 'sales'
                     ? 'text-green-700 bg-green-50 border-green-200'
                     : 'text-gray-600 bg-gray-100 border-gray-200'
                 }`}>
                   {g.rows.length}
                 </span>
-                <span className="text-[11px] text-gray-400">{g.category}</span>
+                {g.category !== 'sales' && <span className="text-[11px] text-gray-400">{g.category}</span>}
               </div>
               {cpTable(g.rows)}
             </section>
