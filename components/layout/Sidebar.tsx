@@ -119,6 +119,7 @@ const NAV_GROUPS: NavGroup[] = [
           { labelKey: 'sidebar.nav.analysisSales', href: '/pl-reports/analysis/sales', icon: TrendingUp },
         ],
       },
+      { labelKey: 'sidebar.nav.ustva', href: '/pl-reports/ustva', icon: FileCheck, permKey: 'pl_reports' },
       { labelKey: 'sidebar.nav.productDetails', href: '/pl-reports/product-details', icon: ShoppingBag, permKey: 'pl_reports' },
     ],
   },
