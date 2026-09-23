@@ -70,6 +70,12 @@ type CfTx = {
     payment_number: string; payout_date: string; amount: number;
     statement: { invoice_number: string; period_start: string; period_end: string } | null;
   } | null;
+  /** The settlement whose fees this debit collects. */
+  nexi_statement_id: string | null;
+  nexi_statement: {
+    invoice_number: string; period_start: string; period_end: string;
+    fees_net: number; fees_vat: number; fees_gross: number;
+  } | null;
   counterparty_id: string | null;
   accounting_period: string | null; // "type|start[|end]"
 };
@@ -149,6 +155,21 @@ function vatOf(tx: CfTx): { rate: number; vatCents: number; nettoCents: number; 
       rate: (vat / net) * 100,
       vatCents: Math.round(vat * 100),
       nettoCents: Math.round(net * 100),
+      fromBill: true,
+      billOdd: false,
+    };
+  }
+
+  /* The fee debit's VAT is on the settlement itself — 19% on Nexi's fees —
+     so it is read off the document rather than guessed from the category. */
+  const ns = tx.nexi_statement;
+  if (ns && Number(ns.fees_gross) > 0) {
+    const share = Number(ns.fees_vat) / Number(ns.fees_gross);
+    const vatCents = Math.round(tx.amount_cents * share);
+    return {
+      rate: (Number(ns.fees_vat) / Number(ns.fees_net)) * 100,
+      vatCents,
+      nettoCents: tx.amount_cents - vatCents,
       fromBill: true,
       billOdd: false,
     };
@@ -847,6 +868,17 @@ function TxRow({ tx, onSave, counterparties, onShowDetails, selected, onToggleSe
                   className="flex items-center justify-center w-6 h-6 rounded-full bg-green-50 border border-green-200 text-green-600 hover:bg-green-100 transition-colors">
                   <CheckCircle2 size={13} />
                 </a>
+              );
+            }
+
+            if (tx.nexi_statement) {
+              const n = tx.nexi_statement;
+              return (
+                <span
+                  title={`Nexi transaction fees for ${n.period_start} – ${n.period_end} · settlement ${n.invoice_number}`}
+                  className="flex items-center justify-center w-6 h-6 rounded-full bg-green-50 border border-green-200 text-green-600">
+                  <CheckCircle2 size={13} />
+                </span>
               );
             }
 

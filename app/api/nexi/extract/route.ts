@@ -14,6 +14,8 @@ export interface NexiImportResult {
   data?:    Omit<NexiStatement, 'payouts'> & { payoutCount: number };
   /** Bank credits this import tied to a transfer. */
   matched?: number;
+  /** Whether the fee direct debit was found in the bank. */
+  feeMatched?: boolean;
   /** Transfers the statement lists that no credit in the bank carries yet. */
   unmatched?: number;
   warnings: string[];
@@ -193,11 +195,44 @@ export async function POST(req: Request) {
       matched++;
     }
 
+    /*
+     * The fees are collected separately, by direct debit a day or two after
+     * the statement. That debit is evidenced by this same document, so it is
+     * tied to the statement rather than to any one transfer.
+     */
+    let feeMatched = false;
+    if (data.debitAmount != null && data.debitDate) {
+      const feeCents = Math.round(data.debitAmount * 100);
+      const { data: feeRows } = await admin
+        .from('cashflow_transactions')
+        .select('id, amount_cents, nexi_statement_id')
+        .eq('direction', 'out')
+        .ilike('counterparty', '%nexi%')
+        .gte('date', plus(data.debitDate, -3))
+        .lte('date', plus(data.debitDate, 10));
+      const hits = (feeRows ?? []).filter(t =>
+        Math.abs(t.amount_cents) === feeCents &&
+        (!t.nexi_statement_id || t.nexi_statement_id === stmt.id));
+      if (hits.length === 1) {
+        const { error } = await admin
+          .from('cashflow_transactions')
+          .update({ nexi_statement_id: stmt.id })
+          .eq('id', hits[0].id);
+        if (error) warnings.push(`Fee debit: ${error.message}`);
+        else feeMatched = true;
+      } else if (hits.length > 1) {
+        warnings.push(`The fee debit of ${data.debitAmount.toFixed(2)} € matches ${hits.length} transactions — left for you to link.`);
+      } else {
+        warnings.push(`The fee debit of ${data.debitAmount.toFixed(2)} € (${data.debitDate}) is not in the bank data yet.`);
+      }
+    }
+
     const { payouts, ...rest } = data;
     results.push({
       source: pdf.name,
       data: { ...rest, payoutCount: payouts.length },
       matched,
+      feeMatched,
       unmatched: saved.length - matched,
       warnings,
     });

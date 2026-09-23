@@ -832,16 +832,17 @@ export default function CounterpartiesPage() {
       const res  = await fetch('/api/nexi/extract', { method: 'POST', body: fd });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? 'The statement could not be read.');
-      const rows: { source: string; data?: { payoutCount: number; periodStart: string; periodEnd: string }; matched?: number; unmatched?: number; warnings: string[]; error?: string }[] = json.results ?? [];
+      const rows: { source: string; data?: { payoutCount: number; periodStart: string; periodEnd: string }; matched?: number; feeMatched?: boolean; unmatched?: number; warnings: string[]; error?: string }[] = json.results ?? [];
       const failed = rows.filter(r => r.error);
       const ok     = rows.filter(r => !r.error);
       const linked = ok.reduce((t, r) => t + (r.matched ?? 0), 0);
+      const fees   = ok.filter(r => r.feeMatched).length;
       const left   = ok.reduce((t, r) => t + (r.unmatched ?? 0), 0);
       const notes  = ok.flatMap(r => r.warnings);
       setNexiMsg({
         ok: failed.length === 0,
         text: [
-          ok.length ? `${ok.length} statement${ok.length === 1 ? '' : 's'} read · ${linked} cash flow${linked === 1 ? '' : 's'} matched${left ? `, ${left} still unmatched` : ''}.` : '',
+          ok.length ? `${ok.length} statement${ok.length === 1 ? '' : 's'} read · ${linked} cash flow${linked === 1 ? '' : 's'} matched${left ? `, ${left} still unmatched` : ''}${fees ? `, ${fees} fee debit${fees === 1 ? '' : 's'} matched` : ''}.` : '',
           ...failed.map(r => `${r.source}: ${r.error}`),
           ...notes,
         ].filter(Boolean).join(' '),

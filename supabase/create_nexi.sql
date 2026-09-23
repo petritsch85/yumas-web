@@ -75,3 +75,14 @@ comment on column public.cashflow_transactions.nexi_payout_id is
 
 create index if not exists cashflow_transactions_nexi_payout_idx
   on public.cashflow_transactions (nexi_payout_id);
+
+-- The fees are collected by direct debit a day or two after the statement, so
+-- that debit points at the statement rather than at any one transfer.
+alter table public.cashflow_transactions
+  add column if not exists nexi_statement_id uuid references public.nexi_statements(id) on delete set null;
+
+comment on column public.cashflow_transactions.nexi_statement_id is
+  'The Nexi settlement whose transaction fees this debit collects.';
+
+create index if not exists cashflow_transactions_nexi_statement_idx
+  on public.cashflow_transactions (nexi_statement_id);
