@@ -2498,6 +2498,9 @@ export default function SalesReportsPage() {
       for (const [i, file] of files.entries()) {
         const fd = new FormData();
         fd.append('files', file);
+        // Only used for documents that name no branch — the early sets say
+        // just "Yumas". The server never lets it override a name that matched.
+        if (location?.id) fd.append('fallbackLocationId', location.id);
         try {
           const res  = await fetch('/api/wolt/extract', { method: 'POST', body: fd });
           const json = await res.json();
@@ -2518,7 +2521,7 @@ export default function SalesReportsPage() {
     } finally {
       setWoltParsing(false); setWoltProgress(null);
     }
-  }, []);
+  }, [location?.id]);
 
   /**
    * Reads the purchases export — the order list carrying the items sold.

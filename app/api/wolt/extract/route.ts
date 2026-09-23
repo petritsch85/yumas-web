@@ -114,9 +114,20 @@ export async function POST(req: Request) {
     (closures  ?? []) as ClosureRow[],
   );
 
+  /*
+   * The location the dropdown was on, used only when the documents name a
+   * restaurant that matches nothing — the early sets say just "Yumas", before
+   * Wolt carried the branch in the name. Never used to override a name that
+   * did match, and every set filed this way says so.
+   */
+  const fallbackId = form.get('fallbackLocationId');
+  const fallback = typeof fallbackId === 'string'
+    ? locations.find(l => l.id === fallbackId) ?? null
+    : null;
+
   const sets: WoltSetResult[] = [];
   for (const [source, groupDocs] of groups) {
-    sets.push(buildSet(source, groupDocs, locations, closedChecker));
+    sets.push(buildSet(source, groupDocs, locations, closedChecker, fallback));
   }
 
   sets.sort((a, b) => (a.data?.periodStart ?? '').localeCompare(b.data?.periodStart ?? ''));
@@ -141,6 +152,7 @@ function buildSelfDeliverySet(
   docs: Doc[],
   locations: { id: string; name: string }[],
   isClosed: (locationId: string, date: string, shift: ShiftType) => boolean,
+  fallback: { id: string; name: string } | null,
 ): WoltSetResult {
   const warnings = base.warnings;
   const feeDoc = docs.find(d => d.kind === 'wolt_invoice');
@@ -198,14 +210,18 @@ function buildSelfDeliverySet(
     };
   }
 
-  const location = matchLocation(data.restaurant, locations);
+  const matched  = matchLocation(data.restaurant, locations);
+  const location = matched ?? fallback;
   if (!location) {
     return {
       ...base, data,
       error: `"${data.restaurant}" does not match a location in the system${
         locations.length ? ` (${locations.map(l => l.name).join(', ')})` : ''
-      }. Add the location, or name it so the restaurant matches, before importing this period.`,
+      }. Pick the location above, or name it so the restaurant matches, before importing this period.`,
     };
+  }
+  if (!matched) {
+    warnings.push(`The documents name the restaurant only "${data.restaurant}", so this period is filed under ${location.name} — the location selected above. Check that is right.`);
   }
 
   const salesDoc = docs.find(d => d.kind === 'sales_report');
@@ -264,6 +280,7 @@ function buildSet(
   docs: Doc[],
   locations: { id: string; name: string }[],
   isClosed: (locationId: string, date: string, shift: ShiftType) => boolean,
+  fallback: { id: string; name: string } | null,
 ): WoltSetResult {
   const files: WoltSetFile[] = docs.map(d => ({ name: d.name, kind: d.kind }));
   const warnings: string[] = [];
@@ -276,7 +293,7 @@ function buildSet(
   // Wolt delivers there is a self-billing invoice; where the restaurant
   // delivers there is a payout report and a separate fee invoice instead.
   if (!invoiceDoc && payoutDoc) {
-    return buildSelfDeliverySet(base, payoutDoc, docs, locations, isClosed);
+    return buildSelfDeliverySet(base, payoutDoc, docs, locations, isClosed, fallback);
   }
   if (!invoiceDoc) {
     return { ...base, error: 'No self-billing invoice (Rechnung (Selbstfakturierung)) and no payout report (Auszahlungsbericht) in this set — one of those carries the period totals.' };
@@ -315,14 +332,18 @@ function buildSet(
   // A set is filed by the restaurant its own invoice names, never by the
   // dropdown: falling back would quietly file one restaurant's sales under
   // another, which is the mistake this whole batch path exists to prevent.
-  const location = matchLocation(data.restaurant, locations);
+  const matched  = matchLocation(data.restaurant, locations);
+  const location = matched ?? fallback;
   if (!location) {
     return {
       ...base, data,
       error: `"${data.restaurant}" does not match a location in the system${
         locations.length ? ` (${locations.map(l => l.name).join(', ')})` : ''
-      }. Add the location, or name it so the restaurant matches, before importing this period.`,
+      }. Pick the location above, or name it so the restaurant matches, before importing this period.`,
     };
+  }
+  if (!matched) {
+    warnings.push(`The documents name the restaurant only "${data.restaurant}", so this period is filed under ${location.name} — the location selected above. Check that is right.`);
   }
 
   // The daily and shift split. It needs the location, so it comes after the
