@@ -65,8 +65,10 @@ export default function UstvaPage() {
         loc(supabase.from('lieferando_shift_sales')
           .select('sale_date,net_sales,refund_est,stamp_card_est').gte('sale_date', from).lte('sale_date', to)),
         supabase.from('outgoing_bills')
-          .select('id,invoice_number,invoice_date,customer_name,net_food,vat_7,net_drinks,vat_19,issuing_location,status')
-          .gte('invoice_date', from).lte('invoice_date', to),
+          // Widened either side: an event in this period may carry an invoice
+          // dated in the next, and the tax follows the event.
+          .select('id,invoice_number,invoice_date,event_date,customer_name,net_food,vat_7,net_drinks,vat_19,issuing_location,status')
+          .or(`and(event_date.gte.${from},event_date.lte.${to}),and(event_date.is.null,invoice_date.gte.${from},invoice_date.lte.${to}),and(invoice_date.gte.${from},invoice_date.lte.${to})`),
         supabase.from('bills')
           .select('id,supplier_name,invoice_number,invoice_date,net_amount,vat_amount,gross_amount,status,category')
           .gte('invoice_date', from).lte('invoice_date', to),
@@ -279,8 +281,8 @@ export default function UstvaPage() {
           )}
 
           <p className="mt-6 mb-10 text-xs text-gray-400">
-            Revenue is taken from the sales records by the day of the sale and input VAT from the invoices by
-            their invoice date — the Soll-Versteuerung the company is on. Card settlements and platform payouts
+            Revenue is taken from the sales records by the day of the sale — for an event, the day it was
+            held rather than the day it was invoiced — and input VAT from the invoices by their invoice date — the Soll-Versteuerung the company is on. Card settlements and platform payouts
             are deliberately ignored: they are the same takings arriving later, net of a fee, and reading them
             would count the revenue twice and lose the fee’s input VAT. A delivery platform’s commission is
             therefore input VAT here, not a deduction from sales, which is where this figure parts company with

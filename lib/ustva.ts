@@ -59,6 +59,8 @@ export interface UstvaOutgoingBill {
   id: string;
   invoice_number: string | null;
   invoice_date: string;
+  /** When the event was held. The supply, and so the period the tax falls in. */
+  event_date: string | null;
   customer_name: string | null;
   net_food: number; vat_7: number;
   net_drinks: number; vat_19: number;
@@ -207,7 +209,39 @@ export function computeUstva(input: UstvaInput): UstvaResult {
   deliveryLine('lieferando-7', 'Lieferando · food', input.lieferando);
 
   /* ── Our own outgoing invoices: they state both bases ── */
-  const out = input.outgoing.filter(b => inRange(b.invoice_date, from, to));
+  /* The tax on a supply arises in the period it was performed, not the one it
+     was invoiced in (§13 UStG): an event held on 28 August and invoiced on 3
+     September belongs to the August return. The invoice date stands in only
+     when no event date was recorded. */
+  const supplyDate = (b: UstvaOutgoingBill) => b.event_date ?? b.invoice_date;
+  const out = input.outgoing.filter(b => inRange(supplyDate(b), from, to));
+  const moved = input.outgoing.filter(b =>
+    b.event_date && inRange(b.invoice_date, from, to) && !inRange(b.event_date, from, to));
+  const pulledIn = out.filter(b => b.event_date && !inRange(b.invoice_date, from, to));
+  if (pulledIn.length > 0) {
+    checks.push({
+      level: 'info',
+      text: `${pulledIn.length} outgoing invoice${pulledIn.length === 1 ? '' : 's'} dated after this period ${pulledIn.length === 1 ? 'is' : 'are'} counted in it, because the event was held then (${pulledIn.map(b => b.invoice_number ?? '—').join(', ')}).`,
+    });
+  }
+  /* An invoice for an event still to come is usually a deposit, and VAT on a
+     deposit is owed when the money arrives, not when the event happens. Moving
+     it to the event's month is right for an ordinary invoice and wrong for a
+     paid deposit, so it is named rather than moved quietly. */
+  const ahead = moved.filter(b => b.event_date! > to);
+  if (ahead.length > 0) {
+    checks.push({
+      level: 'warn',
+      text: `${ahead.length} invoice${ahead.length === 1 ? '' : 's'} raised in this period for a later event (${ahead.map(b => b.invoice_number ?? '—').join(', ')}) ${ahead.length === 1 ? 'is' : 'are'} counted in the event's month. If it was a deposit and the money has been received, the VAT is owed now instead — check before filing.`,
+    });
+  }
+  const behind = moved.filter(b => b.event_date! < from);
+  if (behind.length > 0) {
+    checks.push({
+      level: 'info',
+      text: `${behind.length} invoice${behind.length === 1 ? '' : 's'} raised in this period for an earlier event (${behind.map(b => b.invoice_number ?? '—').join(', ')}) ${behind.length === 1 ? 'belongs' : 'belong'} to that earlier return.`,
+    });
+  }
   if (out.length > 0) {
     const n7  = round2(out.reduce((t, b) => t + Number(b.net_food   ?? 0), 0));
     const v7  = round2(out.reduce((t, b) => t + Number(b.vat_7      ?? 0), 0));
