@@ -81,7 +81,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const body = await req.json();
-  const { name, category, default_vat_rate, notes, keywords } = body;
+  const { name, category, default_vat_rate, notes, keywords, iban, bic, account_holder } = body;
   if (!name?.trim()) return NextResponse.json({ error: 'Name required' }, { status: 400 });
 
   const admin = getSupabaseAdmin();
@@ -91,18 +91,25 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     .from('counterparties')
     .update({
       name: name.trim(),
-      category: category || null,
-      default_vat_rate: default_vat_rate ?? null,
-      notes: notes || null,
-      keywords: kws,
+      /* Every field is written only when the caller sent it. A payment run
+         saving an IBAN sends nothing else, and must not blank the category. */
+      ...(category !== undefined         ? { category: category || null } : {}),
+      ...(default_vat_rate !== undefined ? { default_vat_rate: default_vat_rate ?? null } : {}),
+      ...(notes !== undefined            ? { notes: notes || null } : {}),
+      ...(keywords !== undefined         ? { keywords: kws } : {}),
+      ...(iban !== undefined           ? { iban: iban || null } : {}),
+      ...(bic !== undefined            ? { bic: bic || null } : {}),
+      ...(account_holder !== undefined ? { account_holder: account_holder || null } : {}),
     })
     .eq('id', id)
     .select()
     .single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  const assigned = await autoAssignTransactions(admin, id, kws, name.trim());
-  const recategorised = await applyCategory(admin, id, data.category, kws, name.trim());
+  // The keywords as stored, so a caller that sent none does not re-assign on [].
+  const terms: string[] = Array.isArray(data.keywords) ? data.keywords : kws;
+  const assigned = await autoAssignTransactions(admin, id, terms, name.trim());
+  const recategorised = await applyCategory(admin, id, data.category, terms, name.trim());
   return NextResponse.json({ ...data, assigned, recategorised });
 }
 

@@ -7,8 +7,10 @@ import {
   Upload, FileCheck, AlertCircle, Loader2,
   CheckCircle2, Clock, Banknote, Trash2,
   ChevronDown, ChevronUp, Eye, X, FilePlus, Save, MapPin, Calendar, Pencil, LayoutList,
-  AlertTriangle,
+  AlertTriangle, Landmark, Download,
 } from 'lucide-react';
+import { buildPain001, painFilename, validateOrder, isValidIban, normaliseIban } from '@/lib/sepa-credit-transfer';
+import type { SepaTransfer } from '@/lib/sepa-credit-transfer';
 
 import { useT } from '@/lib/i18n';
 
@@ -38,6 +40,9 @@ type Extracted = {
   due_date:           string | null;
   currency:           string;
   payment_method:     string | null;
+  creditor_iban?:     string | null;
+  creditor_bic?:      string | null;
+  creditor_name?:     string | null;
   net_amount:         number;
   vat_amount:         number;
   gross_amount:       number;
@@ -70,7 +75,14 @@ type Counterparty = {
   id:       string;
   name:     string;
   keywords: string[];
+  /** Where this counterparty is paid. Entered once, used every payment run. */
+  iban?:            string | null;
+  bic?:             string | null;
+  account_holder?:  string | null;
 };
+
+/** Our own account, as the transfer file's debtor. */
+const DEBTOR_DEFAULT = { name: 'Yumas GmbH', iban: 'DE98560501800017148925', bic: '' };
 
 type Bill = {
   id:             string;
@@ -89,6 +101,9 @@ type Bill = {
   period_end:     string | null;
   status:         'pending' | 'approved' | 'paid';
   file_path:      string | null;
+  /** The account printed on the invoice itself, where the extraction found one. */
+  creditor_iban?: string | null;
+  creditor_name?: string | null;
 };
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -232,6 +247,10 @@ async function saveBillToDB(item: QueueItem, userId: string | null): Promise<voi
       currency:       d.currency        ?? 'EUR',
       category:       d.suggested_category ?? null,
       payment_method: d.payment_method  ?? null,
+      // What the invoice printed, to compare against the supplier we hold
+      creditor_iban:  d.creditor_iban   ?? null,
+      creditor_bic:   d.creditor_bic    ?? null,
+      creditor_name:  d.creditor_name   ?? null,
       status:         'pending',
       file_path,
       uploaded_by:    userId,
@@ -452,6 +471,13 @@ export default function BillsPage() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [savingAll, setSavingAll]   = useState(false);
   const [linesBillId, setLinesBillId] = useState<string | null>(null);
+  // The Sammelüberweisung: which approved bills to pay, and from where
+  const [payOpen,   setPayOpen]   = useState(false);
+  const [paySel,    setPaySel]    = useState<Set<string>>(new Set());
+  const [payDate,   setPayDate]   = useState('');
+  const [payIbans,  setPayIbans]  = useState<Record<string, string>>({});
+  const [debtor,    setDebtor]    = useState(DEBTOR_DEFAULT);
+  const [paySaving, setPaySaving] = useState(false);
 
   const [filterStatus,     setFilterStatus]     = useState('all');
   const [filterCategory,   setFilterCategory]   = useState('all');
@@ -500,7 +526,7 @@ export default function BillsPage() {
     queryFn: async () => {
       // PostgREST caps a single response at 1000 rows, so page through the full
       // table — otherwise older bills silently vanish and the totals under-report.
-      const COLS = 'id, created_at, supplier_name, invoice_number, invoice_date, due_date, gross_amount, net_amount, vat_amount, category, location_label, period_type, period_start, period_end, status, file_path';
+      const COLS = 'id, created_at, supplier_name, invoice_number, invoice_date, due_date, gross_amount, net_amount, vat_amount, category, location_label, period_type, period_start, period_end, status, file_path, creditor_iban, creditor_name';
       const PAGE = 1000;
       const all: Bill[] = [];
       for (let page = 0; ; page++) {
@@ -676,6 +702,89 @@ export default function BillsPage() {
     net:   rows.reduce((s, b) => s + b.net_amount,   0),
     vat:   rows.reduce((s, b) => s + b.vat_amount,   0),
   });
+
+  /* ── The Sammelüberweisung ──
+     Everything approved and not yet paid, with the account to pay it to. The
+     counterparty's own account comes first: a supplier is paid to the same
+     account every month, and the one printed on a single invoice may be a
+     factoring house or simply a typo in the extraction. */
+  const payableRows = useMemo(
+    () => bills.filter(b => b.status === 'approved' && b.gross_amount > 0)
+      .sort((a, b) => (a.invoice_date ?? '').localeCompare(b.invoice_date ?? '')),
+    [bills],
+  );
+  const ibanFor = useCallback((b: Bill) => {
+    if (payIbans[b.id] !== undefined) return payIbans[b.id];
+    return matchedCpByBill.get(b.id)?.iban ?? b.creditor_iban ?? '';
+  }, [payIbans, matchedCpByBill]);
+
+  const openPaymentRun = useCallback(() => {
+    // Tomorrow, or Monday when tomorrow is a weekend — banks do not execute then.
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() + 1);
+    setPayDate(d.toISOString().slice(0, 10));
+    setPayIbans({});
+    setPaySel(new Set(payableRows.filter(b => isValidIban(
+      matchedCpByBill.get(b.id)?.iban ?? b.creditor_iban ?? '',
+    )).map(b => b.id)));
+    setPayOpen(true);
+  }, [payableRows, matchedCpByBill]);
+
+  /** Saves an IBAN onto the counterparty, so it is entered once and not again. */
+  const rememberIban = useCallback(async (b: Bill, iban: string) => {
+    const cp = matchedCpByBill.get(b.id);
+    if (!cp || !isValidIban(iban)) return;
+    setPaySaving(true);
+    try {
+      await fetch(`/api/counterparties/${cp.id}`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: cp.name, keywords: cp.keywords, iban: normaliseIban(iban) }),
+      });
+      queryClient.invalidateQueries({ queryKey: ['counterparties'] });
+    } finally { setPaySaving(false); }
+  }, [matchedCpByBill, queryClient]);
+
+  const payTransfers = useMemo<(SepaTransfer & { billId: string })[]>(() =>
+    payableRows.filter(b => paySel.has(b.id)).map(b => ({
+      billId: b.id,
+      reference: (b.invoice_number ?? b.id).slice(0, 35),
+      creditorName: matchedCpByBill.get(b.id)?.account_holder
+        ?? matchedCpByBill.get(b.id)?.name
+        ?? b.creditor_name ?? b.supplier_name,
+      creditorIban: ibanFor(b),
+      creditorBic:  matchedCpByBill.get(b.id)?.bic ?? null,
+      amount: Math.round(b.gross_amount * 100) / 100,
+      remittance: `${b.invoice_number ? `RG ${b.invoice_number}` : 'Rechnung'}${b.invoice_date ? ` v. ${fmtDate(b.invoice_date)}` : ''} - Yumas GmbH`,
+    })), [payableRows, paySel, matchedCpByBill, ibanFor]);
+
+  const payTotal    = payTransfers.reduce((t, x) => t + x.amount, 0);
+  const payProblems = payTransfers.length > 0
+    ? validateOrder({ debtorName: debtor.name, debtorIban: debtor.iban, executionDate: payDate, transfers: payTransfers })
+    : [];
+
+  const downloadPain = useCallback(() => {
+    const xml = buildPain001({
+      debtorName: debtor.name, debtorIban: debtor.iban, debtorBic: debtor.bic || null,
+      executionDate: payDate, transfers: payTransfers,
+    });
+    const url = URL.createObjectURL(new Blob([xml], { type: 'application/xml' }));
+    const a = document.createElement('a');
+    a.href = url; a.download = painFilename(payDate); a.click();
+    URL.revokeObjectURL(url);
+  }, [debtor, payDate, payTransfers]);
+
+  /** Marks what was just paid, once the file has gone to the bank. */
+  const markRunPaid = useCallback(async () => {
+    const ids = payTransfers.map(t => t.billId);
+    if (ids.length === 0) return;
+    setPaySaving(true);
+    try {
+      await supabase.from('bills').update({ status: 'paid' }).in('id', ids);
+      queryClient.invalidateQueries({ queryKey: ['bills'] });
+      setPayOpen(false);
+    } finally { setPaySaving(false); }
+  }, [payTransfers, queryClient]);
 
   // Each table pages independently
   const pendingTotalPages = Math.max(1, Math.ceil(pendingRows.length / pageSize));
@@ -1709,6 +1818,14 @@ export default function BillsPage() {
                   <span className="text-xs font-semibold text-blue-700 bg-blue-50 border border-blue-200 rounded-full px-2 py-0.5">
                     {settledRows.length}
                   </span>
+                  <span className="text-xs text-gray-400">still to pay</span>
+                  {payableRows.length > 0 && (
+                    <button onClick={openPaymentRun}
+                      title="Build a SEPA Sammelüberweisung from everything approved and unpaid"
+                      className="ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border border-[#1B5E20] text-[#1B5E20] hover:bg-green-50 transition-colors">
+                      <Landmark size={13} /> Überweisungsträger
+                    </button>
+                  )}
                 </div>
                 {settledRows.length === 0 ? (
                   <div className="flex items-center justify-center h-20 border border-dashed border-gray-200 rounded-xl">
@@ -1735,6 +1852,148 @@ export default function BillsPage() {
           )}
         </div>
       )}
+      {/* ── Sammelüberweisung ─────────────────────────────────────── */}
+      {payOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setPayOpen(false)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[88vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="px-6 py-4 border-b border-gray-100 flex items-start justify-between">
+              <div>
+                <h2 className="font-bold text-gray-900">SEPA-Sammelüberweisung</h2>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  Everything approved and unpaid · the file is downloaded here and uploaded to the Sparkasse yourself
+                </p>
+              </div>
+              <button onClick={() => setPayOpen(false)} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
+            </div>
+
+            {/* Our account and the execution date */}
+            <div className="px-6 py-3 bg-gray-50 border-b border-gray-100 flex flex-wrap items-end gap-4">
+              <div>
+                <label className="block text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-1">Auftraggeber</label>
+                <input value={debtor.name} onChange={e => setDebtor(d => ({ ...d, name: e.target.value }))}
+                  className="border border-gray-200 rounded-lg px-3 py-1.5 text-xs w-48 focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30" />
+              </div>
+              <div>
+                <label className="block text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-1">IBAN</label>
+                <input value={debtor.iban} onChange={e => setDebtor(d => ({ ...d, iban: e.target.value }))}
+                  className={`border rounded-lg px-3 py-1.5 text-xs w-64 font-mono focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30 ${
+                    isValidIban(debtor.iban) ? 'border-gray-200' : 'border-red-300 bg-red-50'
+                  }`} />
+              </div>
+              <div>
+                <label className="block text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-1">Ausführungstag</label>
+                <input type="date" value={payDate} onChange={e => setPayDate(e.target.value)}
+                  className="border border-gray-200 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30" />
+              </div>
+              <div className="ml-auto text-right">
+                <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Summe</p>
+                <p className="text-lg font-bold text-gray-900 tabular-nums">{fmt(payTotal)}</p>
+                <p className="text-[11px] text-gray-400">{payTransfers.length} of {payableRows.length} bills</p>
+              </div>
+            </div>
+
+            {/* The bills */}
+            <div className="overflow-y-auto flex-1">
+              <table className="w-full text-xs">
+                <thead className="bg-white sticky top-0 border-b border-gray-200">
+                  <tr>
+                    <th className="px-3 py-2 w-8">
+                      <input type="checkbox"
+                        checked={paySel.size > 0 && paySel.size === payableRows.filter(b => isValidIban(ibanFor(b))).length}
+                        onChange={e => setPaySel(e.target.checked
+                          ? new Set(payableRows.filter(b => isValidIban(ibanFor(b))).map(b => b.id))
+                          : new Set())}
+                        className="w-4 h-4 accent-green-600" />
+                    </th>
+                    <th className="px-3 py-2 text-left font-semibold text-gray-500 uppercase tracking-wide">Empfänger</th>
+                    <th className="px-3 py-2 text-left font-semibold text-gray-500 uppercase tracking-wide">Rechnung</th>
+                    <th className="px-3 py-2 text-left font-semibold text-gray-500 uppercase tracking-wide">IBAN</th>
+                    <th className="px-3 py-2 text-right font-semibold text-gray-500 uppercase tracking-wide">Betrag</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {payableRows.map(b => {
+                    const iban = ibanFor(b);
+                    const ok = isValidIban(iban);
+                    const cp = matchedCpByBill.get(b.id);
+                    return (
+                      <tr key={b.id} className={`border-b border-gray-50 ${paySel.has(b.id) ? 'bg-green-50/40' : ''}`}>
+                        <td className="px-3 py-1.5">
+                          <input type="checkbox" checked={paySel.has(b.id)} disabled={!ok}
+                            onChange={e => setPaySel(sel => {
+                              const n = new Set(sel);
+                              if (e.target.checked) n.add(b.id); else n.delete(b.id);
+                              return n;
+                            })}
+                            className="w-4 h-4 accent-green-600 disabled:opacity-30" />
+                        </td>
+                        <td className="px-3 py-1.5 text-gray-800 font-medium max-w-[200px] truncate">
+                          {cp?.account_holder ?? cp?.name ?? b.supplier_name}
+                        </td>
+                        <td className="px-3 py-1.5 text-gray-500 whitespace-nowrap">
+                          {b.invoice_number ?? '—'}
+                          <span className="text-gray-300 ml-1">{fmtDate(b.invoice_date)}</span>
+                        </td>
+                        <td className="px-3 py-1.5">
+                          <input
+                            value={iban}
+                            placeholder="IBAN eintragen…"
+                            onChange={e => setPayIbans(m => ({ ...m, [b.id]: e.target.value }))}
+                            onBlur={e => { if (isValidIban(e.target.value)) void rememberIban(b, e.target.value); }}
+                            className={`w-64 font-mono border rounded px-2 py-1 text-[11px] focus:outline-none focus:ring-1 focus:ring-[#1B5E20]/40 ${
+                              !iban ? 'border-amber-300 bg-amber-50' : ok ? 'border-gray-200' : 'border-red-300 bg-red-50'
+                            }`} />
+                          {cp && iban && ok && !cp.iban && (
+                            <span className="ml-2 text-[10px] text-gray-400">saved to {cp.name}</span>
+                          )}
+                          {!cp && iban && (
+                            <span className="ml-2 text-[10px] text-amber-600">no counterparty — not remembered</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-1.5 text-right tabular-nums font-semibold text-gray-900 whitespace-nowrap">
+                          {fmt(b.gross_amount)}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Problems and the buttons */}
+            <div className="px-6 py-4 border-t border-gray-100 space-y-3">
+              {payProblems.length > 0 && (
+                <div className="flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">
+                  <AlertTriangle size={14} className="flex-shrink-0 mt-0.5" />
+                  <div>{payProblems.slice(0, 4).map((x, i) => <p key={i}>{x}</p>)}</div>
+                </div>
+              )}
+              {payableRows.some(b => !isValidIban(ibanFor(b))) && (
+                <p className="text-xs text-amber-700">
+                  {payableRows.filter(b => !isValidIban(ibanFor(b))).length} bill(s) have no usable IBAN and cannot be
+                  included. Type one in and it is saved to that counterparty for next time.
+                </p>
+              )}
+              <div className="flex items-center justify-end gap-2">
+                <button onClick={() => setPayOpen(false)}
+                  className="px-4 py-2 text-xs font-semibold border border-gray-200 rounded-lg text-gray-500 hover:bg-gray-50">
+                  Schliessen
+                </button>
+                <button onClick={markRunPaid} disabled={payTransfers.length === 0 || paySaving}
+                  title="Only after the file has been uploaded and released at the bank"
+                  className="px-4 py-2 text-xs font-semibold border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 disabled:opacity-40">
+                  Mark {payTransfers.length} as paid
+                </button>
+                <button onClick={downloadPain} disabled={payTransfers.length === 0 || payProblems.length > 0}
+                  className="flex items-center gap-2 px-5 py-2 text-xs font-bold bg-[#1B5E20] text-white rounded-lg hover:bg-[#2E7D32] transition-colors disabled:opacity-40">
+                  <Download size={14} /> XML herunterladen · {fmt(payTotal)}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Line items modal ─────────────────────────────────────── */}
       {linesBillId && (() => {
         const bill = bills.find(b => b.id === linesBillId);
