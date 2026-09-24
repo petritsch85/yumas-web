@@ -462,7 +462,8 @@ export default function BillsPage() {
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
 
   const [page, setPage]         = useState(1);   // pending table
-  const [page2, setPage2]       = useState(1);   // approved / paid table
+  const [page2, setPage2]       = useState(1);   // approved table
+  const [page3, setPage3]       = useState(1);   // paid table
   const [pageSize, setPageSize] = useState(100);
 
   const handleSort = (col: string) => {
@@ -664,7 +665,10 @@ export default function BillsPage() {
   // off; approving (or paying) one moves it down. Changing the status back moves
   // it straight back up, since both lists derive from the same sorted array.
   const pendingRows = useMemo(() => sortedFiltered.filter(b => b.status === 'pending'), [sortedFiltered]);
-  const settledRows = useMemo(() => sortedFiltered.filter(b => b.status !== 'pending'), [sortedFiltered]);
+  /* Approved means checked; paid means the money has gone. A bill marked paid
+     leaves the approved table so that one holds only what is still owed. */
+  const settledRows = useMemo(() => sortedFiltered.filter(b => b.status === 'approved'), [sortedFiltered]);
+  const paidRows    = useMemo(() => sortedFiltered.filter(b => b.status === 'paid'),     [sortedFiltered]);
 
   const sumRows = (rows: Bill[]) => ({
     count: rows.length,
@@ -682,8 +686,12 @@ export default function BillsPage() {
   const settledPage       = Math.min(page2, settledTotalPages);
   const settledPageRows   = settledRows.slice((settledPage - 1) * pageSize, settledPage * pageSize);
 
+  const paidTotalPages = Math.max(1, Math.ceil(paidRows.length / pageSize));
+  const paidPage       = Math.min(page3, paidTotalPages);
+  const paidPageRows   = paidRows.slice((paidPage - 1) * pageSize, paidPage * pageSize);
+
   // Snap back to page 1 whenever the result set changes underneath us
-  useEffect(() => { setPage(1); setPage2(1); }, [filterStatus, filterCategory, filterLocation, filterMonth, filterDuplicates, sortCol, sortDir, pageSize]);
+  useEffect(() => { setPage(1); setPage2(1); setPage3(1); }, [filterStatus, filterCategory, filterLocation, filterMonth, filterDuplicates, sortCol, sortDir, pageSize]);
 
   // ── Match delivery address to a known location ────────────────────────────────
   const matchLocation = useCallback((addr: DeliveryAddress | null, locs: Location[]): { locationId: string; locationLabel: string } | null => {
@@ -1659,7 +1667,7 @@ export default function BillsPage() {
                 </select>
               </label>
               <span className="text-xs text-gray-400">
-                {pendingRows.length} pending · {settledRows.length} approved
+                {pendingRows.length} pending · {settledRows.length} approved · {paidRows.length} paid
               </span>
             </div>
           </div>
@@ -1690,7 +1698,7 @@ export default function BillsPage() {
                 </div>
                 {pendingRows.length === 0 ? (
                   <div className="flex items-center justify-center h-20 border border-dashed border-gray-200 rounded-xl">
-                    <p className="text-xs text-gray-400">Nothing pending — all bills have been approved</p>
+                    <p className="text-xs text-gray-400">Nothing pending — every bill has been reviewed</p>
                   </div>
                 ) : renderBillsTable(pendingPageRows, pendingPage, pendingTotalPages, setPage, pendingRows.length)}
               </section>
@@ -1698,15 +1706,30 @@ export default function BillsPage() {
               <section>
                 <div className="flex items-baseline gap-2 mb-2">
                   <h2 className="text-sm font-bold text-gray-900">Approved</h2>
-                  <span className="text-xs font-semibold text-green-700 bg-green-50 border border-green-200 rounded-full px-2 py-0.5">
+                  <span className="text-xs font-semibold text-blue-700 bg-blue-50 border border-blue-200 rounded-full px-2 py-0.5">
                     {settledRows.length}
                   </span>
                 </div>
                 {settledRows.length === 0 ? (
                   <div className="flex items-center justify-center h-20 border border-dashed border-gray-200 rounded-xl">
-                    <p className="text-xs text-gray-400">No approved bills yet</p>
+                    <p className="text-xs text-gray-400">No approved bills awaiting payment</p>
                   </div>
                 ) : renderBillsTable(settledPageRows, settledPage, settledTotalPages, setPage2, settledRows.length)}
+              </section>
+
+              <section>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <h2 className="text-sm font-bold text-gray-900">Paid</h2>
+                  <span className="text-xs font-semibold text-green-700 bg-green-50 border border-green-200 rounded-full px-2 py-0.5">
+                    {paidRows.length}
+                  </span>
+                  <span className="text-xs text-gray-400">settled</span>
+                </div>
+                {paidRows.length === 0 ? (
+                  <div className="flex items-center justify-center h-20 border border-dashed border-gray-200 rounded-xl">
+                    <p className="text-xs text-gray-400">Nothing marked paid yet</p>
+                  </div>
+                ) : renderBillsTable(paidPageRows, paidPage, paidTotalPages, setPage3, paidRows.length)}
               </section>
             </div>
           )}
