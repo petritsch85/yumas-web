@@ -7259,7 +7259,15 @@ export default function SalesReportsPage() {
                         line(`${sh}-tot`,  totalLabel, mk => cellTotal(mk, sh), y => fyTotal(y, sh), { total: true }),
                         /* A month's takings mean little without the shifts behind them: a
                            short month and a slow one look the same until you divide. */
-                        ...(sh === 'day' ? [] : [
+                        /* The all-day block has no shift count to divide by, so its growth
+                           is the plain one: this month's takings against the same month a
+                           year ago. */
+                        ...(sh === 'day' ? [
+                          line(`${sh}-yoy`, 'Y/Y Sales growth (%)',
+                            mk => yoy(cellTotal(mk, sh), cellTotal(yearAgo(mk), sh)),
+                            y  => yoy(fyTotal(y, sh),    fyTotal(y - 1, sh)),
+                            { derived: true, pctDelta: true }),
+                        ] : [
                           line(`${sh}-n`,   '# of Shifts',
                             mk => shiftsIn(mk, sh), y => shiftsFy(y, sh), { derived: true, count: true }),
                           line(`${sh}-avg`, 'Av. net sales / Shift',
