@@ -1259,8 +1259,8 @@ export default function BillsPage() {
                               const daysLeft = d.date ? Math.floor((new Date(d.date + 'T00:00:00').getTime() - new Date(new Date().toDateString()).getTime()) / 86400000) : null;
                               const tone = !open || d.kind === 'auto' || daysLeft === null ? 'text-gray-400'
                                 : daysLeft < 0 ? 'text-red-600 font-semibold'
-                                : daysLeft <= 7 ? 'text-amber-600 font-semibold'
-                                : 'text-gray-700';
+                                : daysLeft <= 5 ? 'text-amber-600 font-semibold'
+                                : 'text-green-700 font-semibold';
                               const title = d.kind === 'auto' ? `Collected automatically (${bill.payment_method})${d.date ? ' on ' + fmtDate(d.date) : ''} · click to set a date`
                                 : d.kind === 'sofort' ? 'Zahlbar sofort — due on the invoice date · click to set a date'
                                 : d.kind === 'due' ? (open && daysLeft !== null ? (daysLeft < 0 ? `${-daysLeft} days overdue` : daysLeft === 0 ? 'Due today' : `Due in ${daysLeft} days`) : 'Due date') + ' · click to change'
