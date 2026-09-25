@@ -24,7 +24,7 @@ import {
 import type { DatevSettings, Skr } from '@/lib/datev-extf';
 import { buildPostings } from '@/lib/datev-postings';
 import {
-  CalendarDays, Download, AlertTriangle, Settings2, Loader2, Check, BookOpen,
+  CalendarDays, Download, AlertTriangle, Settings2, Loader2, Check, BookOpen, FileArchive,
 } from 'lucide-react';
 
 const MONTHS = ['Januar','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember'];
@@ -45,6 +45,7 @@ export default function DatevPage() {
   const [month, setMonth] = useState(today.getMonth() === 0 ? 12 : today.getMonth());
   const [tab, setTab] = useState<'export' | 'mapping' | 'settings'>('export');
   const [saving, setSaving] = useState(false);
+  const [belege, setBelege] = useState<{ busy: boolean; msg: string | null }>({ busy: false, msg: null });
 
   const from = `${year}-${String(month).padStart(2, '0')}-01`;
   const to   = `${year}-${String(month).padStart(2, '0')}-${String(lastDay(year, month)).padStart(2, '0')}`;
@@ -226,6 +227,38 @@ export default function DatevPage() {
     });
   }, [result, settings, from, to, month, year]);
 
+  /**
+   * The invoice images, zipped on the server: the PDFs sit in storage behind
+   * the service role, and pulling a hundred signed URLs from here would be a
+   * hundred round trips.
+   */
+  const downloadBelege = useCallback(async () => {
+    setBelege({ busy: true, msg: null });
+    try {
+      const res = await fetch(`/api/datev/belege?from=${from}&to=${to}`);
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j.error ?? 'The archive could not be built.');
+      }
+      const included = res.headers.get('X-Beleg-Included') ?? '?';
+      const missing  = Number(res.headers.get('X-Beleg-Missing') ?? 0);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `DATEV_Belege_${from.replace(/-/g, '')}_${to.replace(/-/g, '')}.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setBelege({
+        busy: false,
+        msg: `${included} Belege gepackt (${(blob.size / 1024 / 1024).toFixed(1)} MB)` +
+          (missing > 0 ? ` · ${missing} Rechnung(en) ohne PDF sind nicht enthalten.` : '.'),
+      });
+    } catch (e) {
+      setBelege({ busy: false, msg: e instanceof Error ? e.message : 'The archive could not be built.' });
+    }
+  }, [from, to]);
+
   const ready = !!settings.consultantNumber && !!settings.clientNumber;
 
   const field = (key: string, label: string, placeholder = '', width = 'w-40') => (
@@ -382,11 +415,25 @@ export default function DatevPage() {
               className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm font-medium text-gray-700 bg-white">
               {[today.getFullYear(), today.getFullYear() - 1, today.getFullYear() - 2].map(y => <option key={y} value={y}>{y}</option>)}
             </select>
+            <button onClick={downloadBelege} disabled={belege.busy || !ready}
+              title="The invoice PDFs with their metadata, for Belegtransfer into Unternehmen online"
+              className="ml-auto flex items-center gap-2 px-4 py-2 text-xs font-bold border border-[#1B5E20] text-[#1B5E20] rounded-lg hover:bg-green-50 disabled:opacity-40">
+              {belege.busy ? <Loader2 size={14} className="animate-spin" /> : <FileArchive size={14} />}
+              {belege.busy ? 'Belege werden gepackt…' : 'Belege (ZIP)'}
+            </button>
             <button onClick={download} disabled={!result?.bookings.length || !ready}
-              className="ml-auto flex items-center gap-2 px-4 py-2 text-xs font-bold bg-[#1B5E20] text-white rounded-lg hover:bg-[#2E7D32] disabled:opacity-40">
+              className="flex items-center gap-2 px-4 py-2 text-xs font-bold bg-[#1B5E20] text-white rounded-lg hover:bg-[#2E7D32] disabled:opacity-40">
               <Download size={14} /> Buchungsstapel herunterladen
             </button>
           </div>
+
+          {belege.msg && (
+            <div className="flex items-start gap-2 p-3 mb-4 bg-gray-50 border border-gray-200 rounded-lg text-xs text-gray-700">
+              <FileArchive size={14} className="flex-shrink-0 mt-0.5 text-gray-400" />
+              <span className="flex-1">{belege.msg}</span>
+              <button onClick={() => setBelege(b => ({ ...b, msg: null }))} className="text-gray-400 hover:text-gray-600">×</button>
+            </div>
+          )}
 
           {!ready && (
             <div className="flex items-start gap-2 p-3 mb-4 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-900">
