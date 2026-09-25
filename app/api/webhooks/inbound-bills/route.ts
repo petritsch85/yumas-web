@@ -1,5 +1,6 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse, after } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
+import PostalMime from 'postal-mime';
 import { getSupabaseAdmin } from '@/lib/supabase-admin';
 import { canonicalizeSupplierName, getKnownTerms } from '@/lib/canonical-supplier';
 
@@ -79,7 +80,73 @@ function cleanResponse(text: string): string {
   return extractJSONObject(text.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim());
 }
 
-type Attachment = { Name: string; Content: string; ContentType: string };
+type Attachment = { Name: string; Content: string; ContentType: string; ContentID?: string };
+
+/* A batch arrives as one email with each original forwarded "as attachment"
+   (Gmail: select several → ⋮ → Forward as attachment). The work runs after
+   the reply to Postmark, so a batch of bills is not cut off by its timeout. */
+export const maxDuration = 300;
+
+/** How many bills are read at once — enough to clear a batch, few enough not to hit the API's rate limit. */
+const CONCURRENCY = 3;
+
+const isPdf   = (ct: string, name: string) => ct === 'application/pdf' || name.endsWith('.pdf');
+const isImage = (ct: string, name: string) =>
+  ct === 'image/jpeg' || ct === 'image/jpg' || ct === 'image/png' ||
+  name.endsWith('.jpg') || name.endsWith('.jpeg') || name.endsWith('.png');
+const isEmail = (ct: string, name: string) => ct === 'message/rfc822' || name.endsWith('.eml');
+
+/* The logo in an email signature ("image001.png") is not a bill. It is
+   embedded in the body, not attached, and small. */
+const isSignatureImage = (name: string, inline: boolean, bytes: number) =>
+  inline || /^image\d{3}\.(png|jpe?g)$/i.test(name) || bytes < 15_000;
+
+/** The bills in one email, looking inside any email forwarded as an attachment. */
+async function collectBills(attachments: Attachment[], depth = 0): Promise<Attachment[]> {
+  const found: Attachment[] = [];
+  for (const a of attachments) {
+    const ct = (a.ContentType ?? '').toLowerCase().split(';')[0].trim();
+    const name = (a.Name ?? '').toLowerCase();
+    const bytes = Math.floor((a.Content?.length ?? 0) * 3 / 4);
+
+    if (isEmail(ct, name) && depth < 3) {
+      try {
+        const inner = await PostalMime.parse(Buffer.from(a.Content, 'base64'), { attachmentEncoding: 'base64' });
+        found.push(...await collectBills(inner.attachments.map(x => ({
+          Name:        x.filename ?? 'attachment',
+          Content:     x.content as string,
+          ContentType: x.mimeType,
+          ContentID:   x.disposition === 'inline' || x.related ? (x.contentId ?? 'inline') : undefined,
+        })), depth + 1));
+      } catch (e) {
+        console.error(`[inbound-bills] could not read forwarded email ${a.Name}:`, e);
+      }
+    } else if (isPdf(ct, name)) {
+      found.push(a);
+    } else if (isImage(ct, name) && !isSignatureImage(name, !!a.ContentID, bytes)) {
+      found.push(a);
+    }
+  }
+  return found;
+}
+
+/* A bill forwarded twice — or a batch Postmark delivers again — must not
+   appear twice. Same supplier, same number, same amount is the same bill. */
+async function findDuplicate(extracted: Record<string, unknown>): Promise<string | null> {
+  const invoiceNumber = extracted.invoice_number as string | null;
+  if (!invoiceNumber) return null;
+  const { data } = await getSupabaseAdmin()
+    .from('bills')
+    .select('id, supplier_name, gross_amount')
+    .eq('invoice_number', invoiceNumber)
+    .limit(10);
+  const gross = Number(extracted.gross_amount ?? 0);
+  const supplier = String(extracted.supplier_name ?? '').toLowerCase();
+  const hit = (data ?? []).find(b =>
+    Math.abs(Number(b.gross_amount) - gross) < 0.01 &&
+    String(b.supplier_name ?? '').toLowerCase() === supplier);
+  return hit?.id ?? null;
+}
 
 async function extractFromAttachment(attachment: Attachment): Promise<Record<string, unknown>> {
   const isPdf = attachment.ContentType === 'application/pdf' || attachment.Name.toLowerCase().endsWith('.pdf');
@@ -204,30 +271,32 @@ export async function POST(req: NextRequest) {
   }
 
   const attachments = (payload.Attachments as Attachment[] | undefined) ?? [];
-  const billAttachments = attachments.filter((a) => {
-    const ct = (a.ContentType ?? '').toLowerCase();
-    const name = (a.Name ?? '').toLowerCase();
-    return ct === 'application/pdf' || name.endsWith('.pdf') ||
-      ct === 'image/jpeg' || ct === 'image/jpg' || ct === 'image/png' ||
-      name.endsWith('.jpg') || name.endsWith('.jpeg') || name.endsWith('.png');
-  });
+  const billAttachments = await collectBills(attachments);
 
   if (billAttachments.length === 0) {
     return NextResponse.json({ message: 'No bill attachments found — email ignored' });
   }
 
-  const results: { name: string; status: string; billId?: string; error?: string }[] = [];
+  after(async () => {
+    const queue = [...billAttachments];
+    const worker = async () => {
+      for (let a = queue.shift(); a; a = queue.shift()) {
+        try {
+          const extracted = await extractFromAttachment(a);
+          const duplicate = await findDuplicate(extracted);
+          if (duplicate) {
+            console.log(`[inbound-bills] ${a.Name}: already on file as ${duplicate} — skipped`);
+            continue;
+          }
+          const billId = await saveBillToDB(a, extracted);
+          console.log(`[inbound-bills] ${a.Name}: saved as ${billId}`);
+        } catch (err) {
+          console.error(`[inbound-bills] ${a.Name}: processing failed:`, err);
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, billAttachments.length) }, worker));
+  });
 
-  for (const attachment of billAttachments) {
-    try {
-      const extracted = await extractFromAttachment(attachment);
-      const billId    = await saveBillToDB(attachment, extracted);
-      results.push({ name: attachment.Name, status: 'saved', billId });
-    } catch (err: any) {
-      console.error('Inbound bill processing error:', err);
-      results.push({ name: attachment.Name, status: 'error', error: err.message });
-    }
-  }
-
-  return NextResponse.json({ processed: results });
+  return NextResponse.json({ queued: billAttachments.map(a => a.Name) });
 }
