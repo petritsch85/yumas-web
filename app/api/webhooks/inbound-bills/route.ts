@@ -87,6 +87,9 @@ type Attachment = { Name: string; Content: string; ContentType: string; ContentI
    the reply to Postmark, so a batch of bills is not cut off by its timeout. */
 export const maxDuration = 300;
 
+/** Where the inbound-relay function parks an email too large to post here. */
+const INBOUND_BUCKET = 'inbound-emails';
+
 /** How many bills are read at once — enough to clear a batch, few enough not to hit the API's rate limit. */
 const CONCURRENCY = 3;
 
@@ -263,10 +266,27 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
+  /* An email too large for Vercel's 4.5 MB request limit comes by way of the
+     inbound-relay function, which stores it and sends only its path. */
+  const key = req.nextUrl.searchParams.get('key');
+  if (key && !/^\d{4}-\d{2}-\d{2}\/[0-9a-f-]{36}\.json$/.test(key)) {
+    return NextResponse.json({ error: 'Invalid key' }, { status: 400 });
+  }
+  const discard = async () => {
+    if (key) await getSupabaseAdmin().storage.from(INBOUND_BUCKET).remove([key]);
+  };
+
   let payload: Record<string, unknown>;
   try {
-    payload = await req.json();
+    if (key) {
+      const { data, error } = await getSupabaseAdmin().storage.from(INBOUND_BUCKET).download(key);
+      if (error || !data) return NextResponse.json({ error: `Stored email not found: ${error?.message ?? key}` }, { status: 404 });
+      payload = JSON.parse(await data.text());
+    } else {
+      payload = await req.json();
+    }
   } catch {
+    await discard();
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
   }
 
@@ -274,29 +294,39 @@ export async function POST(req: NextRequest) {
   const billAttachments = await collectBills(attachments);
 
   if (billAttachments.length === 0) {
+    await discard();
     return NextResponse.json({ message: 'No bill attachments found — email ignored' });
   }
 
   after(async () => {
-    const queue = [...billAttachments];
-    const worker = async () => {
-      for (let a = queue.shift(); a; a = queue.shift()) {
-        try {
-          const extracted = await extractFromAttachment(a);
-          const duplicate = await findDuplicate(extracted);
-          if (duplicate) {
-            console.log(`[inbound-bills] ${a.Name}: already on file as ${duplicate} — skipped`);
-            continue;
-          }
-          const billId = await saveBillToDB(a, extracted);
-          console.log(`[inbound-bills] ${a.Name}: saved as ${billId}`);
-        } catch (err) {
-          console.error(`[inbound-bills] ${a.Name}: processing failed:`, err);
-        }
-      }
-    };
-    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, billAttachments.length) }, worker));
+    try {
+      await processBills(billAttachments);
+    } finally {
+      await discard();
+    }
   });
 
   return NextResponse.json({ queued: billAttachments.map(a => a.Name) });
+}
+
+/** Reads each bill and files it, a few at a time. */
+async function processBills(billAttachments: Attachment[]) {
+  const queue = [...billAttachments];
+  const worker = async () => {
+    for (let a = queue.shift(); a; a = queue.shift()) {
+      try {
+        const extracted = await extractFromAttachment(a);
+        const duplicate = await findDuplicate(extracted);
+        if (duplicate) {
+          console.log(`[inbound-bills] ${a.Name}: already on file as ${duplicate} — skipped`);
+          continue;
+        }
+        const billId = await saveBillToDB(a, extracted);
+        console.log(`[inbound-bills] ${a.Name}: saved as ${billId}`);
+      } catch (err) {
+        console.error(`[inbound-bills] ${a.Name}: processing failed:`, err);
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, billAttachments.length) }, worker));
 }
