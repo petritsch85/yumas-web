@@ -260,6 +260,7 @@ export default function OutgoingBillsPage() {
     invoiceDate: string | null; amount: number;
     txId: string; txDate: string; txCounterparty: string; txDescription: string;
     daysAfter: number; reasons: string[]; confident: boolean; paidAmount?: number;
+    alreadyPaid: boolean;
   };
   const [payChecking, setPayChecking] = useState(false);
   const [payMatches,  setPayMatches]  = useState<PaymentMatch[] | null>(null);
@@ -2008,8 +2009,8 @@ export default function OutgoingBillsPage() {
                 <h2 className="font-bold text-gray-900">Payments found</h2>
                 <p className="text-xs text-gray-400 mt-0.5">
                   {payMatches.length === 0
-                    ? 'No credit in the cash flows matches an outstanding invoice.'
-                    : `${payMatches.length} outstanding invoice${payMatches.length === 1 ? '' : 's'} look${payMatches.length === 1 ? 's' : ''} to have been paid · the confident ones are ticked`}
+                    ? 'No credit in the cash flows matches an invoice that is still open or missing its payment.'
+                    : `${payMatches.length} invoice${payMatches.length === 1 ? '' : 's'} matched to a payment in the cash flows · the confident ones are ticked`}
                 </p>
               </div>
               <button onClick={() => setPayMatches(null)} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
@@ -2047,6 +2048,12 @@ export default function OutgoingBillsPage() {
                         </td>
                         <td className="px-3 py-2 whitespace-nowrap">
                           <span className="font-semibold text-gray-800">{m.invoiceNumber ?? '—'}</span>
+                          {m.alreadyPaid && (
+                            <span title="Already marked paid — applying links the payment to it"
+                              className="ml-1.5 text-[10px] font-semibold text-blue-700 bg-blue-50 border border-blue-200 rounded px-1">
+                              bereits bezahlt
+                            </span>
+                          )}
                           <span className="block text-[10px] text-gray-400">{fmtDate(m.invoiceDate)}</span>
                         </td>
                         <td className="px-3 py-2 text-gray-700 max-w-[200px] truncate">{m.customerName}</td>
@@ -2086,7 +2093,7 @@ export default function OutgoingBillsPage() {
               <button onClick={applyPayments} disabled={paySel.size === 0 || payApplying}
                 className="flex items-center gap-2 px-5 py-2 text-xs font-bold bg-[#1B5E20] text-white rounded-lg hover:bg-[#2E7D32] disabled:opacity-40">
                 {payApplying ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
-                Switch {paySel.size} to Paid
+                Link {paySel.size} payment{paySel.size === 1 ? '' : 's'} · mark Paid
               </button>
             </div>
           </div>

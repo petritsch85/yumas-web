@@ -33,6 +33,8 @@ export interface PaymentMatch {
   confident: boolean;
   /** What arrived, where that is not what was invoiced. */
   paidAmount?: number;
+  /** Switched to paid by hand earlier; applying only ties the credit to it. */
+  alreadyPaid: boolean;
 }
 
 /** Legal forms carry no information about who the customer is. */
@@ -63,11 +65,24 @@ async function findMatches(admin: ReturnType<typeof getSupabaseAdmin>): Promise<
   const { data: bills } = await admin
     .from('outgoing_bills')
     .select('id, invoice_number, invoice_date, event_date, customer_name, total_payable, status, paid_in_store')
-    .eq('status', 'pending')
+    .in('status', ['pending', 'paid'])
     .gt('total_payable', 0)
     .order('invoice_date');
 
-  const pending = (bills ?? []).filter(b => !b.paid_in_store);
+  /* An invoice switched to paid by hand still wants the credit that paid it,
+     or that credit sits in the cash flow as "No Bill". Those already tied to
+     a credit are done. */
+  const { data: linkedRows } = await admin
+    .from('cashflow_transactions')
+    .select('outgoing_bill_id')
+    .not('outgoing_bill_id', 'is', null);
+  const linked = new Set((linkedRows ?? []).map(r => r.outgoing_bill_id as string));
+
+  /* Outstanding invoices go first, so where two could take the same credit
+     it settles the one still waiting for its money. */
+  const pending = (bills ?? [])
+    .filter(b => !b.paid_in_store && !linked.has(b.id))
+    .sort((a, b) => Number(a.status === 'paid') - Number(b.status === 'paid'));
   if (pending.length === 0) return [];
 
   /* Only credits, only those not already spoken for. The window starts a
@@ -133,6 +148,7 @@ async function findMatches(admin: ReturnType<typeof getSupabaseAdmin>): Promise<
         reasons: [`quotes invoice ${b.invoice_number}`, `but ${paid.toFixed(2)} € arrived against ${Number(b.total_payable).toFixed(2)} € invoiced`],
         confident: false,
         paidAmount: paid,
+        alreadyPaid: b.status === 'paid',
       });
       continue;
     }
@@ -174,6 +190,7 @@ async function findMatches(admin: ReturnType<typeof getSupabaseAdmin>): Promise<
       daysAfter: best.days,
       reasons: best.reasons,
       confident,
+      alreadyPaid: b.status === 'paid',
     });
   }
 
