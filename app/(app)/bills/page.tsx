@@ -1257,7 +1257,10 @@ export default function BillsPage() {
                               const d = deadlineOf(bill);
                               const open = bill.status !== 'paid';
                               const daysLeft = d.date ? Math.floor((new Date(d.date + 'T00:00:00').getTime() - new Date(new Date().toDateString()).getTime()) / 86400000) : null;
-                              const tone = !open || d.kind === 'auto' || daysLeft === null ? 'text-gray-400'
+                              /* Direct debits are coloured like any other date; one with no date yet is
+                                 amber, since when it will be collected is not known. */
+                              const tone = !open ? 'text-gray-400'
+                                : daysLeft === null ? (d.kind === 'auto' ? 'text-amber-600 font-semibold' : 'text-gray-400')
                                 : daysLeft < 0 ? 'text-red-600 font-semibold'
                                 : daysLeft <= 5 ? 'text-amber-600 font-semibold'
                                 : 'text-green-700 font-semibold';
@@ -1269,9 +1272,9 @@ export default function BillsPage() {
                                 <button onClick={() => setEditingDueId(bill.id)} title={title} className={`hover:underline decoration-dotted ${tone}`}>
                                   {/* The note sits under the date, so the column stays one date wide */}
                                   {d.kind === 'auto' ? (
-                                    <span className="text-gray-400 leading-tight text-left block">
+                                    <span className="leading-tight text-left block">
                                       {d.date && <span className="block">{fmtDate(d.date)}</span>}
-                                      <span className="block text-[10px]">Lastschrift</span>
+                                      <span className={`block text-[10px] ${d.date ? 'font-normal text-gray-400' : ''}`}>Lastschrift</span>
                                     </span>
                                   ) : d.date ? (
                                     <span className="leading-tight text-left block">
