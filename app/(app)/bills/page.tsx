@@ -1206,7 +1206,7 @@ export default function BillsPage() {
                         const active = sortCol === col;
                         return (
                           <th key={col} onClick={() => handleSort(col)}
-                            className={`px-2 py-2 text-xs font-semibold uppercase tracking-wide cursor-pointer select-none leading-tight align-bottom transition-colors text-left
+                            className={`px-1.5 py-2 text-xs font-semibold uppercase tracking-wide cursor-pointer select-none leading-tight align-bottom transition-colors text-left
                               ${active ? 'text-[#1B5E20]' : 'text-gray-500 hover:text-gray-800'}`}>
                             <span className="inline-flex items-center gap-1">
                               {label}
@@ -1217,7 +1217,7 @@ export default function BillsPage() {
                           </th>
                         );
                       })}
-                      <th className="px-2 py-2 w-20"></th>
+                      <th className="px-1.5 py-2"></th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
@@ -1228,7 +1228,7 @@ export default function BillsPage() {
                       return (
                         <React.Fragment key={bill.id}>
                         <tr className={`hover:bg-gray-50 transition-colors ${duplicateIds.has(bill.id) ? 'bg-red-50/40' : ''}`}>
-                          <td className="px-2 py-1.5 font-semibold text-gray-900 text-xs max-w-[160px]">
+                          <td className="px-1.5 py-1.5 font-semibold text-gray-900 text-xs max-w-[160px]">
                             <div className="flex items-center gap-1 min-w-0">
                               {duplicateIds.has(bill.id) && (
                                 <span title="Possible duplicate bill" className="text-red-500 flex-shrink-0 cursor-default">
@@ -1243,8 +1243,8 @@ export default function BillsPage() {
                               )}
                             </div>
                           </td>
-                          <td className="px-2 py-1.5 text-gray-600 whitespace-nowrap text-xs">{fmtDate(bill.invoice_date)}</td>
-                          <td className="px-2 py-1.5 whitespace-nowrap text-xs">
+                          <td className="px-1.5 py-1.5 text-gray-600 whitespace-nowrap text-xs">{fmtDate(bill.invoice_date)}</td>
+                          <td className="px-1.5 py-1.5 whitespace-nowrap text-xs">
                             {editingDueId === bill.id ? (
                               <input type="date" autoFocus defaultValue={bill.due_date ?? ''}
                                 onBlur={e => updateDueDate(bill.id, e.target.value)}
@@ -1286,31 +1286,31 @@ export default function BillsPage() {
                               );
                             })()}
                           </td>
-                          <td className="px-2 py-1.5 whitespace-nowrap">
+                          <td className="px-1.5 py-1.5 whitespace-nowrap">
                             <BillPeriodPicker
                               bill={bill}
                               onSave={(pt, ps, pe) => patchBillPeriod(bill.id, pt, ps, pe)}
                             />
                           </td>
-                          <td className="px-2 py-1.5">
+                          <td className="px-1.5 py-1.5">
                             {bill.location_label && (
                               <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-indigo-50 text-indigo-700 text-xs rounded-full whitespace-nowrap">
                                 <MapPin size={9} />{bill.location_label}
                               </span>
                             )}
                           </td>
-                          <td className="px-2 py-1.5 max-w-[110px]">
+                          <td className="px-1.5 py-1.5 max-w-[110px]">
                             {bill.category && (
                               <span className="inline-block px-1.5 py-0.5 bg-gray-100 text-gray-600 text-xs rounded-full whitespace-nowrap truncate max-w-full">
                                 {bill.category}
                               </span>
                             )}
                           </td>
-                          <td className="px-2 py-1.5 tabular-nums text-xs text-gray-900 whitespace-nowrap">{fmt(bill.net_amount)}</td>
-                          <td className="px-2 py-1.5 tabular-nums text-xs text-gray-500 whitespace-nowrap">{vatPct.toFixed(1)}%</td>
-                          <td className="px-2 py-1.5 tabular-nums text-xs text-gray-500 whitespace-nowrap">{fmt(vatAmount)}</td>
-                          <td className="px-2 py-1.5 font-bold text-gray-900 tabular-nums text-xs whitespace-nowrap">{fmt(bill.gross_amount)}</td>
-                          <td className="px-2 py-1.5">
+                          <td className="px-1.5 py-1.5 tabular-nums text-xs text-gray-900 whitespace-nowrap">{fmt(bill.net_amount)}</td>
+                          <td className="px-1.5 py-1.5 tabular-nums text-xs text-gray-500 whitespace-nowrap">{vatPct.toFixed(1)}%</td>
+                          <td className="px-1.5 py-1.5 tabular-nums text-xs text-gray-500 whitespace-nowrap">{fmt(vatAmount)}</td>
+                          <td className="px-1.5 py-1.5 font-bold text-gray-900 tabular-nums text-xs whitespace-nowrap">{fmt(bill.gross_amount)}</td>
+                          <td className="px-1.5 py-1.5">
                             {(() => {
                               const paid = cfByBill.get(bill.id);
                               if (!paid) return null;
@@ -1324,16 +1324,16 @@ export default function BillsPage() {
                               );
                             })()}
                           </td>
-                          <td className="px-2 py-1.5">
+                          <td className="px-1.5 py-1.5">
                             <select value={bill.status} onChange={(e) => updateStatus(bill.id, e.target.value)}
-                              className={`text-xs font-semibold px-2 py-0.5 rounded-full border cursor-pointer focus:outline-none ${STATUS_STYLES[bill.status]}`}>
+                              className={`text-xs font-semibold pl-2 pr-1 py-0.5 rounded-full border cursor-pointer focus:outline-none ${STATUS_STYLES[bill.status]}`}>
                               <option value="pending">Pending</option>
                               <option value="approved">Approved</option>
                               <option value="paid">Paid</option>
                             </select>
                           </td>
-                          <td className="px-2 py-1.5">
-                            <div className="flex items-center gap-1.5">
+                          <td className="px-1.5 py-1.5">
+                            <div className="grid grid-cols-3 gap-x-1.5 gap-y-1 items-center justify-items-center">
                               {bill.invoice_number && (
                                 <span title={`Invoice #${bill.invoice_number}`} className="text-gray-300 cursor-default text-[10px] font-mono leading-none">#</span>
                               )}
