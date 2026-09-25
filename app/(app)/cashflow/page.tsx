@@ -76,6 +76,13 @@ type CfTx = {
     invoice_number: string; period_start: string; period_end: string;
     fees_net: number; fees_vat: number; fees_gross: number;
   } | null;
+  /** One of our own invoices, which this credit pays. */
+  outgoing_bill_id: string | null;
+  outgoing_bill: {
+    id: string; invoice_number: string | null; invoice_date: string | null;
+    customer_name: string; total_payable: number;
+    vat_7: number | null; vat_19: number | null; file_path: string | null;
+  } | null;
   counterparty_id: string | null;
   accounting_period: string | null; // "type|start[|end]"
 };
@@ -100,6 +107,8 @@ type BillSearchResult = {
   category: string | null;
   location_label: string | null;
   status: string;
+  /** Set on one of our own invoices, offered against a credit. */
+  kind?: 'outgoing';
   _score?: number;
 };
 
@@ -181,6 +190,22 @@ function vatOf(tx: CfTx): { rate: number; vatCents: number; nettoCents: number; 
       rate: (lp.sales_vat / lp.net_sales_pre_ads) * 100,
       vatCents: Math.round(lp.sales_vat * 100),
       nettoCents: Math.round(lp.net_sales_pre_ads * 100),
+      fromBill: true,
+      billOdd: false,
+    };
+  }
+
+  /* Our own invoice carries its VAT; the tip on top of it carries none, so
+     the share is taken of what the customer was asked to pay. */
+  const ob = tx.outgoing_bill;
+  if (ob && Number(ob.total_payable) > 0) {
+    const vat = (Number(ob.vat_7) || 0) + (Number(ob.vat_19) || 0);
+    const net = Number(ob.total_payable) - vat;
+    const vatCents = Math.round(tx.amount_cents * vat / Number(ob.total_payable));
+    return {
+      rate: net > 0 ? (vat / net) * 100 : 0,
+      vatCents,
+      nettoCents: tx.amount_cents - vatCents,
       fromBill: true,
       billOdd: false,
     };
@@ -370,7 +395,11 @@ function TxDetailsModal({ tx, all, uploads, counterparties, onClose }: {
 
           <p className="text-xs font-bold text-gray-700 mb-1">Linked bills</p>
           <div className="mb-4">
-            {tx.bill ? (
+            {tx.outgoing_bill ? (
+              <Row label="Our invoice">
+                {tx.outgoing_bill.customer_name}{tx.outgoing_bill.invoice_number ? ` · ${tx.outgoing_bill.invoice_number}` : ''} · {eurAmt(tx.outgoing_bill.total_payable)}
+              </Row>
+            ) : tx.bill ? (
               <Row label="Bill">
                 {tx.bill.supplier_name}{tx.bill.invoice_number ? ` · ${tx.bill.invoice_number}` : ''} · {eurAmt(tx.bill.gross_amount)}
               </Row>
@@ -427,19 +456,23 @@ function TxDetailsModal({ tx, all, uploads, counterparties, onClose }: {
 
 function BillMatchModal({ tx, onLink, onUnlink, onClose }: {
   tx: CfTx;
-  onLink: (id: string) => void;
+  onLink: (bill: BillSearchResult) => void;
   onUnlink: () => void;
   onClose: () => void;
 }) {
   const [q, setQ] = useState('');
+  /* A credit is usually a customer paying one of our invoices; a supplier
+     refund is the exception, so both stay reachable. */
+  const [ours, setOurs] = useState(tx.direction === 'in');
   const ref = useRef<HTMLInputElement>(null);
   useEffect(() => { ref.current?.focus(); }, []);
 
   const { data: results = [], isFetching } = useQuery<BillSearchResult[]>({
-    queryKey: ['bill-search', q, tx.amount_cents],
+    queryKey: ['bill-search', q, tx.amount_cents, ours],
     queryFn: () => {
       const p = new URLSearchParams({ amountCents: String(tx.amount_cents) });
       if (q) p.set('q', q);
+      if (ours) p.set('direction', 'in');
       return fetch(`/api/cashflow/bills-search?${p}`).then(r => r.json());
     },
     staleTime: 30_000,
@@ -457,6 +490,21 @@ function BillMatchModal({ tx, onLink, onUnlink, onClose }: {
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
         </div>
 
+        {tx.outgoing_bill && (
+          <div className="mx-4 mt-3 p-3 rounded-xl bg-green-50 border border-green-200 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <CheckCircle2 size={15} className="text-green-600 flex-shrink-0" />
+              <div>
+                <div className="text-xs font-semibold text-green-800">{tx.outgoing_bill.customer_name}</div>
+                <div className="text-xs text-green-700">Our invoice {tx.outgoing_bill.invoice_number ?? '—'} · {eurAmt(tx.outgoing_bill.total_payable)}</div>
+              </div>
+            </div>
+            <button onClick={onUnlink} className="text-xs text-red-500 hover:text-red-700 font-medium flex items-center gap-1">
+              <Link2Off size={12} /> Remove
+            </button>
+          </div>
+        )}
+
         {tx.bill && (
           <div className="mx-4 mt-3 p-3 rounded-xl bg-green-50 border border-green-200 flex items-center justify-between gap-3">
             <div className="flex items-center gap-2">
@@ -473,10 +521,22 @@ function BillMatchModal({ tx, onLink, onUnlink, onClose }: {
         )}
 
         <div className="px-4 pt-3 pb-2">
+          {tx.direction === 'in' && (
+            <div className="flex gap-1 mb-2">
+              {([[true, 'Our invoices'], [false, 'Supplier bills']] as const).map(([v, label]) => (
+                <button key={label} onClick={() => setOurs(v)}
+                  className={`text-xs font-semibold px-2.5 py-1 rounded-lg border transition-colors ${
+                    ours === v ? 'bg-[#1B5E20] border-[#1B5E20] text-white' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                  }`}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
           <div className="flex items-center gap-2 border border-gray-200 rounded-lg px-3 py-2 focus-within:border-[#1B5E20]">
             <Search size={14} className="text-gray-400 flex-shrink-0" />
             <input ref={ref} value={q} onChange={e => setQ(e.target.value)}
-              placeholder="Search by supplier or invoice number…"
+              placeholder={ours ? 'Search by customer or invoice number…' : 'Search by supplier or invoice number…'}
               className="flex-1 text-sm outline-none bg-transparent" />
             {isFetching && <Loader2 size={12} className="animate-spin text-gray-400" />}
           </div>
@@ -488,11 +548,11 @@ function BillMatchModal({ tx, onLink, onUnlink, onClose }: {
             <div className="py-8 text-center text-gray-400 text-sm">No bills found</div>
           )}
           {results.map(bill => {
-            const isLinked = tx.bill_id === bill.id;
+            const isLinked = bill.kind === 'outgoing' ? tx.outgoing_bill_id === bill.id : tx.bill_id === bill.id;
             const amountMatch = tx.amount_cents > 0 &&
               Math.abs(Math.round(bill.gross_amount * 100) - tx.amount_cents) / tx.amount_cents < 0.02;
             return (
-              <button key={bill.id} onClick={() => onLink(bill.id)}
+              <button key={bill.id} onClick={() => onLink(bill)}
                 className={`w-full text-left rounded-xl border p-3 transition-colors hover:border-[#1B5E20] hover:bg-green-50/50 ${isLinked ? 'border-green-400 bg-green-50' : 'border-gray-200 bg-white'}`}>
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
@@ -770,8 +830,18 @@ function TxRow({ tx, onSave, counterparties, onShowDetails, selected, onToggleSe
     notesTimer.current = setTimeout(() => patch('notes', v), 800);
   };
 
-  const handleLink    = useCallback((id: string) => { patch('bill_id', id);   setShowModal(false); }, [patch]);
-  const handleUnlink  = useCallback(() =>            { patch('bill_id', null); setShowModal(false); }, [patch]);
+  /* A row pays either a supplier's bill or one of our own invoices, never
+     both, so linking one clears the other. */
+  const handleLink = useCallback((bill: BillSearchResult) => {
+    onSave(tx.id, bill.kind === 'outgoing'
+      ? { outgoing_bill_id: bill.id, ...(tx.bill_id ? { bill_id: null } : {}) }
+      : { bill_id: bill.id, ...(tx.outgoing_bill_id ? { outgoing_bill_id: null } : {}) });
+    setShowModal(false);
+  }, [tx.id, tx.bill_id, tx.outgoing_bill_id, onSave]);
+  const handleUnlink = useCallback(() => {
+    onSave(tx.id, tx.outgoing_bill_id ? { outgoing_bill_id: null } : { bill_id: null });
+    setShowModal(false);
+  }, [tx.id, tx.outgoing_bill_id, onSave]);
 
   const rowBg = locked
     ? 'bg-green-50/70 border-l-2 border-l-green-500'
@@ -890,6 +960,28 @@ function TxRow({ tx, onSave, counterparties, onShowDetails, selected, onToggleSe
                   className="flex items-center justify-center w-6 h-6 rounded-full bg-green-50 border border-green-200 text-green-600">
                   <CheckCircle2 size={13} />
                 </span>
+              );
+            }
+
+            if (tx.outgoing_bill) {
+              const o = tx.outgoing_bill;
+              return (
+                <div className="flex items-center gap-1">
+                  <a
+                    href="/bills/outgoing"
+                    title={`Our invoice ${o.invoice_number ?? ''} · ${o.customer_name} · ${eurAmt(o.total_payable)}`}
+                    className="flex items-center gap-1 text-xs font-semibold text-green-700 bg-green-50 border border-green-200 rounded-full px-2 py-0.5 hover:bg-green-100 transition-colors">
+                    <CheckCircle2 size={11} /> {o.invoice_number ?? 'Invoice'}
+                  </a>
+                  {!locked && (
+                    <button title="Unlink invoice" onClick={() => {
+                      if (window.confirm('Remove the invoice link? The invoice goes back to pending.')) patch('outgoing_bill_id', null);
+                    }}
+                      className="text-gray-300 hover:text-red-400 transition-colors">
+                      <X size={10} />
+                    </button>
+                  )}
+                </div>
               );
             }
 
@@ -1251,7 +1343,8 @@ export default function CashFlowPage() {
     onSuccess: (_data, { id, patch }) => {
       // Confirming moves the row from the review queue into the ledger, so an
       // in-place cache patch is not enough — both lists have to be refetched.
-      if ('confirmed' in patch) {
+      // A new link has to be refetched too: the cache only knows the id, not the bill behind it.
+      if ('confirmed' in patch || 'bill_id' in patch || 'outgoing_bill_id' in patch) {
         qc.invalidateQueries({ queryKey: ['cashflow-tx'] });
       } else {
         // Update the row in-place across all cached transaction pages — no refetch, no reshuffling
