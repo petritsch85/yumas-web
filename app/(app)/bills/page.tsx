@@ -91,6 +91,8 @@ type Bill = {
   invoice_number: string | null;
   invoice_date:   string | null;
   due_date:       string | null;
+  /** As printed on the invoice: 'Zahlbar sofort', 'SEPA-Lastschrift', 'PayPal' … */
+  payment_method?: string | null;
   gross_amount:   number;
   net_amount:     number;
   vat_amount:     number;
@@ -105,6 +107,18 @@ type Bill = {
   creditor_iban?: string | null;
   creditor_name?: string | null;
 };
+
+/* By when a bill has to be paid. The due date printed on the invoice where
+   there is one; "Zahlbar sofort" means the invoice date; and a bill collected
+   by direct debit, card or PayPal needs nothing doing — the supplier takes it. */
+type Deadline = { date: string | null; kind: 'due' | 'sofort' | 'auto' | 'none' };
+const AUTO_PAYMENT = /lastschrift|einzug|direct debit|sepa[- ]?(?:dd|lastschrift|einzug|direct)|paypal|kreditkarte|credit card|mastercard|visa|amex|girocard|ec-?karte|offset|verrechn/i;
+function deadlineOf(b: Bill): Deadline {
+  if (AUTO_PAYMENT.test(b.payment_method ?? '')) return { date: b.due_date, kind: 'auto' };
+  if (b.due_date) return { date: b.due_date, kind: 'due' };
+  if (/sofort|immediate|upon receipt/i.test(b.payment_method ?? '')) return { date: b.invoice_date, kind: 'sofort' };
+  return { date: null, kind: 'none' };
+}
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const CATEGORIES = [
@@ -526,7 +540,7 @@ export default function BillsPage() {
     queryFn: async () => {
       // PostgREST caps a single response at 1000 rows, so page through the full
       // table — otherwise older bills silently vanish and the totals under-report.
-      const COLS = 'id, created_at, supplier_name, invoice_number, invoice_date, due_date, gross_amount, net_amount, vat_amount, category, location_label, period_type, period_start, period_end, status, file_path, creditor_iban, creditor_name';
+      const COLS = 'id, created_at, supplier_name, invoice_number, invoice_date, due_date, payment_method, gross_amount, net_amount, vat_amount, category, location_label, period_type, period_start, period_end, status, file_path, creditor_iban, creditor_name';
       const PAGE = 1000;
       const all: Bill[] = [];
       for (let page = 0; ; page++) {
@@ -711,6 +725,8 @@ export default function BillsPage() {
                            bv = b.net_amount > 0 ? b.vat_amount / b.net_amount : 0; break;
       case 'vat_eur':      av = a.vat_amount;                       bv = b.vat_amount;                       break;
       case 'gross':        av = a.gross_amount;                     bv = b.gross_amount;                     break;
+      // Bills with no date to pay by sort last either way
+      case 'deadline':     av = deadlineOf(a).date ?? (sortDir === 'asc' ? '9999' : ''); bv = deadlineOf(b).date ?? (sortDir === 'asc' ? '9999' : ''); break;
       case 'cf':           av = cfByBill.has(a.id) ? 1 : 0;          bv = cfByBill.has(b.id) ? 1 : 0;          break;
       case 'status':       av = a.status ?? '';                     bv = b.status ?? '';                     break;
       default:             av = '';                                  bv = '';
@@ -1015,6 +1031,13 @@ export default function BillsPage() {
     queryClient.invalidateQueries({ queryKey: ['bills'] });
   };
 
+  const [editingDueId, setEditingDueId] = useState<string | null>(null);
+  const updateDueDate = async (id: string, due: string) => {
+    setEditingDueId(null);
+    await supabase.from('bills').update({ due_date: due || null }).eq('id', id);
+    queryClient.invalidateQueries({ queryKey: ['bills'] });
+  };
+
   const updateStatus = async (id: string, status: string) => {
     await supabase.from('bills').update({ status }).eq('id', id);
     queryClient.invalidateQueries({ queryKey: ['bills'] });
@@ -1169,6 +1192,7 @@ export default function BillsPage() {
                         { col: 'vat_pct',      label: 'VAT %',       align: 'left' },
                         { col: 'vat_eur',      label: 'VAT €',       align: 'left' },
                         { col: 'gross',        label: 'Gross',       align: 'left' },
+                        { col: 'deadline',     label: 'Payment Deadline', align: 'left' },
                         { col: 'cf',           label: 'CF',          align: 'left' },
                         { col: 'status',       label: 'Status',      align: 'left'  },
                       ] as { col: string; label: string; align: 'left' | 'right' }[]).map(({ col, label, align }) => {
@@ -1237,6 +1261,36 @@ export default function BillsPage() {
                           <td className="px-2 py-1.5 tabular-nums text-xs text-gray-500 whitespace-nowrap">{vatPct.toFixed(1)}%</td>
                           <td className="px-2 py-1.5 tabular-nums text-xs text-gray-500 whitespace-nowrap">{fmt(vatAmount)}</td>
                           <td className="px-2 py-1.5 font-bold text-gray-900 tabular-nums text-xs whitespace-nowrap">{fmt(bill.gross_amount)}</td>
+                          <td className="px-2 py-1.5 whitespace-nowrap text-xs">
+                            {editingDueId === bill.id ? (
+                              <input type="date" autoFocus defaultValue={bill.due_date ?? ''}
+                                onBlur={e => updateDueDate(bill.id, e.target.value)}
+                                onKeyDown={e => {
+                                  if (e.key === 'Enter') updateDueDate(bill.id, (e.target as HTMLInputElement).value);
+                                  if (e.key === 'Escape') setEditingDueId(null);
+                                }}
+                                className="border border-gray-300 rounded px-1 py-0.5 text-xs focus:outline-none focus:ring-1 focus:ring-[#1B5E20]/40" />
+                            ) : (() => {
+                              const d = deadlineOf(bill);
+                              const open = bill.status !== 'paid';
+                              const daysLeft = d.date ? Math.floor((new Date(d.date + 'T00:00:00').getTime() - new Date(new Date().toDateString()).getTime()) / 86400000) : null;
+                              const tone = !open || d.kind === 'auto' || daysLeft === null ? 'text-gray-400'
+                                : daysLeft < 0 ? 'text-red-600 font-semibold'
+                                : daysLeft <= 7 ? 'text-amber-600 font-semibold'
+                                : 'text-gray-700';
+                              const title = d.kind === 'auto' ? `Collected automatically (${bill.payment_method})${d.date ? ' on ' + fmtDate(d.date) : ''} · click to set a date`
+                                : d.kind === 'sofort' ? 'Zahlbar sofort — due on the invoice date · click to set a date'
+                                : d.kind === 'due' ? (open && daysLeft !== null ? (daysLeft < 0 ? `${-daysLeft} days overdue` : daysLeft === 0 ? 'Due today' : `Due in ${daysLeft} days`) : 'Due date') + ' · click to change'
+                                : 'No due date on the invoice · click to set one';
+                              return (
+                                <button onClick={() => setEditingDueId(bill.id)} title={title} className={`hover:underline decoration-dotted ${tone}`}>
+                                  {d.kind === 'auto' ? <span className="text-gray-400">{d.date ? fmtDate(d.date) + ' · ' : ''}Lastschrift</span>
+                                    : d.date ? <>{fmtDate(d.date)}{d.kind === 'sofort' && <span className="ml-1 text-[10px] font-normal text-gray-400">sofort</span>}</>
+                                    : <span className="text-gray-300">—</span>}
+                                </button>
+                              );
+                            })()}
+                          </td>
                           <td className="px-2 py-1.5">
                             {(() => {
                               const paid = cfByBill.get(bill.id);
@@ -1294,7 +1348,7 @@ export default function BillsPage() {
                         {/* Inline edit row */}
                         {editingBillId === bill.id && editDraft && (
                           <tr className="bg-indigo-50/60">
-                            <td colSpan={12} className="px-4 py-4">
+                            <td colSpan={13} className="px-4 py-4">
                               <div className="grid grid-cols-5 gap-3 items-end">
                                 {/* Location */}
                                 <div>
@@ -1422,7 +1476,7 @@ export default function BillsPage() {
                       </td>
                       <td className="px-3 py-2 text-right font-bold text-amber-700 tabular-nums text-xs">{fmt(t.vat)}</td>
                       <td className="px-3 py-2 text-right font-bold text-[#1B5E20] tabular-nums text-xs">{fmt(t.gross)}</td>
-                      <td colSpan={3} />
+                      <td colSpan={4} />
                     </tr>
                   </tfoot>
                 </table>
