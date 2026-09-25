@@ -1229,6 +1229,8 @@ export default function CashFlowPage() {
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? 'Apply failed');
       setAutoMatchRows(null);
+      qc.invalidateQueries({ queryKey: ['bills'] });
+      qc.invalidateQueries({ queryKey: ['bill-cf-matches'] });
       setWoltMatchRows(null);
       qc.invalidateQueries({ queryKey: ['cashflow-tx'] });
     } catch (err: any) {
@@ -1358,6 +1360,8 @@ export default function CashFlowPage() {
       // The Group P&L page aggregates these rows, so a category/direction change
       // has to invalidate it — this page no longer shows those totals itself.
       qc.invalidateQueries({ queryKey: ['pnl-monthly'] });
+      // A bill link changes that bill's status (Paid) and its CF tick on the Bills page
+      if ('bill_id' in patch) { qc.invalidateQueries({ queryKey: ['bills'] }); qc.invalidateQueries({ queryKey: ['bill-cf-matches'] }); }
     },
   });
 

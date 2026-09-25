@@ -563,7 +563,7 @@ export default function BillsPage() {
      directly or as one of several bills a transfer covered. Shown as a tick
      only: whether a bill counts as Paid stays a manual decision. */
   type CfPayment = { date: string; amount_cents: number; counterparty: string | null };
-  const { data: cfByBill = new Map<string, CfPayment[]>() } = useQuery({
+  const { data: cfByBill = new Map<string, CfPayment[]>(), dataUpdatedAt: cfUpdatedAt } = useQuery({
     queryKey: ['bill-cf-matches'],
     queryFn: async () => {
       const map = new Map<string, CfPayment[]>();
@@ -596,6 +596,13 @@ export default function BillsPage() {
     },
     staleTime: 60_000,
   });
+
+  /* A new cash flow link has already switched its bill to Paid on the server.
+     Whenever the ticks are reloaded, the statuses are reloaded with them, so a
+     tick never sits next to a stale Pending. */
+  useEffect(() => {
+    if (cfUpdatedAt) queryClient.invalidateQueries({ queryKey: ['bills'] });
+  }, [cfUpdatedAt, queryClient]);
 
   const { data: counterparties = [] } = useQuery<Counterparty[]>({
     queryKey: ['counterparties'],
@@ -1199,7 +1206,7 @@ export default function BillsPage() {
                         const active = sortCol === col;
                         return (
                           <th key={col} onClick={() => handleSort(col)}
-                            className={`px-2 py-2 text-xs font-semibold uppercase tracking-wide cursor-pointer select-none whitespace-nowrap transition-colors text-left
+                            className={`px-2 py-2 text-xs font-semibold uppercase tracking-wide cursor-pointer select-none leading-tight align-bottom transition-colors text-left
                               ${active ? 'text-[#1B5E20]' : 'text-gray-500 hover:text-gray-800'}`}>
                             <span className="inline-flex items-center gap-1">
                               {label}
@@ -1284,9 +1291,18 @@ export default function BillsPage() {
                                 : 'No due date on the invoice · click to set one';
                               return (
                                 <button onClick={() => setEditingDueId(bill.id)} title={title} className={`hover:underline decoration-dotted ${tone}`}>
-                                  {d.kind === 'auto' ? <span className="text-gray-400">{d.date ? fmtDate(d.date) + ' · ' : ''}Lastschrift</span>
-                                    : d.date ? <>{fmtDate(d.date)}{d.kind === 'sofort' && <span className="ml-1 text-[10px] font-normal text-gray-400">sofort</span>}</>
-                                    : <span className="text-gray-300">—</span>}
+                                  {/* The note sits under the date, so the column stays one date wide */}
+                                  {d.kind === 'auto' ? (
+                                    <span className="text-gray-400 leading-tight text-left block">
+                                      {d.date && <span className="block">{fmtDate(d.date)}</span>}
+                                      <span className="block text-[10px]">Lastschrift</span>
+                                    </span>
+                                  ) : d.date ? (
+                                    <span className="leading-tight text-left block">
+                                      <span className="block">{fmtDate(d.date)}</span>
+                                      {d.kind === 'sofort' && <span className="block text-[10px] font-normal text-gray-400">sofort</span>}
+                                    </span>
+                                  ) : <span className="text-gray-300">—</span>}
                                 </button>
                               );
                             })()}
