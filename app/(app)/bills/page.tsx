@@ -545,6 +545,44 @@ export default function BillsPage() {
     },
   });
 
+  /* The cash flows that paid each bill — linked on the Cash Flow page, either
+     directly or as one of several bills a transfer covered. Shown as a tick
+     only: whether a bill counts as Paid stays a manual decision. */
+  type CfPayment = { date: string; amount_cents: number; counterparty: string | null };
+  const { data: cfByBill = new Map<string, CfPayment[]>() } = useQuery({
+    queryKey: ['bill-cf-matches'],
+    queryFn: async () => {
+      const map = new Map<string, CfPayment[]>();
+      const add = (billId: string, p: CfPayment) => map.set(billId, [...(map.get(billId) ?? []), p]);
+      const PAGE = 1000;
+      for (let page = 0; ; page++) {
+        const { data, error } = await supabase
+          .from('cashflow_transactions')
+          .select('id, bill_id, date, amount_cents, counterparty')
+          .not('bill_id', 'is', null)
+          .order('id')
+          .range(page * PAGE, (page + 1) * PAGE - 1);
+        if (error) throw error;
+        for (const t of data ?? []) add(t.bill_id as string, t);
+        if (!data || data.length < PAGE) break;
+      }
+      for (let page = 0; ; page++) {
+        const { data, error } = await supabase
+          .from('transaction_bill_links')
+          .select('id, bill_id, tx:cashflow_transactions(date, amount_cents, counterparty)')
+          .order('id')
+          .range(page * PAGE, (page + 1) * PAGE - 1);
+        if (error) throw error;
+        for (const l of (data ?? []) as unknown as { bill_id: string; tx: CfPayment | null }[]) {
+          if (l.tx) add(l.bill_id, l.tx);
+        }
+        if (!data || data.length < PAGE) break;
+      }
+      return map;
+    },
+    staleTime: 60_000,
+  });
+
   const { data: counterparties = [] } = useQuery<Counterparty[]>({
     queryKey: ['counterparties'],
     queryFn: () => fetch('/api/counterparties').then(r => r.json()),
@@ -673,12 +711,13 @@ export default function BillsPage() {
                            bv = b.net_amount > 0 ? b.vat_amount / b.net_amount : 0; break;
       case 'vat_eur':      av = a.vat_amount;                       bv = b.vat_amount;                       break;
       case 'gross':        av = a.gross_amount;                     bv = b.gross_amount;                     break;
+      case 'cf':           av = cfByBill.has(a.id) ? 1 : 0;          bv = cfByBill.has(b.id) ? 1 : 0;          break;
       case 'status':       av = a.status ?? '';                     bv = b.status ?? '';                     break;
       default:             av = '';                                  bv = '';
     }
     const cmp = typeof av === 'string' ? av.localeCompare(bv as string) : (av as number) - (bv as number);
     return sortDir === 'asc' ? cmp : -cmp;
-  }), [filtered, sortCol, sortDir, displayName]);
+  }), [filtered, sortCol, sortDir, displayName, cfByBill]);
 
   const totals = {
     gross: filtered.reduce((s, b) => s + b.gross_amount, 0),
@@ -1130,6 +1169,7 @@ export default function BillsPage() {
                         { col: 'vat_pct',      label: 'VAT %',       align: 'left' },
                         { col: 'vat_eur',      label: 'VAT €',       align: 'left' },
                         { col: 'gross',        label: 'Gross',       align: 'left' },
+                        { col: 'cf',           label: 'CF',          align: 'left' },
                         { col: 'status',       label: 'Status',      align: 'left'  },
                       ] as { col: string; label: string; align: 'left' | 'right' }[]).map(({ col, label, align }) => {
                         const active = sortCol === col;
@@ -1198,6 +1238,20 @@ export default function BillsPage() {
                           <td className="px-2 py-1.5 tabular-nums text-xs text-gray-500 whitespace-nowrap">{fmt(vatAmount)}</td>
                           <td className="px-2 py-1.5 font-bold text-gray-900 tabular-nums text-xs whitespace-nowrap">{fmt(bill.gross_amount)}</td>
                           <td className="px-2 py-1.5">
+                            {(() => {
+                              const paid = cfByBill.get(bill.id);
+                              if (!paid) return null;
+                              const title = 'Matched in the cash flow\n' + paid
+                                .map(p => `${fmtDate(p.date)} · ${fmt(Math.abs(p.amount_cents) / 100)}${p.counterparty ? ` · ${p.counterparty}` : ''}`)
+                                .join('\n');
+                              return (
+                                <span title={title} className="text-green-600 cursor-default">
+                                  <CheckCircle2 size={15} />
+                                </span>
+                              );
+                            })()}
+                          </td>
+                          <td className="px-2 py-1.5">
                             <select value={bill.status} onChange={(e) => updateStatus(bill.id, e.target.value)}
                               className={`text-xs font-semibold px-2 py-0.5 rounded-full border cursor-pointer focus:outline-none ${STATUS_STYLES[bill.status]}`}>
                               <option value="pending">Pending</option>
@@ -1240,7 +1294,7 @@ export default function BillsPage() {
                         {/* Inline edit row */}
                         {editingBillId === bill.id && editDraft && (
                           <tr className="bg-indigo-50/60">
-                            <td colSpan={11} className="px-4 py-4">
+                            <td colSpan={12} className="px-4 py-4">
                               <div className="grid grid-cols-5 gap-3 items-end">
                                 {/* Location */}
                                 <div>
@@ -1361,14 +1415,14 @@ export default function BillsPage() {
                   </tbody>
                   <tfoot>
                     <tr className="bg-gray-50 border-t-2 border-gray-200">
-                      <td colSpan={6} className="px-3 py-2 text-xs font-semibold text-gray-500">{t.count} bills</td>
+                      <td colSpan={5} className="px-3 py-2 text-xs font-semibold text-gray-500">{t.count} bills</td>
                       <td className="px-3 py-2 text-right font-bold text-gray-700 tabular-nums text-xs">{fmt(t.net)}</td>
                       <td className="px-3 py-2 text-right text-xs text-gray-400 tabular-nums">
                         {t.net > 0 ? (t.vat / t.net * 100).toFixed(0) + '%' : '—'}
                       </td>
                       <td className="px-3 py-2 text-right font-bold text-amber-700 tabular-nums text-xs">{fmt(t.vat)}</td>
                       <td className="px-3 py-2 text-right font-bold text-[#1B5E20] tabular-nums text-xs">{fmt(t.gross)}</td>
-                      <td colSpan={2} />
+                      <td colSpan={3} />
                     </tr>
                   </tfoot>
                 </table>
