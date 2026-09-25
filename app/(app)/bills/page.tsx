@@ -675,10 +675,13 @@ export default function BillsPage() {
       // raw-name key sees three copies of one invoice as three different bills.
       // net_amount is deliberately excluded — it is the field extraction most
       // often misreads, and including it hid duplicates whenever two uploads of
-      // the same PDF disagreed on the net.
+      // the same PDF disagreed on the net. The gross is included: Wolt issues
+      // several documents under one number, and an invoice and its credit note
+      // can share one, and those are different bills, not copies.
       const key = [
         displayName(b).toLowerCase().trim(),
         b.invoice_number.toLowerCase().trim(),
+        Math.round(Number(b.gross_amount) * 100),
       ].join('|');
       if (!byKey.has(key)) byKey.set(key, []);
       byKey.get(key)!.push(b.id);
