@@ -29,7 +29,31 @@ type Match = {
   billInvoiceDate: string | null;
   billGross:       number;
   daysDiff:        number;
+  /** How the match was made: the bank quoted the invoice number, or amount + supplier + date alone. */
+  via:             'invoice' | 'amount';
+  /** Every bill the payment settles — more than one where it paid several
+   *  invoices (credit notes included) in one transfer. */
+  bills:           { id: string; invoiceNo: string | null; gross: number }[];
 };
+
+/* An invoice number counts as quoted when its digits stand on their own in
+   the bank text — "RNR 171503", not the "171503" inside "91715033". Bank
+   exports break text across fields and sometimes mid-word, so the whole
+   number (letters included) must also appear once separators are removed. */
+const alnum = (s: string) => (s ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+function quotes(text: string, invoiceNumber: string | null): boolean {
+  if (!invoiceNumber) return false;
+  const whole = alnum(invoiceNumber);
+  const core = (invoiceNumber.match(/\d+/g) ?? []).sort((a, b) => b.length - a.length)[0];
+  if (!core || core.length < 5 || whole.length < 5) return false;
+  if (!alnum(text).includes(whole)) return false;
+  return new RegExp(`(?<!\\d)${core}(?!\\d)`).test(text);
+}
+
+/* A payment that names an invoice ("RNR 171503", "Re-Nr. 4711", "Rechnung
+   12345") is about that invoice. Matching it to a different bill of the same
+   amount would be a guess, so such a payment only matches by number. */
+const REFERENCE = /\b(?:rnr|re\.?\s*-?\s*nr|rg\.?\s*-?\s*nr|rechnung(?:snummer|s-?nr)?|invoice|inv)\.?\s*:?\s*[a-z]*[-/]?\d{4,}/i;
 
 /** Fetch ALL rows from a query that may exceed Supabase's 1000-row cap */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -55,18 +79,28 @@ export async function POST(req: NextRequest) {
 
   // 1. Fetch ALL unlinked cost transactions (paginated to bypass 1000-row cap)
   let txs: any[];
+  let linkRows: any[];
   try {
     txs = await fetchAll((page, size) =>
       admin.from('cashflow_transactions')
-        .select('id, date, counterparty, amount_cents, direction')
+        .select('id, date, counterparty, description, amount_cents, direction')
         .is('bill_id', null)
         .eq('direction', 'out')
         .order('date', { ascending: false })
         .range(page * size, (page + 1) * size - 1)
     );
+    // A transfer covering several bills is linked through transaction_bill_links, not bill_id
+    linkRows = await fetchAll((page, size) =>
+      admin.from('transaction_bill_links')
+        .select('transaction_id, bill_id')
+        .order('id')
+        .range(page * size, (page + 1) * size - 1)
+    );
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 });
   }
+  const multiLinkedTx = new Set(linkRows.map(r => r.transaction_id as string));
+  txs = txs.filter(t => !multiLinkedTx.has(t.id));
 
   // 2. Fetch ALL bills and all linked bill_ids (paginated)
   let linkedRows: any[];
@@ -88,7 +122,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: e.message }, { status: 500 });
   }
 
-  const linkedBillIds = new Set(linkedRows.map(r => r.bill_id as string));
+  const linkedBillIds = new Set([
+    ...linkedRows.map(r => r.bill_id as string),
+    ...linkRows.map(r => r.bill_id as string),
+  ]);
   const availableBills = bills.filter(b => !linkedBillIds.has(b.id));
 
   // 3. Fetch counterparties for keyword matching
@@ -108,63 +145,87 @@ export async function POST(req: NextRequest) {
     return null;
   }
 
-  // 4. Match each transaction to a bill
+  /** Whether a bill's supplier is the party the bank paid. */
+  function sameSupplier(tx: any, b: any): boolean {
+    const resolvedSupplier = matchedSupplier(tx.counterparty ?? '');
+    const bLower = (b.supplier_name ?? '').toLowerCase();
+    if (resolvedSupplier) {
+      /* The bill's supplier goes through the same keywords as the bank's
+         counterparty. A bill headed "vertical cloud solution GmbH" and a
+         transfer to the same name both resolve to Gastromatic; comparing the
+         resolved name against the raw one would miss it, because neither
+         string contains the other. */
+      const resolvedBill = matchedSupplier(b.supplier_name ?? '');
+      if (resolvedBill) return resolvedBill === resolvedSupplier;
+      return bLower.includes(resolvedSupplier) || resolvedSupplier.includes(bLower);
+    }
+    const txLower = (tx.counterparty ?? '').toLowerCase();
+    return bLower.split(' ').some((w: string) => w.length > 3 && txLower.includes(w));
+  }
+
+  const cents = (euros: number) => Math.round(Number(euros) * 100);
+  const days = (a: string, b: string) => Math.round(Math.abs(new Date(a).getTime() - new Date(b).getTime()) / 86400000);
+
   const matches: Match[] = [];
   const usedBillIds = new Set<string>();
+  const usedTxIds = new Set<string>();
 
-  for (const tx of txs) {
-    const txGross = Math.abs(tx.amount_cents) / 100;
-    const txDate  = new Date(tx.date);
-    const resolvedSupplier = matchedSupplier(tx.counterparty);
-
-    const candidates = availableBills.filter(b => {
-      if (usedBillIds.has(b.id)) return false;
-      if (Math.abs(b.gross_amount - txGross) > 0.01) return false;
-      const bLower = b.supplier_name.toLowerCase();
-      if (resolvedSupplier) {
-        /* The bill's supplier goes through the same keywords as the bank's
-           counterparty. A bill headed "vertical cloud solution GmbH" and a
-           transfer to the same name both resolve to Gastromatic; comparing the
-           resolved name against the raw one would miss it, because neither
-           string contains the other. */
-        const resolvedBill = matchedSupplier(b.supplier_name);
-        if (resolvedBill) {
-          if (resolvedBill !== resolvedSupplier) return false;
-        } else if (!bLower.includes(resolvedSupplier) && !resolvedSupplier.includes(bLower)) {
-          return false;
-        }
-      } else {
-        const txLower = tx.counterparty.toLowerCase();
-        if (!bLower.split(' ').some((w: string) => w.length > 3 && txLower.includes(w))) return false;
-      }
-      if (!b.invoice_date) return false;
-      const diff = Math.abs((new Date(b.invoice_date).getTime() - txDate.getTime()) / 86400000);
-      return diff <= 45;
-    });
-
-    if (candidates.length === 0) continue;
-
-    const best = candidates.reduce((a, b) => {
-      const da = Math.abs(new Date(a.invoice_date!).getTime() - txDate.getTime());
-      const db = Math.abs(new Date(b.invoice_date!).getTime() - txDate.getTime());
-      return da <= db ? a : b;
-    });
-
-    const daysDiff = Math.round(Math.abs(new Date(best.invoice_date!).getTime() - txDate.getTime()) / 86400000);
-
+  const push = (tx: any, settled: any[], via: Match['via']) => {
+    const first = settled[0];
     matches.push({
       txId:            tx.id,
       txDate:          tx.date,
       txCounterparty:  tx.counterparty,
       txAmountCents:   tx.amount_cents,
-      billId:          best.id,
-      billSupplier:    best.supplier_name,
-      billInvoiceNo:   best.invoice_number,
-      billInvoiceDate: best.invoice_date,
-      billGross:       best.gross_amount,
-      daysDiff,
+      billId:          first.id,
+      billSupplier:    first.supplier_name,
+      billInvoiceNo:   settled.map(b => b.invoice_number ?? '—').join(' + '),
+      billInvoiceDate: first.invoice_date,
+      billGross:       settled.reduce((s, b) => s + Number(b.gross_amount), 0),
+      daysDiff:        first.invoice_date ? days(first.invoice_date, tx.date) : 0,
+      via,
+      bills:           settled.map(b => ({ id: b.id, invoiceNo: b.invoice_number, gross: Number(b.gross_amount) })),
     });
-    usedBillIds.add(best.id);
+    settled.forEach(b => usedBillIds.add(b.id));
+    usedTxIds.add(tx.id);
+  };
+
+  /* 4a. By invoice number. The bank quotes it, the supplier is the same, and
+     the money agrees to the cent — one bill for the whole amount, or every
+     quoted bill together (an invoice net of a credit note) for the whole
+     amount. Nothing partial, nothing approximate. */
+  for (const tx of txs) {
+    const text = `${tx.counterparty ?? ''} ${tx.description ?? ''}`;
+    const quoted = availableBills.filter(b => !usedBillIds.has(b.id) && quotes(text, b.invoice_number) && sameSupplier(tx, b));
+    if (quoted.length === 0) continue;
+    const paid = Math.abs(tx.amount_cents);
+    if (quoted.length === 1) {
+      if (cents(quoted[0].gross_amount) === paid) push(tx, quoted, 'invoice');
+    } else if (quoted.reduce((s, b) => s + cents(b.gross_amount), 0) === paid) {
+      push(tx, quoted, 'invoice');
+    }
+  }
+
+  /* 4b. By amount, supplier and date — only where it cannot be anything else:
+     the amount agrees to the cent, exactly one bill fits the payment, and no
+     other payment fits that bill. Two bills of the same amount (a monthly
+     subscription) are left for a person rather than decided by the nearer
+     date. A payment naming an invoice is left out: it was matched above, or
+     the invoice it names is not on file. */
+  const fits = (tx: any, b: any) =>
+    cents(b.gross_amount) === Math.abs(tx.amount_cents) &&
+    !!b.invoice_date && days(b.invoice_date, tx.date) <= 45 &&
+    sameSupplier(tx, b);
+
+  const open = txs.filter(tx => !usedTxIds.has(tx.id) && !REFERENCE.test(`${tx.counterparty ?? ''} ${tx.description ?? ''}`));
+  const freeBills = availableBills.filter(b => !usedBillIds.has(b.id));
+  for (const tx of open) {
+    const candidates = freeBills.filter(b => fits(tx, b));
+    if (candidates.length !== 1) continue;
+    const bill = candidates[0];
+    const rivals = open.filter(other => other.id !== tx.id && fits(other, bill));
+    if (rivals.length > 0) continue;
+    push(tx, [bill], 'amount');
   }
 
   /* ── Wolt payouts are evidenced by their settlement period, not a bill ──
@@ -293,12 +354,14 @@ export async function POST(req: NextRequest) {
   // 5. Apply matches
   const errors: string[] = [];
   for (const m of matches) {
-    const { error } = await admin
-      .from('cashflow_transactions')
-      .update({ bill_id: m.billId })
-      .eq('id', m.txId);
+    // One transfer for several bills is recorded as links, the way the Cash Flow page does it
+    const { error } = m.bills.length > 1
+      ? await admin.from('transaction_bill_links').upsert(
+          m.bills.map(b => ({ transaction_id: m.txId, bill_id: b.id, note: 'Auto-matched by invoice numbers in the transfer' })),
+          { onConflict: 'transaction_id,bill_id', ignoreDuplicates: true })
+      : await admin.from('cashflow_transactions').update({ bill_id: m.billId }).eq('id', m.txId).is('bill_id', null);
     if (error) errors.push(error.message);
-    else await markBillsPaid(admin, [m.billId]);
+    else await markBillsPaid(admin, m.bills.map(b => b.id));
   }
 
   for (const w of woltMatches) {

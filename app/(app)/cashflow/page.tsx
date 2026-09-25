@@ -1186,6 +1186,8 @@ export default function CashFlowPage() {
     txId: string; txDate: string; txCounterparty: string; txAmountCents: number;
     billId: string; billSupplier: string; billInvoiceNo: string | null;
     billInvoiceDate: string | null; billGross: number; daysDiff: number;
+    via: 'invoice' | 'amount';
+    bills: { id: string; invoiceNo: string | null; gross: number }[];
   };
   type WoltMatchRow = {
     platform: 'wolt' | 'lieferando';
@@ -1737,7 +1739,7 @@ export default function CashFlowPage() {
                   {autoMatchRows.length === 0 && !woltMatchRows?.length
                     ? 'No matches found — all transactions already linked or no amount/date match in bills.'
                     : [
-                        autoMatchRows.length > 0 && `${autoMatchRows.length} bill${autoMatchRows.length !== 1 ? 's' : ''} by amount + supplier + date (≤45 days)`,
+                        autoMatchRows.length > 0 && `${autoMatchRows.length} payment${autoMatchRows.length !== 1 ? "s" : ""} matched to the cent — by invoice number, or a unique amount + supplier + date (≤45 days)`,
                         woltMatchRows?.length ? `${woltMatchRows.length} delivery payout${woltMatchRows.length !== 1 ? 's' : ''} by settlement amount` : null,
                       ].filter(Boolean).join(' · ') + '. Review then apply.'}
                 </p>
@@ -1801,6 +1803,7 @@ export default function CashFlowPage() {
                       <th className="text-left px-4 py-2.5 font-semibold text-gray-500 uppercase tracking-wide">Invoice #</th>
                       <th className="text-left px-4 py-2.5 font-semibold text-gray-500 uppercase tracking-wide">Invoice Date</th>
                       <th className="text-right px-4 py-2.5 font-semibold text-gray-500 uppercase tracking-wide">Δ Days</th>
+                      <th className="text-left px-4 py-2.5 font-semibold text-gray-500 uppercase tracking-wide">Matched by</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1816,6 +1819,11 @@ export default function CashFlowPage() {
                         <td className="px-4 py-2 text-gray-500">{r.billInvoiceDate ?? '—'}</td>
                         <td className={`px-4 py-2 text-right tabular-nums font-medium ${r.daysDiff <= 7 ? 'text-green-600' : r.daysDiff <= 20 ? 'text-amber-600' : 'text-orange-600'}`}>
                           {r.daysDiff}d
+                        </td>
+                        <td className="px-4 py-2 whitespace-nowrap">
+                          {r.via === 'invoice'
+                            ? <span className="text-green-700 font-medium">Invoice # in transfer{r.bills.length > 1 ? ` · ${r.bills.length} bills` : ''}</span>
+                            : <span className="text-gray-500">Amount · supplier · date</span>}
                         </td>
                       </tr>
                     ))}
