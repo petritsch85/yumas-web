@@ -58,8 +58,10 @@ Rules:
 - If multiple VAT rates exist, use the dominant one for the header; capture per-line rates in lines
 - Suggest category based on supplier type and line item descriptions
 - If a discount is applied, reflect it in the net_amount (post-discount)
+- Line items: read each number from the column it sits under. Menge / G-Menge / Anzahl is the quantity, E-Preis / Einzelpreis the unit price; Kolli and Inhalt are packaging counts, not the quantity. Check that quantity × unit_price equals line_total for every line and re-read the row if it does not
 
 supplier_name accuracy (important — this field is frequently misread):
+- Yumas GmbH (any company named Yumas) is the CUSTOMER on an ordinary invoice — not the supplier. The one exception is a self-billing invoice (Gutschrift / Gutschriftverfahren) issued in Yumas's name, where Yumas is the seller. Its name sits in the address window (the recipient block, usually top-left under a small sender line); that block is the recipient, not the letterhead. If you find yourself about to answer "Yumas", read the small sender line above the address window, the footer and the bank details instead
 - Read the supplier's name from PLAIN TEXT, not from the stylised logo. Logos use decorative fonts that are easy to misread. The reliable sources, in order of preference: the letterhead address block, the footer / Impressum, the line next to the USt-IdNr / Steuernummer, and the bank-details block ("Kontoinhaber" / account holder)
 - Cross-check the spelling against at least two of those places before deciding. If the logo and the footer disagree, trust the footer
 - Transcribe the name character-for-character. Do not guess at, "correct", or normalise unusual German surnames — names like "Leleithner" contain letter sequences that look like typos but are not
