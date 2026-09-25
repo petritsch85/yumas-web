@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase-admin';
+import { markBillsPaid } from '@/lib/bill-payment-status';
 
 type WoltMatch = {
   /** Which delivery platform's settlement the payout ties to. */
@@ -297,6 +298,7 @@ export async function POST(req: NextRequest) {
       .update({ bill_id: m.billId })
       .eq('id', m.txId);
     if (error) errors.push(error.message);
+    else await markBillsPaid(admin, [m.billId]);
   }
 
   for (const w of woltMatches) {

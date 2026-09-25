@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase-admin';
+import { markBillsPaid, unmarkBillsIfUnlinked } from '@/lib/bill-payment-status';
 
 export async function PATCH(
   req: NextRequest,
@@ -18,18 +19,27 @@ export async function PATCH(
 
   const admin = getSupabaseAdmin();
 
-  /* Linking a credit to one of our own invoices is the payment of that
-     invoice, so the invoice's status follows the link — the same as when the
-     match is applied from the Outgoing Bills page. */
+  /* A link decides a status: a supplier bill with a cash flow behind it is
+     Paid, and one of our own invoices with a credit behind it likewise — the
+     same as when the match is applied from the Outgoing Bills page. The old
+     link is read first so what it pointed to can be put back. */
+  let previousBill: string | null = null;
   let previousOutgoing: string | null = null;
-  if (update.outgoing_bill_id !== undefined) {
+  if (update.bill_id !== undefined || update.outgoing_bill_id !== undefined) {
     const { data: before } = await admin
-      .from('cashflow_transactions').select('outgoing_bill_id').eq('id', id).single();
+      .from('cashflow_transactions').select('bill_id, outgoing_bill_id').eq('id', id).single();
+    previousBill     = before?.bill_id ?? null;
     previousOutgoing = before?.outgoing_bill_id ?? null;
   }
 
   const { error } = await admin.from('cashflow_transactions').update(update).eq('id', id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  if (update.bill_id !== undefined) {
+    const next = update.bill_id as string | null;
+    await markBillsPaid(admin, [next]);
+    if (previousBill && previousBill !== next) await unmarkBillsIfUnlinked(admin, [previousBill]);
+  }
 
   if (update.outgoing_bill_id !== undefined) {
     const next = update.outgoing_bill_id as string | null;

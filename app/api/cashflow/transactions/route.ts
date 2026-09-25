@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase-admin';
+import { markBillsPaid, unmarkBillsIfUnlinked } from '@/lib/bill-payment-status';
 
 export async function GET(req: NextRequest) {
   const p = req.nextUrl.searchParams;
@@ -117,11 +118,25 @@ export async function PATCH(req: NextRequest) {
   if (Object.keys(update).length === 0) return NextResponse.json({ ok: true, updated: 0 });
 
   const admin = getSupabaseAdmin();
+
+  // A bill link sets the bill's status, so the links being replaced are read first
+  let previousBills: string[] = [];
+  if (update.bill_id !== undefined) {
+    const { data } = await admin.from('cashflow_transactions').select('bill_id').in('id', ids as string[]);
+    previousBills = (data ?? []).map(r => r.bill_id).filter(Boolean);
+  }
+
   const { error } = await admin
     .from('cashflow_transactions')
     .update(update)
     .in('id', ids as string[]);
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  if (update.bill_id !== undefined) {
+    await markBillsPaid(admin, [update.bill_id as string | null]);
+    await unmarkBillsIfUnlinked(admin, previousBills.filter(b => b !== update.bill_id));
+  }
+
   return NextResponse.json({ ok: true, updated: ids.length });
 }

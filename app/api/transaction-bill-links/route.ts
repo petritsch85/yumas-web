@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase-admin';
+import { markBillsPaid } from '@/lib/bill-payment-status';
 
 /** Convert bill period_type + period_start + period_end to accounting_period string */
 function billToAccountingPeriod(
@@ -44,6 +45,9 @@ export async function POST(req: NextRequest) {
     .from('transaction_bill_links')
     .upsert(rows, { onConflict: 'transaction_id,bill_id', ignoreDuplicates: true });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  // A transfer covering these bills paid them
+  await markBillsPaid(admin, billIds);
 
   // Auto-set accounting_period on the transaction if it has none and the bill has a period
   try {
