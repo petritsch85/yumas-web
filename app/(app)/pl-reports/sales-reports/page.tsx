@@ -1200,7 +1200,9 @@ export default function SalesReportsPage() {
    * summary. Each is the same table and the same filters the daily summary
    * reads for a quarter; only the date bounds differ.
    */
-  const monthlyTabOn = !!location && activeTab === 'daily' && subTab === 'monthly';
+  /* Both the monthly and the weekly summary read every year, so both need the
+     unbounded queries below. */
+  const monthlyTabOn = !!location && activeTab === 'daily' && (subTab === 'monthly' || subTab === 'weekly');
 
   const { data: allWoltRows = [] } = useQuery({
     queryKey: ['wolt-shift-sales-all', location?.id],
@@ -1290,7 +1292,12 @@ export default function SalesReportsPage() {
     /** Days the till ran that shift — the denominator for net sales per shift. */
     shifts: { lunch: Set<string>; dinner: Set<string> };
   };
-  const monthlySummary = useMemo<Record<string, MonthSummary>>(() => {
+  /**
+   * The same roll-up, over whatever period the caller keys by — a month for
+   * the monthly view, an ISO week for the weekly one. Written once because the
+   * two differ in nothing but the key, and two copies would drift.
+   */
+  const buildChannelSummary = useCallback((keyOf: (date: string) => string) => {
     const out: Record<string, MonthSummary> = {};
     const zero = (): ChannelSums => ({ orderbird: 0, webshop: 0, wolt: 0, lieferando: 0, bills: 0 });
     const at = (key: string) => out[key] ?? (out[key] = {
@@ -1299,7 +1306,7 @@ export default function SalesReportsPage() {
     });
     const add = (date: string, shift: 'lunch' | 'dinner' | null, ch: keyof ChannelSums, v: number) => {
       if (!date || !Number.isFinite(v)) return;
-      const m = at(date.slice(0, 7));
+      const m = at(keyOf(date));
       if (shift) m[shift][ch] += v;
       m.day[ch] += v;
     };
@@ -1308,7 +1315,7 @@ export default function SalesReportsPage() {
       add(r.report_date, r.shift_type, 'orderbird', safeNum(r.net_total) ?? 0);
       // A shift counts once per day, however many Z-reports it produced.
       if (r.shift_type === 'lunch' || r.shift_type === 'dinner') {
-        at(r.report_date.slice(0, 7)).shifts[r.shift_type].add(r.report_date);
+        at(keyOf(r.report_date)).shifts[r.shift_type].add(r.report_date);
       }
     }
     for (const r of allWebshopRows) add(r.sale_date, r.shift, 'webshop', r.net_cents / 100);
@@ -1316,21 +1323,31 @@ export default function SalesReportsPage() {
     for (const r of allLieferandoRows) add(r.sale_date, r.shift, 'lieferando', Number(r.net_final ?? 0));
     for (const b of allOutgoingBills) if (b.event_date) add(b.event_date, b.shift_type, 'bills', Number(b.net_total ?? 0));
 
-    // Wolt+ credits are income for the whole month, shared out by sales.
+    /* A Wolt+ credit is income for a whole calendar month, so it is shared out
+       over that month's sales and each share lands in the period its own day
+       belongs to — which for a week straddling two months is the right one. */
     for (const c of allWoltCredits) {
       const mk = c.month.slice(0, 7);
       const inMonth = allWoltRows.filter(r => r.sale_date.startsWith(mk));
       const base = inMonth.reduce((t, r) => t + Number(r.net_sales), 0);
       if (base <= 0) continue;
-      const m = at(mk);
       for (const r of inMonth) {
-        const share = Number(c.net) * (Number(r.net_sales) / base);
-        m[r.shift].wolt += share;
-        m.day.wolt += share;
+        add(r.sale_date, r.shift, 'wolt', Number(c.net) * (Number(r.net_sales) / base));
       }
     }
     return out;
   }, [allShiftRows, allWebshopRows, allWoltRows, allLieferandoRows, allWoltCredits, allOutgoingBills]);
+
+  const monthlySummary = useMemo(
+    () => buildChannelSummary(d => d.slice(0, 7)),
+    [buildChannelSummary],
+  );
+
+  /** Keyed "2026-W39", so the same week a year earlier is one string away. */
+  const weeklySummary = useMemo(
+    () => buildChannelSummary(d => `${isoWeekYear(d)}-W${String(isoWeek(d)).padStart(2, '0')}`),
+    [buildChannelSummary],
+  );
 
   const { data: allMonthlyReports = [] } = useQuery({
     queryKey: ['monthly-reports-all', location?.id],
@@ -6987,13 +7004,127 @@ export default function SalesReportsPage() {
                       </th>
                     </tr>
                   </thead>
+                  {/* ── Net sales by channel — the same blocks as the monthly view ── */}
+                  {(() => {
+                    type Ch = 'orderbird' | 'webshop' | 'wolt' | 'lieferando' | 'bills';
+                    type Sh = 'lunch' | 'dinner' | 'day';
+                    const wk  = (kw: number, y = year) => `${y}-W${String(kw).padStart(2, '0')}`;
+                    const cell = (kw: number, sh: Sh, ch: Ch) => weeklySummary[wk(kw)]?.[sh][ch] ?? 0;
+                    const totalOf = (x: { orderbird: number; webshop: number; wolt: number; lieferando: number; bills: number }) =>
+                      x.orderbird + x.webshop + x.wolt + x.lieferando + x.bills;
+                    const cellTotal = (kw: number, sh: Sh, y = year) =>
+                      weeklySummary[wk(kw, y)] ? totalOf(weeklySummary[wk(kw, y)][sh]) : 0;
+                    const fyCell  = (sh: Sh, ch: Ch) => Object.entries(weeklySummary)
+                      .filter(([k]) => k.startsWith(`${year}-W`)).reduce((t, [, m]) => t + m[sh][ch], 0);
+                    const fyTotal = (sh: Sh) => Object.entries(weeklySummary)
+                      .filter(([k]) => k.startsWith(`${year}-W`)).reduce((t, [, m]) => t + totalOf(m[sh]), 0);
+                    const shiftsIn = (kw: number, sh: 'lunch' | 'dinner', y = year) =>
+                      weeklySummary[wk(kw, y)]?.shifts[sh].size ?? 0;
+                    const shiftsFy = (sh: 'lunch' | 'dinner') => Object.entries(weeklySummary)
+                      .filter(([k]) => k.startsWith(`${year}-W`)).reduce((t, [, m]) => t + m.shifts[sh].size, 0);
+                    const perShift = (total: number, n: number) => (n > 0 ? total / n : 0);
+                    /* The same week a year earlier. ISO weeks do not line up with
+                       calendar dates, but KW39 against KW39 is the comparison a
+                       trading week is actually judged by. */
+                    const yoy = (now: number, before: number) =>
+                      now > 0 && before > 0 ? ((now - before) / before) * 100 : NaN;
+
+                    const line = (
+                      key: string, label: string,
+                      week: (kw: number) => number, fy: () => number,
+                      opts: { header?: boolean; total?: boolean; derived?: boolean; count?: boolean; pctDelta?: boolean } = {},
+                    ) => {
+                      const bg = opts.header ? '#eef2ff' : opts.total ? '#f0fdf4' : '#ffffff';
+                      const labelCls = opts.header  ? 'text-xs font-bold text-gray-800'
+                                     : opts.total   ? 'text-xs font-bold text-[#1B5E20]'
+                                     : opts.derived ? 'text-[11px] text-gray-400 italic pl-8'
+                                                    : 'text-[11px] text-gray-600 pl-8';
+                      const valCls = opts.total ? 'font-bold text-[#1B5E20]' : opts.derived ? 'text-gray-500' : 'text-blue-700';
+                      return (
+                        <tr key={key} className={`border-b ${opts.header ? 'border-gray-200' : 'border-gray-100'} hover:bg-gray-50/60 group`} style={{ backgroundColor: bg }}>
+                          <td className={`sticky left-0 z-10 px-4 ${opts.header ? 'py-1.5' : 'py-1'} whitespace-nowrap border-r border-gray-100 group-hover:bg-gray-50 transition-colors ${labelCls}`}
+                            style={{ backgroundColor: bg }}>
+                            {label}
+                          </td>
+                          {Array.from({ length: totalWeeks }, (_, i) => i + 1).map(kw => {
+                            const isCurWk = kw === cwk;
+                            const v = opts.header ? 0 : week(kw);
+                            return (
+                              <td key={kw} className={`${opts.header ? 'py-1.5' : 'py-1'} text-right tabular-nums text-xs`}
+                                style={{ paddingLeft: 4, paddingRight: 10, backgroundColor: isCurWk ? 'rgba(59,130,246,0.04)' : undefined }}>
+                                {opts.header ? null
+                                  : opts.count ? (v > 0 ? <span className={valCls}>{v}</span> : <span className="text-gray-300">—</span>)
+                                  : opts.pctDelta ? (Number.isFinite(v)
+                                      ? <span className={v >= 0 ? 'text-green-600' : 'text-red-500'}>{v >= 0 ? '+' : ''}{v.toFixed(0)}%</span>
+                                      : <span className="text-gray-300">—</span>)
+                                  : v > 0 ? <span className={valCls}>{fmtNum(v)}</span> : <span className="text-gray-300">—</span>}
+                              </td>
+                            );
+                          })}
+                          <td className={`${opts.header ? 'py-1.5' : 'py-1'} text-right tabular-nums text-xs border-l border-gray-200`}
+                            style={{ paddingLeft: 4, paddingRight: 10, backgroundColor: opts.total ? '#ecfdf5' : '#f8fafc' }}>
+                            {(() => {
+                              if (opts.header) return null;
+                              const v = fy();
+                              if (opts.count)    return v > 0 ? <span className={valCls}>{v}</span> : <span className="text-gray-300">—</span>;
+                              if (opts.pctDelta) return <span className="text-gray-300">—</span>;
+                              return v > 0 ? <span className={valCls}>{fmtNum(v)}</span> : <span className="text-gray-300">—</span>;
+                            })()}
+                          </td>
+                        </tr>
+                      );
+                    };
+
+                    const block = (sh: Sh, title: string, totalLabel: string) => [
+                      line(`w-${sh}-hdr`, title, () => 0, () => 0, { header: true }),
+                      line(`w-${sh}-ob`, 'Orderbird',  kw => cell(kw, sh, 'orderbird'),  () => fyCell(sh, 'orderbird')),
+                      line(`w-${sh}-ws`, 'Webshop',    kw => cell(kw, sh, 'webshop'),    () => fyCell(sh, 'webshop')),
+                      line(`w-${sh}-wo`, 'Wolt',       kw => cell(kw, sh, 'wolt'),       () => fyCell(sh, 'wolt')),
+                      line(`w-${sh}-li`, 'Lieferando', kw => cell(kw, sh, 'lieferando'), () => fyCell(sh, 'lieferando')),
+                      line(`w-${sh}-bi`, 'Bills',      kw => cell(kw, sh, 'bills'),      () => fyCell(sh, 'bills')),
+                      line(`w-${sh}-tg`, 'Too Good To Go', () => 0, () => 0),
+                      line(`w-${sh}-tot`, totalLabel, kw => cellTotal(kw, sh), () => fyTotal(sh), { total: true }),
+                      ...(sh === 'day' ? [
+                        line('w-day-yoy', 'Y/Y Sales growth (%)',
+                          kw => yoy(cellTotal(kw, 'day'), cellTotal(kw, 'day', year - 1)),
+                          () => NaN, { derived: true, pctDelta: true }),
+                      ] : [
+                        line(`w-${sh}-n`, '# of Shifts',
+                          kw => shiftsIn(kw, sh), () => shiftsFy(sh), { derived: true, count: true }),
+                        line(`w-${sh}-avg`, 'Av. net sales / Shift',
+                          kw => perShift(cellTotal(kw, sh), shiftsIn(kw, sh)),
+                          () => perShift(fyTotal(sh), shiftsFy(sh)), { derived: true }),
+                        line(`w-${sh}-yoy`, 'Y/Y Sales growth (%)',
+                          kw => yoy(perShift(cellTotal(kw, sh), shiftsIn(kw, sh)),
+                                    perShift(cellTotal(kw, sh, year - 1), shiftsIn(kw, sh, year - 1))),
+                          () => NaN, { derived: true, pctDelta: true }),
+                      ]),
+                      <tr key={`w-${sh}-gap`}><td colSpan={totalWeeks + 2} style={{ height: 8, backgroundColor: '#f9fafb' }} /></tr>,
+                    ];
+
+                    return (
+                      <tbody>
+                        <tr>
+                          <td colSpan={totalWeeks + 2}
+                            className="sticky left-0 px-4 py-2 text-xs font-bold uppercase tracking-widest text-white"
+                            style={{ backgroundColor: '#0f172a' }}>
+                            Net sales by channel
+                          </td>
+                        </tr>
+                        {block('lunch',  'Net sales · Lunch',  'Total net sales · Lunch')}
+                        {block('dinner', 'Net sales · Dinner', 'Total net sales · Dinner')}
+                        {block('day',    'Net sales · Week',   'Total net sales · Week')}
+                      </tbody>
+                    );
+                  })()}
+
                   {/* ── Weekly summary (lunch / dinner / total net revenue) ── */}
                   <tbody>
                     <tr>
                       <td colSpan={totalWeeks + 2}
                         className="sticky left-0 px-4 py-2 text-xs font-bold uppercase tracking-widest text-white"
                         style={{ backgroundColor: '#0f172a' }}>
-                        Summary
+                        Orderbird · Summary
                       </td>
                     </tr>
                     {([
