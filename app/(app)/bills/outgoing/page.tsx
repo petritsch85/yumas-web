@@ -7,7 +7,7 @@ import {
   Upload, FileCheck, AlertCircle, Loader2,
   CheckCircle2, Clock, Banknote, Trash2,
   ChevronDown, Eye, EyeOff, X, Save, Pencil, Download, BookOpen, Send, FileText,
-  FilePlus, Plus, FileDown, Camera, FileUp, ReceiptText,
+  FilePlus, Plus, FileDown, Camera, FileUp, ReceiptText, Check,
 } from 'lucide-react';
 import type { BillData, LineItem } from '@/components/bills/BillDocument';
 import { splitAdHocNet, EVENT_EFFECTIVE_RATE, type AdHocVat, netFromGross } from '@/lib/event-vat';
@@ -251,6 +251,60 @@ export default function OutgoingBillsPage() {
   const [inputMode,         setInputMode]         = useState<'brutto' | 'netto' | 'pauschale' | 'catering' | 'adhoc'>('brutto');
   /** 'bewirtung' = Bewirtungsbeleg: own BB sequence, gross positions, already paid. */
   const [docKind,           setDocKind]           = useState<'invoice' | 'bewirtung'>('invoice');
+
+  /* Checking which of our own invoices the bank already paid. The matching
+     happens on the server, where the cash flows are; this holds what it found
+     and which of those a person has agreed to. */
+  type PaymentMatch = {
+    billId: string; invoiceNumber: string | null; customerName: string;
+    invoiceDate: string | null; amount: number;
+    txId: string; txDate: string; txCounterparty: string; txDescription: string;
+    daysAfter: number; reasons: string[]; confident: boolean; paidAmount?: number;
+  };
+  const [payChecking, setPayChecking] = useState(false);
+  const [payMatches,  setPayMatches]  = useState<PaymentMatch[] | null>(null);
+  const [paySel,      setPaySel]      = useState<Set<string>>(new Set());
+  const [payApplying, setPayApplying] = useState(false);
+  const [payError,    setPayError]    = useState<string | null>(null);
+
+  const checkPayments = useCallback(async () => {
+    setPayChecking(true); setPayError(null);
+    try {
+      const res = await fetch('/api/outgoing-bills/check-payments');
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? 'The check failed.');
+      const found = (json.matches ?? []) as PaymentMatch[];
+      setPayMatches(found);
+      setPaySel(new Set(found.filter(m => m.confident).map(m => m.billId)));
+    } catch (e) {
+      setPayError(e instanceof Error ? e.message : 'The check failed.');
+      setPayMatches([]);
+    } finally {
+      setPayChecking(false);
+    }
+  }, []);
+
+  const applyPayments = useCallback(async () => {
+    if (!payMatches) return;
+    const pairs = payMatches.filter(m => paySel.has(m.billId)).map(m => ({ billId: m.billId, txId: m.txId }));
+    if (pairs.length === 0) return;
+    setPayApplying(true); setPayError(null);
+    try {
+      const res = await fetch('/api/outgoing-bills/check-payments', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pairs }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? 'Nothing was changed.');
+      queryClient.invalidateQueries({ queryKey: ['outgoing-bills'] });
+      queryClient.invalidateQueries({ queryKey: ['cashflow-tx'] });
+      setPayMatches(null); setPaySel(new Set());
+    } catch (e) {
+      setPayError(e instanceof Error ? e.message : 'Nothing was changed.');
+    } finally {
+      setPayApplying(false);
+    }
+  }, [payMatches, paySel, queryClient]);
   /** Which run the list is showing. The two never share a total. */
   const [listKind,          setListKind]          = useState<'invoice' | 'bewirtung'>('invoice');
   const [pauschaleTotal,    setPauschaleTotal]    = useState('');
@@ -1907,6 +1961,17 @@ export default function OutgoingBillsPage() {
               Export
             </button>
           )}
+          {canViewAll && (
+            <button
+              onClick={checkPayments}
+              disabled={payChecking}
+              title="Look through the uploaded cash flows for payments against the outstanding invoices"
+              className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2 bg-white text-blue-700 border border-blue-300 text-sm font-semibold rounded-xl hover:bg-blue-50 transition-colors disabled:opacity-50"
+            >
+              {payChecking ? <Loader2 size={15} className="animate-spin" /> : <Banknote size={15} />}
+              {payChecking ? 'Checking…' : 'Check for payment'}
+            </button>
+          )}
           <button
             onClick={() => { setDocKind('invoice'); setTab('create'); }}
             className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2 bg-white text-[#1B5E20] border border-[#1B5E20] text-sm font-semibold rounded-xl hover:bg-green-50 transition-colors"
@@ -1933,6 +1998,104 @@ export default function OutgoingBillsPage() {
           )}
         </div>
       </div>
+
+      {/* ── What the bank already paid ── */}
+      {payMatches && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setPayMatches(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[86vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="px-6 py-4 border-b border-gray-100 flex items-start justify-between">
+              <div>
+                <h2 className="font-bold text-gray-900">Payments found</h2>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  {payMatches.length === 0
+                    ? 'No credit in the cash flows matches an outstanding invoice.'
+                    : `${payMatches.length} outstanding invoice${payMatches.length === 1 ? '' : 's'} look${payMatches.length === 1 ? 's' : ''} to have been paid · the confident ones are ticked`}
+                </p>
+              </div>
+              <button onClick={() => setPayMatches(null)} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
+            </div>
+
+            {payMatches.length > 0 && (
+              <div className="overflow-y-auto flex-1">
+                <table className="w-full text-xs">
+                  <thead className="bg-gray-50 sticky top-0 border-b border-gray-200">
+                    <tr>
+                      <th className="px-3 py-2 w-8">
+                        <input type="checkbox"
+                          checked={paySel.size === payMatches.length && payMatches.length > 0}
+                          onChange={e => setPaySel(e.target.checked ? new Set(payMatches.map(m => m.billId)) : new Set())}
+                          className="w-4 h-4 accent-green-600" />
+                      </th>
+                      <th className="px-3 py-2 text-left font-semibold text-gray-500 uppercase tracking-wide">Rechnung</th>
+                      <th className="px-3 py-2 text-left font-semibold text-gray-500 uppercase tracking-wide">Kunde</th>
+                      <th className="px-3 py-2 text-right font-semibold text-gray-500 uppercase tracking-wide">Betrag</th>
+                      <th className="px-3 py-2 text-left font-semibold text-gray-500 uppercase tracking-wide">Zahlungseingang</th>
+                      <th className="px-3 py-2 text-left font-semibold text-gray-500 uppercase tracking-wide">Warum</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {payMatches.map(m => (
+                      <tr key={m.billId} className={`border-b border-gray-50 ${paySel.has(m.billId) ? 'bg-green-50/40' : ''}`}>
+                        <td className="px-3 py-2">
+                          <input type="checkbox" checked={paySel.has(m.billId)}
+                            onChange={e => setPaySel(sel => {
+                              const n = new Set(sel);
+                              if (e.target.checked) n.add(m.billId); else n.delete(m.billId);
+                              return n;
+                            })}
+                            className="w-4 h-4 accent-green-600" />
+                        </td>
+                        <td className="px-3 py-2 whitespace-nowrap">
+                          <span className="font-semibold text-gray-800">{m.invoiceNumber ?? '—'}</span>
+                          <span className="block text-[10px] text-gray-400">{fmtDate(m.invoiceDate)}</span>
+                        </td>
+                        <td className="px-3 py-2 text-gray-700 max-w-[200px] truncate">{m.customerName}</td>
+                        <td className="px-3 py-2 text-right tabular-nums font-semibold text-gray-900 whitespace-nowrap">
+                          {fmt(m.amount)}
+                          {m.paidAmount !== undefined && m.paidAmount !== m.amount && (
+                            <span className="block text-[10px] font-normal text-amber-700">erhalten {fmt(m.paidAmount)}</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 whitespace-nowrap">
+                          <span className="text-gray-700">{fmtDate(m.txDate)}</span>
+                          <span className="text-gray-300 ml-1">
+                            {m.daysAfter >= 0 ? `+${m.daysAfter}d` : `${m.daysAfter}d`}
+                          </span>
+                          <span className="block text-[10px] text-gray-400 max-w-[220px] truncate">{m.txCounterparty}</span>
+                        </td>
+                        <td className="px-3 py-2">
+                          {m.confident
+                            ? <span className="text-[10px] text-green-700">{m.reasons.join(' · ')}</span>
+                            : <span className="text-[10px] text-amber-700">
+                                {m.reasons.join(' · ')} — nothing names the invoice or the payer, so check this one
+                              </span>}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <div className="px-6 py-4 border-t border-gray-100 flex items-center justify-end gap-2">
+              {payError && <span className="mr-auto text-xs text-red-600">{payError}</span>}
+              <button onClick={() => setPayMatches(null)}
+                className="px-4 py-2 text-xs font-semibold border border-gray-200 rounded-lg text-gray-500 hover:bg-gray-50">
+                Schliessen
+              </button>
+              <button onClick={applyPayments} disabled={paySel.size === 0 || payApplying}
+                className="flex items-center gap-2 px-5 py-2 text-xs font-bold bg-[#1B5E20] text-white rounded-lg hover:bg-[#2E7D32] disabled:opacity-40">
+                {payApplying ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
+                Switch {paySel.size} to Paid
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {payError && !payMatches && (
+        <div className="mb-4 px-4 py-2.5 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">{payError}</div>
+      )}
 
       {/* Tabs */}
       <div className="border-b border-gray-200 mb-6">
