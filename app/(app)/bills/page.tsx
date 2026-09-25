@@ -1192,6 +1192,7 @@ export default function BillsPage() {
                       {([
                         { col: 'supplier',     label: 'Supplier',    align: 'left'  },
                         { col: 'invoice_date', label: 'Issue Date',  align: 'left'  },
+                        { col: 'deadline',     label: 'Due Date',    align: 'left'  },
                         { col: 'period_start', label: 'Period',       align: 'left'  },
                         { col: 'location',     label: 'Location',    align: 'left'  },
                         { col: 'category',     label: 'Category',    align: 'left'  },
@@ -1199,7 +1200,6 @@ export default function BillsPage() {
                         { col: 'vat_pct',      label: 'VAT %',       align: 'left' },
                         { col: 'vat_eur',      label: 'VAT €',       align: 'left' },
                         { col: 'gross',        label: 'Gross',       align: 'left' },
-                        { col: 'deadline',     label: 'Payment Deadline', align: 'left' },
                         { col: 'cf',           label: 'CF',          align: 'left' },
                         { col: 'status',       label: 'Status',      align: 'left'  },
                       ] as { col: string; label: string; align: 'left' | 'right' }[]).map(({ col, label, align }) => {
@@ -1244,30 +1244,6 @@ export default function BillsPage() {
                             </div>
                           </td>
                           <td className="px-2 py-1.5 text-gray-600 whitespace-nowrap text-xs">{fmtDate(bill.invoice_date)}</td>
-                          <td className="px-2 py-1.5 whitespace-nowrap">
-                            <BillPeriodPicker
-                              bill={bill}
-                              onSave={(pt, ps, pe) => patchBillPeriod(bill.id, pt, ps, pe)}
-                            />
-                          </td>
-                          <td className="px-2 py-1.5">
-                            {bill.location_label && (
-                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-indigo-50 text-indigo-700 text-xs rounded-full whitespace-nowrap">
-                                <MapPin size={9} />{bill.location_label}
-                              </span>
-                            )}
-                          </td>
-                          <td className="px-2 py-1.5 max-w-[110px]">
-                            {bill.category && (
-                              <span className="inline-block px-1.5 py-0.5 bg-gray-100 text-gray-600 text-xs rounded-full whitespace-nowrap truncate max-w-full">
-                                {bill.category}
-                              </span>
-                            )}
-                          </td>
-                          <td className="px-2 py-1.5 tabular-nums text-xs text-gray-900 whitespace-nowrap">{fmt(bill.net_amount)}</td>
-                          <td className="px-2 py-1.5 tabular-nums text-xs text-gray-500 whitespace-nowrap">{vatPct.toFixed(1)}%</td>
-                          <td className="px-2 py-1.5 tabular-nums text-xs text-gray-500 whitespace-nowrap">{fmt(vatAmount)}</td>
-                          <td className="px-2 py-1.5 font-bold text-gray-900 tabular-nums text-xs whitespace-nowrap">{fmt(bill.gross_amount)}</td>
                           <td className="px-2 py-1.5 whitespace-nowrap text-xs">
                             {editingDueId === bill.id ? (
                               <input type="date" autoFocus defaultValue={bill.due_date ?? ''}
@@ -1307,6 +1283,30 @@ export default function BillsPage() {
                               );
                             })()}
                           </td>
+                          <td className="px-2 py-1.5 whitespace-nowrap">
+                            <BillPeriodPicker
+                              bill={bill}
+                              onSave={(pt, ps, pe) => patchBillPeriod(bill.id, pt, ps, pe)}
+                            />
+                          </td>
+                          <td className="px-2 py-1.5">
+                            {bill.location_label && (
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-indigo-50 text-indigo-700 text-xs rounded-full whitespace-nowrap">
+                                <MapPin size={9} />{bill.location_label}
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-2 py-1.5 max-w-[110px]">
+                            {bill.category && (
+                              <span className="inline-block px-1.5 py-0.5 bg-gray-100 text-gray-600 text-xs rounded-full whitespace-nowrap truncate max-w-full">
+                                {bill.category}
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-2 py-1.5 tabular-nums text-xs text-gray-900 whitespace-nowrap">{fmt(bill.net_amount)}</td>
+                          <td className="px-2 py-1.5 tabular-nums text-xs text-gray-500 whitespace-nowrap">{vatPct.toFixed(1)}%</td>
+                          <td className="px-2 py-1.5 tabular-nums text-xs text-gray-500 whitespace-nowrap">{fmt(vatAmount)}</td>
+                          <td className="px-2 py-1.5 font-bold text-gray-900 tabular-nums text-xs whitespace-nowrap">{fmt(bill.gross_amount)}</td>
                           <td className="px-2 py-1.5">
                             {(() => {
                               const paid = cfByBill.get(bill.id);
@@ -1485,14 +1485,14 @@ export default function BillsPage() {
                   </tbody>
                   <tfoot>
                     <tr className="bg-gray-50 border-t-2 border-gray-200">
-                      <td colSpan={5} className="px-3 py-2 text-xs font-semibold text-gray-500">{t.count} bills</td>
+                      <td colSpan={6} className="px-3 py-2 text-xs font-semibold text-gray-500">{t.count} bills</td>
                       <td className="px-3 py-2 text-right font-bold text-gray-700 tabular-nums text-xs">{fmt(t.net)}</td>
                       <td className="px-3 py-2 text-right text-xs text-gray-400 tabular-nums">
                         {t.net > 0 ? (t.vat / t.net * 100).toFixed(0) + '%' : '—'}
                       </td>
                       <td className="px-3 py-2 text-right font-bold text-amber-700 tabular-nums text-xs">{fmt(t.vat)}</td>
                       <td className="px-3 py-2 text-right font-bold text-[#1B5E20] tabular-nums text-xs">{fmt(t.gross)}</td>
-                      <td colSpan={4} />
+                      <td colSpan={3} />
                     </tr>
                   </tfoot>
                 </table>
