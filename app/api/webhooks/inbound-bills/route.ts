@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse, after } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
 import PostalMime from 'postal-mime';
+import { createHash } from 'crypto';
 import { getSupabaseAdmin } from '@/lib/supabase-admin';
 import { canonicalizeSupplierName, getKnownTerms } from '@/lib/canonical-supplier';
 
@@ -132,6 +133,42 @@ async function collectBills(attachments: Attachment[], depth = 0): Promise<Attac
   }
   return found;
 }
+
+/* The same file arriving twice at once — one email in two batches, or a
+   manual retry overlapping Postmark's own — would pass the duplicate check
+   below in both copies, since neither is saved until it has been read. So a
+   file is claimed by its content first: creating the claim fails if it
+   exists, and only one copy gets past. A claim is released if reading fails,
+   and lapses after half an hour — the race is over by then, and a bill that
+   was deleted on purpose can be sent again. */
+const CLAIM_MINUTES = 30;
+
+const claimPath = (a: Attachment) =>
+  `claims/${createHash('sha256').update(a.Content).digest('hex')}.json`;
+
+async function claimFile(a: Attachment): Promise<boolean> {
+  const bucket = getSupabaseAdmin().storage.from(INBOUND_BUCKET);
+  const path = claimPath(a);
+  const claim = JSON.stringify({ name: a.Name, at: new Date().toISOString() });
+
+  const { error } = await bucket.upload(path, claim, { contentType: 'application/json', upsert: false });
+  if (!error) return true;
+
+  if (/exists|duplicate|409/i.test(error.message)) {
+    const { data } = await bucket.download(path);
+    const at = data ? Date.parse(JSON.parse(await data.text()).at ?? '') : NaN;
+    if (Number.isFinite(at) && Date.now() - at < CLAIM_MINUTES * 60_000) return false;
+    // A lapsed claim: take it over
+    await bucket.upload(path, claim, { contentType: 'application/json', upsert: true });
+    return true;
+  }
+  // Storage trouble is no reason to drop a bill; the check after reading still stands
+  console.error(`[inbound-bills] ${a.Name}: could not claim (${error.message}) — processing anyway`);
+  return true;
+}
+
+const releaseFile = (a: Attachment) =>
+  getSupabaseAdmin().storage.from(INBOUND_BUCKET).remove([claimPath(a)]);
 
 /* A bill forwarded twice — or a batch Postmark delivers again — must not
    appear twice. Same supplier, same number, same amount is the same bill. */
@@ -314,6 +351,10 @@ async function processBills(billAttachments: Attachment[]) {
   const queue = [...billAttachments];
   const worker = async () => {
     for (let a = queue.shift(); a; a = queue.shift()) {
+      if (!await claimFile(a)) {
+        console.log(`[inbound-bills] ${a.Name}: this exact file was already received — skipped`);
+        continue;
+      }
       try {
         const extracted = await extractFromAttachment(a);
         const duplicate = await findDuplicate(extracted);
@@ -325,6 +366,7 @@ async function processBills(billAttachments: Attachment[]) {
         console.log(`[inbound-bills] ${a.Name}: saved as ${billId}`);
       } catch (err) {
         console.error(`[inbound-bills] ${a.Name}: processing failed:`, err);
+        await releaseFile(a);
       }
     }
   };
