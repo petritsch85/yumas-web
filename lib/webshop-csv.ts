@@ -134,6 +134,25 @@ const REQUIRED = ['Bestellnummer', 'Erstellt am', 'Standort', 'Art', 'Status', '
  * counting, so the page can show what was abandoned rather than silently
  * discarding a third of the file.
  */
+/**
+ * A shop status that means the sale did not happen.
+ *
+ * Everything else that has been paid for is revenue, whatever the kitchen has
+ * done with it yet: an order sits at "confirmed" from the moment it is
+ * accepted until somebody marks it handed over, so an export taken the same
+ * evening is full of paid orders nobody has closed out. Counting only
+ * "completed" lost those until the next export happened to be taken later.
+ */
+const NOT_A_SALE = new Set([
+  'cancelled', 'canceled', 'refunded', 'failed', 'rejected', 'declined',
+  'expired', 'storniert', 'abgebrochen',
+]);
+
+/** Paid and not called off. An unpaid order is an abandoned checkout. */
+export const countsAsSale = (status: string, paymentStatus: string) =>
+  paymentStatus.trim().toLowerCase() === 'paid' &&
+  !NOT_A_SALE.has(status.trim().toLowerCase());
+
 export function parseWebshopCsv(text: string): WebshopOrder[] {
   const clean = text.replace(/^﻿/, '');
   const rows  = parseCsvRows(clean, detectDelimiter(clean));
@@ -177,8 +196,7 @@ export function parseWebshopCsv(text: string): WebshopOrder[] {
       orderType:   /liefer/i.test(at(row, 'Art')) ? 'delivery' : 'pickup',
       status,
       paymentStatus,
-      // An unpaid order is an abandoned checkout, not a sale.
-      counts: status === 'completed' && paymentStatus === 'paid',
+      counts: countsAsSale(status, paymentStatus),
       items:  at(row, 'Artikel'),
       netCents:         cents(at(row, 'Netto (gesamt)')),
       vatCents:         cents(at(row, 'MwSt (gesamt)')),
