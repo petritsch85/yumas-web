@@ -1207,6 +1207,13 @@ export default function CashFlowPage() {
   const [autoMatching, setAutoMatching]     = useState(false);
   const [autoMatchRows, setAutoMatchRows]   = useState<AutoMatchRow[] | null>(null);
   const [applyingMatch, setApplyingMatch]   = useState(false);
+  /* Which proposals to settle. Everything arrives ticked; untick the ones that
+     need more work and they stay in the list after the rest are applied. */
+  const [matchSel, setMatchSel] = useState<Set<string>>(new Set());
+  const toggleMatch = (txId: string, on: boolean) =>
+    setMatchSel(prev => { const n = new Set(prev); if (on) n.add(txId); else n.delete(txId); return n; });
+  const toggleMany = (txIds: string[], on: boolean) =>
+    setMatchSel(prev => { const n = new Set(prev); for (const id of txIds) { if (on) n.add(id); else n.delete(id); } return n; });
 
   const handleAutoMatch = async () => {
     setAutoMatching(true);
@@ -1220,6 +1227,11 @@ export default function CashFlowPage() {
       setAutoMatchRows(json.matches);
       setWoltMatchRows(json.woltMatches ?? []);
       setRefMatchRows(json.referenceMatches ?? []);
+      setMatchSel(new Set<string>([
+        ...(json.matches ?? []).map((m: { txId: string }) => m.txId),
+        ...(json.woltMatches ?? []).map((m: { txId: string }) => m.txId),
+        ...(json.referenceMatches ?? []).map((m: { txId: string }) => m.txId),
+      ]));
     } catch (err: any) {
       alert(err.message);
     } finally {
@@ -1228,21 +1240,30 @@ export default function CashFlowPage() {
   };
 
   const handleApplyAutoMatch = async () => {
-    if (!autoMatchRows?.length && !woltMatchRows?.length && !refMatchRows?.length) return;
+    if (matchSel.size === 0) return;
     setApplyingMatch(true);
     try {
       const res  = await fetch('/api/cashflow/auto-match', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ apply: true }),
+        body: JSON.stringify({ apply: true, only: [...matchSel] }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? 'Apply failed');
-      setAutoMatchRows(null);
       qc.invalidateQueries({ queryKey: ['bills'] });
       qc.invalidateQueries({ queryKey: ['bill-cf-matches'] });
-      setWoltMatchRows(null);
-      setRefMatchRows(null);
       qc.invalidateQueries({ queryKey: ['cashflow-tx'] });
+
+      /* What was left unticked is still to do, so the list is rebuilt rather
+         than closed — the applied rows drop out of it by themselves. */
+      const applied = new Set(matchSel);
+      const keep = <T extends { txId: string }>(rows: T[] | null) => (rows ?? []).filter(r => !applied.has(r.txId));
+      const bills = keep(autoMatchRows), wolt = keep(woltMatchRows), refs = keep(refMatchRows);
+      if (bills.length === 0 && wolt.length === 0 && refs.length === 0) {
+        setAutoMatchRows(null); setWoltMatchRows(null); setRefMatchRows(null);
+      } else {
+        setAutoMatchRows(bills); setWoltMatchRows(wolt); setRefMatchRows(refs);
+      }
+      setMatchSel(new Set());
     } catch (err: any) {
       alert(err.message);
     } finally {
@@ -1766,13 +1787,24 @@ export default function CashFlowPage() {
             <div className="overflow-y-auto flex-1">
             {(refMatchRows?.length ?? 0) > 0 && (
               <div className="px-6 pt-4">
-                <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-2">
-                  Collected payments — the invoices named in the bank&apos;s own reference
-                </p>
+                <div className="flex items-center gap-2 mb-2">
+                  <input type="checkbox"
+                    checked={refMatchRows!.every(r => matchSel.has(r.txId))}
+                    onChange={e => toggleMany(refMatchRows!.map(r => r.txId), e.target.checked)}
+                    className="w-4 h-4 accent-green-600" />
+                  <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wider">
+                    Collected payments — the invoices named in the bank&apos;s own reference
+                  </p>
+                </div>
                 <div className="space-y-2 mb-4">
                   {refMatchRows!.map(r => (
-                    <div key={r.txId} className={`border rounded-lg overflow-hidden ${r.complete ? 'border-gray-200' : 'border-amber-200'}`}>
+                    <div key={r.txId} className={`border rounded-lg overflow-hidden ${
+                      !matchSel.has(r.txId) ? 'border-gray-200 opacity-50' : r.complete ? 'border-gray-200' : 'border-amber-200'
+                    }`}>
                       <div className={`flex items-center gap-3 px-3 py-2 text-xs ${r.complete ? 'bg-gray-50' : 'bg-amber-50'}`}>
+                        <input type="checkbox" checked={matchSel.has(r.txId)}
+                          onChange={e => toggleMatch(r.txId, e.target.checked)}
+                          className="w-4 h-4 accent-green-600 flex-shrink-0" />
                         <span className="text-gray-600">{r.txDate}</span>
                         <span className="font-semibold text-gray-800">{r.supplier}</span>
                         <span className="font-semibold text-red-600 tabular-nums">
@@ -1816,6 +1848,12 @@ export default function CashFlowPage() {
                   <table className="w-full text-xs mb-4">
                     <thead className="bg-gray-50 border-b border-gray-100">
                       <tr className="whitespace-nowrap">
+                        <th className="px-3 py-2 w-8">
+                          <input type="checkbox"
+                            checked={woltMatchRows!.every(r => matchSel.has(r.txId))}
+                            onChange={e => toggleMany(woltMatchRows!.map(r => r.txId), e.target.checked)}
+                            className="w-4 h-4 accent-green-600" />
+                        </th>
                         <th className="text-left  px-3 py-2 font-semibold text-gray-500 uppercase tracking-wide">Tx Date</th>
                         <th className="text-right px-3 py-2 font-semibold text-gray-500 uppercase tracking-wide">Amount</th>
                         <th className="text-left  px-3 py-2 font-semibold text-gray-500 uppercase tracking-wide">Platform</th>
@@ -1827,7 +1865,12 @@ export default function CashFlowPage() {
                     </thead>
                     <tbody>
                       {woltMatchRows!.map(r => (
-                        <tr key={r.txId} className="border-b border-gray-50 hover:bg-gray-50 whitespace-nowrap">
+                        <tr key={r.txId} className={`border-b border-gray-50 hover:bg-gray-50 whitespace-nowrap ${matchSel.has(r.txId) ? '' : 'opacity-50'}`}>
+                          <td className="px-3 py-2">
+                            <input type="checkbox" checked={matchSel.has(r.txId)}
+                              onChange={e => toggleMatch(r.txId, e.target.checked)}
+                              className="w-4 h-4 accent-green-600" />
+                          </td>
                           <td className="px-3 py-2 text-gray-600">{r.txDate}</td>
                           <td className="px-3 py-2 text-right font-semibold text-green-700 tabular-nums">
                             {(r.txAmountCents / 100).toLocaleString('de-DE', { minimumFractionDigits: 2 })} €
@@ -1851,6 +1894,12 @@ export default function CashFlowPage() {
                 <table className="w-full text-xs">
                   <thead className="bg-gray-50 border-b border-gray-100 sticky top-0">
                     <tr>
+                      <th className="px-4 py-2.5 w-8">
+                        <input type="checkbox"
+                          checked={autoMatchRows.every(r => matchSel.has(r.txId))}
+                          onChange={e => toggleMany(autoMatchRows.map(r => r.txId), e.target.checked)}
+                          className="w-4 h-4 accent-green-600" />
+                      </th>
                       <th className="text-left px-4 py-2.5 font-semibold text-gray-500 uppercase tracking-wide">Tx Date</th>
                       <th className="text-left px-4 py-2.5 font-semibold text-gray-500 uppercase tracking-wide">Counterparty</th>
                       <th className="text-right px-4 py-2.5 font-semibold text-gray-500 uppercase tracking-wide">Amount</th>
@@ -1863,7 +1912,12 @@ export default function CashFlowPage() {
                   </thead>
                   <tbody>
                     {autoMatchRows.map(r => (
-                      <tr key={r.txId} className="border-b border-gray-50 hover:bg-gray-50">
+                      <tr key={r.txId} className={`border-b border-gray-50 hover:bg-gray-50 ${matchSel.has(r.txId) ? '' : 'opacity-50'}`}>
+                        <td className="px-4 py-2">
+                          <input type="checkbox" checked={matchSel.has(r.txId)}
+                            onChange={e => toggleMatch(r.txId, e.target.checked)}
+                            className="w-4 h-4 accent-green-600" />
+                        </td>
                         <td className="px-4 py-2 text-gray-600">{r.txDate}</td>
                         <td className="px-4 py-2 text-gray-700 font-medium max-w-[160px] truncate">{r.txCounterparty}</td>
                         <td className="px-4 py-2 text-right font-semibold text-red-600 tabular-nums">
@@ -1893,13 +1947,10 @@ export default function CashFlowPage() {
                 Cancel
               </button>
               {(autoMatchRows.length > 0 || (woltMatchRows?.length ?? 0) > 0 || (refMatchRows?.length ?? 0) > 0) && (
-                <button onClick={handleApplyAutoMatch} disabled={applyingMatch}
+                <button onClick={handleApplyAutoMatch} disabled={applyingMatch || matchSel.size === 0}
                   className="flex items-center gap-2 px-5 py-2 text-sm font-bold bg-[#1B5E20] text-white rounded-lg hover:bg-[#2E7D32] transition-colors disabled:opacity-50">
                   {applyingMatch ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
-                  {applyingMatch ? 'Applying…' : (() => {
-                    const n = autoMatchRows.length + (woltMatchRows?.length ?? 0) + (refMatchRows?.length ?? 0);
-                    return `Apply ${n} match${n !== 1 ? 'es' : ''}`;
-                  })()}
+                  {applyingMatch ? 'Applying…' : `Apply ${matchSel.size} match${matchSel.size !== 1 ? 'es' : ''}`}
                 </button>
               )}
             </div>

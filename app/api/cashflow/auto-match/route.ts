@@ -90,7 +90,12 @@ async function fetchAll(buildQuery: (page: number, pageSize: number) => any): Pr
 
 // POST { apply: false } → preview; POST { apply: true } → apply
 export async function POST(req: NextRequest) {
-  const { apply } = await req.json();
+  const { apply, only } = await req.json();
+  /* Which payments to settle. The matching itself always runs in full and on
+     the server, so the browser only ever chooses among proposals it was shown;
+     it never says what a proposal contains. Omitting the list applies all. */
+  const chosen: Set<string> | null = Array.isArray(only) ? new Set(only.filter((x: unknown) => typeof x === 'string')) : null;
+  const picked = <T extends { txId: string }>(rows: T[]) => (chosen ? rows.filter(r => chosen.has(r.txId)) : rows);
   const admin = getSupabaseAdmin();
 
   // 1. Fetch ALL unlinked cost transactions (paginated to bypass 1000-row cap)
@@ -421,7 +426,12 @@ export async function POST(req: NextRequest) {
 
   // 5. Apply matches
   const errors: string[] = [];
-  for (const m of matches) {
+  const applyBills = picked(matches);
+  const applyWolt = picked(woltMatches);
+  const applyLieferando = picked(lieferandoMatches);
+  const applyReference = picked(referenceMatches);
+
+  for (const m of applyBills) {
     // One transfer for several bills is recorded as links, the way the Cash Flow page does it
     const { error } = m.bills.length > 1
       ? await admin.from('transaction_bill_links').upsert(
@@ -432,14 +442,14 @@ export async function POST(req: NextRequest) {
     else await markBillsPaid(admin, m.bills.map(b => b.id));
   }
 
-  for (const w of woltMatches) {
+  for (const w of applyWolt) {
     const { error } = await admin
       .from('cashflow_transactions')
       .update({ wolt_period_id: w.periodId })
       .eq('id', w.txId);
     if (error) errors.push(error.message);
   }
-  for (const l of lieferandoMatches) {
+  for (const l of applyLieferando) {
     const { error } = await admin
       .from('cashflow_transactions')
       .update({ lieferando_period_id: l.periodId })
@@ -450,7 +460,7 @@ export async function POST(req: NextRequest) {
   /* One payment, many invoices: the link table carries those, and the note
      records what the bank said so a gap stays visible afterwards. */
   let appliedReference = 0;
-  for (const r of referenceMatches) {
+  for (const r of applyReference) {
     const note = `${r.bills.length} Rechnung${r.bills.length === 1 ? '' : 'en'} laut Verwendungszweck`
       + (r.complete ? '' : ` · ${r.sum.toFixed(2)} € von ${(Math.abs(r.txAmountCents) / 100).toFixed(2)} €`)
       + (r.missing.length ? ` · nicht im System: ${r.missing.join(', ')}` : '');
@@ -464,8 +474,8 @@ export async function POST(req: NextRequest) {
   }
 
   return NextResponse.json({
-    applied: matches.length,
-    appliedWolt: woltMatches.length + lieferandoMatches.length,
+    applied: applyBills.length,
+    appliedWolt: applyWolt.length + applyLieferando.length,
     appliedReference,
     errors,
   });
