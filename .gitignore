@@ -41,3 +41,6 @@ yarn-error.log*
 next-env.d.ts
 
 .vercel
+
+# Throwaway scripts used while investigating; never part of the app.
+.*.mts
