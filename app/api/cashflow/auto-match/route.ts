@@ -3,6 +3,7 @@ import { getSupabaseAdmin } from '@/lib/supabase-admin';
 import { matchByReference } from '@/lib/payment-reference';
 import type { RefBill, TakenBill } from '@/lib/payment-reference';
 import { linkObjection } from '@/lib/match-rules';
+import { payableAmounts } from '@/lib/skonto';
 import { markBillsPaid, unmarkBillsIfUnlinked } from '@/lib/bill-payment-status';
 
 type WoltMatch = {
@@ -182,12 +183,26 @@ export async function POST(req: NextRequest) {
         .not('bill_id', 'is', null)
         .range(page * size, (page + 1) * size - 1)
     );
-    bills = await fetchAll((page, size) =>
-      admin.from('bills')
-        .select('id, supplier_name, invoice_number, invoice_date, gross_amount')
-        .order('invoice_date', { ascending: false })
-        .range(page * size, (page + 1) * size - 1)
-    );
+    /* settlement_amount arrives with supabase/add_bill_settlement.sql. Until
+       that has been run the column is not there, and matching on the gross
+       alone is still better than no matching at all. */
+    const billColumns = 'id, supplier_name, invoice_number, invoice_date, gross_amount';
+    try {
+      bills = await fetchAll((page, size) =>
+        admin.from('bills')
+          .select(`${billColumns}, settlement_amount`)
+          .order('invoice_date', { ascending: false })
+          .range(page * size, (page + 1) * size - 1)
+      );
+    } catch {
+      console.warn('[auto-match] bills.settlement_amount missing — run supabase/add_bill_settlement.sql');
+      bills = await fetchAll((page, size) =>
+        admin.from('bills')
+          .select(billColumns)
+          .order('invoice_date', { ascending: false })
+          .range(page * size, (page + 1) * size - 1)
+      );
+    }
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 });
   }
@@ -260,6 +275,19 @@ export async function POST(req: NextRequest) {
     usedTxIds.add(tx.id);
   };
 
+  /* What a bill can show up as in the bank. A supplier taking Skonto collects
+     the discounted figure printed on the invoice and nothing else, so a bill
+     with a settlement amount has two faces and matching must accept either.
+     See lib/skonto.ts. */
+  const payable = (b: any) => payableAmounts(b).map(cents);
+  /** Every total this set of bills could add up to, Skonto taken or not. */
+  const payableSums = (bs: any[]): number[] =>
+    bs.reduce<number[]>((sums, b) => {
+      const next = new Set<number>();
+      for (const s of sums) for (const a of payable(b)) next.add(s + a);
+      return [...next];
+    }, [0]);
+
   /* 4a. By invoice number. The bank quotes it, the supplier is the same, and
      the money agrees to the cent — one bill for the whole amount, or every
      quoted bill together (an invoice net of a credit note) for the whole
@@ -270,8 +298,8 @@ export async function POST(req: NextRequest) {
     if (quoted.length === 0) continue;
     const paid = Math.abs(tx.amount_cents);
     if (quoted.length === 1) {
-      if (cents(quoted[0].gross_amount) === paid) push(tx, quoted, 'invoice');
-    } else if (quoted.reduce((s, b) => s + cents(b.gross_amount), 0) === paid) {
+      if (payable(quoted[0]).includes(paid)) push(tx, quoted, 'invoice');
+    } else if (payableSums(quoted).includes(paid)) {
       push(tx, quoted, 'invoice');
     }
   }
@@ -287,7 +315,7 @@ export async function POST(req: NextRequest) {
      cannot argue with — the invoice number the bank names, and the direction
      of time. See lib/match-rules.ts. */
   const fits = (tx: any, b: any) =>
-    cents(b.gross_amount) === Math.abs(tx.amount_cents) &&
+    payable(b).includes(Math.abs(tx.amount_cents)) &&
     !!b.invoice_date && days(b.invoice_date, tx.date) <= 45 &&
     sameSupplier(tx, b) &&
     !linkObjection(tx, b);

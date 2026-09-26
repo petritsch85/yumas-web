@@ -27,6 +27,8 @@ The invoices may be in German or English. German terms to know:
 - Netto = Net
 - Brutto = Gross
 - Leergut = Deposit items (returnable packaging — include but flag)
+- Skonto = early-payment discount
+- abgebucht / eingezogen = collected by direct debit
 
 Return this exact JSON structure:
 {
@@ -39,6 +41,10 @@ Return this exact JSON structure:
   "net_amount": number,
   "vat_amount": number,
   "gross_amount": number,
+  "settlement_amount": "number or null — what the supplier will actually collect, when the invoice prints it",
+  "settlement_date": "YYYY-MM-DD or null — the date the invoice says the debit falls",
+  "discount_amount": "number or null — the Skonto in euros, as printed",
+  "discount_percent": "number or null — the Skonto rate, as printed",
   "suggested_category": "one of: Food Cost | Drinks Cost | Packaging | Software & Technology | Delivery Platform Fees | Repairs & Maintenance | Cleaning Services | Utilities | Rent | Labour | Marketing | Other",
   "lines": [
     {
@@ -61,6 +67,7 @@ Rules:
 - If multiple VAT rates exist, use the dominant one for the header; capture per-line rates in lines
 - Suggest category based on supplier type and line item descriptions
 - If a discount is applied, reflect it in the net_amount (post-discount)
+- Skonto: many German suppliers print exactly what they will collect, e.g. "Der Rechnungsbetrag wird am 02.10.26 per Lastschrift abzüglich 2.00 % / 14.46 EUR Skonto = 756.24 EUR abgebucht". Copy those figures into settlement_amount (756.24), discount_amount (14.46), discount_percent (2.00) and settlement_date (2026-10-02). gross_amount stays the invoice total (770.70) — never reduce it by the Skonto. Leave all four null when the invoice offers no discount, and never calculate them yourself: the discount runs on the supplier's own base, which excludes Pfand and Leergut, so it is not a fixed percentage of the gross
 - Line items: read each number from the column it sits under. Menge / G-Menge / Anzahl is the quantity, E-Preis / Einzelpreis the unit price; Kolli and Inhalt are packaging counts, not the quantity. Check that quantity × unit_price equals line_total for every line and re-read the row if it does not
 
 supplier_name accuracy (important — this field is frequently misread):
@@ -262,7 +269,28 @@ async function saveBillToDB(attachment: Attachment, extracted: Record<string, un
 
   const invoiceDate = (extracted.invoice_date as string | null) ?? null;
 
-  const { data: bill, error: billErr } = await admin.from('bills').insert({
+  /* Skonto: only accepted when the three printed figures agree with the gross.
+     A settlement read off the wrong line would quietly break bank matching,
+     which is the one thing this field exists to fix. */
+  const grossAmount = Number(extracted.gross_amount ?? 0);
+  const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+  let settlementAmount = num(extracted.settlement_amount);
+  let discountAmount = num(extracted.discount_amount);
+  if (settlementAmount !== null && grossAmount > 0) {
+    if (discountAmount === null) discountAmount = Math.round((grossAmount - settlementAmount) * 100) / 100;
+    const agrees = Math.abs(grossAmount - discountAmount - settlementAmount) <= 0.02;
+    const sane = settlementAmount > 0 && settlementAmount <= grossAmount + 0.01 && settlementAmount >= grossAmount * 0.85;
+    if (!agrees || !sane) {
+      console.warn(`[inbound-bills] ${attachment.Name}: ignoring implausible Skonto ${settlementAmount} against gross ${grossAmount}`);
+      settlementAmount = null;
+      discountAmount = null;
+    }
+  } else {
+    settlementAmount = null;
+    discountAmount = null;
+  }
+
+  const row: Record<string, unknown> = {
     supplier_name:  extracted.supplier_name  ?? 'Unknown',
     invoice_number: extracted.invoice_number ?? null,
     invoice_date:   invoiceDate,
@@ -286,8 +314,25 @@ async function saveBillToDB(attachment: Attachment, extracted: Record<string, un
     period_type:    'single_date',
     period_start:   invoiceDate,
     period_end:     invoiceDate,
-  }).select('id').single();
+  };
+
+  /* The gross stays the invoice total; this is what the bank will show. The
+     columns arrive with supabase/add_bill_settlement.sql — until that has been
+     run, a bill is still worth filing without them. */
+  const settlementCols = {
+    settlement_amount: settlementAmount,
+    settlement_date:   settlementAmount !== null ? ((extracted.settlement_date as string | null) ?? null) : null,
+    discount_amount:   discountAmount,
+    discount_percent:  settlementAmount !== null ? num(extracted.discount_percent) : null,
+  };
+  let { data: bill, error: billErr } = await admin.from('bills')
+    .insert({ ...row, ...settlementCols }).select('id').single();
+  if (billErr && /settlement_amount|discount_amount|discount_percent|settlement_date/.test(billErr.message)) {
+    console.warn('[inbound-bills] settlement columns missing — run supabase/add_bill_settlement.sql');
+    ({ data: bill, error: billErr } = await admin.from('bills').insert(row).select('id').single());
+  }
   if (billErr) throw billErr;
+  if (!bill) throw new Error('Bill insert returned no row');
 
   const lines = extracted.lines as Record<string, unknown>[] | undefined;
   if (lines?.length && bill) {

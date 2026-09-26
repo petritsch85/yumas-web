@@ -69,8 +69,16 @@ export interface RefBill {
   invoice_number: string | null;
   invoice_date: string | null;
   gross_amount: number;
+  /** What the supplier collects after Skonto, where the invoice prints it. */
+  settlement_amount?: number | null;
   supplier_name: string;
 }
+
+/** What a bill will actually appear as in the bank. See lib/skonto.ts. */
+const collected = (b: RefBill) =>
+  typeof b.settlement_amount === 'number' && b.settlement_amount > 0
+    ? b.settlement_amount
+    : Number(b.gross_amount);
 
 /** An invoice the reference names that we hold, but another payment already claims. */
 export interface TakenBill {
@@ -149,8 +157,14 @@ export function matchByReference(
   if (bills.length === 0) return null;
 
   const amount = Math.abs(tx.amount_cents) / 100;
-  const sum = Math.round(bills.reduce((t, b) => t + Number(b.gross_amount), 0) * 100) / 100;
-  const complete = Math.abs(sum - amount) < 0.01;
+  const round2 = (n: number) => Math.round(n * 100) / 100;
+  /* A supplier taking Skonto debits the discounted figure, so the collected
+     total is what the bank will show. The gross total is kept as the second
+     candidate: some invoices in a batch may state no discount. */
+  const sumCollected = round2(bills.reduce((t, b) => t + collected(b), 0));
+  const sumGross = round2(bills.reduce((t, b) => t + Number(b.gross_amount), 0));
+  const complete = Math.abs(sumCollected - amount) < 0.01 || Math.abs(sumGross - amount) < 0.01;
+  const sum = Math.abs(sumGross - amount) < 0.01 ? sumGross : sumCollected;
 
   // One number alone is only convincing when it explains the whole payment.
   if (bills.length === 1 && !complete) return null;
