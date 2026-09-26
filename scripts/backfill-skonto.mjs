@@ -56,15 +56,23 @@ const args = process.argv.slice(2);
 const dry = args.includes('--dry');
 const supplier = args.find(a => !a.startsWith('--'));
 
-let q = db.from('bills')
-  .select('id, supplier_name, invoice_number, gross_amount, file_path, settlement_amount')
-  .is('settlement_amount', null)
-  .not('file_path', 'is', null)
-  .order('invoice_date');
-if (supplier) q = q.ilike('supplier_name', `%${supplier}%`);
-
-const { data: bills, error } = await q;
-if (error) { console.error(error.message); process.exit(1); }
+/* Supabase caps a select at 1000 rows, so a book of a thousand-odd bills is
+   silently cut short without paging through it. */
+const PAGE = 500;
+const bills = [];
+for (let page = 0; ; page++) {
+  let q = db.from('bills')
+    .select('id, supplier_name, invoice_number, gross_amount, file_path, settlement_amount')
+    .is('settlement_amount', null)
+    .not('file_path', 'is', null)
+    .order('invoice_date')
+    .range(page * PAGE, (page + 1) * PAGE - 1);
+  if (supplier) q = q.ilike('supplier_name', `%${supplier}%`);
+  const { data, error } = await q;
+  if (error) { console.error(error.message); process.exit(1); }
+  bills.push(...data);
+  if (data.length < PAGE) break;
+}
 console.log(`${bills.length} bill(s) to read${dry ? ' (dry run)' : ''}\n`);
 
 let filled = 0, none = 0, failed = 0;
