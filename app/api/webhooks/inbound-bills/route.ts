@@ -4,6 +4,7 @@ import PostalMime from 'postal-mime';
 import { createHash } from 'crypto';
 import { getSupabaseAdmin } from '@/lib/supabase-admin';
 import { canonicalizeSupplierName, getKnownTerms } from '@/lib/canonical-supplier';
+import { resolveDueDate } from '@/lib/payment-terms';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const SECRET = process.env.INBOUND_BILLS_WEBHOOK_SECRET ?? '';
@@ -14,7 +15,9 @@ The invoices may be in German or English. German terms to know:
 - Rechnung = Invoice
 - Rechnungsnummer / Rechnungs-Nummer = Invoice number
 - Rechnungsdatum = Invoice date
-- Fälligkeitsdatum = Due date
+- Fälligkeitsdatum / Zahlungsziel / Valuta = Due date
+- Zahlbar sofort / sofort ohne Abzüge / netto Kasse = payable immediately (a condition, not a date)
+- Zahlbar innerhalb von 14 Tagen / 14 Tage netto = payable within N days of the invoice date
 - Menge = Quantity
 - Einzelpreis / E-Preis = Unit price
 - Gesamtpreis / Gesamt / Betrag = Line total
@@ -32,7 +35,7 @@ Return this exact JSON structure:
   "invoice_date": "YYYY-MM-DD or null",
   "due_date": "YYYY-MM-DD or null",
   "currency": "EUR",
-  "payment_method": "string or null",
+  "payment_method": "how and by when it is to be paid, copied as printed — e.g. 'Zahlbar sofort ohne Abzüge', 'SEPA-Lastschrift', '14 Tage netto'. Always fill this where the invoice states any payment condition, even when no due date is given. null only when the invoice says nothing at all",
   "net_amount": number,
   "vat_amount": number,
   "gross_amount": number,
@@ -263,7 +266,12 @@ async function saveBillToDB(attachment: Attachment, extracted: Record<string, un
     supplier_name:  extracted.supplier_name  ?? 'Unknown',
     invoice_number: extracted.invoice_number ?? null,
     invoice_date:   invoiceDate,
-    due_date:       extracted.due_date       ?? null,
+    // "Zahlbar sofort" is a condition, not a date; read it into one.
+    due_date:       resolveDueDate({
+      invoiceDate: invoiceDate,
+      dueDate:     (extracted.due_date as string | null) ?? null,
+      terms:       (extracted.payment_method as string | null) ?? null,
+    }),
     net_amount:     extracted.net_amount     ?? 0,
     vat_amount:     extracted.vat_amount     ?? 0,
     gross_amount:   extracted.gross_amount   ?? 0,

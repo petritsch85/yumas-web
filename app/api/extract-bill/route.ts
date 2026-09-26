@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { NextRequest, NextResponse } from 'next/server';
 import { canonicalizeSupplierName, getKnownTerms } from '@/lib/canonical-supplier';
+import { resolveDueDate } from '@/lib/payment-terms';
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -10,7 +11,9 @@ The invoices may be in German or English. German terms to know:
 - Rechnung = Invoice
 - Rechnungsnummer / Rechnungs-Nummer = Invoice number
 - Rechnungsdatum = Invoice date
-- Fälligkeitsdatum = Due date
+- Fälligkeitsdatum / Zahlungsziel / Valuta = Due date
+- Zahlbar sofort / sofort ohne Abzüge / netto Kasse = payable immediately (a condition, not a date)
+- Zahlbar innerhalb von 14 Tagen / 14 Tage netto = payable within N days of the invoice date
 - Menge = Quantity
 - Einzelpreis / E-Preis = Unit price
 - Gesamtpreis / Gesamt / Betrag = Line total
@@ -31,7 +34,7 @@ Return this exact JSON structure:
   "billing_period_start": "YYYY-MM-DD or null",
   "billing_period_end": "YYYY-MM-DD or null",
   "currency": "EUR",
-  "payment_method": "string or null",
+  "payment_method": "how and by when it is to be paid, copied as printed — e.g. 'Zahlbar sofort ohne Abzüge', 'SEPA-Lastschrift', '14 Tage netto'. Always fill this where the invoice states any payment condition, even when no due date is given. null only when the invoice says nothing at all",
   "creditor_iban": "the IBAN the invoice asks to be paid into, no spaces, or null",
   "creditor_bic": "string or null",
   "creditor_name": "the account holder, where the invoice names one different from the supplier, or null",

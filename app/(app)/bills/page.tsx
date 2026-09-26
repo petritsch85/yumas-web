@@ -10,6 +10,7 @@ import {
   AlertTriangle, Landmark, Download,
 } from 'lucide-react';
 import { buildPain001, painFilename, validateOrder, isValidIban, normaliseIban } from '@/lib/sepa-credit-transfer';
+import { resolveDueDate, SOFORT_DAYS } from '@/lib/payment-terms';
 import type { SepaTransfer } from '@/lib/sepa-credit-transfer';
 
 import { useT } from '@/lib/i18n';
@@ -108,15 +109,18 @@ type Bill = {
   creditor_name?: string | null;
 };
 
-/* By when a bill has to be paid. The due date printed on the invoice where
-   there is one; "Zahlbar sofort" means the invoice date; and a bill collected
-   by direct debit, card or PayPal needs nothing doing — the supplier takes it. */
+/* By when a bill has to be paid. The date printed on the invoice where there
+   is one; otherwise the payment condition is read — "Zahlbar sofort" becomes a
+   week from the invoice date, which is the interval the payment run works on.
+   A bill collected by direct debit, card or PayPal needs nothing doing. */
 type Deadline = { date: string | null; kind: 'due' | 'sofort' | 'auto' | 'none' };
 const AUTO_PAYMENT = /lastschrift|einzug|direct debit|sepa[- ]?(?:dd|lastschrift|einzug|direct)|paypal|kreditkarte|credit card|mastercard|visa|amex|girocard|ec-?karte|offset|verrechn/i;
 function deadlineOf(b: Bill): Deadline {
   if (AUTO_PAYMENT.test(b.payment_method ?? '')) return { date: b.due_date, kind: 'auto' };
   if (b.due_date) return { date: b.due_date, kind: 'due' };
-  if (/sofort|immediate|upon receipt/i.test(b.payment_method ?? '')) return { date: b.invoice_date, kind: 'sofort' };
+  // Bills stored before the condition was read still have no date of their own.
+  const derived = resolveDueDate({ invoiceDate: b.invoice_date, dueDate: null, terms: b.payment_method });
+  if (derived) return { date: derived, kind: 'sofort' };
   return { date: null, kind: 'none' };
 }
 
@@ -254,7 +258,8 @@ async function saveBillToDB(item: QueueItem, userId: string | null): Promise<voi
       supplier_name:  d.supplier_name,
       invoice_number: d.invoice_number  ?? null,
       invoice_date:   d.invoice_date    ?? null,
-      due_date:       d.due_date        ?? null,
+      // A condition such as "Zahlbar sofort" carries a date of its own.
+      due_date:       resolveDueDate({ invoiceDate: d.invoice_date, dueDate: d.due_date, terms: d.payment_method }),
       net_amount:     d.net_amount      ?? 0,
       vat_amount:     d.vat_amount      ?? 0,
       gross_amount:   d.gross_amount    ?? 0,
@@ -1268,7 +1273,7 @@ export default function BillsPage() {
                                 : daysLeft <= 5 ? 'text-amber-600 font-semibold'
                                 : 'text-green-700 font-semibold';
                               const title = d.kind === 'auto' ? `Collected automatically (${bill.payment_method})${d.date ? ' on ' + fmtDate(d.date) : ''} · click to set a date`
-                                : d.kind === 'sofort' ? 'Zahlbar sofort — due on the invoice date · click to set a date'
+                                : d.kind === 'sofort' ? `Zahlbar sofort — ${SOFORT_DAYS} days from the invoice date · click to set a date`
                                 : d.kind === 'due' ? (open && daysLeft !== null ? (daysLeft < 0 ? `${-daysLeft} days overdue` : daysLeft === 0 ? 'Due today' : `Due in ${daysLeft} days`) : 'Due date') + ' · click to change'
                                 : 'No due date on the invoice · click to set one';
                               return (
