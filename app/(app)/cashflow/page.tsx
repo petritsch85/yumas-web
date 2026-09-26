@@ -5,8 +5,9 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Upload, Loader2, TrendingUp, TrendingDown, Minus,
   Link2, Link2Off, X, Search, CheckCircle2, Check, XCircle,
-  Download, ChevronDown, ChevronUp, FileText, Info, Wand2, Trash2,
+  Download, ChevronDown, ChevronUp, FileText, Info, Wand2, Trash2, AlertTriangle,
 } from 'lucide-react';
+import { linkCoverage, coverageLabel, coverageTitle } from '@/lib/link-coverage';
 
 /* ── Types ─────────────────────────────────────────────────────────── */
 type CfUpload = {
@@ -1009,15 +1010,23 @@ function TxRow({ tx, onSave, counterparties, onShowDetails, selected, onToggleSe
             }
 
             if (multi.length > 0) {
+              /* Green is reserved for a payment that is fully documented. A
+                 collected payment whose invoices we only partly hold is linked
+                 but not matched, so it stays amber until the rest arrive. */
+              const cov   = linkCoverage(tx.amount_cents, multi);
               const names = multi
                 .map(l => `${l.bill!.supplier_name}${l.bill!.invoice_number ? ' · ' + l.bill!.invoice_number : ''}`)
                 .join('\n');
+              const tone  = cov.complete ? 'text-green-700 bg-green-50 border-green-200 hover:bg-green-100'
+                          : cov.known    ? 'text-amber-700 bg-amber-50 border-amber-300 hover:bg-amber-100'
+                                         : 'text-gray-600 bg-gray-50 border-gray-200 hover:bg-gray-100';
               return (
                 <button
-                  title={names}
+                  title={`${coverageTitle(cov, multi.map(l => l.note))}\n\n${names}`}
                   onClick={() => !locked && setShowModal(true)}
-                  className={`flex items-center gap-1 text-xs font-semibold text-green-700 bg-green-50 border border-green-200 rounded-full px-2 py-0.5 transition-colors ${locked ? 'cursor-default opacity-50' : 'hover:bg-green-100 cursor-pointer'}`}>
-                  <CheckCircle2 size={11} /> {multi.length} bills
+                  className={`flex items-center gap-1 text-xs font-semibold border rounded-full px-2 py-0.5 transition-colors ${tone} ${locked ? 'cursor-default opacity-50' : 'cursor-pointer'}`}>
+                  {cov.complete ? <CheckCircle2 size={11} /> : <AlertTriangle size={11} />}
+                  {coverageLabel(cov)}
                 </button>
               );
             }

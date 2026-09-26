@@ -2,7 +2,8 @@
 
 import { useState, useMemo, Fragment } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Pencil, Trash2, X, Check, ChevronDown, ChevronUp, Tag, TrendingUp, TrendingDown, Minus, Link2, Upload, Loader2 } from 'lucide-react';
+import { Plus, Pencil, Trash2, X, Check, ChevronDown, ChevronUp, Tag, TrendingUp, TrendingDown, Minus, Link2, Upload, Loader2, AlertTriangle } from 'lucide-react';
+import { linkCoverage, coverageLabel, coverageTitle } from '@/lib/link-coverage';
 import { supabase } from '@/lib/supabase-browser';
 
 type Counterparty = {
@@ -535,12 +536,24 @@ function CpPanel({ cp }: { cp: Counterparty }) {
                                 if (settlement) return (
                                   <span title={settlement} className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-green-100"><Check size={11} className="text-green-600" /></span>
                                 );
-                                if (linkedCount > 0) return (
-                                  <button onClick={() => setActiveLinkTx(tx)} title="Edit bill links"
-                                    className="inline-flex items-center justify-center gap-0.5 px-1.5 py-0.5 rounded-full bg-green-100 text-green-700 text-xs font-semibold whitespace-nowrap hover:bg-green-200 transition-colors">
-                                    {linkedCount} bill{linkedCount !== 1 ? 's' : ''} <Check size={10} className="text-green-600" />
-                                  </button>
-                                );
+                                if (linkedCount > 0) {
+                                  /* Only a payment whose invoices we hold in full
+                                     counts as matched — see lib/link-coverage.ts. */
+                                  const cov  = linkCoverage(tx.amount_cents, embeddedLinks);
+                                  const tone = cov.complete ? 'bg-green-100 text-green-700 hover:bg-green-200'
+                                             : cov.known    ? 'bg-amber-100 text-amber-800 hover:bg-amber-200'
+                                                            : 'bg-gray-100 text-gray-600 hover:bg-gray-200';
+                                  return (
+                                    <button onClick={() => setActiveLinkTx(tx)}
+                                      title={cov.known ? coverageTitle(cov, embeddedLinks.map(l => l.note)) : 'Edit bill links'}
+                                      className={`inline-flex items-center justify-center gap-0.5 px-1.5 py-0.5 rounded-full text-xs font-semibold whitespace-nowrap transition-colors ${tone}`}>
+                                      {cov.known ? coverageLabel(cov) : `${linkedCount} bill${linkedCount !== 1 ? 's' : ''}`}
+                                      {cov.complete
+                                        ? <Check size={10} className="text-green-600" />
+                                        : cov.known && <AlertTriangle size={10} className="text-amber-600" />}
+                                    </button>
+                                  );
+                                }
                                 return (
                                   <div className="flex items-center justify-center gap-1">
                                     <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-red-100"><X size={11} className="text-red-500" /></span>
