@@ -10,7 +10,7 @@ import {
   AlertTriangle, Landmark, Download,
 } from 'lucide-react';
 import { buildPain001, painFilename, validateOrder, isValidIban, normaliseIban } from '@/lib/sepa-credit-transfer';
-import { resolveDueDate, SOFORT_DAYS } from '@/lib/payment-terms';
+import { resolveDueDate, SOFORT_DAYS, isAutoCollected } from '@/lib/payment-terms';
 import type { SepaTransfer } from '@/lib/sepa-credit-transfer';
 
 import { useT } from '@/lib/i18n';
@@ -779,8 +779,18 @@ export default function BillsPage() {
      account every month, and the one printed on a single invoice may be a
      factoring house or simply a typo in the extraction. */
   const payableRows = useMemo(
-    () => bills.filter(b => b.status === 'approved' && b.gross_amount > 0)
+    () => bills.filter(b =>
+      b.status === 'approved' && b.gross_amount > 0 &&
+      /* A supplier that collects by direct debit, card or PayPal takes the
+         money itself. Transferring it as well pays the invoice twice, which is
+         the one mistake a payment run must never make. */
+      !isAutoCollected(b.payment_method))
       .sort((a, b) => (a.invoice_date ?? '').localeCompare(b.invoice_date ?? '')),
+    [bills],
+  );
+  /** Approved, but collected by the supplier — shown so they are not simply invisible. */
+  const autoCollectedRows = useMemo(
+    () => bills.filter(b => b.status === 'approved' && b.gross_amount > 0 && isAutoCollected(b.payment_method)),
     [bills],
   );
   const ibanFor = useCallback((b: Bill) => {
@@ -2102,6 +2112,12 @@ export default function BillsPage() {
                   <AlertTriangle size={14} className="flex-shrink-0 mt-0.5" />
                   <div>{payProblems.slice(0, 4).map((x, i) => <p key={i}>{x}</p>)}</div>
                 </div>
+              )}
+              {autoCollectedRows.length > 0 && (
+                <p className="text-xs text-gray-500">
+                  {autoCollectedRows.length} approved invoice(s) are left out because the supplier collects them
+                  itself — SEPA-Lastschrift, card or PayPal. Transferring those would pay them twice.
+                </p>
               )}
               {payableRows.some(b => !isValidIban(ibanFor(b))) && (
                 <p className="text-xs text-amber-700">

@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase-admin';
+import { matchByReference } from '@/lib/payment-reference';
+import type { RefBill } from '@/lib/payment-reference';
 import { markBillsPaid } from '@/lib/bill-payment-status';
 
 type WoltMatch = {
@@ -16,6 +18,20 @@ type WoltMatch = {
   periodEnd:      string;
   payout:         number;
   daysDiff:       number;
+};
+
+/** A payment whose reference names the invoices it settles. */
+type ReferenceMatch = {
+  txId:           string;
+  txDate:         string;
+  txCounterparty: string;
+  txAmountCents:  number;
+  supplier:       string;
+  bills:          { id: string; invoiceNumber: string | null; invoiceDate: string | null; gross: number }[];
+  sum:            number;
+  /** Numbers the bank quotes that no invoice in the system carries. */
+  missing:        string[];
+  complete:       boolean;
 };
 
 type Match = {
@@ -349,7 +365,59 @@ export async function POST(req: NextRequest) {
     // Before the migration the column is missing; the other matches stand alone.
   }
 
-  if (!apply) return NextResponse.json({ matches, woltMatches: [...woltMatches, ...lieferandoMatches] });
+  /* ── Payments whose reference names their invoices ──
+     A supplier collecting a fortnight of deliveries by direct debit writes
+     every invoice number into the Verwendungszweck. That is the only thing
+     that can match one debit to sixteen bills: no single amount equals the
+     payment, so the amount pass above cannot see it at all. */
+  const referenceMatches: ReferenceMatch[] = [];
+  try {
+    const linkRows = await fetchAll((page, size) =>
+      admin.from('transaction_bill_links').select('transaction_id, bill_id').range(page * size, (page + 1) * size - 1)
+    );
+    const linkedByAnything = new Set<string>([
+      ...linkedBillIds,
+      ...linkRows.map(r => r.bill_id as string),
+    ]);
+    const txWithLinks = new Set(linkRows.map(r => r.transaction_id as string));
+
+    const claimed = new Set<string>(matches.map(m => m.billId));
+    for (const tx of txs) {
+      if (txWithLinks.has(tx.id)) continue;               // already linked to several
+      if (matches.some(m => m.txId === tx.id)) continue;  // matched one-to-one above
+
+      const resolved = matchedSupplier(tx.counterparty);
+      const pool = availableBills.filter(b => {
+        if (linkedByAnything.has(b.id) || claimed.has(b.id)) return false;
+        const bLower = b.supplier_name.toLowerCase();
+        if (resolved) {
+          const resolvedBill = matchedSupplier(b.supplier_name);
+          return resolvedBill ? resolvedBill === resolved : bLower.includes(resolved);
+        }
+        const txLower = (tx.counterparty ?? '').toLowerCase();
+        return bLower.split(' ').some((w: string) => w.length > 3 && txLower.includes(w));
+      }) as RefBill[];
+      if (pool.length === 0) continue;
+
+      const hit = matchByReference(tx, pool);
+      if (!hit) continue;
+
+      for (const b of hit.bills) claimed.add(b.id);
+      referenceMatches.push({
+        txId: tx.id, txDate: tx.date, txCounterparty: tx.counterparty,
+        txAmountCents: tx.amount_cents,
+        supplier: hit.bills[0].supplier_name,
+        bills: hit.bills.map(b => ({
+          id: b.id, invoiceNumber: b.invoice_number, invoiceDate: b.invoice_date, gross: Number(b.gross_amount),
+        })),
+        sum: hit.sum, missing: hit.missing, complete: hit.complete,
+      });
+    }
+  } catch {
+    // The link table may not exist on an older database; the rest still stands.
+  }
+
+  if (!apply) return NextResponse.json({ matches, woltMatches: [...woltMatches, ...lieferandoMatches], referenceMatches });
 
   // 5. Apply matches
   const errors: string[] = [];
@@ -379,5 +447,26 @@ export async function POST(req: NextRequest) {
     if (error) errors.push(error.message);
   }
 
-  return NextResponse.json({ applied: matches.length, appliedWolt: woltMatches.length + lieferandoMatches.length, errors });
+  /* One payment, many invoices: the link table carries those, and the note
+     records what the bank said so a gap stays visible afterwards. */
+  let appliedReference = 0;
+  for (const r of referenceMatches) {
+    const note = `${r.bills.length} Rechnung${r.bills.length === 1 ? '' : 'en'} laut Verwendungszweck`
+      + (r.complete ? '' : ` · ${r.sum.toFixed(2)} € von ${(Math.abs(r.txAmountCents) / 100).toFixed(2)} €`)
+      + (r.missing.length ? ` · nicht im System: ${r.missing.join(', ')}` : '');
+    const { error } = await admin.from('transaction_bill_links').insert(
+      r.bills.map(b => ({ transaction_id: r.txId, bill_id: b.id, note })),
+    );
+    if (error) { errors.push(error.message); continue; }
+    // A collected invoice is paid, whatever anyone does next.
+    await admin.from('bills').update({ status: 'paid' }).in('id', r.bills.map(b => b.id));
+    appliedReference++;
+  }
+
+  return NextResponse.json({
+    applied: matches.length,
+    appliedWolt: woltMatches.length + lieferandoMatches.length,
+    appliedReference,
+    errors,
+  });
 }
