@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase-admin';
 import { matchByReference } from '@/lib/payment-reference';
-import type { RefBill } from '@/lib/payment-reference';
+import type { RefBill, TakenBill } from '@/lib/payment-reference';
 import { markBillsPaid } from '@/lib/bill-payment-status';
 
 type WoltMatch = {
@@ -31,6 +31,8 @@ type ReferenceMatch = {
   sum:            number;
   /** Numbers the bank quotes that no invoice in the system carries. */
   missing:        string[];
+  /** Numbers the bank quotes whose invoice we hold, but another payment claims. */
+  taken:          TakenBill[];
   complete:       boolean;
 };
 
@@ -129,7 +131,9 @@ export async function POST(req: NextRequest) {
   try {
     linkedRows = await fetchAll((page, size) =>
       admin.from('cashflow_transactions')
-        .select('bill_id')
+        // date and description name the payment holding a bill, so a link that
+        // turns out to be the wrong one can be found and undone.
+        .select('id, date, description, bill_id')
         .not('bill_id', 'is', null)
         .range(page * size, (page + 1) * size - 1)
     );
@@ -233,9 +237,19 @@ export async function POST(req: NextRequest) {
      subscription) are left for a person rather than decided by the nearer
      date. A payment naming an invoice is left out: it was matched above, or
      the invoice it names is not on file. */
+  /* An invoice dated after the money left cannot be what that money paid. A
+     day or two of lead is ordinary — an invoice written up the morning after a
+     delivery was already paid for — but beyond that the amount agreeing is a
+     coincidence, which is how a €125 invoice of the 20th was attached to a
+     €125 payment of the 19th that names a different invoice entirely. */
+  const LEAD_DAYS = 3;
+  const aheadOfPayment = (invoiceDate: string, txDate: string) =>
+    (new Date(invoiceDate).getTime() - new Date(txDate).getTime()) / 86400000;
+
   const fits = (tx: any, b: any) =>
     cents(b.gross_amount) === Math.abs(tx.amount_cents) &&
     !!b.invoice_date && days(b.invoice_date, tx.date) <= 45 &&
+    aheadOfPayment(b.invoice_date, tx.date) <= LEAD_DAYS &&
     sameSupplier(tx, b);
 
   const open = txs.filter(tx => !usedTxIds.has(tx.id) && !REFERENCE.test(`${tx.counterparty ?? ''} ${tx.description ?? ''}`));
@@ -386,14 +400,22 @@ export async function POST(req: NextRequest) {
     ]);
     const txWithLinks = new Set(linkRows.map(r => r.transaction_id as string));
 
+    /* Which payment already holds a bill. An invoice the bank names for this
+       payment but that something else holds is not a missing invoice — it is
+       very likely a link made on a coincidence of amount, and saying so is the
+       only way the wrong one gets noticed. */
+    const heldBy = new Map<string, { date: string; description: string | null }>();
+    for (const r of linkedRows) {
+      if (r.bill_id) heldBy.set(r.bill_id as string, { date: r.date as string, description: (r.description as string) ?? null });
+    }
+
     const claimed = new Set<string>(matches.map(m => m.billId));
     for (const tx of txs) {
       if (txWithLinks.has(tx.id)) continue;               // already linked to several
       if (matches.some(m => m.txId === tx.id)) continue;  // matched one-to-one above
 
       const resolved = matchedSupplier(tx.counterparty);
-      const pool = availableBills.filter(b => {
-        if (linkedByAnything.has(b.id) || claimed.has(b.id)) return false;
+      const sameParty = (b: { supplier_name: string }) => {
         const bLower = b.supplier_name.toLowerCase();
         if (resolved) {
           const resolvedBill = matchedSupplier(b.supplier_name);
@@ -401,10 +423,17 @@ export async function POST(req: NextRequest) {
         }
         const txLower = (tx.counterparty ?? '').toLowerCase();
         return bLower.split(' ').some((w: string) => w.length > 3 && txLower.includes(w));
-      }) as RefBill[];
+      };
+
+      const free = (b: { id: string }) => !linkedByAnything.has(b.id) && !claimed.has(b.id);
+      const pool = availableBills.filter(b => free(b) && sameParty(b)) as RefBill[];
       if (pool.length === 0) continue;
 
-      const hit = matchByReference(tx, pool);
+      const held = bills
+        .filter(b => !free(b) && sameParty(b))
+        .map(b => ({ ...(b as RefBill), heldBy: heldBy.get(b.id) ?? null }));
+
+      const hit = matchByReference(tx, pool, held);
       if (!hit) continue;
 
       for (const b of hit.bills) claimed.add(b.id);
@@ -415,7 +444,7 @@ export async function POST(req: NextRequest) {
         bills: hit.bills.map(b => ({
           id: b.id, invoiceNumber: b.invoice_number, invoiceDate: b.invoice_date, gross: Number(b.gross_amount),
         })),
-        sum: hit.sum, missing: hit.missing, complete: hit.complete,
+        sum: hit.sum, missing: hit.missing, taken: hit.taken, complete: hit.complete,
       });
     }
   } catch {
@@ -463,7 +492,8 @@ export async function POST(req: NextRequest) {
   for (const r of applyReference) {
     const note = `${r.bills.length} Rechnung${r.bills.length === 1 ? '' : 'en'} laut Verwendungszweck`
       + (r.complete ? '' : ` · ${r.sum.toFixed(2)} € von ${(Math.abs(r.txAmountCents) / 100).toFixed(2)} €`)
-      + (r.missing.length ? ` · nicht im System: ${r.missing.join(', ')}` : '');
+      + (r.missing.length ? ` · nicht im System: ${r.missing.join(', ')}` : '')
+      + (r.taken.length ? ` · bereits anderweitig zugeordnet: ${r.taken.map(t => t.invoiceNumber ?? '—').join(', ')}` : '');
     const { error } = await admin.from('transaction_bill_links').insert(
       r.bills.map(b => ({ transaction_id: r.txId, bill_id: b.id, note })),
     );

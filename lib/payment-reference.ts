@@ -56,10 +56,26 @@ export interface RefBill {
   supplier_name: string;
 }
 
+/** An invoice the reference names that we hold, but another payment already claims. */
+export interface TakenBill {
+  invoiceNumber: string | null;
+  gross: number;
+  /** The payment holding it, so the wrong link can be found and undone. */
+  heldBy: { date: string; description: string | null } | null;
+}
+
 export interface ReferenceMatch {
   bills: RefBill[];
   /** Numbers the reference quotes that no bill in the system carries. */
   missing: string[];
+  /**
+   * Numbers the reference quotes that we do hold, but that are linked to some
+   * other payment. Almost always the other link is the wrong one: the bank
+   * naming an invoice is better evidence than an amount that happened to
+   * agree. Reporting these apart from `missing` is what stops "ask the
+   * supplier to resend" being said about an invoice already in the building.
+   */
+  taken: TakenBill[];
   /** What the found bills add up to. */
   sum: number;
   /** The transaction's own amount, for the comparison. */
@@ -83,6 +99,8 @@ export interface ReferenceMatch {
 export function matchByReference(
   tx: { description: string | null; counterparty: string | null; amount_cents: number },
   candidateBills: RefBill[],
+  /** Bills of the same supplier that another payment already holds. */
+  claimedBills: (RefBill & { heldBy?: { date: string; description: string | null } | null })[] = [],
 ): ReferenceMatch | null {
   const tokens = referenceTokens(`${tx.description ?? ''} ${tx.counterparty ?? ''}`);
   if (tokens.length === 0) return null;
@@ -93,15 +111,23 @@ export function matchByReference(
     const key = normaliseRef(b.invoice_number);
     if (key.length >= 4) byRef.set(key, b);
   }
+  const byRefClaimed = new Map<string, (typeof claimedBills)[number]>();
+  for (const b of claimedBills) {
+    const key = normaliseRef(b.invoice_number);
+    if (key.length >= 4) byRefClaimed.set(key, b);
+  }
 
   const bills: RefBill[] = [];
   const missing: string[] = [];
+  const taken: TakenBill[] = [];
   const seen = new Set<string>();
   for (const t of wanted) {
     if (seen.has(t)) continue;
     seen.add(t);
     const hit = byRef.get(t);
-    if (hit) { if (!bills.includes(hit)) bills.push(hit); }
+    if (hit) { if (!bills.includes(hit)) bills.push(hit); continue; }
+    const held = byRefClaimed.get(t);
+    if (held) taken.push({ invoiceNumber: held.invoice_number, gross: Number(held.gross_amount), heldBy: held.heldBy ?? null });
     else missing.push(t);
   }
   if (bills.length === 0) return null;
@@ -118,7 +144,7 @@ export function matchByReference(
      the numbers that did match. */
   const shapes = new Set(bills.map(b => normaliseRef(b.invoice_number).length));
   return {
-    bills, sum, amount, complete,
+    bills, sum, amount, complete, taken,
     missing: missing.filter(m => shapes.has(m.length)),
   };
 }

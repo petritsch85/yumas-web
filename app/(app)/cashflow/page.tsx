@@ -1211,6 +1211,8 @@ export default function CashFlowPage() {
     supplier: string;
     bills: { id: string; invoiceNumber: string | null; invoiceDate: string | null; gross: number }[];
     sum: number; missing: string[]; complete: boolean;
+    /** Named by the bank, held by us, but tied up in another payment. */
+    taken: { invoiceNumber: string | null; gross: number; heldBy: { date: string; description: string | null } | null }[];
   };
   const [refMatchRows, setRefMatchRows] = useState<ReferenceMatchRow[] | null>(null);
   const [autoMatching, setAutoMatching]     = useState(false);
@@ -1837,6 +1839,22 @@ export default function CashFlowPage() {
                         <div className="px-3 py-1.5 bg-amber-50/60 border-t border-amber-100 text-[11px] text-amber-800">
                           The bank names {r.missing.length} invoice{r.missing.length !== 1 ? 's' : ''} we do not hold:{' '}
                           <span className="font-mono">{r.missing.join(', ')}</span> — ask the supplier to resend.
+                        </div>
+                      )}
+                      {/* Held, but by something else. Almost always the other link is
+                          the wrong one, so it is named rather than just flagged. */}
+                      {(r.taken?.length ?? 0) > 0 && (
+                        <div className="px-3 py-1.5 bg-orange-50 border-t border-orange-200 text-[11px] text-orange-900 space-y-0.5">
+                          {r.taken.map((t, i) => (
+                            <div key={i}>
+                              Invoice <span className="font-mono font-semibold">{t.invoiceNumber ?? '—'}</span>{' '}
+                              ({t.gross.toLocaleString('de-DE', { minimumFractionDigits: 2 })} €) is on file but already linked
+                              {t.heldBy
+                                ? <> to the payment of <span className="font-semibold">{fmtDate(t.heldBy.date)}</span>
+                                    {t.heldBy.description ? <> — <span className="font-mono">{t.heldBy.description}</span></> : null}</>
+                                : ' to another payment'}. Unlink it there if that match was wrong.
+                            </div>
+                          ))}
                         </div>
                       )}
                     </div>
