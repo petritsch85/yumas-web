@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase-admin';
 import { matchByReference } from '@/lib/payment-reference';
 import type { RefBill, TakenBill } from '@/lib/payment-reference';
-import { markBillsPaid } from '@/lib/bill-payment-status';
+import { linkObjection } from '@/lib/match-rules';
+import { markBillsPaid, unmarkBillsIfUnlinked } from '@/lib/bill-payment-status';
 
 type WoltMatch = {
   /** Which delivery platform's settlement the payout ties to. */
@@ -34,6 +35,22 @@ type ReferenceMatch = {
   /** Numbers the bank quotes whose invoice we hold, but another payment claims. */
   taken:          TakenBill[];
   complete:       boolean;
+};
+
+/** A link already saved that the matching rules would now refuse to make. */
+type SuspectLink = {
+  txId:            string;
+  txDate:          string;
+  txDescription:   string | null;
+  txCounterparty:  string | null;
+  txAmountCents:   number;
+  billId:          string;
+  billSupplier:    string;
+  billInvoiceNo:   string | null;
+  billInvoiceDate: string | null;
+  billGross:       number;
+  code:            string;
+  reason:          string;
 };
 
 type Match = {
@@ -68,10 +85,10 @@ function quotes(text: string, invoiceNumber: string | null): boolean {
   return new RegExp(`(?<!\\d)${core}(?!\\d)`).test(text);
 }
 
-/* A payment that names an invoice ("RNR 171503", "Re-Nr. 4711", "Rechnung
-   12345") is about that invoice. Matching it to a different bill of the same
-   amount would be a guess, so such a payment only matches by number. */
-const REFERENCE = /\b(?:rnr|re\.?\s*-?\s*nr|rg\.?\s*-?\s*nr|rechnung(?:snummer|s-?nr)?|invoice|inv)\.?\s*:?\s*[a-z]*[-/]?\d{4,}/i;
+/* The old REFERENCE regex lived here. It required a keyword before the number
+   ("Re-Nr. 4711") and so missed "RE 65221" — the commonest form in this book —
+   which is how most of the wrong links were made. linkObjection in
+   lib/match-rules.ts replaces it: it works off the number shape, not a vocabulary. */
 
 /** Fetch ALL rows from a query that may exceed Supabase's 1000-row cap */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -92,13 +109,41 @@ async function fetchAll(buildQuery: (page: number, pageSize: number) => any): Pr
 
 // POST { apply: false } → preview; POST { apply: true } → apply
 export async function POST(req: NextRequest) {
-  const { apply, only } = await req.json();
+  const { apply, only, unlink } = await req.json();
   /* Which payments to settle. The matching itself always runs in full and on
      the server, so the browser only ever chooses among proposals it was shown;
      it never says what a proposal contains. Omitting the list applies all. */
   const chosen: Set<string> | null = Array.isArray(only) ? new Set(only.filter((x: unknown) => typeof x === 'string')) : null;
   const picked = <T extends { txId: string }>(rows: T[]) => (chosen ? rows.filter(r => chosen.has(r.txId)) : rows);
   const admin = getSupabaseAdmin();
+
+  /* Undoing links the audit flagged. The rule is re-checked here rather than
+     taken on the browser's word: a link is only cut when the server agrees it
+     is wrong, so a stale page cannot unpick a match someone made by hand. */
+  if (Array.isArray(unlink) && unlink.length > 0) {
+    const ids = unlink.filter((x: unknown) => typeof x === 'string') as string[];
+    const { data: rows, error } = await admin
+      .from('cashflow_transactions')
+      .select('id, date, description, counterparty, bill:bills(id, invoice_number, invoice_date)')
+      .in('id', ids)
+      .not('bill_id', 'is', null);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+    const cut: string[] = [];
+    const freed: string[] = [];
+    for (const tx of rows ?? []) {
+      const bill = tx.bill as unknown as { id: string; invoice_number: string | null; invoice_date: string | null } | null;
+      if (!bill || !linkObjection(tx, bill)) continue;
+      cut.push(tx.id);
+      freed.push(bill.id);
+    }
+    if (cut.length > 0) {
+      const { error: upErr } = await admin.from('cashflow_transactions').update({ bill_id: null }).in('id', cut);
+      if (upErr) return NextResponse.json({ error: upErr.message }, { status: 500 });
+      await unmarkBillsIfUnlinked(admin, freed);
+    }
+    return NextResponse.json({ unlinked: cut.length, skipped: ids.length - cut.length });
+  }
 
   // 1. Fetch ALL unlinked cost transactions (paginated to bypass 1000-row cap)
   let txs: any[];
@@ -237,22 +282,17 @@ export async function POST(req: NextRequest) {
      subscription) are left for a person rather than decided by the nearer
      date. A payment naming an invoice is left out: it was matched above, or
      the invoice it names is not on file. */
-  /* An invoice dated after the money left cannot be what that money paid. A
-     day or two of lead is ordinary — an invoice written up the morning after a
-     delivery was already paid for — but beyond that the amount agreeing is a
-     coincidence, which is how a €125 invoice of the 20th was attached to a
-     €125 payment of the 19th that names a different invoice entirely. */
-  const LEAD_DAYS = 3;
-  const aheadOfPayment = (invoiceDate: string, txDate: string) =>
-    (new Date(invoiceDate).getTime() - new Date(txDate).getTime()) / 86400000;
-
+  /* The amount has to agree and the supplier has to be right, but neither is
+     enough on its own: linkObjection holds the two vetoes that the amount
+     cannot argue with — the invoice number the bank names, and the direction
+     of time. See lib/match-rules.ts. */
   const fits = (tx: any, b: any) =>
     cents(b.gross_amount) === Math.abs(tx.amount_cents) &&
     !!b.invoice_date && days(b.invoice_date, tx.date) <= 45 &&
-    aheadOfPayment(b.invoice_date, tx.date) <= LEAD_DAYS &&
-    sameSupplier(tx, b);
+    sameSupplier(tx, b) &&
+    !linkObjection(tx, b);
 
-  const open = txs.filter(tx => !usedTxIds.has(tx.id) && !REFERENCE.test(`${tx.counterparty ?? ''} ${tx.description ?? ''}`));
+  const open = txs.filter(tx => !usedTxIds.has(tx.id));
   const freeBills = availableBills.filter(b => !usedBillIds.has(b.id));
   for (const tx of open) {
     const candidates = freeBills.filter(b => fits(tx, b));
@@ -451,7 +491,39 @@ export async function POST(req: NextRequest) {
     // The link table may not exist on an older database; the rest still stands.
   }
 
-  if (!apply) return NextResponse.json({ matches, woltMatches: [...woltMatches, ...lieferandoMatches], referenceMatches });
+  /* ── Links already in the database that the rules above would refuse ──
+     The vetoes read backwards. Most of these were made before the reference
+     rule could see "RE 65221", and each one does double harm: the payment is
+     wrong, and the bill it wrongly holds is marked paid, so the payment that
+     really did settle it reports the invoice as missing. */
+  const suspectLinks: SuspectLink[] = [];
+  try {
+    const linkedTxs = await fetchAll((page, size) =>
+      admin.from('cashflow_transactions')
+        .select('id, date, description, counterparty, amount_cents, bill:bills(id, supplier_name, invoice_number, invoice_date, gross_amount)')
+        .not('bill_id', 'is', null)
+        .order('date', { ascending: false })
+        .range(page * size, (page + 1) * size - 1)
+    );
+    for (const tx of linkedTxs) {
+      const bill = tx.bill as { id: string; supplier_name: string; invoice_number: string | null; invoice_date: string | null; gross_amount: number } | null;
+      if (!bill) continue;
+      const objection = linkObjection(tx, bill);
+      if (!objection) continue;
+      suspectLinks.push({
+        txId: tx.id, txDate: tx.date, txDescription: tx.description,
+        txCounterparty: tx.counterparty, txAmountCents: tx.amount_cents,
+        billId: bill.id, billSupplier: bill.supplier_name,
+        billInvoiceNo: bill.invoice_number, billInvoiceDate: bill.invoice_date,
+        billGross: Number(bill.gross_amount),
+        code: objection.code, reason: objection.reason,
+      });
+    }
+  } catch (e) {
+    console.error('[auto-match] link audit failed (non-fatal):', e);
+  }
+
+  if (!apply) return NextResponse.json({ matches, woltMatches: [...woltMatches, ...lieferandoMatches], referenceMatches, suspectLinks });
 
   // 5. Apply matches
   const errors: string[] = [];

@@ -1217,6 +1217,44 @@ export default function CashFlowPage() {
     taken: { invoiceNumber: string | null; gross: number; heldBy: { date: string; description: string | null } | null }[];
   };
   const [refMatchRows, setRefMatchRows] = useState<ReferenceMatchRow[] | null>(null);
+  /** A link already saved that the matching rules would now refuse to make. */
+  type SuspectLinkRow = {
+    txId: string; txDate: string; txDescription: string | null;
+    txCounterparty: string | null; txAmountCents: number;
+    billId: string; billSupplier: string; billInvoiceNo: string | null;
+    billInvoiceDate: string | null; billGross: number;
+    code: string; reason: string;
+  };
+  const [suspectRows, setSuspectRows] = useState<SuspectLinkRow[] | null>(null);
+  const [suspectSel, setSuspectSel]   = useState<Set<string>>(new Set());
+  const [unlinking, setUnlinking]     = useState(false);
+  const toggleSuspect = (txId: string, on: boolean) =>
+    setSuspectSel(prev => { const n = new Set(prev); if (on) n.add(txId); else n.delete(txId); return n; });
+
+  /* Cutting a wrong link frees the bill it wrongly held, which is usually what
+     lets the payment that really settled it match on the next run. */
+  const handleUnlinkSuspect = async () => {
+    if (suspectSel.size === 0) return;
+    setUnlinking(true);
+    try {
+      const res  = await fetch('/api/cashflow/auto-match', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ unlink: [...suspectSel] }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? 'Unlink failed');
+      const cut = new Set(suspectSel);
+      setSuspectRows(prev => (prev ?? []).filter(r => !cut.has(r.txId)));
+      setSuspectSel(new Set());
+      qc.invalidateQueries({ queryKey: ['bills'] });
+      qc.invalidateQueries({ queryKey: ['bill-cf-matches'] });
+      qc.invalidateQueries({ queryKey: ['cashflow-tx'] });
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Unlink failed');
+    } finally {
+      setUnlinking(false);
+    }
+  };
   const [autoMatching, setAutoMatching]     = useState(false);
   const [autoMatchRows, setAutoMatchRows]   = useState<AutoMatchRow[] | null>(null);
   const [applyingMatch, setApplyingMatch]   = useState(false);
@@ -1240,6 +1278,8 @@ export default function CashFlowPage() {
       setAutoMatchRows(json.matches);
       setWoltMatchRows(json.woltMatches ?? []);
       setRefMatchRows(json.referenceMatches ?? []);
+      setSuspectRows(json.suspectLinks ?? []);
+      setSuspectSel(new Set<string>((json.suspectLinks ?? []).map((s: { txId: string }) => s.txId)));
       setMatchSel(new Set<string>([
         ...(json.matches ?? []).map((m: { txId: string }) => m.txId),
         ...(json.woltMatches ?? []).map((m: { txId: string }) => m.txId),
@@ -1787,20 +1827,70 @@ export default function CashFlowPage() {
               <div>
                 <h2 className="text-base font-bold text-gray-900">Auto-match Preview</h2>
                 <p className="text-xs text-gray-500 mt-0.5">
-                  {autoMatchRows.length === 0 && !woltMatchRows?.length && !refMatchRows?.length
+                  {autoMatchRows.length === 0 && !woltMatchRows?.length && !refMatchRows?.length && !suspectRows?.length
                     ? 'No matches found — all transactions already linked or no amount/date match in bills.'
                     : [
                         autoMatchRows.length > 0 && `${autoMatchRows.length} payment${autoMatchRows.length !== 1 ? "s" : ""} matched to the cent — by invoice number, or a unique amount + supplier + date (≤45 days)`,
                         woltMatchRows?.length ? `${woltMatchRows.length} delivery payout${woltMatchRows.length !== 1 ? 's' : ''} by settlement amount` : null,
                         refMatchRows?.length ? `${refMatchRows.length} collected payment${refMatchRows.length !== 1 ? 's' : ''} by invoice numbers in the reference` : null,
+                        suspectRows?.length ? `${suspectRows.length} existing link${suspectRows.length !== 1 ? 's' : ''} the bank contradicts` : null,
                       ].filter(Boolean).join(' · ') + '. Review then apply.'}
                 </p>
               </div>
-              <button onClick={() => setAutoMatchRows(null)} className="text-gray-400 hover:text-gray-700">
+              <button onClick={() => { setAutoMatchRows(null); setSuspectRows(null); }} className="text-gray-400 hover:text-gray-700">
                 <X size={18} />
               </button>
             </div>
             <div className="overflow-y-auto flex-1">
+            {/* Links already saved that the rules would now refuse. Shown first
+                because cutting them is usually what unblocks the matches below. */}
+            {(suspectRows?.length ?? 0) > 0 && (
+              <div className="px-6 pt-4">
+                <div className="flex items-center gap-2 mb-1">
+                  <input type="checkbox"
+                    checked={suspectRows!.every(r => suspectSel.has(r.txId))}
+                    onChange={e => setSuspectSel(e.target.checked ? new Set(suspectRows!.map(r => r.txId)) : new Set())}
+                    className="w-4 h-4 accent-red-600" />
+                  <p className="text-[11px] font-bold text-red-500 uppercase tracking-wider">
+                    Existing links to undo — matched on the amount, contradicted by the bank
+                  </p>
+                </div>
+                <p className="text-[11px] text-gray-500 mb-2 ml-6">
+                  Each of these also holds a bill that some other payment really settled, so cutting
+                  them tends to fix two rows at once.
+                </p>
+                <div className="space-y-1.5 mb-3">
+                  {suspectRows!.map(r => (
+                    <div key={r.txId}
+                      className={`border rounded-lg px-3 py-2 text-xs ${suspectSel.has(r.txId) ? 'border-red-200 bg-red-50/60' : 'border-gray-200 bg-white opacity-60'}`}>
+                      <div className="flex items-center gap-3">
+                        <input type="checkbox" checked={suspectSel.has(r.txId)}
+                          onChange={e => toggleSuspect(r.txId, e.target.checked)}
+                          className="w-4 h-4 accent-red-600 flex-shrink-0" />
+                        <span className="text-gray-600 whitespace-nowrap">{fmtDate(r.txDate)}</span>
+                        <span className="font-semibold text-gray-800 truncate">{r.billSupplier}</span>
+                        <span className="font-semibold text-red-600 tabular-nums whitespace-nowrap">
+                          {(Math.abs(r.txAmountCents) / 100).toLocaleString('de-DE', { minimumFractionDigits: 2 })} €
+                        </span>
+                        <span className="ml-auto text-gray-500 whitespace-nowrap">
+                          holds invoice <span className="font-mono">{r.billInvoiceNo ?? '—'}</span>
+                          {r.billInvoiceDate ? ` of ${fmtDate(r.billInvoiceDate)}` : ''}
+                        </span>
+                      </div>
+                      <div className="ml-7 mt-1 text-[11px] text-red-800">{r.reason}</div>
+                      {r.txDescription && (
+                        <div className="ml-7 text-[11px] text-gray-400 font-mono truncate">{r.txDescription}</div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                <button onClick={handleUnlinkSuspect} disabled={unlinking || suspectSel.size === 0}
+                  className="mb-4 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-600 text-white text-xs font-bold hover:bg-red-700 disabled:opacity-50 transition-colors">
+                  {unlinking ? <Loader2 size={12} className="animate-spin" /> : <Link2Off size={12} />}
+                  {unlinking ? 'Unlinking…' : `Unlink ${suspectSel.size}`}
+                </button>
+              </div>
+            )}
             {(refMatchRows?.length ?? 0) > 0 && (
               <div className="px-6 pt-4">
                 <div className="flex items-center gap-2 mb-2">

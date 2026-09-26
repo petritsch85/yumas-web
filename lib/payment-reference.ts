@@ -17,7 +17,20 @@
  */
 
 /** Words that carry digits but never an invoice number. */
-const NOISE = /\b(?:datum|uhr|iban|bic|mandat|glaeubiger|gläubiger|ref|kundennummer|kd|vertrag)\b/gi;
+const NOISE = /\b(?:datum|uhr|ref)\b/gi;
+
+/**
+ * A number introduced as something other than an invoice.
+ *
+ * "Kd.1059374738", "KndNr: 16137", "Auftragsbestätigung Nr. 167021" — a
+ * customer number, an order confirmation, a contract or a mandate all look
+ * exactly like an invoice number once the words around them are dropped, and
+ * a ten-digit customer number will happily "contradict" a ten-digit invoice.
+ * So the label is stripped together with the number it introduces, rather
+ * than the label alone.
+ */
+const LABELLED_NON_INVOICE =
+  /\b(?:kd|knd|kunden?|kundennummer|auftrag|auftrags?best(?:ä|ae)tigung|order|vertrag|mandat|gl(?:ä|ae)ubiger|iban|bic|ust|steuer)\.?(?:\s*-?\s*(?:nr|nummer|id)\.?)?\s*[:#-]?\s*[A-Za-z]{0,3}[-/]?\d{4,12}/gi;
 
 /**
  * Every token in a reference that could be an invoice number.
@@ -32,6 +45,9 @@ export function referenceTokens(text: string | null | undefined): string[] {
     // Dates in any common shape, and the time that follows them.
     .replace(/\b\d{1,2}[.\/-]\s?\d{1,2}[.\/-]\s?\d{2,4}\b/g, ' ')
     .replace(/\b\d{1,2}[.:]\d{2}\s*uhr\b/gi, ' ')
+    // Labelled non-invoice numbers go before the bare-word noise, so the
+    // label is still there to identify them.
+    .replace(LABELLED_NON_INVOICE, ' ')
     .replace(NOISE, ' ');
   const out = new Set<string>();
   for (const m of cleaned.matchAll(/[A-Za-z]{0,3}[-\/]?\d{4,12}(?:[-\/]\d{1,4})?/g)) {
