@@ -1075,7 +1075,9 @@ function TxRow({ tx, onSave, counterparties, onShowDetails, selected, onToggleSe
             <select
               value={tx.category}
               onChange={e => onSave(tx.id, { category: e.target.value, category_manual: true })}
-              className={`text-xs font-medium px-1.5 py-0.5 rounded-full border-0 outline-none cursor-pointer ${chipClass}`}
+              /* A select sizes itself to its longest option, so without a cap
+                 "C - Repairs & Maintenance" sets the width of the whole column. */
+              className={`text-xs font-medium px-1.5 py-0.5 rounded-full border-0 outline-none cursor-pointer max-w-[128px] truncate ${chipClass}`}
             >
               <optgroup label="── Cost (C) ──">
                 {C_CATEGORIES.map(c => (
@@ -1097,7 +1099,7 @@ function TxRow({ tx, onSave, counterparties, onShowDetails, selected, onToggleSe
             <span className="text-xs text-gray-600 bg-white border border-gray-200 rounded px-1.5 py-0.5">{tx.location}</span>
           ) : (
             <select value={tx.location} onChange={e => patch('location', e.target.value)}
-              className="text-xs bg-white border border-gray-200 rounded px-1.5 py-0.5 text-gray-700 outline-none cursor-pointer hover:border-gray-400">
+              className="text-xs bg-white border border-gray-200 rounded px-1.5 py-0.5 text-gray-700 outline-none cursor-pointer hover:border-gray-400 max-w-[96px] truncate">
               {locations.map(l => <option key={l} value={l}>{l}</option>)}
             </select>
           )}
@@ -1113,7 +1115,7 @@ function TxRow({ tx, onSave, counterparties, onShowDetails, selected, onToggleSe
         </td>
 
         {/* Notes */}
-        <td className="py-2 px-2 w-full">
+        <td className="py-2 px-2 w-full min-w-[120px]">
           {locked ? (
             <span className="text-xs text-gray-500">{tx.notes || '—'}</span>
           ) : (
@@ -1555,8 +1557,11 @@ export default function CashFlowPage() {
                 <div className="py-12 text-center text-gray-400 text-sm">{emptyText}</div>
               )}
               {rows.length > 0 && (
-                <div>
-                  <table className="w-full text-sm">
+                /* Thirteen columns do not always fit the window. Rather than let
+                   Notes and Confirm fall off the right edge, the table keeps a
+                   width its columns can live in and scrolls inside the card. */
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[1180px] text-sm">
                     <thead className="bg-gray-50 border-b border-gray-200">
                       <tr>
                         {([
