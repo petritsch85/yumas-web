@@ -21,7 +21,7 @@
  * should never have been made, which is what `linkObjection` is for.
  */
 
-import { referenceTokens, normaliseRef } from './payment-reference';
+import { referenceTokens, normaliseRef, tailSegment } from './payment-reference';
 
 /**
  * An invoice may be dated a little after the payment and still be that
@@ -57,19 +57,23 @@ export function contradictingNumber(text: string, invoiceNumber: string | null):
   if (mine.length < 4) return null;
 
   const digitsOf = (s: string) => s.replace(/\D/g, '');
-  const myDigits = digitsOf(mine);
+  /* METRO's bank only ever prints the tail of a long segmented number, so the
+     tail is what its references have to be judged against. */
+  const tail = tailSegment(invoiceNumber);
+  const myForms = [digitsOf(mine), ...(tail ? [digitsOf(tail)] : [])];
 
-  for (const raw of referenceTokens(text)) {
-    const t = normaliseRef(raw);
-    if (t === mine) return null;                      // the bank names this very bill
-    if (digitsOf(t) === myDigits) return null;        // same number, written differently
+  const tokens = referenceTokens(text).map(raw => ({ raw, digits: digitsOf(normaliseRef(raw)) }));
+
+  for (const { raw, digits } of tokens) {
+    if (normaliseRef(raw) === mine) return null;      // the bank names this very bill
+    if (myForms.includes(digits)) return null;        // same number, written shorter
   }
 
   /* Nothing matched. Now: did the bank name anything that could have been an
-     invoice of this supplier — a number of the same length as this one? */
-  for (const raw of referenceTokens(text)) {
-    const t = normaliseRef(raw);
-    if (digitsOf(t).length === myDigits.length) return raw;
+     invoice of this supplier — a number the length of one of its forms? */
+  const lengths = new Set(myForms.map(f => f.length));
+  for (const { raw, digits } of tokens) {
+    if (lengths.has(digits.length)) return raw;
   }
   return null;
 }

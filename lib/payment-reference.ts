@@ -64,6 +64,52 @@ export function referenceTokens(text: string | null | undefined): string[] {
 export const normaliseRef = (raw: string | null | undefined) =>
   (raw ?? '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
 
+/**
+ * The last part of a segmented invoice number.
+ *
+ * METRO numbers an invoice by the store and the day that produced it —
+ * "23.09.2026/529/0/0/0194/030282" — but its direct debit quotes only the
+ * running number at the end, "RG030282". Without this the two can never be
+ * compared, which is why 115 METRO bills and 108 METRO payments sat side by
+ * side barely matching.
+ */
+export function tailSegment(invoiceNumber: string | null | undefined): string | null {
+  const parts = String(invoiceNumber ?? '').split('/').map(s => s.trim()).filter(Boolean);
+  if (parts.length < 2) return null;
+  const last = parts[parts.length - 1];
+  return /^\d{4,12}$/.test(last) ? last : null;
+}
+
+/** One invoice named in a reference that spells out number, date and amount. */
+export interface QuotedItem {
+  ref: string;
+  /** The invoice's own date, ISO. */
+  date: string;
+  /** What the bank says that invoice came to. */
+  amount: number;
+}
+
+/* "RG000192/05.01.26/EUR 3.117,93RG000082/05.01.26/EUR 76,51" — entries run
+   together with no separator, each carrying three facts. Three agreeing facts
+   identify a bill even where the number alone would be ambiguous. */
+const QUOTED_ITEM =
+  /(?:[A-Z]{0,3})\s*(\d{4,12})\s*\/\s*(\d{1,2})\.(\d{1,2})\.(\d{2,4})\s*\/\s*(?:EUR|€)\s*([\d.]*,\d{2}|\d+)/gi;
+
+export function quotedItems(text: string | null | undefined): QuotedItem[] {
+  const out: QuotedItem[] = [];
+  for (const m of (text ?? '').matchAll(QUOTED_ITEM)) {
+    const year = m[4].length === 2 ? 2000 + Number(m[4]) : Number(m[4]);
+    const amount = Number(String(m[5]).replace(/\./g, '').replace(',', '.'));
+    if (!Number.isFinite(amount)) continue;
+    out.push({
+      ref: m[1],
+      date: `${year}-${m[3].padStart(2, '0')}-${m[2].padStart(2, '0')}`,
+      amount,
+    });
+  }
+  return out;
+}
+
 export interface RefBill {
   id: string;
   invoice_number: string | null;
@@ -126,33 +172,69 @@ export function matchByReference(
   /** Bills of the same supplier that another payment already holds. */
   claimedBills: (RefBill & { heldBy?: { date: string; description: string | null } | null })[] = [],
 ): ReferenceMatch | null {
-  const tokens = referenceTokens(`${tx.description ?? ''} ${tx.counterparty ?? ''}`);
-  if (tokens.length === 0) return null;
+  const text = `${tx.description ?? ''} ${tx.counterparty ?? ''}`;
+  const tokens = referenceTokens(text);
+  const items = quotedItems(text);
+  if (tokens.length === 0 && items.length === 0) return null;
 
-  const wanted = new Set(tokens.map(normaliseRef).filter(t => t.length >= 4));
   const byRef = new Map<string, RefBill>();
+  const byTail = new Map<string, RefBill[]>();
   for (const b of candidateBills) {
     const key = normaliseRef(b.invoice_number);
     if (key.length >= 4) byRef.set(key, b);
+    const tail = tailSegment(b.invoice_number);
+    if (tail) byTail.set(tail, [...(byTail.get(tail) ?? []), b]);
   }
-  const byRefClaimed = new Map<string, (typeof claimedBills)[number]>();
+  type Claimed = (typeof claimedBills)[number];
+  const byRefClaimed = new Map<string, Claimed>();
+  const byTailClaimed = new Map<string, Claimed[]>();
   for (const b of claimedBills) {
     const key = normaliseRef(b.invoice_number);
     if (key.length >= 4) byRefClaimed.set(key, b);
+    const tail = tailSegment(b.invoice_number);
+    if (tail) byTailClaimed.set(tail, [...(byTailClaimed.get(tail) ?? []), b]);
   }
 
   const bills: RefBill[] = [];
   const missing: string[] = [];
   const taken: TakenBill[] = [];
-  const seen = new Set<string>();
+  const add = (b: RefBill) => { if (!bills.includes(b)) bills.push(b); };
+  const hold = (b: Claimed) =>
+    taken.push({ invoiceNumber: b.invoice_number, gross: Number(b.gross_amount), heldBy: b.heldBy ?? null });
+
+  /* 1. Itemised entries. The bank gives the number, the invoice's own date and
+     its own amount, so a bill can be picked out of a store's running sequence
+     even though only the tail of its number is printed. Requiring the date and
+     the amount to agree as well is what makes a short number safe to use. */
+  const claimedItems = new Set<string>();
+  for (const it of items) {
+    if (claimedItems.has(it.ref)) continue;
+    claimedItems.add(it.ref);
+    const agrees = <T extends RefBill>(pool: T[]) => pool.filter(b =>
+      b.invoice_date === it.date && Math.abs(Number(b.gross_amount) - it.amount) < 0.01);
+
+    const whole = byRef.get(normaliseRef(it.ref));
+    if (whole) { add(whole); continue; }
+    const tailHits = agrees(byTail.get(it.ref) ?? []);
+    if (tailHits.length === 1) { add(tailHits[0]); continue; }
+
+    const heldWhole = byRefClaimed.get(normaliseRef(it.ref));
+    const heldTail = agrees(byTailClaimed.get(it.ref) ?? []);
+    if (heldWhole) hold(heldWhole);
+    else if (heldTail.length === 1) hold(heldTail[0]);
+    else missing.push(it.ref);
+  }
+
+  /* 2. Bare numbers, for references that just list them. */
+  const wanted = new Set(tokens.map(normaliseRef).filter(t => t.length >= 4));
+  const bare: string[] = [];
   for (const t of wanted) {
-    if (seen.has(t)) continue;
-    seen.add(t);
+    if (claimedItems.has(t)) continue;
     const hit = byRef.get(t);
-    if (hit) { if (!bills.includes(hit)) bills.push(hit); continue; }
+    if (hit) { add(hit); continue; }
     const held = byRefClaimed.get(t);
-    if (held) taken.push({ invoiceNumber: held.invoice_number, gross: Number(held.gross_amount), heldBy: held.heldBy ?? null });
-    else missing.push(t);
+    if (held) hold(held);
+    else bare.push(t);
   }
   if (bills.length === 0) return null;
 
@@ -169,12 +251,16 @@ export function matchByReference(
   // One number alone is only convincing when it explains the whole payment.
   if (bills.length === 1 && !complete) return null;
 
-  /* Numbers that look nothing like this supplier's are not missing invoices,
-     they are noise in the reference. Only report gaps that share the shape of
-     the numbers that did match. */
-  const shapes = new Set(bills.map(b => normaliseRef(b.invoice_number).length));
+  /* A number quoted with its date and its amount is certainly an invoice, so
+     it is reported missing as it stands. A bare number is only reported when
+     it is shaped like the ones that did match — otherwise every Kundennummer
+     in the text would look like a missing invoice. */
+  const shapes = new Set(bills.map(b => {
+    const tail = tailSegment(b.invoice_number);
+    return (tail ?? normaliseRef(b.invoice_number)).length;
+  }));
   return {
     bills, sum, amount, complete, taken,
-    missing: missing.filter(m => shapes.has(m.length)),
+    missing: [...missing, ...bare.filter(m => shapes.has(m.length))],
   };
 }
