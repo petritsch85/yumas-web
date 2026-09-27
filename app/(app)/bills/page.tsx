@@ -92,6 +92,8 @@ type Bill = {
   invoice_number: string | null;
   invoice_date:   string | null;
   due_date:       string | null;
+  /** How due_date was arrived at — see DERIVED_DUE. */
+  due_date_source?: string | null;
   /** As printed on the invoice: 'Zahlbar sofort', 'SEPA-Lastschrift', 'PayPal' … */
   payment_method?: string | null;
   gross_amount:   number;
@@ -123,6 +125,19 @@ function deadlineOf(b: Bill): Deadline {
   if (derived) return { date: derived, kind: 'sofort' };
   return { date: null, kind: 'none' };
 }
+
+/* A due date the supplier printed and one we worked out must not look alike.
+   Anything other than "printed" gets a caption under the date saying where it
+   came from, and the tooltip spells it out. */
+const DERIVED_DUE: Record<string, { tag: string; why: string }> = {
+  'stated-term':   { tag: 'per terms',    why: 'Worked out from the payment condition printed on the invoice.' },
+  'settlement':    { tag: 'Abbuchung',    why: 'The invoice names the day the direct debit falls.' },
+  'prepaid':       { tag: 'Vorkasse',     why: 'Payable in advance, so it is due on the invoice date.' },
+  'settled':       { tag: 'bezahlt',      why: 'Already settled when the invoice was issued.' },
+  'supplier-term': { tag: 'per supplier', why: 'This invoice states no term; taken from the term this supplier prints on its other invoices.' },
+  'bank-history':  { tag: 'per rhythm',   why: 'This supplier never states a term, but collects on a regular rhythm — taken from its own debits in your bank.' },
+  'default':       { tag: 'assumed',      why: 'Nothing was stated anywhere, so a fortnight is assumed. Worth setting by hand.' },
+};
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const CATEGORIES = [
@@ -545,7 +560,7 @@ export default function BillsPage() {
     queryFn: async () => {
       // PostgREST caps a single response at 1000 rows, so page through the full
       // table — otherwise older bills silently vanish and the totals under-report.
-      const COLS = 'id, created_at, supplier_name, invoice_number, invoice_date, due_date, payment_method, gross_amount, net_amount, vat_amount, category, location_label, period_type, period_start, period_end, status, file_path, creditor_iban, creditor_name';
+      const COLS = 'id, created_at, supplier_name, invoice_number, invoice_date, due_date, due_date_source, payment_method, gross_amount, net_amount, vat_amount, category, location_label, period_type, period_start, period_end, status, file_path, creditor_iban, creditor_name';
       const PAGE = 1000;
       const all: Bill[] = [];
       for (let page = 0; ; page++) {
@@ -1282,9 +1297,13 @@ export default function BillsPage() {
                                 : daysLeft < 0 ? 'text-red-600 font-semibold'
                                 : daysLeft <= 5 ? 'text-amber-600 font-semibold'
                                 : 'text-green-700 font-semibold';
+                              /* Where the date came from, when it was not printed on the invoice. */
+                              const derived = bill.due_date_source && bill.due_date_source !== 'printed'
+                                ? DERIVED_DUE[bill.due_date_source] ?? null : null;
                               const title = d.kind === 'auto' ? `Collected automatically (${bill.payment_method})${d.date ? ' on ' + fmtDate(d.date) : ''} · click to set a date`
                                 : d.kind === 'sofort' ? `Zahlbar sofort — ${SOFORT_DAYS} days from the invoice date · click to set a date`
-                                : d.kind === 'due' ? (open && daysLeft !== null ? (daysLeft < 0 ? `${-daysLeft} days overdue` : daysLeft === 0 ? 'Due today' : `Due in ${daysLeft} days`) : 'Due date') + ' · click to change'
+                                : d.kind === 'due' ? (open && daysLeft !== null ? (daysLeft < 0 ? `${-daysLeft} days overdue` : daysLeft === 0 ? 'Due today' : `Due in ${daysLeft} days`) : 'Due date')
+                                    + (derived ? ` · ${derived.why}` : '') + ' · click to change'
                                 : 'No due date on the invoice · click to set one';
                               return (
                                 <button onClick={() => setEditingDueId(bill.id)} title={title} className={`hover:underline decoration-dotted ${tone}`}>
@@ -1298,6 +1317,11 @@ export default function BillsPage() {
                                     <span className="leading-tight text-left block">
                                       <span className="block">{fmtDate(d.date)}</span>
                                       {d.kind === 'sofort' && <span className="block text-[10px] font-normal text-gray-400">sofort</span>}
+                                      {d.kind !== 'sofort' && derived && (
+                                        <span className={`block text-[10px] font-normal ${bill.due_date_source === 'default' ? 'text-orange-500' : 'text-gray-400'}`}>
+                                          {derived.tag}
+                                        </span>
+                                      )}
                                     </span>
                                   ) : <span className="text-gray-300">—</span>}
                                 </button>

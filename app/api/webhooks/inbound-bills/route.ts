@@ -4,7 +4,7 @@ import PostalMime from 'postal-mime';
 import { createHash } from 'crypto';
 import { getSupabaseAdmin } from '@/lib/supabase-admin';
 import { canonicalizeSupplierName, getKnownTerms } from '@/lib/canonical-supplier';
-import { resolveDueDate } from '@/lib/payment-terms';
+import { resolveDueDate, addDaysTo, DEFAULT_DAYS } from '@/lib/payment-terms';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const SECRET = process.env.INBOUND_BILLS_WEBHOOK_SECRET ?? '';
@@ -290,16 +290,31 @@ async function saveBillToDB(attachment: Attachment, extracted: Record<string, un
     discountAmount = null;
   }
 
+  /* Every bill gets a deadline. A printed date wins; then the condition the
+     invoice states ("Zahlbar sofort" is a condition, not a date); then the day
+     the Skonto line says the debit falls; and failing all of that a fortnight,
+     which is the commercial norm and keeps the bill inside the next payment
+     run. due_date_source records which, so a date worked out never passes for
+     one the supplier printed. */
+  const printedDue = (extracted.due_date as string | null) ?? null;
+  const terms = (extracted.payment_method as string | null) ?? null;
+  let dueDate = resolveDueDate({ invoiceDate, dueDate: printedDue, terms });
+  let dueSource: string | null =
+    printedDue ? 'printed' : dueDate ? 'stated-term' : null;
+  if (!dueDate && settlementAmount !== null && extracted.settlement_date) {
+    dueDate = extracted.settlement_date as string;
+    dueSource = 'settlement';
+  }
+  if (!dueDate && invoiceDate) {
+    dueDate = addDaysTo(invoiceDate, DEFAULT_DAYS);
+    dueSource = 'default';
+  }
+
   const row: Record<string, unknown> = {
     supplier_name:  extracted.supplier_name  ?? 'Unknown',
     invoice_number: extracted.invoice_number ?? null,
     invoice_date:   invoiceDate,
-    // "Zahlbar sofort" is a condition, not a date; read it into one.
-    due_date:       resolveDueDate({
-      invoiceDate: invoiceDate,
-      dueDate:     (extracted.due_date as string | null) ?? null,
-      terms:       (extracted.payment_method as string | null) ?? null,
-    }),
+    due_date:       dueDate,
     net_amount:     extracted.net_amount     ?? 0,
     vat_amount:     extracted.vat_amount     ?? 0,
     gross_amount:   extracted.gross_amount   ?? 0,
@@ -320,6 +335,7 @@ async function saveBillToDB(attachment: Attachment, extracted: Record<string, un
      columns arrive with supabase/add_bill_settlement.sql — until that has been
      run, a bill is still worth filing without them. */
   const settlementCols = {
+    due_date_source:   dueSource,
     settlement_amount: settlementAmount,
     settlement_date:   settlementAmount !== null ? ((extracted.settlement_date as string | null) ?? null) : null,
     discount_amount:   discountAmount,
@@ -327,7 +343,7 @@ async function saveBillToDB(attachment: Attachment, extracted: Record<string, un
   };
   let { data: bill, error: billErr } = await admin.from('bills')
     .insert({ ...row, ...settlementCols }).select('id').single();
-  if (billErr && /settlement_amount|discount_amount|discount_percent|settlement_date/.test(billErr.message)) {
+  if (billErr && /due_date_source|settlement_amount|discount_amount|discount_percent|settlement_date/.test(billErr.message)) {
     console.warn('[inbound-bills] settlement columns missing — run supabase/add_bill_settlement.sql');
     ({ data: bill, error: billErr } = await admin.from('bills').insert(row).select('id').single());
   }
