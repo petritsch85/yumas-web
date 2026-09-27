@@ -167,7 +167,13 @@ export interface ReferenceMatch {
  * worth reporting precisely because it is a gap.
  */
 export function matchByReference(
-  tx: { description: string | null; counterparty: string | null; amount_cents: number },
+  tx: {
+    description: string | null;
+    counterparty: string | null;
+    amount_cents: number;
+    /** Which way the money went. A credit note is settled by a refund in. */
+    direction?: 'in' | 'out' | null;
+  },
   candidateBills: RefBill[],
   /** Bills of the same supplier that another payment already holds. */
   claimedBills: (RefBill & { heldBy?: { date: string; description: string | null } | null })[] = [],
@@ -245,8 +251,16 @@ export function matchByReference(
      candidate: some invoices in a batch may state no discount. */
   const sumCollected = round2(bills.reduce((t, b) => t + collected(b), 0));
   const sumGross = round2(bills.reduce((t, b) => t + Number(b.gross_amount), 0));
-  const complete = Math.abs(sumCollected - amount) < 0.01 || Math.abs(sumGross - amount) < 0.01;
-  const sum = Math.abs(sumGross - amount) < 0.01 ? sumGross : sumCollected;
+
+  /* A transaction's amount carries no sign, so totals are compared as
+     magnitudes and the direction settles which way it should have run: a
+     positive total is owed and leaves, a credit note comes back. */
+  const runsRight = (total: number) =>
+    !tx.direction ? true : total < 0 ? tx.direction === 'in' : tx.direction === 'out';
+  const explains = (total: number) => Math.abs(Math.abs(total) - amount) < 0.01 && runsRight(total);
+
+  const complete = explains(sumCollected) || explains(sumGross);
+  const sum = explains(sumGross) ? sumGross : sumCollected;
 
   /* A number quoted with its date and its amount is certainly an invoice, so
      it is reported missing as it stands. A bare number is only reported when

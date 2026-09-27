@@ -234,6 +234,39 @@ export async function POST(req: NextRequest) {
   ]);
   const availableBills = bills.filter(b => !linkedBillIds.has(b.id));
 
+  /* A credit note is settled the other way round: the supplier sends the money
+     back, so the evidence is a payment IN — "Kd.Nr.7148 GS 26003449" against a
+     bill of −11,76 €. Every pass below looked only at money going out, so no
+     credit note could ever match.
+     Only refunds from a supplier that actually has an open credit note are
+     pulled in. There are a handful of those against a thousand customer
+     payments and platform payouts, and the amount passes compare every
+     transaction with every other, so widening the pool wholesale would cost a
+     great deal to find very little. */
+  const openCreditNotes = availableBills.filter(b => Number(b.gross_amount) < 0);
+  if (openCreditNotes.length > 0) {
+    try {
+      const refunds = await fetchAll((page, size) =>
+        admin.from('cashflow_transactions')
+          .select('id, date, counterparty, description, amount_cents, direction')
+          .is('bill_id', null)
+          .eq('direction', 'in')
+          .order('id')
+          .range(page * size, (page + 1) * size - 1)
+      );
+      const creditNoteParty = (tx: { counterparty: string | null }) =>
+        openCreditNotes.some(b => {
+          const words: string[] = (b.supplier_name ?? '').toLowerCase().split(/[^a-zà-ÿ0-9]+/).filter((w: string) => w.length > 3);
+          const cp = (tx.counterparty ?? '').toLowerCase();
+          return words.some((w: string) => cp.includes(w));
+        });
+      const relevant = refunds.filter(t => !multiLinkedTx.has(t.id) && creditNoteParty(t));
+      txs = [...txs, ...relevant];
+    } catch (e) {
+      console.error('[auto-match] refund pass failed (non-fatal):', e);
+    }
+  }
+
   // 3. Fetch counterparties for keyword matching
   const { data: cps } = await admin
     .from('counterparties')
@@ -301,13 +334,24 @@ export async function POST(req: NextRequest) {
      with a settlement amount has two faces and matching must accept either.
      See lib/skonto.ts. */
   const payable = (b: any) => payableAmounts(b).map(cents);
-  /** Every total this set of bills could add up to, Skonto taken or not. */
+  /** Every signed total this set of bills could come to, Skonto taken or not. */
   const payableSums = (bs: any[]): number[] =>
     bs.reduce<number[]>((sums, b) => {
       const next = new Set<number>();
       for (const s of sums) for (const a of payable(b)) next.add(s + a);
       return [...next];
     }, [0]);
+
+  /* Money has to move the way the paperwork points: an invoice is settled by a
+     payment out, a credit note by a refund in. Amounts are then compared as
+     magnitudes, since a transaction's amount_cents carries no sign. */
+  const runsRight = (tx: any, signedCents: number) =>
+    signedCents === 0 ? false
+    : signedCents > 0 ? tx.direction === 'out'
+    : tx.direction === 'in';
+  /** Does any of these signed totals settle this transaction, the right way round? */
+  const settles = (tx: any, signedTotals: number[]) =>
+    signedTotals.some(s => Math.abs(s) === Math.abs(tx.amount_cents) && runsRight(tx, s));
 
   /* 4a. By invoice number. The bank quotes it, the supplier is the same, and
      the money agrees to the cent — one bill for the whole amount, or every
@@ -317,10 +361,9 @@ export async function POST(req: NextRequest) {
     const text = `${tx.counterparty ?? ''} ${tx.description ?? ''}`;
     const quoted = availableBills.filter(b => !usedBillIds.has(b.id) && quotes(text, b.invoice_number) && sameSupplier(tx, b));
     if (quoted.length === 0) continue;
-    const paid = Math.abs(tx.amount_cents);
     if (quoted.length === 1) {
-      if (payable(quoted[0]).includes(paid)) push(tx, quoted, 'invoice');
-    } else if (payableSums(quoted).includes(paid)) {
+      if (settles(tx, payable(quoted[0]))) push(tx, quoted, 'invoice');
+    } else if (settles(tx, payableSums(quoted))) {
       push(tx, quoted, 'invoice');
     }
   }
@@ -336,7 +379,7 @@ export async function POST(req: NextRequest) {
      cannot argue with — the invoice number the bank names, and the direction
      of time. See lib/match-rules.ts. */
   const fits = (tx: any, b: any) =>
-    payable(b).includes(Math.abs(tx.amount_cents)) &&
+    settles(tx, payable(b)) &&
     !!b.invoice_date && days(b.invoice_date, tx.date) <= 45 &&
     sameSupplier(tx, b) &&
     !linkObjection(tx, b);
