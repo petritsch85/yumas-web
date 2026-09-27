@@ -248,9 +248,6 @@ export function matchByReference(
   const complete = Math.abs(sumCollected - amount) < 0.01 || Math.abs(sumGross - amount) < 0.01;
   const sum = Math.abs(sumGross - amount) < 0.01 ? sumGross : sumCollected;
 
-  // One number alone is only convincing when it explains the whole payment.
-  if (bills.length === 1 && !complete) return null;
-
   /* A number quoted with its date and its amount is certainly an invoice, so
      it is reported missing as it stands. A bare number is only reported when
      it is shaped like the ones that did match — otherwise every Kundennummer
@@ -259,8 +256,14 @@ export function matchByReference(
     const tail = tailSegment(b.invoice_number);
     return (tail ?? normaliseRef(b.invoice_number)).length;
   }));
-  return {
-    bills, sum, amount, complete, taken,
-    missing: [...missing, ...bare.filter(m => shapes.has(m.length))],
-  };
+  const gaps = [...missing, ...bare.filter(m => shapes.has(m.length))];
+
+  /* One number alone is only convincing when it explains the whole payment.
+     But where the bank named several and we hold one of them, the shortfall is
+     the point: FFD's debit of 30,37 € names a credit note of −60,39 € that we
+     have and an invoice of 90,76 € that we do not, and saying so is more use
+     than saying nothing. */
+  if (bills.length === 1 && !complete && gaps.length === 0 && taken.length === 0) return null;
+
+  return { bills, sum, amount, complete, taken, missing: gaps };
 }
