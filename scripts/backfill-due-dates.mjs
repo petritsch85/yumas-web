@@ -107,7 +107,11 @@ const pageAll = async build => { const o = []; for (let p = 0; ; p++) { const { 
 
 const bills = await pageAll(p => db.from('bills')
   .select('id, supplier_name, invoice_number, invoice_date, due_date, payment_method, settlement_date, file_path')
-  .order('invoice_date').range(p * 500, p * 500 + 499));
+  /* Ordered by id, not invoice_date: paging with range() over a column that
+     repeats gives no stable order, so rows sharing a date can be handed out
+     twice or skipped entirely — which is how two bills survived the first run
+     still without a due date. */
+  .order('id').range(p * 500, p * 500 + 499));
 const allTx = await pageAll(p => db.from('cashflow_transactions').select('id, date, bill_id').range(p * 500, p * 500 + 499));
 const links = await pageAll(p => db.from('transaction_bill_links').select('transaction_id, bill_id').range(p * 500, p * 500 + 499));
 const txDate = new Map(allTx.map(t => [t.id, t.date]));
