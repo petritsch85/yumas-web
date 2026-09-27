@@ -38,6 +38,27 @@ type ReferenceMatch = {
   complete:       boolean;
 };
 
+/** A customer's payment against an invoice we issued. */
+type OutgoingMatch = {
+  txId:           string;
+  txDate:         string;
+  txCounterparty: string | null;
+  txAmountCents:  number;
+  billId:         string;
+  invoiceNumber:  string | null;
+  invoiceDate:    string | null;
+  customerName:   string | null;
+  totalPayable:   number;
+  /** How it was found: the invoice number the customer quoted, or the amount alone. */
+  via:            'invoice' | 'amount';
+  /** Payment minus invoice, in euros. Zero unless the customer rounded. */
+  delta:          number;
+  /** True when it can be applied unreviewed. */
+  confident:      boolean;
+  /** What a person should know before ticking it. */
+  note:           string | null;
+};
+
 /** A link already saved that the matching rules would now refuse to make. */
 type SuspectLink = {
   txId:            string;
@@ -519,6 +540,108 @@ export async function POST(req: NextRequest) {
     // The link table may not exist on an older database; the rest still stands.
   }
 
+  /* ── Customers paying the invoices we issued ──
+     Until now matching only ever looked at money going out, so not one
+     incoming payment was ever tied to an outgoing invoice. Customers quote the
+     invoice number — "133-26", "Rech.Nr.106-26/15.6.2026", "Rg 123-26, 122-26"
+     — which is the strongest evidence there is, and the amount usually agrees
+     to the cent. */
+  const outgoingMatches: OutgoingMatch[] = [];
+  try {
+    const obs = await fetchAll((page, size) =>
+      admin.from('outgoing_bills')
+        .select('id, invoice_number, invoice_date, customer_name, total_payable')
+        .order('invoice_date', { ascending: false })
+        .range(page * size, (page + 1) * size - 1)
+    );
+    const inTxs = await fetchAll((page, size) =>
+      admin.from('cashflow_transactions')
+        .select('id, date, counterparty, description, amount_cents')
+        .eq('direction', 'in')
+        .is('outgoing_bill_id', null)
+        .order('date', { ascending: false })
+        .range(page * size, (page + 1) * size - 1)
+    );
+    const claimedObs = await fetchAll((page, size) =>
+      admin.from('cashflow_transactions')
+        .select('outgoing_bill_id')
+        .not('outgoing_bill_id', 'is', null)
+        .range(page * size, (page + 1) * size - 1)
+    );
+    const spokenFor = new Set(claimedObs.map(r => r.outgoing_bill_id as string));
+    const freeObs = obs.filter(b => !spokenFor.has(b.id));
+
+    /* "133-26" is short, so it only counts standing on its own — not as the
+       tail of "1133-26" nor the head of "133-260". */
+    const quotesInvoice = (text: string, no: string | null) => {
+      const n = (no ?? '').trim();
+      if (n.length < 4) return false;
+      const esc = n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      return new RegExp(`(?<![\\w-])${esc}(?![\\w-])`, 'i').test(text);
+    };
+    /* A customer's bank name and the name on our invoice rarely match word for
+       word ("MOBIS PARTS EUROPE N.V." against "Mobis Parts Europe N.V. –
+       Zweigniederlassung"), so a shared distinctive word is enough. */
+    const sameCustomer = (tx: { counterparty: string | null }, b: { customer_name: string | null }) => {
+      const a = (tx.counterparty ?? '').toLowerCase();
+      const words = (b.customer_name ?? '').toLowerCase().split(/[^a-zà-ÿ0-9]+/).filter(w => w.length > 3);
+      return words.some(w => a.includes(w));
+    };
+
+    const usedObs = new Set<string>();
+    const usedTx = new Set<string>();
+
+    /* 1. The customer named the invoice. */
+    for (const tx of inTxs) {
+      if (usedTx.has(tx.id)) continue;
+      const text = `${tx.description ?? ''} ${tx.counterparty ?? ''}`;
+      const named = freeObs.filter(b => !usedObs.has(b.id) && quotesInvoice(text, b.invoice_number));
+      if (named.length !== 1) continue;   // several invoices on one payment needs a person
+      const b = named[0];
+      const paid = Math.abs(tx.amount_cents) / 100;
+      const delta = Math.round((paid - Number(b.total_payable)) * 100) / 100;
+      outgoingMatches.push({
+        txId: tx.id, txDate: tx.date, txCounterparty: tx.counterparty, txAmountCents: tx.amount_cents,
+        billId: b.id, invoiceNumber: b.invoice_number, invoiceDate: b.invoice_date,
+        customerName: b.customer_name, totalPayable: Number(b.total_payable),
+        via: 'invoice', delta,
+        confident: Math.abs(delta) <= 0.01,
+        note: Math.abs(delta) <= 0.01 ? null
+          : `Paid ${delta > 0 ? 'over' : 'under'} by ${Math.abs(delta).toFixed(2)} € — the customer names this invoice but did not pay its amount.`,
+      });
+      usedObs.add(b.id);
+      usedTx.add(tx.id);
+    }
+
+    /* 2. No number quoted: the amount and the customer must both be unique. */
+    for (const tx of inTxs) {
+      if (usedTx.has(tx.id)) continue;
+      const paid = Math.abs(tx.amount_cents);
+      const fitsOb = (b: (typeof freeObs)[number]) =>
+        !usedObs.has(b.id) &&
+        Math.round(Number(b.total_payable) * 100) === paid &&
+        !!b.invoice_date && new Date(tx.date) >= new Date(b.invoice_date) &&
+        sameCustomer(tx, b);
+      const cands = freeObs.filter(fitsOb);
+      if (cands.length !== 1) continue;
+      const b = cands[0];
+      const rivals = inTxs.filter(o => o.id !== tx.id && !usedTx.has(o.id) && fitsOb(b) &&
+        Math.abs(o.amount_cents) === paid && sameCustomer(o, b));
+      if (rivals.length > 0) continue;
+      outgoingMatches.push({
+        txId: tx.id, txDate: tx.date, txCounterparty: tx.counterparty, txAmountCents: tx.amount_cents,
+        billId: b.id, invoiceNumber: b.invoice_number, invoiceDate: b.invoice_date,
+        customerName: b.customer_name, totalPayable: Number(b.total_payable),
+        via: 'amount', delta: 0, confident: false,
+        note: 'The amount and the customer agree, but no invoice number was quoted — worth a glance.',
+      });
+      usedObs.add(b.id);
+      usedTx.add(tx.id);
+    }
+  } catch (e) {
+    console.error('[auto-match] outgoing-invoice pass failed (non-fatal):', e);
+  }
+
   /* ── Links already in the database that the rules above would refuse ──
      The vetoes read backwards. Most of these were made before the reference
      rule could see "RE 65221", and each one does double harm: the payment is
@@ -551,7 +674,7 @@ export async function POST(req: NextRequest) {
     console.error('[auto-match] link audit failed (non-fatal):', e);
   }
 
-  if (!apply) return NextResponse.json({ matches, woltMatches: [...woltMatches, ...lieferandoMatches], referenceMatches, suspectLinks });
+  if (!apply) return NextResponse.json({ matches, woltMatches: [...woltMatches, ...lieferandoMatches], referenceMatches, outgoingMatches, suspectLinks });
 
   // 5. Apply matches
   const errors: string[] = [];
@@ -559,6 +682,7 @@ export async function POST(req: NextRequest) {
   const applyWolt = picked(woltMatches);
   const applyLieferando = picked(lieferandoMatches);
   const applyReference = picked(referenceMatches);
+  const applyOutgoing = picked(outgoingMatches);
 
   for (const m of applyBills) {
     // One transfer for several bills is recorded as links, the way the Cash Flow page does it
@@ -603,10 +727,25 @@ export async function POST(req: NextRequest) {
     appliedReference++;
   }
 
+  /* A customer's payment against an invoice we issued. Mirrors what the Cash
+     Flow page does by hand: the credit points at the invoice, and the invoice
+     stops being pending. */
+  let appliedOutgoing = 0;
+  for (const o of applyOutgoing) {
+    const { error } = await admin
+      .from('cashflow_transactions')
+      .update({ outgoing_bill_id: o.billId })
+      .eq('id', o.txId);
+    if (error) { errors.push(error.message); continue; }
+    await admin.from('outgoing_bills').update({ status: 'paid' }).eq('id', o.billId).eq('status', 'pending');
+    appliedOutgoing++;
+  }
+
   return NextResponse.json({
     applied: applyBills.length,
     appliedWolt: applyWolt.length + applyLieferando.length,
     appliedReference,
+    appliedOutgoing,
     errors,
   });
 }
