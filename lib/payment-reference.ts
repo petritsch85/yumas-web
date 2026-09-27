@@ -80,6 +80,31 @@ export function tailSegment(invoiceNumber: string | null | undefined): string | 
   return /^\d{4,12}$/.test(last) ? last : null;
 }
 
+/**
+ * Numbers the reference explicitly calls invoice numbers.
+ *
+ * `referenceTokens` insists on four digits, because a bare three-digit number
+ * turns up by accident in every second Verwendungszweck. But a small number a
+ * supplier has *labelled* is not an accident: "Rechnung Nr. 105+106" against
+ * two invoices of 1.000 € each is unambiguous, and without this the whole
+ * payment goes unmatched. The label is what makes a short number safe to use.
+ *
+ * Lists are read as lists — "105+106", "103 + 104", "12 und 13".
+ */
+const LABELLED_INVOICES =
+  /(?:rechnung(?:s?\s*-?\s*(?:nummer|nr)n?)?|re\.?\s*-?\s*nr|rg\.?\s*-?\s*nr|rnr|invoice|inv)\.?\s*:?\s*((?:\d{1,12}\s*(?:[+,&/]|und)\s*)*\d{1,12})/gi;
+
+export function labelledInvoiceNumbers(text: string | null | undefined): string[] {
+  const out = new Set<string>();
+  for (const m of (text ?? '').matchAll(LABELLED_INVOICES)) {
+    for (const part of m[1].split(/[+,&/]|und/i)) {
+      const n = part.trim();
+      if (n) out.add(n.toUpperCase());
+    }
+  }
+  return [...out];
+}
+
 /** One invoice named in a reference that spells out number, date and amount. */
 export interface QuotedItem {
   ref: string;
@@ -181,13 +206,20 @@ export function matchByReference(
   const text = `${tx.description ?? ''} ${tx.counterparty ?? ''}`;
   const tokens = referenceTokens(text);
   const items = quotedItems(text);
-  if (tokens.length === 0 && items.length === 0) return null;
+  /* Read before the guard: a reference may name nothing but short numbers —
+     "Rechnung Nr. 105+106" yields no ordinary token at all. */
+  const labelled = new Set(labelledInvoiceNumbers(text).map(normaliseRef).filter(Boolean));
+  if (tokens.length === 0 && items.length === 0 && labelled.size === 0) return null;
 
   const byRef = new Map<string, RefBill>();
   const byTail = new Map<string, RefBill[]>();
+  /* Numbers too short for the general path — "105", "42". Reachable only
+     through a label, never from a bare token. */
+  const byShortRef = new Map<string, RefBill[]>();
   for (const b of candidateBills) {
     const key = normaliseRef(b.invoice_number);
     if (key.length >= 4) byRef.set(key, b);
+    else if (key.length >= 1) byShortRef.set(key, [...(byShortRef.get(key) ?? []), b]);
     const tail = tailSegment(b.invoice_number);
     if (tail) byTail.set(tail, [...(byTail.get(tail) ?? []), b]);
   }
@@ -231,7 +263,21 @@ export function matchByReference(
     else missing.push(it.ref);
   }
 
-  /* 2. Bare numbers, for references that just list them. */
+  /* 2. Numbers the reference calls invoice numbers outright. These may be
+     short — "Rechnung Nr. 105+106" — because the label vouches for them. */
+  for (const t of labelled) {
+    if (claimedItems.has(t)) continue;
+    claimedItems.add(t);
+    const whole = byRef.get(t);
+    if (whole) { add(whole); continue; }
+    const short = byShortRef.get(t) ?? [];
+    if (short.length === 1) { add(short[0]); continue; }
+    const held = byRefClaimed.get(t);
+    if (held) hold(held);
+    else if (t.length < 4) missing.push(t);   // labelled, so certainly an invoice
+  }
+
+  /* 3. Bare numbers, for references that just list them. */
   const wanted = new Set(tokens.map(normaliseRef).filter(t => t.length >= 4));
   const bare: string[] = [];
   for (const t of wanted) {
