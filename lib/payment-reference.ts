@@ -105,6 +105,28 @@ export function labelledInvoiceNumbers(text: string | null | undefined): string[
   return [...out];
 }
 
+/**
+ * A bill whose number *ends* with the quoted one.
+ *
+ * Werz's bank drops the constant leading digits of its own invoice numbers:
+ * it writes "792690+792689+792688…" for invoices 10792690, 10792689, 10792688.
+ * Seventeen of those in one reference added up to the payment exactly, and
+ * none of them matched, because nothing compared the ends of the numbers.
+ *
+ * Deliberately narrow. The token must be five digits or more, the bill's
+ * number must be genuinely longer — a full match is handled before this — and
+ * exactly one bill of the supplier may end that way. A shorter suffix, or two
+ * bills sharing one, is a coincidence rather than an abbreviation.
+ */
+function endsWithMatch<T extends RefBill>(token: string, pool: T[]): T | null {
+  if (token.length < 5) return null;
+  const hits = pool.filter(b => {
+    const n = normaliseRef(b.invoice_number);
+    return n.length > token.length && n.endsWith(token);
+  });
+  return hits.length === 1 ? hits[0] : null;
+}
+
 /** One invoice named in a reference that spells out number, date and amount. */
 export interface QuotedItem {
   ref: string;
@@ -282,9 +304,9 @@ export function matchByReference(
   const bare: string[] = [];
   for (const t of wanted) {
     if (claimedItems.has(t)) continue;
-    const hit = byRef.get(t);
+    const hit = byRef.get(t) ?? endsWithMatch(t, candidateBills);
     if (hit) { add(hit); continue; }
-    const held = byRefClaimed.get(t);
+    const held = byRefClaimed.get(t) ?? endsWithMatch(t, claimedBills);
     if (held) hold(held);
     else bare.push(t);
   }
