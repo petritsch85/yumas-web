@@ -88,6 +88,26 @@ type Location = { id: string; name: string };
 /** Catering sold out of no particular store, kept beside the restaurants. */
 const CATERING_KEY = '__catering';
 
+/**
+ * The first month whose incoming bills are complete enough to cost.
+ *
+ * Before this the inbox was missing whole runs of supplier invoices — Metro,
+ * Leleithner, FFD and Fruveg all have gaps through July and August — so a
+ * COGS line for those months would understate cost and flatter the margin.
+ * The line is left empty rather than wrong.
+ */
+const COGS_FROM = '2026-09';
+
+/** The bill categories that are cost of goods, and the line each one feeds. */
+const COGS_CATEGORIES = {
+  'Food Cost':   'food',
+  'Drinks Cost': 'drinks',
+  'Packaging':   'packaging',
+} as const;
+
+/** Cost of goods for one month, split the way the bills are categorised. */
+type CogsBucket = { food: number; drinks: number; packaging: number; total: number };
+
 /** Net sales for one restaurant in one month, split by shift. */
 type GroupBucket = { lunch: number; dinner: number; total: number };
 
@@ -1408,6 +1428,48 @@ export default function SalesReportsPage() {
     queryKey: ['group-monthly', 'bills'], enabled: groupMonthlyOn,
     queryFn: () => fetchAllRows('outgoing_bills', 'issuing_location,event_date,shift_type,net_total', 'event_date'),
   });
+
+  /**
+   * Incoming bills, for the cost of goods.
+   *
+   * Only from COGS_FROM: before that the inbox holds whatever happened to be
+   * forwarded, and a cost line built on a part of the invoices is worse than
+   * no line at all — it reads as a margin that was never earned.
+   */
+  const { data: gmCostBills = [] } = useQuery({
+    queryKey: ['group-monthly', 'cost-bills'], enabled: groupMonthlyOn,
+    queryFn: async () => {
+      const out: Record<string, unknown>[] = [];
+      for (let pg = 0; ; pg++) {
+        const { data, error } = await supabase.from('bills')
+          .select('invoice_date,category,net_amount')
+          .gte('invoice_date', COGS_FROM + '-01')
+          .order('invoice_date')
+          .range(pg * 1000, (pg + 1) * 1000 - 1);
+        if (error) throw new Error(`bills: ${error.message}`);
+        if (!data?.length) break;
+        out.push(...(data as unknown as Record<string, unknown>[]));
+        if (data.length < 1000) break;
+      }
+      return out;
+    },
+  });
+
+  /** Cost of goods per month: the three categories that make it up, and their sum. */
+  const groupCogs = useMemo(() => {
+    const m: Record<string, CogsBucket> = {};
+    for (const b of gmCostBills) {
+      const cat = String(b.category ?? '');
+      const key = COGS_CATEGORIES[cat as keyof typeof COGS_CATEGORIES];
+      if (!key) continue;
+      const monthKey = String(b.invoice_date ?? '').slice(0, 7);
+      if (!monthKey || monthKey < COGS_FROM) continue;
+      const c = (m[monthKey] ??= { food: 0, drinks: 0, packaging: 0, total: 0 });
+      c[key] += Number(b.net_amount ?? 0);
+      c.total += Number(b.net_amount ?? 0);
+    }
+    return m;
+  }, [gmCostBills]);
 
   /* The three restaurants, in a fixed order so the columns never move. */
   const groupRestaurants = useMemo(
@@ -7449,6 +7511,84 @@ export default function SalesReportsPage() {
               return { lunch: s.lunch + c.lunch, dinner: s.dinner + c.dinner, total: s.total + c.total };
             };
 
+            /* ── Cost of goods, and what is left after it ────────────────────
+               A month before COGS_FROM has no cost line: the bills for it were
+               never all collected, so the figure would be a fiction and the
+               margin beside it flattering. Those cells stay blank. */
+            const cogsFor = (colKey: string): CogsBucket | null => {
+              const add = (a: CogsBucket, b: CogsBucket): CogsBucket => ({
+                food: a.food + b.food, drinks: a.drinks + b.drinks,
+                packaging: a.packaging + b.packaging, total: a.total + b.total,
+              });
+              if (!colKey.startsWith('FY')) {
+                return colKey >= COGS_FROM ? (groupCogs[colKey] ?? null) : null;
+              }
+              const months = Object.entries(groupCogs).filter(([k]) => k.startsWith(colKey.slice(2) + '-'));
+              if (months.length === 0) return null;
+              return months.reduce<CogsBucket>((acc, [, v]) => add(acc, v), { food: 0, drinks: 0, packaging: 0, total: 0 });
+            };
+
+            /** A row whose cells are plain numbers, blank where there is nothing to say. */
+            const valueLine = (
+              rowKey: string, label: string, get: (colKey: string) => number | null,
+              opts: { bold?: boolean; indent?: boolean; pct?: boolean } = {},
+            ) => (
+              <tr key={rowKey} className="border-b border-gray-100 hover:bg-gray-50/60 group"
+                style={{ backgroundColor: opts.bold ? '#f9fafb' : '#ffffff' }}>
+                <td className={'sticky left-0 z-10 px-4 whitespace-nowrap border-r border-gray-100 group-hover:bg-gray-50 transition-colors ' + (opts.bold ? 'py-1.5 text-xs font-bold text-gray-800' : 'py-1 text-[11px] text-gray-600') + (opts.indent ? ' pl-8' : '')}
+                  style={{ backgroundColor: opts.bold ? '#f9fafb' : '#ffffff' }}>
+                  {label}
+                </td>
+                {groupMonthCols.map(col => {
+                  const fy = col.type === 'fy';
+                  const v = get(col.key);
+                  return (
+                    <td key={col.key}
+                      className={'text-right tabular-nums ' + (opts.bold ? 'py-1.5 text-xs font-bold' : 'py-1 text-[11px]')}
+                      style={{ paddingLeft: 4, paddingRight: fy ? 6 : 8,
+                        ...(fy ? { backgroundColor: '#fffbeb', borderLeft: '1px solid #fde68a', borderRight: '1px solid #fde68a' } : {}) }}>
+                      {v === null
+                        ? <span className="text-gray-300">—</span>
+                        : opts.pct
+                          ? <span className="text-gray-800">{v.toFixed(1).replace('.', ',')}%</span>
+                          : <span className="text-gray-800">{fmtNum(Math.round(v))}</span>}
+                    </td>
+                  );
+                })}
+              </tr>
+            );
+
+            const headingRow = (rowKey: string, heading: string) => (
+              <tr key={rowKey} className="border-b border-gray-200" style={{ backgroundColor: '#eef2ff' }}>
+                <td className="sticky left-0 z-10 px-4 py-1.5 whitespace-nowrap border-r border-gray-100 text-xs font-bold text-gray-800"
+                  style={{ backgroundColor: '#eef2ff' }}>{heading}</td>
+                {groupMonthCols.map(col => <td key={col.key} style={{ backgroundColor: '#eef2ff' }} />)}
+              </tr>
+            );
+
+            const spacerRow = (rowKey: string) => (
+              <tr key={rowKey} style={{ height: 10 }}>
+                <td className="sticky left-0 z-10 bg-white border-r border-gray-100" />
+                {groupMonthCols.map(col => <td key={col.key} className="bg-white" />)}
+              </tr>
+            );
+
+            const cogsPart = (pick: (c: CogsBucket) => number) => (colKey: string) => {
+              const c = cogsFor(colKey);
+              return c ? pick(c) : null;
+            };
+            /** What the group kept: everything sold, less what the goods cost. */
+            const grossProfit = (colKey: string) => {
+              const c = cogsFor(colKey);
+              return c ? grandTotal(colKey).total - c.total : null;
+            };
+            const grossMarginPct = (colKey: string) => {
+              const c = cogsFor(colKey);
+              const sales = grandTotal(colKey).total;
+              if (!c || sales <= 0) return null;
+              return ((sales - c.total) / sales) * 100;
+            };
+
             /**
              * A block: the heading, a line per restaurant, then the total.
              *
@@ -7499,6 +7639,15 @@ export default function SalesReportsPage() {
                       {block('lunch',  'Net sales · Lunch',  b => b.lunch)}
                       {block('dinner', 'Net sales · Dinner', b => b.dinner)}
                       {block('total',  'Net sales · Total',  b => b.total, true)}
+                      {headingRow('cogs-head', 'COGS')}
+                      {valueLine('cogs-food',      'Food Cost',   cogsPart(c => c.food),      { indent: true })}
+                      {valueLine('cogs-drinks',    'Drinks Cost', cogsPart(c => c.drinks),    { indent: true })}
+                      {valueLine('cogs-packaging', 'Packaging',   cogsPart(c => c.packaging), { indent: true })}
+                      {valueLine('cogs-total',     'Total',       cogsPart(c => c.total),     { bold: true })}
+                      {spacerRow('cogs-gap')}
+                      {headingRow('gm-head', 'Gross margin')}
+                      {valueLine('gm-abs', 'Gross profit',   grossProfit,    { bold: true })}
+                      {valueLine('gm-pct', 'Gross margin %', grossMarginPct, { indent: true, pct: true })}
                     </tbody>
                   </table>
                 </div>
@@ -7509,6 +7658,10 @@ export default function SalesReportsPage() {
                   restaurant&rsquo;s name counts to that restaurant; one issued as &ldquo;Catering&rdquo; or
                   &ldquo;Other&rdquo; was sold out of no store and sits on the Caterings line, so Total (stores)
                   stays exactly the sum of its columns and Total is the group.
+                  {' '}COGS is the net of every incoming bill categorised Food Cost, Drinks Cost or Packaging,
+                  by invoice date. It starts at {COGS_FROM} — earlier months are missing whole runs of supplier
+                  invoices, and a cost line built on some of them would only flatter the margin, so those cells
+                  are left empty and the gross margin with them.
                 </div>
               </div>
             );
