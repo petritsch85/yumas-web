@@ -3,6 +3,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
+import { useActiveLocations, restaurantsOnly } from '@/lib/use-locations';
 import { ShoppingBag, ChevronDown, ChevronUp, ChevronsUpDown, Euro, Utensils, Wine, Users, Plus, X, Check, AlertTriangle } from 'lucide-react';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -151,17 +152,9 @@ export default function ProductDetailsPage() {
   }, [mode, shiftDate, shiftType, selWeek, selMonth, currentYear]);
 
   // ── Locations ──────────────────────────────────────────────────────────────
-  const { data: locations = [] } = useQuery<Location[]>({
-    queryKey: ['locations-active'],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from('locations').select('id, name, type')
-        .eq('is_active', true).order('name');
-      return ((data ?? []) as any[])
-        .filter(l => l.type === 'restaurant')
-        .map(({ id, name }) => ({ id, name }));
-    },
-  });
+  // ZK is a production site, not a restaurant, so it is not offered here.
+  const { data: allLocations = [] } = useActiveLocations();
+  const locations: Location[] = restaurantsOnly(allLocations);
 
   // ── Product data ───────────────────────────────────────────────────────────
   const { data: rows = [], isLoading } = useQuery<ProductRow[]>({

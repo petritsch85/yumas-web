@@ -3,6 +3,7 @@
 import { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
+import { useActiveLocations } from '@/lib/use-locations';
 import { MapPin, BarChart3, Loader2 } from 'lucide-react';
 import { useT } from '@/lib/i18n';
 
@@ -49,14 +50,7 @@ export default function StatsPage() {
 
   // ── Queries ───────────────────────────────────────────────────────────────
 
-  const { data: locations = [] } = useQuery({
-    queryKey: ['locations-active'],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from('locations').select('id,name').eq('is_active', true).order('name');
-      return (data ?? []) as Location[];
-    },
-  });
+  const { data: locations = [] } = useActiveLocations();
 
   const location = locations.find(l => l.id === locationId) ?? null;
 

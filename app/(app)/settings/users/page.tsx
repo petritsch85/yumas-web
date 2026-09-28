@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
+import { useActiveLocations } from '@/lib/use-locations';
 import { Plus, Pencil, X, Eye, EyeOff, Trash2, CheckSquare, Square } from 'lucide-react';
 import { useT } from '@/lib/i18n';
 
@@ -411,17 +412,7 @@ export default function TeamPage() {
     },
   });
 
-  const { data: locations } = useQuery({
-    queryKey: ['locations-active'],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from('locations')
-        .select('id, name')
-        .eq('is_active', true)
-        .order('name');
-      return (data ?? []) as Location[];
-    },
-  });
+  const { data: locations } = useActiveLocations();
 
   const { data: dynamicChannels = [] } = useQuery<{ id: string; label: string }[]>({
     queryKey: ['chat-channels'],

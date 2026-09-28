@@ -3,6 +3,7 @@
 import { useState, useMemo, useCallback, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
+import { useActiveLocations } from '@/lib/use-locations';
 import {
   Upload, FileCheck, AlertCircle, DatabaseZap,
   History, MapPin, Trash2, ChevronLeft, ChevronRight,
@@ -243,13 +244,7 @@ export default function CSVImporterPage() {
   const catRevenue = parseResult?.categoryRevenue ?? {};
 
   // ── Queries ──────────────────────────────────────────────────────────────────
-  const { data: locations = [] } = useQuery({
-    queryKey: ['locations-active'],
-    queryFn: async () => {
-      const { data } = await supabase.from('locations').select('id, name').eq('is_active', true).order('name');
-      return (data ?? []) as Location[];
-    },
-  });
+  const { data: locations = [] } = useActiveLocations();
 
   const { data: history = [], isLoading: histLoading } = useQuery({
     queryKey: ['sales-imports'],

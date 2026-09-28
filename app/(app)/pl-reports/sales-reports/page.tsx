@@ -3,6 +3,7 @@
 import { useState, useMemo, useCallback, useRef, useEffect, Fragment } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
+import { useActiveLocations, restaurantsOnly } from '@/lib/use-locations';
 import { parseOpenTableCsv, summariseOpenTable, OpenTableParseError } from '@/lib/opentable-csv';
 import { parseGdpduZip, GdpduParseError } from '@/lib/gdpdu';
 import { isoWeek, isoWeekYear, isoWeekRange, isoWeeksInYear, currentISOWeek } from '@/lib/iso-week';
@@ -1101,15 +1102,9 @@ export default function SalesReportsPage() {
 
   // ── Queries ────────────────────────────────────────────────────────────────
 
-  const { data: locations = [] } = useQuery({
-    queryKey: ['locations-active'],
-    queryFn: async () => {
-      const { data } = await supabase.from('locations').select('id, name, type').eq('is_active', true).order('name');
-      return ((data ?? []) as { id: string; name: string; type: string }[])
-        .filter(l => l.type === 'restaurant')
-        .map(({ id, name }) => ({ id, name })) as Location[];
-    },
-  });
+  // ZK is a production site, not a restaurant, so it is not offered here.
+  const { data: allLocations = [] } = useActiveLocations();
+  const locations: Location[] = restaurantsOnly(allLocations);
 
   // Weekly imports
   const { data: weeklyImports = [] } = useQuery({

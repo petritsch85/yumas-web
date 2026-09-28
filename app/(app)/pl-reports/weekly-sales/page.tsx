@@ -3,6 +3,7 @@
 import { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
+import { useActiveLocations } from '@/lib/use-locations';
 import { MapPin } from 'lucide-react';
 import { useT } from '@/lib/i18n';
 
@@ -161,13 +162,7 @@ export default function WeeklySalesPage() {
   const [location, setLocation] = useState<Location | null>(null);
   const [year, setYear]         = useState(new Date().getFullYear());
 
-  const { data: locations = [] } = useQuery({
-    queryKey: ['locations-active'],
-    queryFn: async () => {
-      const { data } = await supabase.from('locations').select('id, name').eq('is_active', true).order('name');
-      return (data ?? []) as Location[];
-    },
-  });
+  const { data: locations = [] } = useActiveLocations();
 
   const { data: imports = [] } = useQuery({
     queryKey: ['weekly-sales', location?.id, year],
