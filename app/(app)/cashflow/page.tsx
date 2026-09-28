@@ -1045,27 +1045,10 @@ function TxRow({ tx, onSave, counterparties, onShowDetails, selected, onToggleSe
           {isIn ? '+' : '−'} {eur(tx.amount_cents)}
         </td>
 
-        {/* VAT %, VAT €, Netto */}
-        {(() => {
-          const { rate, vatCents, nettoCents, fromBill, billOdd } = vatOf(tx);
-          return (
-            <>
-              <td className="py-2 px-2 text-right whitespace-nowrap text-xs tabular-nums"
-                title={billOdd  ? 'The linked bill has an impossible VAT split — showing the category rate until the bill is corrected'
-                     : fromBill ? 'Rate taken from the linked bill'
-                                : 'Assumed from the category — no bill linked'}>
-                <span className={fromBill ? 'text-blue-600 font-medium' : 'text-gray-500'}>{fmtRate(rate)}</span>
-                {billOdd && <span className="ml-1 text-amber-500">⚠</span>}
-              </td>
-              <td className="py-2 px-2 text-right whitespace-nowrap text-xs text-gray-500 tabular-nums">
-                {vatCents === 0 ? '—' : eur(vatCents)}
-              </td>
-              <td className={`py-2 px-2 text-right whitespace-nowrap text-xs tabular-nums font-medium ${isIn ? 'text-green-700' : 'text-red-700'}`}>
-                {isIn ? '+' : '−'} {eur(nettoCents)}
-              </td>
-            </>
-          );
-        })()}
+        {/* VAT is not shown here. The bank tells you what moved, not how it
+            splits — the VAT on a cost is read off the bill itself, which is
+            where it is analysed. The detail panel still shows the derivation
+            for a single row. */}
 
         {/* Category — unified for both in and out */}
         <td className="py-2 px-2">
@@ -1408,18 +1391,7 @@ export default function CashFlowPage() {
         case 'counterparty': av = a.counterparty ?? ''; bv = b.counterparty ?? ''; break;
         case 'brutto':       av = a.direction === 'in' ?  a.amount_cents : -a.amount_cents;
                              bv = b.direction === 'in' ?  b.amount_cents : -b.amount_cents; break;
-        case 'vatpct':       av = defaultVatRate(a.category); bv = defaultVatRate(b.category); break;
-        case 'vateur': {
-          const ra = defaultVatRate(a.category), rb = defaultVatRate(b.category);
-          av = vatOf(a).vatCents;
-          bv = vatOf(b).vatCents;
-          break;
-        }
-        case 'netto': {
-          av = (a.direction === 'in' ? 1 : -1) * vatOf(a).nettoCents;
-          bv = (b.direction === 'in' ? 1 : -1) * vatOf(b).nettoCents;
-          break;
-        }
+
         case 'category':          av = a.category          ?? ''; bv = b.category          ?? ''; break;
         case 'location':          av = a.location           ?? ''; bv = b.location           ?? ''; break;
         case 'accounting_period': av = a.accounting_period  ?? ''; bv = b.accounting_period  ?? ''; break;
@@ -1610,11 +1582,12 @@ export default function CashFlowPage() {
                 <div className="py-12 text-center text-gray-400 text-sm">{emptyText}</div>
               )}
               {rows.length > 0 && (
-                /* Thirteen columns do not always fit the window. Rather than let
-                   Notes and Confirm fall off the right edge, the table keeps a
-                   width its columns can live in and scrolls inside the card. */
+                /* Rather than let Notes and Confirm fall off the right edge, the
+                   table keeps a width its columns can live in and scrolls inside
+                   the card. Dropping VAT %, VAT € and Netto bought back about a
+                   fifth of it. */
                 <div className="overflow-x-auto">
-                  <table className="w-full min-w-[1180px] text-sm">
+                  <table className="w-full min-w-[920px] text-sm">
                     <thead className="bg-gray-50 border-b border-gray-200">
                       <tr>
                         {([
@@ -1639,10 +1612,7 @@ export default function CashFlowPage() {
                         })}
                         <th className="py-2.5 px-2 text-xs font-semibold text-gray-500 uppercase tracking-wide text-left">Bill</th>
                         {([
-                          { col: 'brutto',   label: 'Brutto',   align: 'right' },
-                          { col: 'vatpct',   label: 'VAT %',    align: 'right' },
-                          { col: 'vateur',   label: 'VAT €',    align: 'right' },
-                          { col: 'netto',    label: 'Netto',    align: 'right' },
+                          { col: 'brutto',   label: 'Amount',   align: 'right' },
                           { col: 'category',          label: 'Category', align: 'left'  },
                           { col: 'location',          label: 'Location', align: 'left'  },
                           { col: 'accounting_period', label: 'Period',   align: 'left'  },
