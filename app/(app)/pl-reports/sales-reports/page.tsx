@@ -85,6 +85,9 @@ import { useT } from '@/lib/i18n';
 
 type Location = { id: string; name: string };
 
+/** Catering sold out of no particular store, kept beside the restaurants. */
+const CATERING_KEY = '__catering';
+
 /** Net sales for one restaurant in one month, split by shift. */
 type GroupBucket = { lunch: number; dinner: number; total: number };
 
@@ -1452,14 +1455,15 @@ export default function SalesReportsPage() {
       }
     }
 
-    /* Catering invoices. issuing_location is a name, and only the three
-       restaurants have a column — a bill issued as "Catering" or "Other"
-       belongs to no restaurant, and counting it in the total alone would make
-       the total stop equalling its own columns. */
+    /* Catering invoices. issuing_location is a name; where it names one of the
+       restaurants the sale belongs to that restaurant's columns. A bill issued
+       as "Catering" or "Other" was not sold out of any store, so it is kept
+       apart under CATERING_KEY — that way the stores' total stays exactly the
+       sum of its own columns, and the catering on top of it is still visible
+       as a line of its own. */
     const idByName = new Map(groupRestaurants.map(l => [l.name.toLowerCase(), l.id]));
     for (const b of gmBills) {
-      const id = idByName.get(String(b.issuing_location ?? '').toLowerCase());
-      if (!id) continue;
+      const id = idByName.get(String(b.issuing_location ?? '').toLowerCase()) ?? CATERING_KEY;
       add(b.event_date, id, b.shift_type, Number(b.net_total ?? 0));
     }
 
@@ -7437,15 +7441,35 @@ export default function SalesReportsPage() {
               </tr>
             );
 
-            /** A block: the heading, a line per restaurant, then the total. */
-            const block = (blockKey: string, heading: string, pick: (b: GroupBucket) => number) => [
+            /* Catering sold out of no particular store, and the group figure
+               that lands once it is added to what the stores took. */
+            const cateringFor = (colKey: string) => cellFor(colKey, CATERING_KEY);
+            const grandTotal = (colKey: string): GroupBucket => {
+              const s = sumAll(colKey), c = cateringFor(colKey);
+              return { lunch: s.lunch + c.lunch, dinner: s.dinner + c.dinner, total: s.total + c.total };
+            };
+
+            /**
+             * A block: the heading, a line per restaurant, then the total.
+             *
+             * The Total block closes differently — the stores' own total, the
+             * catering on top of it, and the group figure — so that the three
+             * can be read apart.
+             */
+            const block = (
+              blockKey: string, heading: string, pick: (b: GroupBucket) => number, withCatering = false,
+            ) => [
               <tr key={blockKey + '-head'} className="border-b border-gray-200" style={{ backgroundColor: '#eef2ff' }}>
                 <td className="sticky left-0 z-10 px-4 py-1.5 whitespace-nowrap border-r border-gray-100 text-xs font-bold text-gray-800"
                   style={{ backgroundColor: '#eef2ff' }}>{heading}</td>
                 {groupMonthCols.map(col => <td key={col.key} style={{ backgroundColor: '#eef2ff' }} />)}
               </tr>,
               ...groupRestaurants.map(l => line(blockKey, l.name, pick, k => cellFor(k, l.id), false)),
-              line(blockKey, 'Total', pick, sumAll, true),
+              line(blockKey, withCatering ? 'Total (stores)' : 'Total', pick, sumAll, true),
+              ...(withCatering ? [
+                line(blockKey, 'Caterings', pick, cateringFor, false),
+                line(blockKey, 'Total', pick, grandTotal, true),
+              ] : []),
               <tr key={blockKey + '-gap'} style={{ height: 10 }}>
                 <td className="sticky left-0 z-10 bg-white border-r border-gray-100" />
                 {groupMonthCols.map(col => <td key={col.key} className="bg-white" />)}
@@ -7474,16 +7498,17 @@ export default function SalesReportsPage() {
                     <tbody>
                       {block('lunch',  'Net sales · Lunch',  b => b.lunch)}
                       {block('dinner', 'Net sales · Dinner', b => b.dinner)}
-                      {block('total',  'Net sales · Total',  b => b.total)}
+                      {block('total',  'Net sales · Total',  b => b.total, true)}
                     </tbody>
                   </table>
                 </div>
                 <div className="px-4 py-2 border-t border-gray-100 bg-gray-50 text-[11px] text-gray-500">
                   Net sales are the till plus Webshop, Wolt, Lieferando and catering invoices — the same figure as
                   &ldquo;Total net sales&rdquo; on the daily sheet. Total is every row of the month, so a shift left
-                  unset counts in Total without landing in Lunch or Dinner. Catering invoices issued as
-                  &ldquo;Catering&rdquo; or &ldquo;Other&rdquo; belong to no restaurant and are left out, so Total
-                  always equals its own columns.
+                  unset counts in Total without landing in Lunch or Dinner. A catering invoice issued in a
+                  restaurant&rsquo;s name counts to that restaurant; one issued as &ldquo;Catering&rdquo; or
+                  &ldquo;Other&rdquo; was sold out of no store and sits on the Caterings line, so Total (stores)
+                  stays exactly the sum of its columns and Total is the group.
                 </div>
               </div>
             );
