@@ -1065,6 +1065,11 @@ export default function SalesReportsPage() {
   const [year,     setYear]     = useState(new Date().getFullYear());
   const [quarter,  setQuarter]  = useState<number>(Math.ceil((new Date().getMonth() + 1) / 3));
 
+  /* Which COGS cell has been opened out, if any. A cost line answers 'how
+     much'; the question straight after is always 'to whom', so a cell opens
+     into the suppliers behind it. */
+  const [cogsDrill, setCogsDrill] = useState<{ part: string; colKey: string } | null>(null);
+
   // Ref for daily table — scroll handled after yearShiftRows is declared below
   const dailyScrollRef = useRef<HTMLDivElement>(null);
 
@@ -1442,7 +1447,7 @@ export default function SalesReportsPage() {
       const out: Record<string, unknown>[] = [];
       for (let pg = 0; ; pg++) {
         const { data, error } = await supabase.from('bills')
-          .select('invoice_date,category,net_amount')
+          .select('invoice_date,category,net_amount,supplier_name,invoice_number')
           .gte('invoice_date', COGS_FROM + '-01')
           .order('invoice_date')
           .range(pg * 1000, (pg + 1) * 1000 - 1);
@@ -7531,27 +7536,43 @@ export default function SalesReportsPage() {
             /** A row whose cells are plain numbers, blank where there is nothing to say. */
             const valueLine = (
               rowKey: string, label: string, get: (colKey: string) => number | null,
-              opts: { bold?: boolean; indent?: boolean; pct?: boolean } = {},
+              /* `drill` makes each figure a button that opens the suppliers
+                 behind it. Only the COGS lines use it. */
+              opts: { bold?: boolean; indent?: boolean; pct?: boolean; drill?: string } = {},
             ) => (
               <tr key={rowKey} className="border-b border-gray-100 hover:bg-gray-50/60 group"
                 style={{ backgroundColor: opts.bold ? '#f9fafb' : '#ffffff' }}>
                 <td className={'sticky left-0 z-10 px-4 whitespace-nowrap border-r border-gray-100 group-hover:bg-gray-50 transition-colors ' + (opts.bold ? 'py-1.5 text-xs font-bold text-gray-800' : 'py-1 text-[11px] text-gray-600') + (opts.indent ? ' pl-8' : '')}
                   style={{ backgroundColor: opts.bold ? '#f9fafb' : '#ffffff' }}>
                   {label}
+                  {opts.drill && cogsDrill?.part === opts.drill && (
+                    <span className="ml-1 text-[10px] font-normal text-gray-400">by supplier ▾</span>
+                  )}
                 </td>
                 {groupMonthCols.map(col => {
                   const fy = col.type === 'fy';
                   const v = get(col.key);
+                  const open = !!opts.drill && cogsDrill?.part === opts.drill && cogsDrill.colKey === col.key;
+                  const canDrill = !!opts.drill && v !== null && v !== 0;
+                  const body = v === null
+                    ? <span className="text-gray-300">—</span>
+                    : opts.pct
+                      ? <span className="text-gray-800">{v.toFixed(1).replace('.', ',')}%</span>
+                      : <span className="text-gray-800">{fmtNum(Math.round(v))}</span>;
                   return (
                     <td key={col.key}
                       className={'text-right tabular-nums ' + (opts.bold ? 'py-1.5 text-xs font-bold' : 'py-1 text-[11px]')}
                       style={{ paddingLeft: 4, paddingRight: fy ? 6 : 8,
-                        ...(fy ? { backgroundColor: '#fffbeb', borderLeft: '1px solid #fde68a', borderRight: '1px solid #fde68a' } : {}) }}>
-                      {v === null
-                        ? <span className="text-gray-300">—</span>
-                        : opts.pct
-                          ? <span className="text-gray-800">{v.toFixed(1).replace('.', ',')}%</span>
-                          : <span className="text-gray-800">{fmtNum(Math.round(v))}</span>}
+                        ...(open ? { backgroundColor: '#e0e7ff' }
+                          : fy ? { backgroundColor: '#fffbeb', borderLeft: '1px solid #fde68a', borderRight: '1px solid #fde68a' } : {}) }}>
+                      {canDrill ? (
+                        <button
+                          onClick={() => setCogsDrill(open ? null : { part: opts.drill!, colKey: col.key })}
+                          title={open ? 'Hide the suppliers' : 'Show the suppliers behind this figure'}
+                          className="hover:underline decoration-dotted cursor-pointer">
+                          {body}
+                        </button>
+                      ) : body}
                     </td>
                   );
                 })}
@@ -7576,6 +7597,85 @@ export default function SalesReportsPage() {
             const cogsPart = (pick: (c: CogsBucket) => number) => (colKey: string) => {
               const c = cogsFor(colKey);
               return c ? pick(c) : null;
+            };
+
+            /**
+             * The suppliers behind one COGS cell, largest first.
+             *
+             * `part` is a line of the block — food, drinks, packaging — or
+             * 'total' for the three together. A column may be one month or a
+             * whole year; both are just a prefix of the invoice date.
+             */
+            const cogsSuppliers = (part: string, colKey: string) => {
+              const prefix = colKey.startsWith('FY') ? colKey.slice(2) + '-' : colKey;
+              const wanted = Object.entries(COGS_CATEGORIES)
+                .filter(([, key]) => part === 'total' || key === part)
+                .map(([cat]) => cat);
+              /* Keyed on the name in lower case: the same supplier is spelled
+                 both "Bier-Zentrale Leleithner GmbH" and "BIER-ZENTRALE
+                 Leleithner GmbH" across its own invoices, and two lines for one
+                 supplier would misread as two suppliers. The spelling shown is
+                 whichever the most invoices use. */
+              const by = new Map<string, { net: number; bills: number; names: Map<string, number> }>();
+              for (const b of gmCostBills) {
+                const date = String(b.invoice_date ?? '');
+                if (!date.startsWith(prefix) || date.slice(0, 7) < COGS_FROM) continue;
+                if (!wanted.includes(String(b.category ?? ''))) continue;
+                const name = String(b.supplier_name ?? '—').trim();
+                const key = name.toLowerCase();
+                const cur = by.get(key) ?? { net: 0, bills: 0, names: new Map<string, number>() };
+                cur.net += Number(b.net_amount ?? 0);
+                cur.bills += 1;
+                cur.names.set(name, (cur.names.get(name) ?? 0) + 1);
+                by.set(key, cur);
+              }
+              return [...by.values()]
+                .map(v => ({
+                  name: [...v.names.entries()].sort((a, z) => z[1] - a[1])[0][0],
+                  net: v.net,
+                  bills: v.bills,
+                }))
+                .sort((a, z) => z.net - a.net);
+            };
+
+            /** The opened-out rows sitting under a COGS line. */
+            const drillRows = (part: string) => {
+              if (!cogsDrill || cogsDrill.part !== part) return [];
+              const { colKey } = cogsDrill;
+              const rows = cogsSuppliers(part, colKey);
+              const total = rows.reduce((t, r) => t + r.net, 0);
+              const colLabel = colKey.startsWith('FY')
+                ? 'FY ' + colKey.slice(2)
+                : MONTH_ABBR[Number(colKey.slice(5)) - 1] + ' ' + colKey.slice(2, 4);
+              if (rows.length === 0) {
+                return [(
+                  <tr key={part + '-drill-none'} style={{ backgroundColor: '#f8fafc' }}>
+                    <td className="sticky left-0 z-10 px-4 py-1 pl-12 text-[11px] text-gray-400 border-r border-gray-100"
+                      style={{ backgroundColor: '#f8fafc' }}>No bills in {colLabel}</td>
+                    {groupMonthCols.map(col => <td key={col.key} style={{ backgroundColor: '#f8fafc' }} />)}
+                  </tr>
+                )];
+              }
+              return rows.map((r, i) => (
+                <tr key={part + '-drill-' + r.name} style={{ backgroundColor: '#f8fafc' }}>
+                  <td className="sticky left-0 z-10 px-4 py-1 pl-12 text-[11px] text-gray-500 border-r border-gray-100 truncate"
+                    style={{ backgroundColor: '#f8fafc', maxWidth: LABEL_W }}
+                    title={r.name + ' · ' + r.bills + ' bill' + (r.bills === 1 ? '' : 's')}>
+                    <span className="text-gray-400 mr-1">{i + 1}.</span>{r.name}
+                  </td>
+                  {groupMonthCols.map(col => (
+                    <td key={col.key} className="py-1 text-right tabular-nums text-[11px]"
+                      style={{ paddingLeft: 4, paddingRight: col.type === 'fy' ? 6 : 8, backgroundColor: '#f8fafc' }}>
+                      {col.key === colKey
+                        ? <span className="text-gray-700">
+                            {fmtNum(Math.round(r.net))}
+                            <span className="text-gray-400 ml-1">{total > 0 ? Math.round(r.net / total * 100) + '%' : ''}</span>
+                          </span>
+                        : null}
+                    </td>
+                  ))}
+                </tr>
+              ));
             };
             /** What the group kept: everything sold, less what the goods cost. */
             const grossProfit = (colKey: string) => {
@@ -7640,10 +7740,14 @@ export default function SalesReportsPage() {
                       {block('dinner', 'Net sales · Dinner', b => b.dinner)}
                       {block('total',  'Net sales · Total',  b => b.total, true)}
                       {headingRow('cogs-head', 'COGS')}
-                      {valueLine('cogs-food',      'Food Cost',   cogsPart(c => c.food),      { indent: true })}
-                      {valueLine('cogs-drinks',    'Drinks Cost', cogsPart(c => c.drinks),    { indent: true })}
-                      {valueLine('cogs-packaging', 'Packaging',   cogsPart(c => c.packaging), { indent: true })}
-                      {valueLine('cogs-total',     'Total',       cogsPart(c => c.total),     { bold: true })}
+                      {valueLine('cogs-food',      'Food Cost',   cogsPart(c => c.food),      { indent: true, drill: 'food' })}
+                      {drillRows('food')}
+                      {valueLine('cogs-drinks',    'Drinks Cost', cogsPart(c => c.drinks),    { indent: true, drill: 'drinks' })}
+                      {drillRows('drinks')}
+                      {valueLine('cogs-packaging', 'Packaging',   cogsPart(c => c.packaging), { indent: true, drill: 'packaging' })}
+                      {drillRows('packaging')}
+                      {valueLine('cogs-total',     'Total',       cogsPart(c => c.total),     { bold: true, drill: 'total' })}
+                      {drillRows('total')}
                       {spacerRow('cogs-gap')}
                       {headingRow('gm-head', 'Gross margin')}
                       {valueLine('gm-abs', 'Gross profit',   grossProfit,    { bold: true })}
