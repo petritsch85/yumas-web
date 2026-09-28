@@ -200,6 +200,42 @@ async function findDuplicate(extracted: Record<string, unknown>): Promise<string
   return hit?.id ?? null;
 }
 
+/** Case, accents and punctuation removed — two spellings of one name match here. */
+const nameKey = (s: string) => s.toLowerCase()
+  .replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue').replace(/ß/g, 'ss')
+  .replace(/[^a-z0-9]/g, '');
+
+/**
+ * The spelling this supplier's existing bills already use.
+ *
+ * Matching ignores case and punctuation, and accepts a name that only differs
+ * by a trailing tagline — "… GmbH Getränkegrosshandel und Gastronomiepartner"
+ * is the same merchant as "… GmbH". Returns null when the supplier is new or
+ * its spellings disagree, in which case the extracted name stands.
+ */
+async function establishedSpelling(raw: string): Promise<string | null> {
+  const key = nameKey(raw);
+  if (key.length < 6) return null;
+  const { data } = await getSupabaseAdmin()
+    .from('bills')
+    .select('supplier_name')
+    .ilike('supplier_name', `%${raw.trim().split(/\s+/)[0]}%`)
+    .limit(500);
+
+  const counts = new Map<string, number>();
+  for (const row of data ?? []) {
+    const name = String(row.supplier_name ?? '').trim();
+    const k = nameKey(name);
+    if (!k) continue;
+    // The same string, or one a prefix of the other with enough in common.
+    const [short, long] = k.length <= key.length ? [k, key] : [key, k];
+    if (k !== key && !(short.length >= 12 && long.startsWith(short))) continue;
+    counts.set(name, (counts.get(name) ?? 0) + 1);
+  }
+  if (counts.size === 0) return null;
+  return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].length - b[0].length)[0][0];
+}
+
 async function extractFromAttachment(attachment: Attachment): Promise<Record<string, unknown>> {
   const isPdf = attachment.ContentType === 'application/pdf' || attachment.Name.toLowerCase().endsWith('.pdf');
   const textBlock = { type: 'text' as const, text: `Extract all invoice data from this file (filename: ${attachment.Name}) and return the JSON structure described. Return valid JSON only — no markdown, no trailing commas.` };
@@ -246,6 +282,15 @@ async function extractFromAttachment(attachment: Attachment): Promise<Record<str
       if (fixed !== extracted.supplier_name) {
         console.log(`[inbound-bills] supplier corrected: ${extracted.supplier_name} -> ${fixed}`);
         extracted.supplier_name = fixed;
+      }
+      /* Then to the spelling this supplier already uses here. The model copies
+         the name off the page and the page is not consistent — Leleithner
+         invoices its own name in six different casings — so a bill would
+         otherwise arrive as a supplier of its own. */
+      const settled = await establishedSpelling(extracted.supplier_name as string);
+      if (settled && settled !== extracted.supplier_name) {
+        console.log(`[inbound-bills] supplier spelling settled: ${extracted.supplier_name} -> ${settled}`);
+        extracted.supplier_name = settled;
       }
     }
   } catch (e) {
