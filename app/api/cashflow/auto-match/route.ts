@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase-admin';
-import { matchByReference } from '@/lib/payment-reference';
+import { matchByReference, normaliseRef } from '@/lib/payment-reference';
 import type { RefBill, TakenBill } from '@/lib/payment-reference';
 import { linkObjection } from '@/lib/match-rules';
 import { payableAmounts } from '@/lib/skonto';
@@ -36,6 +36,8 @@ type ReferenceMatch = {
   /** Numbers the bank quotes whose invoice we hold, but another payment claims. */
   taken:          TakenBill[];
   complete:       boolean;
+  /** True when this adds to links already saved rather than making new ones. */
+  toppingUp?:     boolean;
 };
 
 /** A customer's payment against an invoice we issued. */
@@ -190,6 +192,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: e.message }, { status: 500 });
   }
   const multiLinkedTx = new Set(linkRows.map(r => r.transaction_id as string));
+  /* Transactions already covered by links are kept aside: the amount passes
+     must not touch them, but the reference pass below can still top one up
+     when the invoices it was missing finally arrive. */
+  const partiallyLinkedTxs = txs.filter(t => multiLinkedTx.has(t.id));
   txs = txs.filter(t => !multiLinkedTx.has(t.id));
 
   // 2. Fetch ALL bills and all linked bill_ids (paginated)
@@ -530,7 +536,25 @@ export async function POST(req: NextRequest) {
       ...linkedBillIds,
       ...linkRows.map(r => r.bill_id as string),
     ]);
-    const txWithLinks = new Set(linkRows.map(r => r.transaction_id as string));
+    /* What each part-linked payment already has against it, so a top-up is
+       measured against the shortfall rather than the whole amount. */
+    const grossById = new Map(bills.map(b => [b.id as string, Number(b.gross_amount)]));
+    const numberById = new Map(bills.map(b => [b.id as string, normaliseRef(b.invoice_number as string | null)]));
+    const linkedSum = new Map<string, number>();
+    /* The invoice numbers a payment already holds. Without these a top-up
+       reports the bills it is already attached to as missing. */
+    const linkedNumbers = new Map<string, Set<string>>();
+    for (const r of linkRows) {
+      const txId = r.transaction_id as string;
+      const g = grossById.get(r.bill_id as string);
+      if (g === undefined) continue;
+      linkedSum.set(txId, (linkedSum.get(txId) ?? 0) + g);
+      const n = numberById.get(r.bill_id as string);
+      if (n) {
+        if (!linkedNumbers.has(txId)) linkedNumbers.set(txId, new Set());
+        linkedNumbers.get(txId)!.add(n);
+      }
+    }
 
     /* Which payment already holds a bill. An invoice the bank names for this
        payment but that something else holds is not a missing invoice — it is
@@ -542,9 +566,20 @@ export async function POST(req: NextRequest) {
     }
 
     const claimed = new Set<string>(matches.map(m => m.billId));
-    for (const tx of txs) {
-      if (txWithLinks.has(tx.id)) continue;               // already linked to several
+    /* Part-linked payments come first: closing one is worth more than opening a
+       new one, and the bills it wants must not be claimed by something else in
+       the meantime. */
+    for (const tx of [...partiallyLinkedTxs, ...txs]) {
       if (matches.some(m => m.txId === tx.id)) continue;  // matched one-to-one above
+
+      /* A payment that already has links is only revisited while it is short.
+         The invoices it was missing arrive weeks later — fifteen Fruveg ones
+         did — and nothing could ever attach them once the partial link was
+         saved. */
+      const already = linkedSum.get(tx.id) ?? 0;
+      const shortfall = Math.round((Math.abs(tx.amount_cents) / 100 - already) * 100) / 100;
+      const toppingUp = multiLinkedTx.has(tx.id);
+      if (toppingUp && Math.abs(shortfall) < 0.01) continue;   // nothing left owing
 
       const resolved = matchedSupplier(tx.counterparty);
       const sameParty = (b: { supplier_name: string }) => {
@@ -565,7 +600,13 @@ export async function POST(req: NextRequest) {
         .filter(b => !free(b) && sameParty(b))
         .map(b => ({ ...(b as RefBill), heldBy: heldBy.get(b.id) ?? null }));
 
-      const hit = matchByReference(tx, pool, held);
+      /* When topping up, the bills already attached are not in the pool, so
+         the match is judged against what is still owing rather than the whole
+         payment. */
+      const asIfOwing = toppingUp
+        ? { ...tx, amount_cents: Math.round(Math.abs(shortfall) * 100) }
+        : tx;
+      const hit = matchByReference(asIfOwing, pool, held);
       if (!hit) continue;
 
       for (const b of hit.bills) claimed.add(b.id);
@@ -576,7 +617,11 @@ export async function POST(req: NextRequest) {
         bills: hit.bills.map(b => ({
           id: b.id, invoiceNumber: b.invoice_number, invoiceDate: b.invoice_date, gross: Number(b.gross_amount),
         })),
-        sum: hit.sum, missing: hit.missing, taken: hit.taken, complete: hit.complete,
+        sum: Math.round((already + hit.sum) * 100) / 100,
+        /* A number this payment already holds is not missing from it. */
+        missing: hit.missing.filter(m => !(linkedNumbers.get(tx.id)?.has(normaliseRef(m)) ?? false)),
+        taken: hit.taken, complete: hit.complete,
+        toppingUp,
       });
     }
   } catch {
@@ -758,6 +803,7 @@ export async function POST(req: NextRequest) {
   let appliedReference = 0;
   for (const r of applyReference) {
     const note = `${r.bills.length} Rechnung${r.bills.length === 1 ? '' : 'en'} laut Verwendungszweck`
+      + (r.toppingUp ? ' (nachgetragen)' : '')
       + (r.complete ? '' : ` · ${r.sum.toFixed(2)} € von ${(Math.abs(r.txAmountCents) / 100).toFixed(2)} €`)
       + (r.missing.length ? ` · nicht im System: ${r.missing.join(', ')}` : '')
       + (r.taken.length ? ` · bereits anderweitig zugeordnet: ${r.taken.map(t => t.invoiceNumber ?? '—').join(', ')}` : '');
@@ -765,6 +811,14 @@ export async function POST(req: NextRequest) {
       r.bills.map(b => ({ transaction_id: r.txId, bill_id: b.id, note })),
     );
     if (error) { errors.push(error.message); continue; }
+    /* Topping up closes the gap the earlier links recorded, so their note is
+       brought up to date too — otherwise the row keeps claiming a shortfall
+       that has just been filled. */
+    if (r.toppingUp && r.complete) {
+      await admin.from('transaction_bill_links')
+        .update({ note })
+        .eq('transaction_id', r.txId);
+    }
     // A collected invoice is paid, whatever anyone does next.
     await admin.from('bills').update({ status: 'paid' }).in('id', r.bills.map(b => b.id));
     appliedReference++;

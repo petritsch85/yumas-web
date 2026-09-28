@@ -1195,7 +1195,7 @@ export default function CashFlowPage() {
     txId: string; txDate: string; txCounterparty: string; txAmountCents: number;
     supplier: string;
     bills: { id: string; invoiceNumber: string | null; invoiceDate: string | null; gross: number }[];
-    sum: number; missing: string[]; complete: boolean;
+    sum: number; missing: string[]; complete: boolean; toppingUp?: boolean;
     /** Named by the bank, held by us, but tied up in another payment. */
     taken: { invoiceNumber: string | null; gross: number; heldBy: { date: string; description: string | null } | null }[];
   };
@@ -1939,6 +1939,12 @@ export default function CashFlowPage() {
                           className="w-4 h-4 accent-green-600 flex-shrink-0" />
                         <span className="text-gray-600">{r.txDate}</span>
                         <span className="font-semibold text-gray-800">{r.supplier}</span>
+                        {r.toppingUp && (
+                          <span className="text-[10px] font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-full px-1.5 py-0.5"
+                            title="This payment already has bills against it — these complete the set">
+                            tops up
+                          </span>
+                        )}
                         <span className="font-semibold text-red-600 tabular-nums">
                           {(Math.abs(r.txAmountCents) / 100).toLocaleString('de-DE', { minimumFractionDigits: 2 })} €
                         </span>
