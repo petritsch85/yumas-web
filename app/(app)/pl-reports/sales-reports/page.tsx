@@ -85,6 +85,9 @@ import { useT } from '@/lib/i18n';
 
 type Location = { id: string; name: string };
 
+/** Net sales for one restaurant in one month, split by shift. */
+type GroupBucket = { lunch: number; dinner: number; total: number };
+
 type WeekData = {
   week_start:       string;
   week_end:         string | null;
@@ -1356,6 +1359,126 @@ export default function SalesReportsPage() {
       return (data ?? []) as MonthlyReportData[];
     },
   });
+
+  /* ── Group monthly: every restaurant side by side ──────────────────────────
+     The monthly sheet is written for one location, so "Group" had nothing to
+     show. These read the same tables the daily summary reads, but for all
+     restaurants at once and keeping location_id, so each one can have its own
+     column. Loaded only on the Group monthly view. */
+  const groupMonthlyOn = isGroup && activeTab === 'daily' && subTab === 'monthly';
+
+  /** Every row of a table, paged past Supabase's 1000-row ceiling. */
+  const fetchAllRows = useCallback(async (table: string, columns: string, order: string) => {
+    const out: Record<string, unknown>[] = [];
+    for (let pg = 0; ; pg++) {
+      const { data, error } = await supabase.from(table).select(columns)
+        .order(order).range(pg * 1000, (pg + 1) * 1000 - 1);
+      if (error) throw new Error(`${table}: ${error.message}`);
+      if (!data?.length) break;
+      out.push(...(data as unknown as Record<string, unknown>[]));
+      if (data.length < 1000) break;
+    }
+    return out;
+  }, []);
+
+  const { data: gmShifts = [] } = useQuery({
+    queryKey: ['group-monthly', 'shifts'], enabled: groupMonthlyOn,
+    queryFn: () => fetchAllRows('shift_reports', 'location_id,report_date,shift_type,net_total', 'report_date'),
+  });
+  const { data: gmWebshop = [] } = useQuery({
+    queryKey: ['group-monthly', 'webshop'], enabled: groupMonthlyOn,
+    queryFn: () => fetchAllRows('webshop_orders', 'location_id,sale_date,shift,net_cents', 'sale_date'),
+  });
+  const { data: gmWolt = [] } = useQuery({
+    queryKey: ['group-monthly', 'wolt'], enabled: groupMonthlyOn,
+    queryFn: () => fetchAllRows('wolt_shift_sales', 'location_id,sale_date,shift,net_sales,net_final', 'sale_date'),
+  });
+  const { data: gmWoltCredits = [] } = useQuery({
+    queryKey: ['group-monthly', 'wolt-credits'], enabled: groupMonthlyOn,
+    queryFn: () => fetchAllRows('wolt_month_credits', 'location_id,month,net', 'month'),
+  });
+  const { data: gmLieferando = [] } = useQuery({
+    queryKey: ['group-monthly', 'lieferando'], enabled: groupMonthlyOn,
+    queryFn: () => fetchAllRows('lieferando_shift_sales', 'location_id,sale_date,shift,net_final', 'sale_date'),
+  });
+  const { data: gmBills = [] } = useQuery({
+    queryKey: ['group-monthly', 'bills'], enabled: groupMonthlyOn,
+    queryFn: () => fetchAllRows('outgoing_bills', 'issuing_location,event_date,shift_type,net_total', 'event_date'),
+  });
+
+  /* The three restaurants, in a fixed order so the columns never move. */
+  const groupRestaurants = useMemo(
+    () => restaurantsOnly(allLocations).slice().sort((a, b) => a.name.localeCompare(b.name)),
+    [allLocations],
+  );
+
+  /**
+   * Net sales per month, per restaurant, per shift.
+   *
+   * The same figure the daily sheet calls "Total net sales": the till, plus
+   * Webshop, Wolt, Lieferando and catering invoices. Wolt's monthly credit is
+   * spread across that month's days in proportion to their sales, exactly as
+   * the daily view spreads it, so the two agree.
+   *
+   * `total` is every row of the month, not lunch + dinner: a row whose shift
+   * was never set belongs to the day even though it belongs to neither shift.
+   */
+  const groupMonthly = useMemo(() => {
+    type Bucket = GroupBucket;
+    const m: Record<string, Record<string, Bucket>> = {};
+    const bucket = (monthKey: string, locId: string): Bucket =>
+      ((m[monthKey] ??= {})[locId] ??= { lunch: 0, dinner: 0, total: 0 });
+    const add = (date: unknown, locId: unknown, shift: unknown, value: number) => {
+      if (!date || !locId || !Number.isFinite(value) || value === 0) return;
+      const b = bucket(String(date).slice(0, 7), String(locId));
+      if (shift === 'lunch') b.lunch += value;
+      else if (shift === 'dinner') b.dinner += value;
+      b.total += value;
+    };
+
+    for (const r of gmShifts) add(r.report_date, r.location_id, r.shift_type, Number(r.net_total ?? 0));
+    for (const r of gmWebshop) add(r.sale_date, r.location_id, r.shift, Number(r.net_cents ?? 0) / 100);
+    for (const r of gmWolt) add(r.sale_date, r.location_id, r.shift, Number(r.net_final ?? 0));
+    for (const r of gmLieferando) add(r.sale_date, r.location_id, r.shift, Number(r.net_final ?? 0));
+
+    /* Wolt's monthly credit, shared over the month's days by their net sales. */
+    for (const c of gmWoltCredits) {
+      const monthKey = String(c.month ?? '').slice(0, 7);
+      const rows = gmWolt.filter(r => r.location_id === c.location_id && String(r.sale_date).startsWith(monthKey));
+      const base = rows.reduce((t, r) => t + Number(r.net_sales ?? 0), 0);
+      if (base <= 0) continue;
+      for (const r of rows) {
+        add(r.sale_date, r.location_id, r.shift, Number(c.net ?? 0) * (Number(r.net_sales ?? 0) / base));
+      }
+    }
+
+    /* Catering invoices. issuing_location is a name, and only the three
+       restaurants have a column — a bill issued as "Catering" or "Other"
+       belongs to no restaurant, and counting it in the total alone would make
+       the total stop equalling its own columns. */
+    const idByName = new Map(groupRestaurants.map(l => [l.name.toLowerCase(), l.id]));
+    for (const b of gmBills) {
+      const id = idByName.get(String(b.issuing_location ?? '').toLowerCase());
+      if (!id) continue;
+      add(b.event_date, id, b.shift_type, Number(b.net_total ?? 0));
+    }
+
+    return m;
+  }, [gmShifts, gmWebshop, gmWolt, gmWoltCredits, gmLieferando, gmBills, groupRestaurants]);
+
+  /** Months from the first with data to the last, each year closed by an FY column. */
+  const groupMonthCols = useMemo(() => {
+    const keys = Object.keys(groupMonthly).sort();
+    if (keys.length === 0) return [] as { type: 'month' | 'fy'; year: number; month: number; key: string }[];
+    const firstY = Number(keys[0].slice(0, 4));
+    const lastY  = Number(keys[keys.length - 1].slice(0, 4));
+    const cols: { type: 'month' | 'fy'; year: number; month: number; key: string }[] = [];
+    for (let y = firstY; y <= lastY; y++) {
+      for (let mn = 1; mn <= 12; mn++) cols.push({ type: 'month', year: y, month: mn, key: `${y}-${String(mn).padStart(2, '0')}` });
+      cols.push({ type: 'fy', year: y, month: 0, key: `FY${y}` });
+    }
+    return cols;
+  }, [groupMonthly]);
 
   // Shift reports for full year — used in weekly summary (lunch/dinner split by KW)
   const { data: yearShiftRows = [] } = useQuery({
@@ -7256,6 +7379,115 @@ export default function SalesReportsPage() {
             <MapPin size={36} className="text-gray-200" />
             <p className="text-sm">Select a location to view the monthly P&amp;L</p>
           </div>
+        ) : isGroup ? (
+          /* ── Group: the restaurants side by side ──────────────────────────
+             One location's monthly sheet is a P&L; the group's job is the
+             comparison, so each block carries a column per restaurant and the
+             total beside them. */
+          groupMonthCols.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-40 text-gray-400 gap-2 border border-dashed border-gray-200 rounded-xl">
+              <TableProperties size={28} className="text-gray-200" />
+              <p className="text-sm font-medium">No sales recorded for any restaurant yet</p>
+            </div>
+          ) : (() => {
+            const ZERO: GroupBucket = { lunch: 0, dinner: 0, total: 0 };
+            const cellFor = (colKey: string, locId: string): GroupBucket => {
+              if (!colKey.startsWith('FY')) return groupMonthly[colKey]?.[locId] ?? ZERO;
+              const year = colKey.slice(2);
+              return Object.entries(groupMonthly)
+                .filter(([k]) => k.startsWith(year + '-'))
+                .reduce<GroupBucket>((acc, [, byLoc]) => {
+                  const b = byLoc[locId];
+                  return b ? { lunch: acc.lunch + b.lunch, dinner: acc.dinner + b.dinner, total: acc.total + b.total } : acc;
+                }, { ...ZERO });
+            };
+            const sumAll = (colKey: string): GroupBucket =>
+              groupRestaurants.reduce<GroupBucket>((acc, l) => {
+                const b = cellFor(colKey, l.id);
+                return { lunch: acc.lunch + b.lunch, dinner: acc.dinner + b.dinner, total: acc.total + b.total };
+              }, { ...ZERO });
+
+            const MONTH_ABBR = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+            const show = (v: number) => v === 0
+              ? <span className="text-gray-300">—</span>
+              : <span className="text-gray-800">{fmtNum(v)}</span>;
+
+            /** One restaurant's line inside a block, or the bold total closing it. */
+            const line = (
+              blockKey: string, label: string, pick: (b: GroupBucket) => number,
+              get: (colKey: string) => GroupBucket, bold: boolean,
+            ) => (
+              <tr key={blockKey + '-' + label} className="border-b border-gray-100 hover:bg-gray-50/60 group"
+                style={{ backgroundColor: bold ? '#f9fafb' : '#ffffff' }}>
+                <td className={'sticky left-0 z-10 px-4 whitespace-nowrap border-r border-gray-100 group-hover:bg-gray-50 transition-colors ' + (bold ? 'py-1.5 text-xs font-bold text-gray-800' : 'py-1 pl-8 text-[11px] text-gray-600')}
+                  style={{ backgroundColor: bold ? '#f9fafb' : '#ffffff' }}>
+                  {label}
+                </td>
+                {groupMonthCols.map(col => {
+                  const fy = col.type === 'fy';
+                  return (
+                    <td key={col.key}
+                      className={'text-right tabular-nums ' + (bold ? 'py-1.5 text-xs font-bold' : 'py-1 text-[11px]')}
+                      style={{ paddingLeft: 4, paddingRight: fy ? 6 : 8,
+                        ...(fy ? { backgroundColor: '#fffbeb', borderLeft: '1px solid #fde68a', borderRight: '1px solid #fde68a' } : {}) }}>
+                      {show(Math.round(pick(get(col.key))))}
+                    </td>
+                  );
+                })}
+              </tr>
+            );
+
+            /** A block: the heading, a line per restaurant, then the total. */
+            const block = (blockKey: string, heading: string, pick: (b: GroupBucket) => number) => [
+              <tr key={blockKey + '-head'} className="border-b border-gray-200" style={{ backgroundColor: '#eef2ff' }}>
+                <td className="sticky left-0 z-10 px-4 py-1.5 whitespace-nowrap border-r border-gray-100 text-xs font-bold text-gray-800"
+                  style={{ backgroundColor: '#eef2ff' }}>{heading}</td>
+                {groupMonthCols.map(col => <td key={col.key} style={{ backgroundColor: '#eef2ff' }} />)}
+              </tr>,
+              ...groupRestaurants.map(l => line(blockKey, l.name, pick, k => cellFor(k, l.id), false)),
+              line(blockKey, 'Total', pick, sumAll, true),
+              <tr key={blockKey + '-gap'} style={{ height: 10 }}>
+                <td className="sticky left-0 z-10 bg-white border-r border-gray-100" />
+                {groupMonthCols.map(col => <td key={col.key} className="bg-white" />)}
+              </tr>,
+            ];
+
+            return (
+              <div className="flex-1 min-h-0 flex flex-col border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+                <div className="flex-1 min-h-0 overflow-x-scroll overflow-y-auto scrollbar-always">
+                  <table className="text-xs border-collapse" style={{ minWidth: LABEL_W + groupMonthCols.length * COL_W_MN }}>
+                    <thead className="sticky top-0 z-30">
+                      <tr style={{ backgroundColor: '#111827' }}>
+                        <th className="sticky left-0 z-20 px-4 py-3 text-left text-xs font-semibold text-gray-400 uppercase tracking-wider whitespace-nowrap border-r border-gray-700"
+                          style={{ backgroundColor: '#111827', minWidth: LABEL_W, width: LABEL_W }}>
+                          NET SALES / MONTH
+                        </th>
+                        {groupMonthCols.map(col => (
+                          <th key={col.key} className="py-3 text-right font-bold whitespace-nowrap border-l border-gray-700"
+                            style={{ minWidth: COL_W_MN, width: COL_W_MN, paddingLeft: 4, paddingRight: 8,
+                              color: col.type === 'fy' ? '#e5e7eb' : '#9ca3af' }}>
+                            {col.type === 'fy' ? 'FY ' + col.year : MONTH_ABBR[col.month - 1] + ' ' + String(col.year).slice(2)}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {block('lunch',  'Net sales · Lunch',  b => b.lunch)}
+                      {block('dinner', 'Net sales · Dinner', b => b.dinner)}
+                      {block('total',  'Net sales · Total',  b => b.total)}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="px-4 py-2 border-t border-gray-100 bg-gray-50 text-[11px] text-gray-500">
+                  Net sales are the till plus Webshop, Wolt, Lieferando and catering invoices — the same figure as
+                  &ldquo;Total net sales&rdquo; on the daily sheet. Total is every row of the month, so a shift left
+                  unset counts in Total without landing in Lunch or Dinner. Catering invoices issued as
+                  &ldquo;Catering&rdquo; or &ldquo;Other&rdquo; belong to no restaurant and are left out, so Total
+                  always equals its own columns.
+                </div>
+              </div>
+            );
+          })()
         ) : Object.keys(monthMapAll).length === 0 ? (
               <div className="flex flex-col items-center justify-center h-40 text-gray-400 gap-2 border border-dashed border-gray-200 rounded-xl">
                 <TableProperties size={28} className="text-gray-200" />
