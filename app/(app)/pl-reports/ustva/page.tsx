@@ -235,7 +235,7 @@ export default function UstvaPage() {
                       <table className="w-full text-xs">
                         <tbody>
                           {isBills
-                            ? (data?.bills ?? []).filter(b => b.status === 'approved').map(b => (
+                            ? (data?.bills ?? []).filter(b => b.status === 'approved' || b.status === 'to_be_paid').map(b => (
                               <tr key={b.id} className="border-b border-gray-100 last:border-0">
                                 <td className="py-1 pr-3 text-gray-500 whitespace-nowrap">{de(b.invoice_date)}</td>
                                 <td className="py-1 pr-3 text-gray-800">{b.supplier_name}</td>

@@ -574,8 +574,9 @@ function BillMatchModal({ tx, onLink, onUnlink, onClose }: {
                     <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${
                       bill.status === 'approved' ? 'bg-green-100 text-green-800'
                       : bill.status === 'paid' ? 'bg-blue-100 text-blue-800'
+                      : bill.status === 'to_be_paid' ? 'bg-purple-100 text-purple-800'
                       : 'bg-amber-100 text-amber-800'
-                    }`}>{bill.status}</span>
+                    }`}>{bill.status === 'to_be_paid' ? 'to be paid' : bill.status}</span>
                     {' '}<span className="text-xs text-gray-400">{bill.category}</span>
                   </div>
                 )}

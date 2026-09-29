@@ -104,7 +104,7 @@ type Bill = {
   period_type:    string | null;
   period_start:   string | null;
   period_end:     string | null;
-  status:         'pending' | 'approved' | 'paid';
+  status:         'pending' | 'approved' | 'to_be_paid' | 'paid';
   file_path:      string | null;
   /** The account printed on the invoice itself, where the extraction found one. */
   creditor_iban?: string | null;
@@ -156,8 +156,9 @@ const PERIOD_LABELS: Record<PeriodType, string> = {
 
 const STATUS_STYLES: Record<string, string> = {
   pending:  'bg-amber-50 text-amber-700 border-amber-200',
-  approved: 'bg-blue-50 text-blue-700 border-blue-200',
-  paid:     'bg-green-50 text-green-700 border-green-200',
+  approved:   'bg-blue-50 text-blue-700 border-blue-200',
+  to_be_paid: 'bg-purple-50 text-purple-700 border-purple-200',
+  paid:       'bg-green-50 text-green-700 border-green-200',
 };
 
 const SPECIAL_LOCATIONS = [
@@ -524,6 +525,7 @@ export default function BillsPage() {
   const [page, setPage]         = useState(1);   // pending table
   const [page2, setPage2]       = useState(1);   // approved table
   const [page3, setPage3]       = useState(1);   // paid table
+  const [page4, setPage4]       = useState(1);   // to-be-paid table
   const [pageSize, setPageSize] = useState(100);
 
   const handleSort = (col: string) => {
@@ -776,10 +778,12 @@ export default function BillsPage() {
   // off; approving (or paying) one moves it down. Changing the status back moves
   // it straight back up, since both lists derive from the same sorted array.
   const pendingRows = useMemo(() => sortedFiltered.filter(b => b.status === 'pending'), [sortedFiltered]);
-  /* Approved means checked; paid means the money has gone. A bill marked paid
-     leaves the approved table so that one holds only what is still owed. */
-  const settledRows = useMemo(() => sortedFiltered.filter(b => b.status === 'approved'), [sortedFiltered]);
-  const paidRows    = useMemo(() => sortedFiltered.filter(b => b.status === 'paid'),     [sortedFiltered]);
+  /* Approved means checked; to be paid means it has to be transferred by hand
+     (a SEPA debit skips it and goes straight to paid); paid means the money has
+     gone. Each table holds only its own status. */
+  const settledRows  = useMemo(() => sortedFiltered.filter(b => b.status === 'approved'),   [sortedFiltered]);
+  const toBePaidRows = useMemo(() => sortedFiltered.filter(b => b.status === 'to_be_paid'), [sortedFiltered]);
+  const paidRows     = useMemo(() => sortedFiltered.filter(b => b.status === 'paid'),       [sortedFiltered]);
 
   const sumRows = (rows: Bill[]) => ({
     count: rows.length,
@@ -789,13 +793,13 @@ export default function BillsPage() {
   });
 
   /* ── The Sammelüberweisung ──
-     Everything approved and not yet paid, with the account to pay it to. The
+     Everything marked To Be Paid, with the account to pay it to. The
      counterparty's own account comes first: a supplier is paid to the same
      account every month, and the one printed on a single invoice may be a
      factoring house or simply a typo in the extraction. */
   const payableRows = useMemo(
     () => bills.filter(b =>
-      b.status === 'approved' && b.gross_amount > 0 &&
+      b.status === 'to_be_paid' && b.gross_amount > 0 &&
       /* A supplier that collects by direct debit, card or PayPal takes the
          money itself. Transferring it as well pays the invoice twice, which is
          the one mistake a payment run must never make. */
@@ -803,9 +807,9 @@ export default function BillsPage() {
       .sort((a, b) => (a.invoice_date ?? '').localeCompare(b.invoice_date ?? '')),
     [bills],
   );
-  /** Approved, but collected by the supplier — shown so they are not simply invisible. */
+  /** To be paid, but collected by the supplier — shown so they are not simply invisible. */
   const autoCollectedRows = useMemo(
-    () => bills.filter(b => b.status === 'approved' && b.gross_amount > 0 && isAutoCollected(b.payment_method)),
+    () => bills.filter(b => b.status === 'to_be_paid' && b.gross_amount > 0 && isAutoCollected(b.payment_method)),
     [bills],
   );
   const ibanFor = useCallback((b: Bill) => {
@@ -890,12 +894,16 @@ export default function BillsPage() {
   const settledPage       = Math.min(page2, settledTotalPages);
   const settledPageRows   = settledRows.slice((settledPage - 1) * pageSize, settledPage * pageSize);
 
+  const toBePaidTotalPages = Math.max(1, Math.ceil(toBePaidRows.length / pageSize));
+  const toBePaidPage       = Math.min(page4, toBePaidTotalPages);
+  const toBePaidPageRows   = toBePaidRows.slice((toBePaidPage - 1) * pageSize, toBePaidPage * pageSize);
+
   const paidTotalPages = Math.max(1, Math.ceil(paidRows.length / pageSize));
   const paidPage       = Math.min(page3, paidTotalPages);
   const paidPageRows   = paidRows.slice((paidPage - 1) * pageSize, paidPage * pageSize);
 
   // Snap back to page 1 whenever the result set changes underneath us
-  useEffect(() => { setPage(1); setPage2(1); setPage3(1); }, [filterStatus, filterCategory, filterLocation, filterMonth, filterDuplicates, sortCol, sortDir, pageSize]);
+  useEffect(() => { setPage(1); setPage2(1); setPage3(1); setPage4(1); }, [filterStatus, filterCategory, filterLocation, filterMonth, filterDuplicates, sortCol, sortDir, pageSize]);
 
   // ── Match delivery address to a known location ────────────────────────────────
   const matchLocation = useCallback((addr: DeliveryAddress | null, locs: Location[]): { locationId: string; locationLabel: string } | null => {
@@ -1371,6 +1379,7 @@ export default function BillsPage() {
                               className={`text-xs font-semibold pl-2 pr-1 py-0.5 rounded-full border cursor-pointer focus:outline-none ${STATUS_STYLES[bill.status]}`}>
                               <option value="pending">Pending</option>
                               <option value="approved">Approved</option>
+                              <option value="to_be_paid">To Be Paid</option>
                               <option value="paid">Paid</option>
                             </select>
                           </td>
@@ -1900,6 +1909,7 @@ export default function BillsPage() {
               <option value="all">All statuses</option>
               <option value="pending">Pending</option>
               <option value="approved">Approved</option>
+              <option value="to_be_paid">To Be Paid</option>
               <option value="paid">Paid</option>
             </select>
             <select value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)}
@@ -1945,7 +1955,7 @@ export default function BillsPage() {
                 </select>
               </label>
               <span className="text-xs text-gray-400">
-                {pendingRows.length} pending · {settledRows.length} approved · {paidRows.length} paid
+                {pendingRows.length} pending · {settledRows.length} approved · {toBePaidRows.length} to be paid · {paidRows.length} paid
               </span>
             </div>
           </div>
@@ -1987,20 +1997,35 @@ export default function BillsPage() {
                   <span className="text-xs font-semibold text-blue-700 bg-blue-50 border border-blue-200 rounded-full px-2 py-0.5">
                     {settledRows.length}
                   </span>
-                  <span className="text-xs text-gray-400">still to pay</span>
-                  {payableRows.length > 0 && (
-                    <button onClick={openPaymentRun}
-                      title="Build a SEPA Sammelüberweisung from everything approved and unpaid"
-                      className="ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border border-[#1B5E20] text-[#1B5E20] hover:bg-green-50 transition-colors">
-                      <Landmark size={13} /> Überweisungsträger
-                    </button>
-                  )}
+                  <span className="text-xs text-gray-400">checked · SEPA debits to Paid, transfers to To Be Paid</span>
                 </div>
                 {settledRows.length === 0 ? (
                   <div className="flex items-center justify-center h-20 border border-dashed border-gray-200 rounded-xl">
-                    <p className="text-xs text-gray-400">No approved bills awaiting payment</p>
+                    <p className="text-xs text-gray-400">No approved bills waiting</p>
                   </div>
                 ) : renderBillsTable(settledPageRows, settledPage, settledTotalPages, setPage2, settledRows.length)}
+              </section>
+
+              <section>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <h2 className="text-sm font-bold text-gray-900">To Be Paid</h2>
+                  <span className="text-xs font-semibold text-purple-700 bg-purple-50 border border-purple-200 rounded-full px-2 py-0.5">
+                    {toBePaidRows.length}
+                  </span>
+                  <span className="text-xs text-gray-400">to transfer yourself</span>
+                  {payableRows.length > 0 && (
+                    <button onClick={openPaymentRun}
+                      title="Build a SEPA Sammelüberweisung from everything marked To Be Paid"
+                      className="ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border border-[#1B5E20] text-[#1B5E20] hover:bg-green-50 transition-colors">
+                      <Landmark size={13} /> Sammelüberweisung
+                    </button>
+                  )}
+                </div>
+                {toBePaidRows.length === 0 ? (
+                  <div className="flex items-center justify-center h-20 border border-dashed border-gray-200 rounded-xl">
+                    <p className="text-xs text-gray-400">Nothing waiting to be transferred</p>
+                  </div>
+                ) : renderBillsTable(toBePaidPageRows, toBePaidPage, toBePaidTotalPages, setPage4, toBePaidRows.length)}
               </section>
 
               <section>
@@ -2029,7 +2054,7 @@ export default function BillsPage() {
               <div>
                 <h2 className="font-bold text-gray-900">SEPA-Sammelüberweisung</h2>
                 <p className="text-xs text-gray-400 mt-0.5">
-                  Everything approved and unpaid · the file is downloaded here and uploaded to the Sparkasse yourself
+                  Everything marked To Be Paid · the file is downloaded here and uploaded to the Sparkasse yourself
                 </p>
               </div>
               <button onClick={() => setPayOpen(false)} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
@@ -2139,7 +2164,7 @@ export default function BillsPage() {
               )}
               {autoCollectedRows.length > 0 && (
                 <p className="text-xs text-gray-500">
-                  {autoCollectedRows.length} approved invoice(s) are left out because the supplier collects them
+                  {autoCollectedRows.length} To Be Paid invoice(s) are left out because the supplier collects them
                   itself — SEPA-Lastschrift, card or PayPal. Transferring those would pay them twice.
                 </p>
               )}

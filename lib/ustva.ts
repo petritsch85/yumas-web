@@ -253,8 +253,9 @@ export function computeUstva(input: UstvaInput): UstvaResult {
 
   /* ── Input VAT ── */
   const bills = input.bills.filter(b => inRange(b.invoice_date, from, to));
-  const approved = bills.filter(b => b.status === 'approved');
-  const pending  = bills.filter(b => b.status !== 'approved');
+  // To Be Paid is approved and only waiting for the transfer, so it counts too.
+  const approved = bills.filter(b => b.status === 'approved' || b.status === 'to_be_paid');
+  const pending  = bills.filter(b => b.status !== 'approved' && b.status !== 'to_be_paid');
   if (approved.length > 0) {
     inputLines.push({
       key: 'bills-in', label: 'Supplier invoices', rate: 0,
