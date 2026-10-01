@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase-admin';
+import { attachLinkAmounts } from '@/lib/link-amounts';
 import { markBillsPaid, unmarkBillsIfUnlinked } from '@/lib/bill-payment-status';
 
 export async function GET(req: NextRequest) {
@@ -24,7 +25,7 @@ export async function GET(req: NextRequest) {
     // wolt_period stands in for a bill on a Wolt payout: the settlement
     // documents in Sales Reports are the evidence, and Wolt issues no invoice
     // that would ever be filed under incoming bills.
-    .select('*, bill:bills(id, supplier_name, invoice_number, gross_amount, net_amount, vat_amount, file_path), transaction_bill_links(id, note, amount, bill:bills(id, supplier_name, invoice_number, gross_amount, net_amount, vat_amount)), wolt_period:wolt_periods(invoice_number, restaurant, period_start, period_end, payout_net, net_sales_pre_ads, sales_vat), lieferando_period:lieferando_periods(id, location_id, invoice_number, restaurant, period_start, period_end, payout), nexi_payout:nexi_payouts(payment_number, payout_date, amount, statement:nexi_statements(invoice_number, period_start, period_end)), nexi_statement:nexi_statements(invoice_number, period_start, period_end, fees_net, fees_vat, fees_gross), outgoing_bill:outgoing_bills(id, invoice_number, invoice_date, customer_name, total_payable, vat_7, vat_19, file_path)', { count: 'exact' })
+    .select('*, bill:bills(id, supplier_name, invoice_number, gross_amount, net_amount, vat_amount, file_path), transaction_bill_links(id, note, bill:bills(id, supplier_name, invoice_number, gross_amount, net_amount, vat_amount)), wolt_period:wolt_periods(invoice_number, restaurant, period_start, period_end, payout_net, net_sales_pre_ads, sales_vat), lieferando_period:lieferando_periods(id, location_id, invoice_number, restaurant, period_start, period_end, payout), nexi_payout:nexi_payouts(payment_number, payout_date, amount, statement:nexi_statements(invoice_number, period_start, period_end)), nexi_statement:nexi_statements(invoice_number, period_start, period_end, fees_net, fees_vat, fees_gross), outgoing_bill:outgoing_bills(id, invoice_number, invoice_date, customer_name, total_payable, vat_7, vat_19, file_path)', { count: 'exact' })
     .order('date', { ascending: false })
     .order('created_at', { ascending: false })
     .range((page - 1) * pageSize, page * pageSize - 1);
@@ -62,6 +63,9 @@ export async function GET(req: NextRequest) {
 
   const { data, count, error } = await q;
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  // Instalment links carry the part of a bill they settle; see lib/link-amounts.ts.
+  await attachLinkAmounts(admin, (data ?? []) as Parameters<typeof attachLinkAmounts>[1]);
 
   /* A Lieferando transfer can settle several weeks: the statement that carries
      the Auszahlung is linked, and every earlier week without a payout of its

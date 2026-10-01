@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase-admin';
+import { attachLinkAmounts } from '@/lib/link-amounts';
 
 // The settlement links stand in for a bill — a Nexi transfer, a Wolt or
 // Lieferando payout — so the panel can mark those rows as evidenced too.
-const SELECT = '*, bill:bills(id, supplier_name, invoice_number, gross_amount, file_path), transaction_bill_links(id, note, amount, bill:bills(id, supplier_name, invoice_number, gross_amount)), nexi_payout:nexi_payouts(payment_number, payout_date), nexi_statement:nexi_statements(invoice_number, period_start, period_end), wolt_period:wolt_periods(invoice_number, period_start, period_end), lieferando_period:lieferando_periods(invoice_number, period_start, period_end)';
+const SELECT = '*, bill:bills(id, supplier_name, invoice_number, gross_amount, file_path), transaction_bill_links(id, note, bill:bills(id, supplier_name, invoice_number, gross_amount)), nexi_payout:nexi_payouts(payment_number, payout_date), nexi_statement:nexi_statements(invoice_number, period_start, period_end), wolt_period:wolt_periods(invoice_number, period_start, period_end), lieferando_period:lieferando_periods(invoice_number, period_start, period_end)';
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -48,6 +49,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   const combined = [...(pinned ?? []), ...keywordRows].sort(
     (a, b) => b.date.localeCompare(a.date) || b.created_at.localeCompare(a.created_at)
   );
+
+  // Instalment links carry the part of a bill they settle; see lib/link-amounts.ts.
+  await attachLinkAmounts(admin, combined as Parameters<typeof attachLinkAmounts>[1]);
 
   return NextResponse.json({ data: combined, count: combined.length });
 }
