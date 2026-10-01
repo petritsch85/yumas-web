@@ -11,7 +11,13 @@
 
 export interface CoverageLink {
   bill?: { gross_amount?: number | null } | null;
+  /** The part of the bill this payment settles; null means the whole of it. */
+  amount?: number | null;
 }
+
+/** What a link is worth against the payment holding it. */
+const worth = (l: CoverageLink) =>
+  typeof l.amount === 'number' ? l.amount : Number(l.bill?.gross_amount ?? 0);
 
 export interface Coverage {
   /** How many links carry a bill we hold. */
@@ -34,8 +40,9 @@ const TOLERANCE = 0.01;
 export function linkCoverage(amountCents: number, links: CoverageLink[] | null | undefined): Coverage {
   const withBill = (links ?? []).filter(l => !!l?.bill);
   const amount = Math.abs(amountCents) / 100;
-  const known = withBill.length > 0 && withBill.every(l => typeof l.bill!.gross_amount === 'number');
-  const sum = withBill.reduce((s, l) => s + (l.bill!.gross_amount ?? 0), 0);
+  const known = withBill.length > 0
+    && withBill.every(l => typeof l.amount === 'number' || typeof l.bill!.gross_amount === 'number');
+  const sum = withBill.reduce((s, l) => s + worth(l), 0);
   const shortfall = amount - sum;
   return {
     count: withBill.length,

@@ -40,6 +40,23 @@ type ReferenceMatch = {
   toppingUp?:     boolean;
 };
 
+/** One of several payments settling a single bill. */
+type InstalmentMatch = {
+  txId:           string;
+  txDate:         string;
+  txCounterparty: string | null;
+  txAmountCents:  number;
+  billId:         string;
+  invoiceNumber:  string | null;
+  invoiceDate:    string | null;
+  supplier:       string;
+  billGross:      number;
+  /** What other payments have already settled of this bill. */
+  alreadyPaid:    number;
+  /** What is left owing once this payment is counted. */
+  remaining:      number;
+};
+
 /** A customer's payment against an invoice we issued. */
 type OutgoingMatch = {
   txId:           string;
@@ -184,7 +201,7 @@ export async function POST(req: NextRequest) {
     // A transfer covering several bills is linked through transaction_bill_links, not bill_id
     linkRows = await fetchAll((page, size) =>
       admin.from('transaction_bill_links')
-        .select('transaction_id, bill_id')
+        .select('transaction_id, bill_id, amount')
         .order('id')
         .range(page * size, (page + 1) * size - 1)
     );
@@ -628,6 +645,68 @@ export async function POST(req: NextRequest) {
     // The link table may not exist on an older database; the rest still stands.
   }
 
+  /* ── One bill, several payments ──────────────────────────────────────────
+     Every rule above assumes a payment settles whole bills. This is the
+     inverse: Perola's invoice 161077 prints "Zahlung 4.250€ nach 30 Tagen,
+     4.250€ nach 60 Tagen, 4.309,16€ nach 90 Tagen" and the bank pays exactly
+     that, so 12.809,16 € arrives as three transfers and no rule could see any
+     of them.
+
+     Only a payment that names one bill outright qualifies, and only for what
+     that bill still has owing. Without the number this would be guesswork —
+     any payment smaller than any bill would "fit". */
+  const instalmentMatches: InstalmentMatch[] = [];
+  try {
+    const grossOf = new Map<string, number>(bills.map(b => [b.id as string, Number(b.gross_amount)]));
+    const settledSoFar = new Map<string, number>();
+    for (const r of linkRows) {
+      const part = typeof r.amount === 'number' ? r.amount : grossOf.get(r.bill_id as string);
+      if (part === undefined) continue;
+      settledSoFar.set(r.bill_id as string, (settledSoFar.get(r.bill_id as string) ?? 0) + part);
+    }
+    for (const r of linkedRows) {
+      if (!r.bill_id) continue;
+      const g = grossOf.get(r.bill_id as string);
+      if (g !== undefined) settledSoFar.set(r.bill_id as string, (settledSoFar.get(r.bill_id as string) ?? 0) + g);
+    }
+
+    const alreadyProposed = new Set<string>([
+      ...matches.map(m => m.txId),
+      ...referenceMatches.map(m => m.txId),
+    ]);
+    const takenThisRun = new Map<string, number>();
+
+    for (const tx of txs) {
+      if (alreadyProposed.has(tx.id) || multiLinkedTx.has(tx.id)) continue;
+      const text = `${tx.counterparty ?? ''} ${tx.description ?? ''}`;
+      const named = bills.filter(b => quotes(text, b.invoice_number) && sameSupplier(tx, b));
+      if (named.length !== 1) continue;            // several named: not an instalment
+
+      const bill = named[0];
+      const gross = Number(bill.gross_amount);
+      if (!(gross > 0)) continue;
+      const paid = Math.abs(tx.amount_cents) / 100;
+      if (paid >= gross - 0.01) continue;          // settles the lot: not an instalment
+
+      const before = (settledSoFar.get(bill.id) ?? 0) + (takenThisRun.get(bill.id) ?? 0);
+      const owing = Math.round((gross - before) * 100) / 100;
+      if (owing <= 0.01) continue;                 // nothing left on it
+      if (paid > owing + 0.01) continue;           // more than is owed: not this bill
+
+      takenThisRun.set(bill.id, (takenThisRun.get(bill.id) ?? 0) + paid);
+      instalmentMatches.push({
+        txId: tx.id, txDate: tx.date, txCounterparty: tx.counterparty,
+        txAmountCents: tx.amount_cents,
+        billId: bill.id, invoiceNumber: bill.invoice_number, invoiceDate: bill.invoice_date,
+        supplier: bill.supplier_name, billGross: gross,
+        alreadyPaid: Math.round(before * 100) / 100,
+        remaining: Math.round((owing - paid) * 100) / 100,
+      });
+    }
+  } catch (e) {
+    console.error('[auto-match] instalment pass failed (non-fatal):', e);
+  }
+
   /* ── Customers paying the invoices we issued ──
      Until now matching only ever looked at money going out, so not one
      incoming payment was ever tied to an outgoing invoice. Customers quote the
@@ -762,7 +841,7 @@ export async function POST(req: NextRequest) {
     console.error('[auto-match] link audit failed (non-fatal):', e);
   }
 
-  if (!apply) return NextResponse.json({ matches, woltMatches: [...woltMatches, ...lieferandoMatches], referenceMatches, outgoingMatches, suspectLinks });
+  if (!apply) return NextResponse.json({ matches, woltMatches: [...woltMatches, ...lieferandoMatches], referenceMatches, instalmentMatches, outgoingMatches, suspectLinks });
 
   // 5. Apply matches
   const errors: string[] = [];
@@ -771,6 +850,7 @@ export async function POST(req: NextRequest) {
   const applyLieferando = picked(lieferandoMatches);
   const applyReference = picked(referenceMatches);
   const applyOutgoing = picked(outgoingMatches);
+  const applyInstalments = picked(instalmentMatches);
 
   for (const m of applyBills) {
     // One transfer for several bills is recorded as links, the way the Cash Flow page does it
@@ -824,6 +904,23 @@ export async function POST(req: NextRequest) {
     appliedReference++;
   }
 
+  /* An instalment: the link carries the part it settles, and the bill only
+     counts as paid once the parts add up to it. */
+  let appliedInstalments = 0;
+  for (const i of applyInstalments) {
+    const note = `Teilzahlung ${(Math.abs(i.txAmountCents) / 100).toFixed(2)} € von ${i.billGross.toFixed(2)} €`
+      + (i.remaining > 0.01 ? ` · offen ${i.remaining.toFixed(2)} €` : ' · vollständig beglichen');
+    const { error } = await admin.from('transaction_bill_links').insert({
+      transaction_id: i.txId, bill_id: i.billId, note,
+      amount: Math.abs(i.txAmountCents) / 100,
+    });
+    if (error) { errors.push(error.message); continue; }
+    if (i.remaining <= 0.01) {
+      await admin.from('bills').update({ status: 'paid' }).eq('id', i.billId);
+    }
+    appliedInstalments++;
+  }
+
   /* A customer's payment against an invoice we issued. Mirrors what the Cash
      Flow page does by hand: the credit points at the invoice, and the invoice
      stops being pending. */
@@ -842,6 +939,7 @@ export async function POST(req: NextRequest) {
     applied: applyBills.length,
     appliedWolt: applyWolt.length + applyLieferando.length,
     appliedReference,
+    appliedInstalments,
     appliedOutgoing,
     errors,
   });

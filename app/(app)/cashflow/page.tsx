@@ -45,7 +45,7 @@ type CfTx = {
   bill_id: string | null;
   bill: BillRef | null;
   /** Many-to-many links — set when one cash flow covers several bills. */
-  transaction_bill_links: { id: string; note: string | null; bill: BillRef | null }[] | null;
+  transaction_bill_links: { id: string; note: string | null; amount: number | null; bill: BillRef | null }[] | null;
   confirmed: boolean;
   /** Wolt sends no incoming bill; its settlement period is the evidence. */
   wolt_period_id: string | null;
@@ -1217,6 +1217,13 @@ export default function CashFlowPage() {
     via: 'invoice' | 'amount'; delta: number; confident: boolean; note: string | null;
   };
   const [outMatchRows, setOutMatchRows] = useState<OutgoingMatchRow[] | null>(null);
+  /** One invoice settled by several payments — the inverse of a collected payment. */
+  type InstalmentMatchRow = {
+    txId: string; txDate: string; txCounterparty: string | null; txAmountCents: number;
+    billId: string; invoiceNumber: string | null; invoiceDate: string | null;
+    supplier: string; billGross: number; alreadyPaid: number; remaining: number;
+  };
+  const [instMatchRows, setInstMatchRows] = useState<InstalmentMatchRow[] | null>(null);
   const [suspectRows, setSuspectRows] = useState<SuspectLinkRow[] | null>(null);
   const [suspectSel, setSuspectSel]   = useState<Set<string>>(new Set());
   const [unlinking, setUnlinking]     = useState(false);
@@ -1271,12 +1278,14 @@ export default function CashFlowPage() {
       setWoltMatchRows(json.woltMatches ?? []);
       setRefMatchRows(json.referenceMatches ?? []);
       setOutMatchRows(json.outgoingMatches ?? []);
+      setInstMatchRows(json.instalmentMatches ?? []);
       setSuspectRows(json.suspectLinks ?? []);
       setSuspectSel(new Set<string>((json.suspectLinks ?? []).map((s: { txId: string }) => s.txId)));
       setMatchSel(new Set<string>([
         ...(json.matches ?? []).map((m: { txId: string }) => m.txId),
         ...(json.woltMatches ?? []).map((m: { txId: string }) => m.txId),
         ...(json.referenceMatches ?? []).map((m: { txId: string }) => m.txId),
+        ...(json.instalmentMatches ?? []).map((m: { txId: string }) => m.txId),
         /* Only the ones that need no judgement start ticked; a customer who
            rounded the amount, or quoted nothing, waits to be looked at. */
         ...(json.outgoingMatches ?? []).filter((m: { confident: boolean }) => m.confident)
@@ -1307,11 +1316,11 @@ export default function CashFlowPage() {
          than closed — the applied rows drop out of it by themselves. */
       const applied = new Set(matchSel);
       const keep = <T extends { txId: string }>(rows: T[] | null) => (rows ?? []).filter(r => !applied.has(r.txId));
-      const bills = keep(autoMatchRows), wolt = keep(woltMatchRows), refs = keep(refMatchRows), outs = keep(outMatchRows);
-      if (bills.length === 0 && wolt.length === 0 && refs.length === 0 && outs.length === 0) {
-        setAutoMatchRows(null); setWoltMatchRows(null); setRefMatchRows(null); setOutMatchRows(null);
+      const bills = keep(autoMatchRows), wolt = keep(woltMatchRows), refs = keep(refMatchRows), outs = keep(outMatchRows), insts = keep(instMatchRows);
+      if (bills.length === 0 && wolt.length === 0 && refs.length === 0 && outs.length === 0 && insts.length === 0) {
+        setAutoMatchRows(null); setWoltMatchRows(null); setRefMatchRows(null); setOutMatchRows(null); setInstMatchRows(null);
       } else {
-        setAutoMatchRows(bills); setWoltMatchRows(wolt); setRefMatchRows(refs); setOutMatchRows(outs);
+        setAutoMatchRows(bills); setWoltMatchRows(wolt); setRefMatchRows(refs); setOutMatchRows(outs); setInstMatchRows(insts);
       }
       setMatchSel(new Set());
     } catch (err: any) {
@@ -1811,18 +1820,19 @@ export default function CashFlowPage() {
               <div>
                 <h2 className="text-base font-bold text-gray-900">Auto-match Preview</h2>
                 <p className="text-xs text-gray-500 mt-0.5">
-                  {autoMatchRows.length === 0 && !woltMatchRows?.length && !refMatchRows?.length && !outMatchRows?.length && !suspectRows?.length
+                  {autoMatchRows.length === 0 && !woltMatchRows?.length && !refMatchRows?.length && !outMatchRows?.length && !instMatchRows?.length && !suspectRows?.length
                     ? 'No matches found — all transactions already linked or no amount/date match in bills.'
                     : [
                         autoMatchRows.length > 0 && `${autoMatchRows.length} payment${autoMatchRows.length !== 1 ? "s" : ""} matched to the cent — by invoice number, or a unique amount + supplier + date (≤45 days)`,
                         woltMatchRows?.length ? `${woltMatchRows.length} delivery payout${woltMatchRows.length !== 1 ? 's' : ''} by settlement amount` : null,
                         refMatchRows?.length ? `${refMatchRows.length} collected payment${refMatchRows.length !== 1 ? 's' : ''} by invoice numbers in the reference` : null,
                         outMatchRows?.length ? `${outMatchRows.length} customer payment${outMatchRows.length !== 1 ? 's' : ''} against invoices we issued` : null,
+                        instMatchRows?.length ? `${instMatchRows.length} instalment${instMatchRows.length !== 1 ? 's' : ''} against one invoice` : null,
                         suspectRows?.length ? `${suspectRows.length} existing link${suspectRows.length !== 1 ? 's' : ''} the bank contradicts` : null,
                       ].filter(Boolean).join(' · ') + '. Review then apply.'}
                 </p>
               </div>
-              <button onClick={() => { setAutoMatchRows(null); setSuspectRows(null); setOutMatchRows(null); }} className="text-gray-400 hover:text-gray-700">
+              <button onClick={() => { setAutoMatchRows(null); setSuspectRows(null); setOutMatchRows(null); setInstMatchRows(null); }} className="text-gray-400 hover:text-gray-700">
                 <X size={18} />
               </button>
             </div>
@@ -1876,6 +1886,50 @@ export default function CashFlowPage() {
                 </button>
               </div>
             )}
+            {/* One bill, several payments — the inverse of a collected payment. */}
+            {(instMatchRows?.length ?? 0) > 0 && (
+              <div className="px-6 pt-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <input type="checkbox"
+                    checked={instMatchRows!.every(r => matchSel.has(r.txId))}
+                    onChange={e => toggleMany(instMatchRows!.map(r => r.txId), e.target.checked)}
+                    className="w-4 h-4 accent-green-600" />
+                  <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wider">
+                    Instalments — one invoice settled by several payments
+                  </p>
+                </div>
+                <div className="space-y-1.5 mb-4">
+                  {instMatchRows!.map(r => (
+                    <div key={r.txId}
+                      className={`border rounded-lg px-3 py-2 text-xs ${matchSel.has(r.txId) ? 'border-gray-200 bg-gray-50' : 'border-gray-200 bg-white opacity-60'}`}>
+                      <div className="flex items-center gap-3">
+                        <input type="checkbox" checked={matchSel.has(r.txId)}
+                          onChange={e => toggleMatch(r.txId, e.target.checked)}
+                          className="w-4 h-4 accent-green-600 flex-shrink-0" />
+                        <span className="text-gray-600 whitespace-nowrap">{fmtDate(r.txDate)}</span>
+                        <span className="font-semibold text-gray-800 truncate">{r.supplier}</span>
+                        <span className="font-semibold text-red-600 tabular-nums whitespace-nowrap">
+                          {(Math.abs(r.txAmountCents) / 100).toLocaleString('de-DE', { minimumFractionDigits: 2 })} €
+                        </span>
+                        <span className="ml-auto text-gray-500 whitespace-nowrap">
+                          invoice <span className="font-mono font-semibold">{r.invoiceNumber ?? '—'}</span>
+                          {' · '}{r.billGross.toLocaleString('de-DE', { minimumFractionDigits: 2 })} €
+                        </span>
+                      </div>
+                      <div className="ml-7 mt-1 text-[11px] text-gray-500">
+                        {r.alreadyPaid > 0
+                          ? `${r.alreadyPaid.toLocaleString('de-DE', { minimumFractionDigits: 2 })} € already settled · `
+                          : ''}
+                        {r.remaining > 0.01
+                          ? `${r.remaining.toLocaleString('de-DE', { minimumFractionDigits: 2 })} € still owing after this`
+                          : 'this payment clears the invoice'}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Money coming in, against the invoices we issued. */}
             {(outMatchRows?.length ?? 0) > 0 && (
               <div className="px-6 pt-4">
@@ -2101,7 +2155,7 @@ export default function CashFlowPage() {
                 className="px-4 py-2 text-sm font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50">
                 Cancel
               </button>
-              {(autoMatchRows.length > 0 || (woltMatchRows?.length ?? 0) > 0 || (refMatchRows?.length ?? 0) > 0 || (outMatchRows?.length ?? 0) > 0) && (
+              {(autoMatchRows.length > 0 || (woltMatchRows?.length ?? 0) > 0 || (refMatchRows?.length ?? 0) > 0 || (outMatchRows?.length ?? 0) > 0 || (instMatchRows?.length ?? 0) > 0) && (
                 <button onClick={handleApplyAutoMatch} disabled={applyingMatch || matchSel.size === 0}
                   className="flex items-center gap-2 px-5 py-2 text-sm font-bold bg-[#1B5E20] text-white rounded-lg hover:bg-[#2E7D32] transition-colors disabled:opacity-50">
                   {applyingMatch ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}

@@ -19,6 +19,8 @@ type Counterparty = {
 type BillLink = {
   id: string;
   note: string | null;
+  /** The part of the bill this payment settles; null means all of it. */
+  amount: number | null;
   bill: { id: string; supplier_name: string; invoice_number: string | null; gross_amount: number } | null;
 };
 
