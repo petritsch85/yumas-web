@@ -307,6 +307,32 @@ export async function POST(req: NextRequest) {
     return null;
   }
 
+  /**
+   * The same supplier, beyond doubt.
+   *
+   * sameSupplier below falls back to any shared word over three letters, and
+   * "GmbH" is four — so against a counterparty called "Perola GmbH" it accepts
+   * a bill from every other GmbH in the book. That is tolerable where the
+   * invoice number has already identified the bill, and not at all where the
+   * supplier is the only thing narrowing the field. This wants the
+   * counterparty's own keywords, or failing those a word that actually names a
+   * business.
+   */
+  const LEGAL_FORMS = new Set([
+    'gmbh', 'mbh', 'ohg', 'kgaa', 'gmbhcokg', 'kg', 'gbr', 'ltd', 'limited', 'inh',
+    'co', 'und', 'the', 'ag', 'se', 'ev', 'bv', 'nv', 'sarl', 'srl', 'spa',
+    'deutschland', 'germany', 'group', 'holding', 'international', 'service', 'services',
+    'vertrieb', 'handel', 'grosshandel', 'gastronomie', 'company',
+  ]);
+  function definitelySameSupplier(tx: any, b: { supplier_name: string }): boolean {
+    const resolved = matchedSupplier(tx.counterparty ?? '');
+    if (resolved) return matchedSupplier(b.supplier_name ?? '') === resolved;
+    const txLower = (tx.counterparty ?? '').toLowerCase();
+    return (b.supplier_name ?? '').toLowerCase()
+      .split(/[^a-zà-ÿ0-9]+/)
+      .some((w: string) => w.length > 3 && !LEGAL_FORMS.has(w) && txLower.includes(w));
+  }
+
   /** Whether a bill's supplier is the party the bank paid. */
   function sameSupplier(tx: any, b: any): boolean {
     const resolvedSupplier = matchedSupplier(tx.counterparty ?? '');
@@ -679,17 +705,46 @@ export async function POST(req: NextRequest) {
     for (const tx of txs) {
       if (alreadyProposed.has(tx.id) || multiLinkedTx.has(tx.id)) continue;
       const text = `${tx.counterparty ?? ''} ${tx.description ?? ''}`;
-      const named = bills.filter(b => quotes(text, b.invoice_number) && sameSupplier(tx, b));
-      if (named.length !== 1) continue;            // several named: not an instalment
+      const paid = Math.abs(tx.amount_cents) / 100;
+      const owedOn = (b: { id: string; gross_amount: number }) => {
+        const before = (settledSoFar.get(b.id) ?? 0) + (takenThisRun.get(b.id) ?? 0);
+        return { before, owing: Math.round((Number(b.gross_amount) - before) * 100) / 100 };
+      };
 
-      const bill = named[0];
+      const named = bills.filter(b => quotes(text, b.invoice_number) && sameSupplier(tx, b));
+      let bill: typeof bills[number] | null = null;
+
+      if (named.length === 1) {
+        bill = named[0];
+      } else if (named.length === 0) {
+        /* The closing instalment, whose reference went astray. Perola's third
+           payment quotes "Rechnung Nr. 157001", an invoice that exists
+           nowhere, while 4.309,16 € is to the cent what invoice 161077 still
+           had owing.
+
+           Allowed only where there is no guesswork left: the supplier has
+           exactly one bill part-paid already, and the payment is exactly what
+           that bill still owes. A part-paid bill means an instalment plan is
+           already running and recorded — this closes one rather than inventing
+           one, which is why an unnamed payment can be trusted here and nowhere
+           else. */
+        const partPaid = bills.filter(b => {
+          if (!definitelySameSupplier(tx, b)) return false;
+          const { before, owing } = owedOn(b);
+          return before > 0.01 && owing > 0.01;
+        });
+        const exact = partPaid.filter(b => Math.abs(owedOn(b).owing - paid) < 0.01);
+        if (partPaid.length !== 1 || exact.length !== 1) continue;
+        bill = exact[0];
+      } else {
+        continue;                                  // several named: not an instalment
+      }
+
       const gross = Number(bill.gross_amount);
       if (!(gross > 0)) continue;
-      const paid = Math.abs(tx.amount_cents) / 100;
       if (paid >= gross - 0.01) continue;          // settles the lot: not an instalment
 
-      const before = (settledSoFar.get(bill.id) ?? 0) + (takenThisRun.get(bill.id) ?? 0);
-      const owing = Math.round((gross - before) * 100) / 100;
+      const { before, owing } = owedOn(bill);
       if (owing <= 0.01) continue;                 // nothing left on it
       if (paid > owing + 0.01) continue;           // more than is owed: not this bill
 
