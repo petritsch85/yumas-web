@@ -1,0 +1,131 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { extractText, getDocumentProxy } from 'unpdf';
+import { getSupabaseAdmin } from '@/lib/supabase-admin';
+// Plain ESM, shared with scripts/ which runs outside the Next.js build.
+import { parseKontoauszug } from '@/lib/kontoauszug.mjs';
+
+export const maxDuration = 120;
+
+type Entry = { date: string; kind: string; text: string; amount: number };
+
+/**
+ * Settling the ledger against the official Kontoauszug.
+ *
+ * The CSV exports are a convenience and they lie in one specific way: they
+ * carry payments the bank has only earmarked. Those appear again in a later
+ * export under their real booking date, and the ledger ends up holding the
+ * same money twice — 25.975,58 € of it in September alone. Only the statement
+ * says which bookings happened, and on what day.
+ *
+ * POST with the PDF to preview; add ?apply=1 to carry the changes out. The
+ * preview and the application run the same comparison, so nothing is applied
+ * that was not shown.
+ */
+export async function POST(req: NextRequest) {
+  const apply = req.nextUrl.searchParams.get('apply') === '1';
+
+  const form = await req.formData().catch(() => null);
+  const file = form?.get('file');
+  if (!(file instanceof File)) {
+    return NextResponse.json({ error: 'Attach the Kontoauszug PDF as "file".' }, { status: 400 });
+  }
+
+  let parsed;
+  try {
+    const pdf = await getDocumentProxy(new Uint8Array(await file.arrayBuffer()));
+    const { text } = await extractText(pdf, { mergePages: true });
+    parsed = parseKontoauszug(text) as {
+      entries: Entry[]; from: string | null; to: string | null; number: string | null;
+      openingBalance: number | null; closingBalance: number | null;
+    };
+  } catch (e) {
+    return NextResponse.json({ error: `Could not read the PDF: ${e instanceof Error ? e.message : 'unknown'}` }, { status: 400 });
+  }
+
+  const { entries, from, to, number } = parsed;
+  if (!entries.length || !from || !to) {
+    return NextResponse.json({ error: 'No bookings found — is this a Sparkasse Kontoauszug?' }, { status: 400 });
+  }
+
+  const admin = getSupabaseAdmin();
+  const rows: { id: string; date: string; direction: string; counterparty: string | null; amount_cents: number; bill_id: string | null }[] = [];
+  for (let page = 0; ; page++) {
+    const { data, error } = await admin.from('cashflow_transactions')
+      .select('id, date, direction, counterparty, amount_cents, bill_id')
+      .gte('date', from).lte('date', to).order('id')
+      .range(page * 500, page * 500 + 499);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (!data?.length) break;
+    rows.push(...(data as typeof rows));
+    if (data.length < 500) break;
+  }
+
+  const { data: linkRows } = await admin.from('transaction_bill_links').select('transaction_id');
+  const linked = new Set<string>([
+    ...(linkRows ?? []).map(l => l.transaction_id as string),
+    ...rows.filter(r => r.bill_id).map(r => r.id),
+  ]);
+
+  const signed = (r: (typeof rows)[number]) => (r.direction === 'in' ? 1 : -1) * Math.abs(r.amount_cents);
+  const ours = new Map<number, typeof rows>();
+  for (const r of rows) ours.set(signed(r), [...(ours.get(signed(r)) ?? []), r]);
+  const bank = new Map<number, Entry[]>();
+  for (const e of entries) {
+    const c = Math.round(e.amount * 100);
+    bank.set(c, [...(bank.get(c) ?? []), e]);
+  }
+
+  const remove: typeof rows = [];
+  const redate: { row: (typeof rows)[number]; to: string }[] = [];
+  for (const [cents, mine] of ours) {
+    const booked = bank.get(cents) ?? [];
+    if (mine.length <= booked.length) continue;
+    /* Keep what the bank booked, preferring rows that carry bill links so no
+       link is broken, then rows whose date already agrees. */
+    const ranked = [...mine].sort((a, b) =>
+      (linked.has(b.id) ? 1 : 0) - (linked.has(a.id) ? 1 : 0)
+      || (booked.some(e => e.date === a.date) ? -1 : 1));
+    ranked.slice(0, booked.length).forEach((r, i) => {
+      if (booked[i] && r.date !== booked[i].date) redate.push({ row: r, to: booked[i].date });
+    });
+    remove.push(...ranked.slice(booked.length));
+  }
+
+  /* Bookings the bank made that never reached us — a CSV that was never
+
+     uploaded, or one that stopped short. */
+  const missing: Entry[] = [];
+  for (const [cents, booked] of bank) {
+    const extra = booked.length - (ours.get(cents)?.length ?? 0);
+    if (extra > 0) missing.push(...booked.slice(0, extra));
+  }
+
+  const describe = (r: (typeof rows)[number]) => ({
+    id: r.id, date: r.date, counterparty: r.counterparty,
+    amount: (r.direction === 'in' ? 1 : -1) * Math.abs(r.amount_cents) / 100,
+    hasBill: linked.has(r.id),
+  });
+  const result = {
+    statement: {
+      number, from, to, bookings: entries.length,
+      net: Math.round(entries.reduce((s, e) => s + e.amount, 0) * 100) / 100,
+    },
+    ours: rows.length,
+    remove: remove.map(describe),
+    redate: redate.map(x => ({ ...describe(x.row), newDate: x.to })),
+    missing: missing.map(e => ({ date: e.date, amount: e.amount, text: e.text.slice(0, 120) })),
+    applied: false,
+  };
+
+  if (!apply) return NextResponse.json(result);
+
+  for (const x of redate) {
+    const { error } = await admin.from('cashflow_transactions').update({ date: x.to }).eq('id', x.row.id);
+    if (error) return NextResponse.json({ ...result, error: error.message }, { status: 500 });
+  }
+  if (remove.length) {
+    const { error } = await admin.from('cashflow_transactions').delete().in('id', remove.map(r => r.id));
+    if (error) return NextResponse.json({ ...result, error: error.message }, { status: 500 });
+  }
+  return NextResponse.json({ ...result, applied: true });
+}

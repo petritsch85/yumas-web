@@ -1151,6 +1151,51 @@ export default function CashFlowPage() {
   /* Deleting an upload takes its bank rows with it, so the button asks first. */
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [deletingId,      setDeletingId]      = useState<string | null>(null);
+  /* ── The Kontoauszug: the record the CSVs only approximate ────────────────
+     A CSV can carry a payment the bank has merely earmarked, and a later
+     export carries it again under its real booking date. Only the statement
+     says which bookings happened and when. */
+  type StatementCheck = {
+    statement: { number: string | null; from: string; to: string; bookings: number; net: number };
+    ours: number;
+    remove: { id: string; date: string; counterparty: string | null; amount: number; hasBill: boolean }[];
+    redate: { id: string; date: string; newDate: string; counterparty: string | null; amount: number; hasBill: boolean }[];
+    missing: { date: string; amount: number; text: string }[];
+    applied: boolean;
+  };
+  const [stmtBusy, setStmtBusy]   = useState(false);
+  const [stmtCheck, setStmtCheck] = useState<StatementCheck | null>(null);
+  const [stmtErr, setStmtErr]     = useState<string | null>(null);
+  const [stmtOver, setStmtOver]   = useState(false);
+  const stmtInputRef = useRef<HTMLInputElement>(null);
+
+  const sendStatement = useCallback(async (file: File, apply: boolean) => {
+    setStmtBusy(true); setStmtErr(null);
+    try {
+      const body = new FormData();
+      body.append('file', file);
+      const res = await fetch(`/api/cashflow/statement${apply ? '?apply=1' : ''}`, { method: 'POST', body });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? 'Could not read the statement');
+      setStmtCheck(json);
+      if (apply) {
+        qc.invalidateQueries({ queryKey: ['cashflow-tx'] });
+        qc.invalidateQueries({ queryKey: ['cashflow-aggregate'] });
+      }
+    } catch (e) {
+      setStmtErr(e instanceof Error ? e.message : 'Could not read the statement');
+    } finally {
+      setStmtBusy(false);
+    }
+  }, [qc]);
+
+  /** Kept so the same file can be applied after it has been previewed. */
+  const stmtFileRef = useRef<File | null>(null);
+  const onStatementFile = useCallback((f: File) => {
+    stmtFileRef.current = f;
+    void sendStatement(f, false);
+  }, [sendStatement]);
+
   const [showFormatInfo, setShowFormatInfo] = useState(false);
   const [sortCol, setSortCol] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
@@ -1713,6 +1758,26 @@ export default function CashFlowPage() {
               {uploading ? 'Importing…' : 'Upload CSV'}
             </button>
           </div>
+          {/* The Kontoauszug — the record the CSV exports only approximate. */}
+          <div
+            onDragOver={e => { e.preventDefault(); setStmtOver(true); }}
+            onDragLeave={() => setStmtOver(false)}
+            onDrop={e => {
+              e.preventDefault(); setStmtOver(false);
+              const f = [...e.dataTransfer.files].find(x => /\.pdf$/i.test(x.name));
+              if (f) onStatementFile(f);
+              else setStmtErr('Drop the Kontoauszug PDF.');
+            }}
+            onClick={() => stmtInputRef.current?.click()}
+            title="Drop the month's Kontoauszug here — it decides which bookings are real and on what date"
+            className={`flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-lg border-2 border-dashed cursor-pointer transition-colors ${
+              stmtOver ? 'border-[#1B5E20] bg-green-50 text-[#1B5E20]'
+                       : 'border-gray-300 text-gray-600 hover:border-[#1B5E20] hover:text-[#1B5E20]'}`}>
+            {stmtBusy ? <Loader2 size={14} className="animate-spin" /> : <FileText size={14} />}
+            {stmtBusy ? 'Reading…' : 'Kontoauszug PDF'}
+          </div>
+          <input ref={stmtInputRef} type="file" accept="application/pdf,.pdf" className="hidden"
+            onChange={e => { const f = e.target.files?.[0]; if (f) onStatementFile(f); e.target.value = ''; }} />
           <button onClick={() => setShowFormatInfo(v => !v)}
             className={`p-2 rounded-lg border transition-colors ${showFormatInfo ? 'border-indigo-300 bg-indigo-50 text-indigo-600' : 'border-gray-200 text-gray-400 hover:text-gray-600'}`}
             title="Required CSV format">
@@ -2164,6 +2229,122 @@ export default function CashFlowPage() {
               )}
             </div>
           </div>
+        </div>
+      )}
+
+      {/* What the Kontoauszug says about the ledger. */}
+      {(stmtErr || stmtCheck) && (
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+          <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100">
+            <div className="flex items-center gap-2">
+              <FileText size={15} className="text-gray-400" />
+              <span className="text-sm font-semibold text-gray-800">
+                {stmtCheck ? `Kontoauszug ${stmtCheck.statement.number ?? ''} · ${fmtDate(stmtCheck.statement.from)} – ${fmtDate(stmtCheck.statement.to)}` : 'Kontoauszug'}
+              </span>
+              {stmtCheck && (
+                <span className="text-xs text-gray-500">
+                  {stmtCheck.statement.bookings} bookings · net {stmtCheck.statement.net.toLocaleString('de-DE', { minimumFractionDigits: 2 })} €
+                </span>
+              )}
+            </div>
+            <button onClick={() => { setStmtCheck(null); setStmtErr(null); }} className="text-gray-400 hover:text-gray-700">
+              <X size={16} />
+            </button>
+          </div>
+
+          {stmtErr && <div className="px-5 py-3 text-sm text-red-600">{stmtErr}</div>}
+
+          {stmtCheck && (
+            <div className="px-5 py-3 space-y-3">
+              {stmtCheck.applied && (
+                <p className="text-sm font-semibold text-green-700">
+                  Done — the ledger now agrees with the statement.
+                </p>
+              )}
+              {stmtCheck.remove.length === 0 && stmtCheck.redate.length === 0 && stmtCheck.missing.length === 0 ? (
+                <p className="text-sm text-green-700 font-medium">
+                  Every booking on the statement is in the ledger, on the right date. Nothing to do.
+                </p>
+              ) : (
+                <>
+                  {stmtCheck.remove.length > 0 && (
+                    <div>
+                      <p className="text-[11px] font-bold text-red-500 uppercase tracking-wider mb-1">
+                        In the ledger, never booked by the bank — {stmtCheck.remove.length} row(s),{' '}
+                        {stmtCheck.remove.reduce((s, r) => s + Math.abs(r.amount), 0).toLocaleString('de-DE', { minimumFractionDigits: 2 })} €
+                      </p>
+                      <p className="text-[11px] text-gray-500 mb-1.5">
+                        A CSV carried these before the bank had booked them; a later export carried them again for real.
+                      </p>
+                      <div className="space-y-0.5">
+                        {stmtCheck.remove.map(r => (
+                          <div key={r.id} className="flex items-center gap-3 text-xs">
+                            <span className="text-gray-500 w-20">{fmtDate(r.date)}</span>
+                            <span className="tabular-nums w-24 text-right text-red-600 font-semibold">
+                              {r.amount.toLocaleString('de-DE', { minimumFractionDigits: 2 })} €
+                            </span>
+                            <span className="text-gray-700 truncate">{r.counterparty ?? '—'}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {stmtCheck.redate.length > 0 && (
+                    <div>
+                      <p className="text-[11px] font-bold text-amber-600 uppercase tracking-wider mb-1">
+                        Dated wrongly — {stmtCheck.redate.length} row(s)
+                      </p>
+                      <div className="space-y-0.5">
+                        {stmtCheck.redate.map(r => (
+                          <div key={r.id} className="flex items-center gap-3 text-xs">
+                            <span className="text-gray-500 w-36">{fmtDate(r.date)} → <span className="font-semibold text-gray-800">{fmtDate(r.newDate)}</span></span>
+                            <span className="tabular-nums w-24 text-right text-red-600 font-semibold">
+                              {r.amount.toLocaleString('de-DE', { minimumFractionDigits: 2 })} €
+                            </span>
+                            <span className="text-gray-700 truncate">{r.counterparty ?? '—'}</span>
+                            {r.hasBill && <span className="text-[10px] text-green-700">keeps its bill</span>}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {stmtCheck.missing.length > 0 && (
+                    <div>
+                      <p className="text-[11px] font-bold text-indigo-600 uppercase tracking-wider mb-1">
+                        Booked by the bank but missing here — {stmtCheck.missing.length}
+                      </p>
+                      <p className="text-[11px] text-gray-500 mb-1.5">
+                        Upload the CSV that covers these; the statement cannot add them itself.
+                      </p>
+                      <div className="space-y-0.5">
+                        {stmtCheck.missing.slice(0, 12).map((m, i) => (
+                          <div key={i} className="flex items-center gap-3 text-xs">
+                            <span className="text-gray-500 w-20">{fmtDate(m.date)}</span>
+                            <span className="tabular-nums w-24 text-right font-semibold">
+                              {m.amount.toLocaleString('de-DE', { minimumFractionDigits: 2 })} €
+                            </span>
+                            <span className="text-gray-600 truncate">{m.text}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {!stmtCheck.applied && (stmtCheck.remove.length > 0 || stmtCheck.redate.length > 0) && (
+                    <button
+                      onClick={() => { const f = stmtFileRef.current; if (f) void sendStatement(f, true); }}
+                      disabled={stmtBusy}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#1B5E20] text-white text-xs font-bold hover:bg-[#2E7D32] disabled:opacity-60 transition-colors">
+                      {stmtBusy ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} strokeWidth={3} />}
+                      Make the ledger match the statement
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
+          )}
         </div>
       )}
 
