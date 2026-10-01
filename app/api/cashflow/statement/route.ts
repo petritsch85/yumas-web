@@ -37,14 +37,24 @@ export async function POST(req: NextRequest) {
     parsed = parseKontoauszug(text) as {
       entries: Entry[]; from: string | null; to: string | null; number: string | null;
       openingBalance: number | null; closingBalance: number | null;
+      net: number; balanced: boolean | null;
     };
   } catch (e) {
     return NextResponse.json({ error: `Could not read the PDF: ${e instanceof Error ? e.message : 'unknown'}` }, { status: 400 });
   }
 
-  const { entries, from, to, number } = parsed;
+  const { entries, from, to, number, balanced, openingBalance, closingBalance } = parsed;
   if (!entries.length || !from || !to) {
     return NextResponse.json({ error: 'No bookings found — is this a Sparkasse Kontoauszug?' }, { status: 400 });
+  }
+  /* The statement proves its own reading: opening and closing balances must be
+     exactly the bookings apart. A parse that cannot show that has dropped or
+     invented a booking, and must not be allowed to change the ledger. */
+  if (balanced === false) {
+    return NextResponse.json({
+      error: `Could not read this statement reliably: its bookings come to ${parsed.net.toFixed(2)} €, `
+        + `but it runs from ${openingBalance?.toFixed(2)} € to ${closingBalance?.toFixed(2)} €. Nothing has been changed.`,
+    }, { status: 422 });
   }
 
   const admin = getSupabaseAdmin();
@@ -107,7 +117,7 @@ export async function POST(req: NextRequest) {
   });
   const result = {
     statement: {
-      number, from, to, bookings: entries.length,
+      number, from, to, bookings: entries.length, balanced, openingBalance, closingBalance,
       net: Math.round(entries.reduce((s, e) => s + e.amount, 0) * 100) / 100,
     },
     ours: rows.length,
