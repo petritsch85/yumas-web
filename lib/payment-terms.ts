@@ -6,15 +6,15 @@
  * Tagen". Those left the due date empty, so the bill showed no deadline at all
  * and dropped out of every payment run.
  *
- * "Sofort" is read as **a week from the invoice date** rather than the same
- * day. A supplier asking to be paid immediately is stating a preference, not a
- * deadline; invoices arrive days after they are written, and paying the day a
- * scan lands would mean a payment run every morning. A week is the interval
- * the payment run actually works on.
+ * "Sofort" is read as **a fortnight from the invoice date** rather than the
+ * same day. A supplier asking to be paid immediately is stating a preference,
+ * not a deadline; invoices arrive days after they are written, and paying the
+ * day a scan lands would mean a payment run every morning. A fortnight is the
+ * interval the payment run actually works on.
  */
 
-/** A week, for an invoice that asks to be paid at once. */
-export const SOFORT_DAYS = 7;
+/** A fortnight, for an invoice that asks to be paid at once. */
+export const SOFORT_DAYS = 14;
 
 /**
  * What to assume when an invoice says nothing and nothing else is known.
@@ -92,8 +92,14 @@ export const addDaysTo = (iso: string, days: number) => {
   return d.toISOString().slice(0, 10);
 };
 
-/** "Zahlbar sofort", "payable immediately", "netto Kasse". */
-const IMMEDIATE = /\bsofort\b|sofort(?:ige|iger)?\s*(?:zahlung|f[äa]llig)|netto\s*kasse|ohne\s*abzug|immediate|upon\s*receipt|due\s*on\s*receipt|payable\s*(?:immediately|on\s*receipt)/i;
+/**
+ * "Zahlbar sofort", "payable immediately", "netto Kasse".
+ *
+ * "ohne Abzug" is not here. It says the invoice carries no discount, not that
+ * it is due at once — "14 Tage (bis 08.10.2026) ohne Abzug" is a fortnight,
+ * and reading it as immediate would bring a real deadline forward.
+ */
+const IMMEDIATE = /\bsofort|netto\s*kasse|immediate|upon\s*receipt|due\s*on\s*receipt|payable\s*(?:immediately|on\s*receipt)/i;
 
 /** Collected by the supplier: nothing to pay, so nothing to schedule. */
 const AUTO_COLLECTED = /lastschrift|einzug|direct\s*debit|sepa[- ]?(?:dd|lastschrift|einzug|direct)|paypal|kreditkarte|credit\s*card|mastercard|visa|amex|girocard|ec-?karte/i;

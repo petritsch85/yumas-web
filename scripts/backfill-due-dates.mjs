@@ -43,7 +43,7 @@ const db = createClient(env.NEXT_PUBLIC_SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_
 
 /* Kept in step with lib/payment-terms.ts by hand: this runs outside the
    Next.js build and cannot import the TypeScript module. */
-const SOFORT_DAYS = 7, DEFAULT_DAYS = 14;
+const SOFORT_DAYS = 14, DEFAULT_DAYS = 14;
 const D = String.raw`(\d{1,2})\.\s?(\d{1,2})\.\s?(\d{2,4})`;
 const PRINTED_DUE = [
   new RegExp(String.raw`f[äa]llig(?:keit)?(?:s(?:datum|tag))?\s*(?:am|:|ist)?\s*${D}`, 'i'),
@@ -53,7 +53,9 @@ const PRINTED_DUE = [
   new RegExp(String.raw`valuta\s*:?\s*${D}`, 'i'),
   new RegExp(String.raw`(?:due\s*date|payment\s*due|due\s*on|pay\s*by)\s*:?\s*${D}`, 'i'),
 ];
-const IMMEDIATE = /\bsofort\b|netto\s*kasse|ohne\s*abzug|immediate|upon\s*receipt|due\s*on\s*receipt|payable\s*(?:immediately|on\s*receipt)/i;
+/* "ohne Abzug" is not here: it says the invoice carries no discount, not that
+   it is due at once. See lib/payment-terms.ts. */
+const IMMEDIATE = /\bsofort|netto\s*kasse|immediate|upon\s*receipt|due\s*on\s*receipt|payable\s*(?:immediately|on\s*receipt)/i;
 const PREPAID = /vorkasse|vorauskasse|payment\s*in\s*advance|prepaid/i;
 const SETTLED = /(?:betrag\s*)?dankend\s*erhalten|bereits\s*(?:bezahlt|beglichen)|bezahlt\s*(?:per|mit)|paid\s*(?:in\s*full|via|by)|zahlung\s*erfolgt|wurde\s*abgebucht/i;
 
