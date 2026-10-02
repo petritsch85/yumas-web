@@ -53,6 +53,10 @@ export function classifyTransaction(
     if (
       cp.includes('wohnraum entwicklungs') ||
       cp.includes('strabag real estate') ||
+      // Westend's landlord. Named here because the rent usually says
+      // "Bruttomiete+NK Feuerbachstr 46" and is caught below, but one payment
+      // was worded only "Abschlagszahlung" and landed in Personnel instead.
+      cp.includes('wohninveste') ||
       desc.includes('bruttomiete') ||
       desc.includes('miete yumas')
     ) return { category: 'C - Rent', salesType: 'Other' };
