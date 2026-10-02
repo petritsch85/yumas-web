@@ -5,6 +5,7 @@ import { createHash } from 'crypto';
 import { getSupabaseAdmin } from '@/lib/supabase-admin';
 import { canonicalizeSupplierName, getKnownTerms } from '@/lib/canonical-supplier';
 import { resolveDueDate, addDaysTo, DEFAULT_DAYS } from '@/lib/payment-terms';
+import { isRemitter } from '@/lib/remitters';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const SECRET = process.env.INBOUND_BILLS_WEBHOOK_SECRET ?? '';
@@ -300,7 +301,8 @@ async function extractFromAttachment(attachment: Attachment): Promise<Record<str
   return extracted;
 }
 
-async function saveBillToDB(attachment: Attachment, extracted: Record<string, unknown>): Promise<string> {
+/** The new bill's id, or null when the document was filed without one. */
+async function saveBillToDB(attachment: Attachment, extracted: Record<string, unknown>): Promise<string | null> {
   const admin = getSupabaseAdmin();
 
   const bytes = Buffer.from(attachment.Content, 'base64');
@@ -353,6 +355,15 @@ async function saveBillToDB(attachment: Attachment, extracted: Record<string, un
   if (!dueDate && invoiceDate) {
     dueDate = addDaysTo(invoiceDate, DEFAULT_DAYS);
     dueSource = 'default';
+  }
+
+  /* Some counterparties only ever pay us. Their remittance advice carries an
+     amount, a date and a reference, so it extracts cleanly as an invoice and
+     lands in the ledger as a payable nobody owes. The file is kept — it is
+     still a document the Steuerberater needs — but no bill is created. */
+  if (isRemitter(extracted.supplier_name as string | null)) {
+    console.log(`[inbound-bills] ${extracted.supplier_name} remits to us — stored at ${path}, no payable created`);
+    return null;
   }
 
   const row: Record<string, unknown> = {
@@ -479,7 +490,9 @@ async function processBills(billAttachments: Attachment[]) {
           continue;
         }
         const billId = await saveBillToDB(a, extracted);
-        console.log(`[inbound-bills] ${a.Name}: saved as ${billId}`);
+        console.log(billId
+          ? `[inbound-bills] ${a.Name}: saved as ${billId}`
+          : `[inbound-bills] ${a.Name}: stored, but not as a payable`);
       } catch (err) {
         console.error(`[inbound-bills] ${a.Name}: processing failed:`, err);
         await releaseFile(a);
