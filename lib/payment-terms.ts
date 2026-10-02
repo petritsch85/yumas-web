@@ -79,7 +79,7 @@ export function readPaymentTerms(text: string | null | undefined): TermReading |
 
   const days = netDays(flat);
   if (days != null) return { source: 'stated-term', days };
-  if (IMMEDIATE.test(flat)) return { source: 'stated-term', days: SOFORT_DAYS };
+  if (saysImmediate(flat)) return { source: 'stated-term', days: SOFORT_DAYS };
   if (PREPAID.test(flat)) return { source: 'prepaid', days: 0 };
   if (SETTLED.test(flat)) return { source: 'settled', days: 0 };
   return null;
@@ -93,13 +93,33 @@ export const addDaysTo = (iso: string, days: number) => {
 };
 
 /**
- * "Zahlbar sofort", "payable immediately", "netto Kasse".
+ * "Zahlbar sofort", "Fällig bei Erhalt", "payable immediately", "netto Kasse".
  *
- * "ohne Abzug" is not here. It says the invoice carries no discount, not that
- * it is due at once — "14 Tage (bis 08.10.2026) ohne Abzug" is a fortnight,
- * and reading it as immediate would bring a real deadline forward.
+ * The word has to be standing in for a deadline, not merely present, so it is
+ * only read next to the act of paying. Read loosely it catches three things
+ * that are not terms at all, each of them live in this ledger: Nacho Kings
+ * announce a delivery fee "ab sofort" while granting seven days, Edenred say
+ * the amount falls due at once *should a direct debit bounce*, and Storm print
+ * "sofort fällig" about a sum they then collect themselves.
+ *
+ * "ohne Abzug" is not here either. It says the invoice carries no discount,
+ * not that it is due at once — "14 Tage (bis 08.10.2026) ohne Abzug" is a
+ * fortnight, and reading it as immediate would bring a real deadline forward.
  */
-const IMMEDIATE = /\bsofort|netto\s*kasse|immediate|upon\s*receipt|due\s*on\s*receipt|payable\s*(?:immediately|on\s*receipt)/i;
+const IMMEDIATE = /zahlbar\s+sofort|sofort\s+(?:zahlbar|f[äa]llig|rein\s+netto|zu\s+zahlen)|(?:zahlbar|f[äa]llig)\s+(?:bei|nach)\s+erhalt|netto\s+kasse|payable\s+(?:immediately|on\s+receipt)|due\s+(?:up)?on\s+receipt/i;
+
+/** Makes the clause a consequence of non-payment rather than the term itself. */
+const CONDITIONAL = /r[üu]cklastschrift|verzug|mahn|zahlungserinnerung|sollte\s+es|nicht\s+(?:rechtzeitig|fristgerecht)|versp[äa]tet/i;
+
+/**
+ * Whether the text asks to be paid at once, judged on the sentence the term
+ * sits in rather than on the whole document.
+ */
+function saysImmediate(flat: string): boolean {
+  const hit = flat.match(IMMEDIATE);
+  if (!hit) return false;
+  return !CONDITIONAL.test(flat.slice(Math.max(0, (hit.index ?? 0) - 120), (hit.index ?? 0) + 120));
+}
 
 /** Collected by the supplier: nothing to pay, so nothing to schedule. */
 const AUTO_COLLECTED = /lastschrift|einzug|direct\s*debit|sepa[- ]?(?:dd|lastschrift|einzug|direct)|paypal|kreditkarte|credit\s*card|mastercard|visa|amex|girocard|ec-?karte/i;
@@ -140,7 +160,7 @@ export function resolveDueDate({ invoiceDate, dueDate, terms }: DueDateInput): s
 
   const days = netDays(terms);
   if (days != null) return addDays(invoiceDate, days);
-  if (IMMEDIATE.test(terms ?? '')) return addDays(invoiceDate, SOFORT_DAYS);
+  if (saysImmediate((terms ?? '').replace(/\s+/g, ' '))) return addDays(invoiceDate, SOFORT_DAYS);
   return null;
 }
 
