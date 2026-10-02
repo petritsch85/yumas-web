@@ -44,3 +44,4 @@ next-env.d.ts
 
 # Throwaway scripts used while investigating; never part of the app.
 .*.mts
+*.tmp.mjs
