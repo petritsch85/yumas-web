@@ -8,6 +8,7 @@ import {
   Download, ChevronDown, ChevronUp, FileText, Info, Wand2, Trash2, AlertTriangle,
 } from 'lucide-react';
 import { linkCoverage, coverageLabel, coverageTitle } from '@/lib/link-coverage';
+import { statusLabel } from '@/lib/bill-status';
 
 /* ── Types ─────────────────────────────────────────────────────────── */
 type CfUpload = {
@@ -576,7 +577,7 @@ function BillMatchModal({ tx, onLink, onUnlink, onClose }: {
                       : bill.status === 'paid' ? 'bg-blue-100 text-blue-800'
                       : bill.status === 'to_be_paid' ? 'bg-purple-100 text-purple-800'
                       : 'bg-amber-100 text-amber-800'
-                    }`}>{bill.status === 'to_be_paid' ? 'to be paid' : bill.status}</span>
+                    }`}>{statusLabel(bill.status)}</span>
                     {' '}<span className="text-xs text-gray-400">{bill.category}</span>
                   </div>
                 )}

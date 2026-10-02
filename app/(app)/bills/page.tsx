@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { buildPain001, painFilename, validateOrder, isValidIban, normaliseIban } from '@/lib/sepa-credit-transfer';
 import { resolveDueDate, SOFORT_DAYS, isAutoCollected } from '@/lib/payment-terms';
+import { STATUS_LABELS } from '@/lib/bill-status';
 import type { SepaTransfer } from '@/lib/sepa-credit-transfer';
 
 import { useT } from '@/lib/i18n';
@@ -160,6 +161,7 @@ const STATUS_STYLES: Record<string, string> = {
   to_be_paid: 'bg-purple-50 text-purple-700 border-purple-200',
   paid:       'bg-green-50 text-green-700 border-green-200',
 };
+
 
 const SPECIAL_LOCATIONS = [
   { id: 'corporate', name: 'Corporate' },
@@ -1377,10 +1379,9 @@ export default function BillsPage() {
                           <td className="px-1.5 py-1.5">
                             <select value={bill.status} onChange={(e) => updateStatus(bill.id, e.target.value)}
                               className={`text-xs font-semibold pl-2 pr-1 py-0.5 rounded-full border cursor-pointer focus:outline-none ${STATUS_STYLES[bill.status]}`}>
-                              <option value="pending">Pending</option>
-                              <option value="approved">Approved</option>
-                              <option value="to_be_paid">To Be Paid</option>
-                              <option value="paid">Paid</option>
+                              {Object.entries(STATUS_LABELS).map(([value, label]) => (
+                                <option key={value} value={value}>{label}</option>
+                              ))}
                             </select>
                           </td>
                           <td className="px-1.5 py-1.5">
@@ -1907,10 +1908,9 @@ export default function BillsPage() {
             <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}
               className="border border-gray-200 rounded-lg px-3 py-1.5 text-xs font-semibold text-gray-600 focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30">
               <option value="all">All statuses</option>
-              <option value="pending">Pending</option>
-              <option value="approved">Approved</option>
-              <option value="to_be_paid">To Be Paid</option>
-              <option value="paid">Paid</option>
+              {Object.entries(STATUS_LABELS).map(([value, label]) => (
+                <option key={value} value={value}>{label}</option>
+              ))}
             </select>
             <select value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)}
               className="border border-gray-200 rounded-lg px-3 py-1.5 text-xs font-semibold text-gray-600 focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30">
@@ -1955,7 +1955,7 @@ export default function BillsPage() {
                 </select>
               </label>
               <span className="text-xs text-gray-400">
-                {pendingRows.length} pending · {settledRows.length} approved · {toBePaidRows.length} to be paid · {paidRows.length} paid
+                {pendingRows.length} pending · {settledRows.length} upcoming SEPA · {toBePaidRows.length} to be paid · {paidRows.length} paid
               </span>
             </div>
           </div>
@@ -1993,7 +1993,7 @@ export default function BillsPage() {
 
               <section>
                 <div className="flex items-baseline gap-2 mb-2">
-                  <h2 className="text-sm font-bold text-gray-900">Approved</h2>
+                  <h2 className="text-sm font-bold text-gray-900">{STATUS_LABELS.approved}</h2>
                   <span className="text-xs font-semibold text-blue-700 bg-blue-50 border border-blue-200 rounded-full px-2 py-0.5">
                     {settledRows.length}
                   </span>
@@ -2001,7 +2001,7 @@ export default function BillsPage() {
                 </div>
                 {settledRows.length === 0 ? (
                   <div className="flex items-center justify-center h-20 border border-dashed border-gray-200 rounded-xl">
-                    <p className="text-xs text-gray-400">No approved bills waiting</p>
+                    <p className="text-xs text-gray-400">No upcoming SEPA debits waiting</p>
                   </div>
                 ) : renderBillsTable(settledPageRows, settledPage, settledTotalPages, setPage2, settledRows.length)}
               </section>

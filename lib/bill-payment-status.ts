@@ -15,8 +15,9 @@ export async function markBillsPaid(admin: Admin, billIds: (string | null | unde
 
 /**
  * When a link is removed, a bill that no longer has any cash flow behind it
- * goes back to Approved — it was approved to be paid, and now is not shown
- * as paid by anything. A bill still linked elsewhere stays Paid.
+ * goes back to 'approved' — shown as "Upcoming SEPA", since it is due to be
+ * collected and nothing shows it as paid. A bill still linked elsewhere stays
+ * Paid.
  */
 export async function unmarkBillsIfUnlinked(admin: Admin, billIds: (string | null | undefined)[]) {
   const ids = [...new Set(billIds.filter((id): id is string => !!id))];

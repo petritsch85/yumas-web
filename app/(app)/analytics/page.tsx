@@ -3,6 +3,7 @@
 import { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { AlertCircle, RefreshCw, ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-react';
+import { statusLabel } from '@/lib/bill-status';
 
 type UnmatchedTx = {
   id: string;
@@ -305,7 +306,7 @@ export default function AnalyticsPage() {
                         bill.status === 'approved' ? 'bg-green-100 text-green-700'
                         : bill.status === 'pending' ? 'bg-yellow-100 text-yellow-700'
                         : 'bg-gray-100 text-gray-500'
-                      }`}>{bill.status}</span>
+                      }`}>{statusLabel(bill.status)}</span>
                     </td>
                     <td className="py-2 px-3 text-gray-400">{bill.location_label ?? '—'}</td>
                   </tr>
