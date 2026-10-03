@@ -150,6 +150,18 @@ const REPAIR_CATEGORIES = ['Repairs & Maintenance'];
  */
 const STAFF_FROM_BILLS = false;
 
+/**
+ * Staff cost standing in until the payroll is wired in.
+ *
+ * Shown in red, the colour this house uses for a figure somebody put in and
+ * will replace — as against a measured one. Nothing else in the block is red,
+ * so the one assumption EBITDA rests on is visible at a glance rather than
+ * hiding inside a total.
+ */
+const STAFF_PLACEHOLDER: Record<string, number> = {
+  '2026-09': 115000,
+};
+
 /** What SG&A and repairs came to in one month. */
 type OpexBucket = { lines: Record<string, number>; total: number; repairs: number };
 
@@ -7603,8 +7615,11 @@ export default function SalesReportsPage() {
             const valueLine = (
               rowKey: string, label: string, get: (colKey: string) => number | null,
               /* `drill` makes each figure a button that opens the suppliers
-                 behind it. Only the COGS lines use it. */
-              opts: { bold?: boolean; indent?: boolean; pct?: boolean; drill?: string } = {},
+                 behind it. Only the COGS lines use it. `assumed` turns a cell
+                 red: a figure somebody entered and will replace, not one the
+                 bills or the till produced. */
+              opts: { bold?: boolean; indent?: boolean; pct?: boolean; drill?: string;
+                      assumed?: (colKey: string) => boolean } = {},
             ) => (
               <tr key={rowKey} className="border-b border-gray-100 hover:bg-gray-50/60 group"
                 style={{ backgroundColor: opts.bold ? '#f9fafb' : '#ffffff' }}>
@@ -7620,11 +7635,15 @@ export default function SalesReportsPage() {
                   const v = get(col.key);
                   const open = !!opts.drill && cogsDrill?.part === opts.drill && cogsDrill.colKey === col.key;
                   const canDrill = !!opts.drill && v !== null && v !== 0;
+                  const red = !!opts.assumed?.(col.key);
+                  const tone = red ? 'text-red-600' : 'text-gray-800';
                   const body = v === null
                     ? <span className="text-gray-300">—</span>
                     : opts.pct
-                      ? <span className="text-gray-800">{v.toFixed(1).replace('.', ',')}%</span>
-                      : <span className="text-gray-800">{fmtNum(Math.round(v))}</span>;
+                      ? <span className={tone}>{v.toFixed(1).replace('.', ',')}%</span>
+                      : <span className={tone} title={red ? 'Placeholder — to be replaced' : undefined}>
+                          {fmtNum(Math.round(v))}
+                        </span>;
                   return (
                     <td key={col.key}
                       className={'text-right tabular-nums ' + (opts.bold ? 'py-1.5 text-xs font-bold' : 'py-1 text-[11px]')}
@@ -7774,11 +7793,19 @@ export default function SalesReportsPage() {
             };
             const sgaTotal = (colKey: string) => opexFor(colKey)?.total ?? null;
 
-            /** Payroll is not in the bills; the row waits for it. */
+            /**
+             * Payroll is not in the bills, so the row carries a placeholder
+             * where one has been set and stays empty everywhere else.
+             */
             const staffCost = (colKey: string): number | null => {
-              if (!STAFF_FROM_BILLS) return null;
-              return opexFor(colKey) ? 0 : null;
+              if (STAFF_FROM_BILLS) return opexFor(colKey) ? 0 : null;
+              if (!colKey.startsWith('FY')) return STAFF_PLACEHOLDER[colKey] ?? null;
+              const year = colKey.slice(2);
+              const months = Object.entries(STAFF_PLACEHOLDER).filter(([m]) => m.startsWith(year));
+              return months.length ? months.reduce((s, [, v]) => s + v, 0) : null;
             };
+            /** True where the figure is the placeholder, not a measured cost. */
+            const staffIsAssumed = (colKey: string) => staffCost(colKey) !== null;
             const staffPct = (colKey: string) => {
               const s = staffCost(colKey);
               const sales = grandTotal(colKey).total;
@@ -7800,9 +7827,9 @@ export default function SalesReportsPage() {
             /**
              * EBITDA: gross profit, less what it costs to keep the doors open.
              *
-             * Staff counts as nothing while its row is blank, so the figure is
-             * gross profit less SG&A until the payroll is wired in — and is
-             * overstated by roughly a month's wages until then.
+             * Staff counts as whatever its row shows, which for now is the
+             * placeholder — so EBITDA rests on that figure wherever one is set,
+             * and is overstated by a month's wages wherever one is not.
              */
             const ebitda = (colKey: string) => {
               const gp = grossProfit(colKey);
@@ -7909,8 +7936,8 @@ export default function SalesReportsPage() {
                       {spacerRow('gm-gap')}
 
                       {headingRow('staff-head', 'Staff costs')}
-                      {valueLine('staff-abs', 'Staff costs',    staffCost, { bold: true })}
-                      {valueLine('staff-pct', 'as % of sales',  staffPct,  { indent: true, pct: true })}
+                      {valueLine('staff-abs', 'Staff costs',   staffCost, { bold: true, assumed: staffIsAssumed })}
+                      {valueLine('staff-pct', 'as % of sales', staffPct,  { indent: true, pct: true })}
                       {spacerRow('staff-gap')}
 
                       {headingRow('sga-head', 'SG&A')}
@@ -7951,8 +7978,9 @@ export default function SalesReportsPage() {
                   rather than zero where no bill carried its category that month — rent above all is still paid
                   without an invoice reaching the inbox, so a 0 would read as &ldquo;nothing was spent&rdquo;
                   when it means &ldquo;nothing was filed&rdquo;. Every cost line opens to show its suppliers.
-                  {' '}EBITDA is gross profit less staff and SG&amp;A; while the staff row is blank it counts as
-                  nothing, so EBITDA is currently overstated by about a month&rsquo;s wages. Repairs are held
+                  {' '}EBITDA is gross profit less staff and SG&amp;A. The staff figure is a placeholder, shown
+                  in red — EBITDA rests on it until the payroll is wired in, and where no placeholder is set
+                  staff counts as nothing and EBITDA is overstated by a month&rsquo;s wages. Repairs are held
                   below EBITDA because a ventilation overhaul is work on the premises, not the cost of trading,
                   and FCF is EBITDA less repairs. Financial interest waits on the loan statement: the Sparkasse
                   Darlehen leaves as one payment covering principal and interest together, and calling the whole
