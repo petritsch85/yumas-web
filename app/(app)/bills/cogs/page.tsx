@@ -32,24 +32,66 @@ const COGS_CATEGORIES = ['Food Cost', 'Drinks Cost', 'Packaging'];
  * cleaning and hygiene goods that arrive among the food. Everything else
  * edible — spices, dairy, drinks — falls to Other.
  */
-const BUCKETS = ['Meat', 'Fruit & Veg', 'Non-food', 'Other'] as const;
+const BUCKETS = ['Meat', 'Fruit & Veg', 'Dairy', 'Drinks', 'Dry goods',
+                'Oils, sauces & spices', 'Non-food', 'Delivery charges', 'Other'] as const;
 type Bucket = typeof BUCKETS[number];
 
-/** Non-food that the food classifier would otherwise call Other. */
-const NON_FOOD = /reinig|hygiene|sp[üu]lmittel|putz|handschuh|m[üu]llbeutel|folie|serviette|besteck|becher|teller|schale|deckel|karton|verpackung|t[üu]te|beutel|papier|clean|wipe|towel|container|box\b/i;
+/**
+ * Flatten a description before matching.
+ *
+ * The wholesalers write umlauts as two letters — MUELLS., LOEFFEL, GRILLBUERSTE,
+ * TRENNBOEDEN, HAEHNCHEN — while the suppliers who send real invoices write
+ * them properly. Matching both spellings in every pattern is how the keyword
+ * lists grow unreadable, so the text is folded once and the patterns below are
+ * written without umlauts.
+ */
+const flat = (s: string) => s.toLowerCase()
+  .replace(/ä|ae/g, 'a').replace(/ö|oe/g, 'o').replace(/ü|ue/g, 'u').replace(/ß/g, 'ss');
 
+/** Packaging and cleaning, which the food classifier would call Other. */
+const NON_FOOD = /reinig|hygiene|spulmittel|putz|handschuh|mullbeutel|folie|serviette|besteck|becher|teller|schale|deckel|karton|verpackung|tute|beutel|papier|clean|wipe|towel|container|box\b/;
+/** Things you do not sell: cleaning, bin bags, kitchen tools, crates. */
+const NON_FOOD_GOODS = /mulls|toilettenpap|klorix|waschmittel|wischset|microfaser|burste|loffel|gabel\b|messer|mixer|siegelrand|trennbod|mehrwegkiste|kiste\b|tuch\b|spul/;
+/** Freight, not goods — part of the cost, but not a thing on a shelf. */
+const CHARGES = /versandkosten|liefergebuhr|shipping|fracht|zuschlag/;
+const DRINKS = /bier|beer|cerveza|pils|lager|fass|cola|fanta|spezi|limo|schorle|wasser|water|selters|azur|mineral|saft|juice|tonic|mate\b|red bull|energy|wein|wine|vino|burgunder|riesling|tequila|mezcal|rum\b|vodka|gin\b|whisk|likor|prosecco|sekt|frizz|valmarone|espresso|kaffee|coffee|jever|paloma|corona|modelo|pacifico|cranberry|dpg|kasten|tray|pfand/;
+/* \bol\b, not a bare "ol": "40% vol." would otherwise read as cooking oil. */
+const OILS = /\bol\b|olivenol|rapsol|sonnenblumenol|speiseol|balsamico|condimento|essig|senf|mayonnaise|ketchup/;
+const DRY = /tortilla|chips|reis\b|rice|zucker|sugar|mehl|flour|honig|marmelade|mus\b|sultana|rosine|linsen|nudel|pasta|brot|bread|ciabatta|glasur|konserv|sack\b|parboiled|kidney bohne|bohnen ds/;
+/** Vegetables the shared classifier does not know, in flattened spelling. */
+const VEG_EXTRA = /rote beete|beete\b/;
+
+/**
+ * Which bucket a line belongs to.
+ *
+ * Order matters. Freight first, because it is not a good at all. Then anything
+ * on a Packaging bill. Then the shared classifier, whose answer is trusted over
+ * any wording in the line: "Queso Oaxaca 2 Kg Tiras (3 Karton)" is cheese, and
+ * the carton it travels in does not make it packaging. Only a line the
+ * classifier cannot place is matched on wording, and drinks are tested before
+ * dry goods so an Espresso does not land among the rice.
+ */
 function bucketFor(description: string, billCategory: string): Bucket {
+  const d = flat(description);
+  if (CHARGES.test(d)) return 'Delivery charges';
   if (billCategory === 'Packaging') return 'Non-food';
+
   const sub = classifyLine(description);
-  if (sub === 'Meat') return 'Meat';
+  if (sub === 'Meat')        return 'Meat';
   if (sub === 'Fruit & Veg') return 'Fruit & Veg';
-  if (sub === 'Leergut') return 'Non-food';
-  /* Anything the classifier recognised as food stays food, whatever else the
-     line mentions: "Queso Oaxaca 2 Kg Tiras (3 Karton)" is cheese, and the
-     carton it travels in does not make it packaging. Only a line the
-     classifier could not place at all is tested for non-food wording. */
-  if (sub !== 'Other') return 'Other';
-  if (NON_FOOD.test(description)) return 'Non-food';
+  if (sub === 'Dairy')       return 'Dairy';
+  if (sub === 'Spices')      return 'Oils, sauces & spices';
+  if (sub === 'Leergut')     return 'Non-food';
+
+  if (NON_FOOD_GOODS.test(d) || NON_FOOD.test(d)) return 'Non-food';
+  if (VEG_EXTRA.test(d))  return 'Fruit & Veg';
+  if (DRINKS.test(d))     return 'Drinks';
+  if (OILS.test(d))       return 'Oils, sauces & spices';
+  if (DRY.test(d))        return 'Dry goods';
+  /* A line nobody could place, on a bill filed as drinks, is a drink. This
+     catches the spirits, which arrive as brand names alone — Glenfiddich,
+     Moët, Sarti Rosa — and would otherwise need a list of every bottle. */
+  if (billCategory === 'Drinks Cost') return 'Drinks';
   return 'Other';
 }
 
@@ -79,7 +121,8 @@ const LABEL_W = 260;
 
 export default function CogsPage() {
   const [year, setYear] = useState(new Date().getFullYear());
-  const [open, setOpen] = useState<Record<string, boolean>>({ Meat: true, 'Fruit & Veg': true, 'Non-food': true, Other: true });
+  /* Collapsed to start: nine buckets opened at once is a wall of products. */
+  const [open, setOpen] = useState<Record<string, boolean>>({});
 
   const { data: bills = [], isLoading: lb } = useQuery({
     queryKey: ['cogs-page', 'bills', year],
@@ -115,9 +158,7 @@ export default function CogsPage() {
 
     /* By product: the invoice lines, bucketed. */
     const billById = new Map(cogsBills.map(b => [String(b.id), b]));
-    const byBucket: Record<Bucket, Map<string, Row>> = {
-      'Meat': new Map(), 'Fruit & Veg': new Map(), 'Non-food': new Map(), 'Other': new Map(),
-    };
+    const byBucket = Object.fromEntries(BUCKETS.map(b => [b, new Map<string, Row>()])) as Record<Bucket, Map<string, Row>>;
     let lineTotal = 0;
     for (const l of lines as Record<string, unknown>[]) {
       const b = billById.get(String(l.bill_id));
