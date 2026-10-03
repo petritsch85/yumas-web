@@ -21,6 +21,11 @@ const SUB_CATEGORY_KEYWORDS: Record<Exclude<SubCategory, 'All' | 'Other'>, strin
     'habanero', 'chile', 'chili', 'poblano', 'serrano', 'peperoni', 'knoblauch', 'garlic',
     'ajo', 'ingwer', 'ginger', 'jengibre', 'koriander', 'cilantro', 'petersilie',
     'parsley', 'minze', 'mint', 'hierba', 'kräuter', 'herbs',
+    // Found sitting in Other on the COGS page: 17.000 € a year between them.
+    // Beans are named specifically: a bare 'bohne' also catches Röstkaffeebohnen,
+    // and 1.151 € of espresso is not a vegetable.
+    'kartoffel', 'potato', 'tomatillo', 'schwarze bohne', 'pinto bohne',
+    'wachtelbohne', 'kidneybohne', 'frijol', 'melone', 'melon', 'kaktusfeige', 'nopal',
   ],
   'Meat': [
     'rind', 'beef', 'res', 'carne', 'schwein', 'pork', 'cerdo', 'hähnchen', 'huhn',
@@ -30,6 +35,11 @@ const SUB_CATEGORY_KEYWORDS: Record<Exclude<SubCategory, 'All' | 'Other'>, strin
     'costilla', 'ribs', 'rippe', 'geflügel', 'poultry', 'aves', 'truthahn', 'turkey',
     'pavo', 'ente', 'duck', 'pato', 'garnele', 'shrimp', 'camarón', 'fisch', 'fish',
     'pescado', 'lachs', 'salmon', 'salmón', 'thunfisch', 'tuna', 'atún',
+    // Found sitting in Other on the COGS page: 19.000 € a year between them.
+    // 'geschnetzeltes' is always meat; 'haehn' catches the invoices that write
+    // Hähnchen without the umlaut; 'vannemel' is a supplier's typo for the
+    // prawn, kept because it is what two invoices actually say.
+    'geschnetzeltes', 'brustfil', 'haehn', 'vannamei', 'vannemel', 'wolfsbarsch',
   ],
   'Spices': [
     'gewürz', 'spice', 'especias', 'salz', 'salt', 'sal', 'pfeffer', 'pepper', 'pimienta',
