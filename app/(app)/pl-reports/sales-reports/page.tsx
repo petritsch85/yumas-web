@@ -108,6 +108,51 @@ const COGS_CATEGORIES = {
 /** Cost of goods for one month, split the way the bills are categorised. */
 type CogsBucket = { food: number; drinks: number; packaging: number; total: number };
 
+/**
+ * SG&A — the cost of running the business, in the order the block shows it.
+ *
+ * Read from the bills by invoice date, exactly as COGS is, so the two halves of
+ * the margin are measured the same way. Several bill categories can feed one
+ * line where the distinction does not earn a row of its own.
+ *
+ * A line shows blank rather than zero when no bill carries its category that
+ * month. Most of these costs are still paid without an invoice ever reaching
+ * the inbox — rent above all — and a confident 0 would read as "nothing was
+ * spent" when it means "nothing was filed".
+ */
+const SGA_LINES: { key: string; label: string; categories: string[] }[] = [
+  { key: 'rent',      label: 'Rent',                   categories: ['Rent'] },
+  { key: 'utilities', label: 'Utilities & energy',     categories: ['Utilities', 'Fuel & Energy', 'Fuel Cost'] },
+  { key: 'software',  label: 'Software & technology',  categories: ['Software & Technology'] },
+  { key: 'delivery',  label: 'Delivery platform fees', categories: ['Delivery Platform Fees'] },
+  { key: 'cleaning',  label: 'Cleaning & hygiene',     categories: ['Cleaning Services'] },
+  { key: 'marketing', label: 'Marketing',              categories: ['Marketing'] },
+  { key: 'other',     label: 'Other operating costs',  categories: ['Other'] },
+];
+
+/**
+ * Repairs sit below EBITDA, not in SG&A.
+ *
+ * A ventilation overhaul or a new vacuum pump is work on the premises, not the
+ * cost of opening the doors each day — holding it above EBITDA would make a
+ * month with a breakdown look like a month that traded badly.
+ */
+const REPAIR_CATEGORIES = ['Repairs & Maintenance'];
+
+/**
+ * Staff costs are deliberately not read from the bills.
+ *
+ * Wages leave the account as transfers, not invoices, and the few bills marked
+ * Labour (an agency, the Edenred benefit cards) are a sliver of the real figure
+ * — 2.918 € against the ~104.000 € a month the payroll actually costs. Showing
+ * the sliver would be worse than showing nothing, so the row stays blank until
+ * the payroll data is wired in.
+ */
+const STAFF_FROM_BILLS = false;
+
+/** What SG&A and repairs came to in one month. */
+type OpexBucket = { lines: Record<string, number>; total: number; repairs: number };
+
 /** Net sales for one restaurant in one month, split by shift. */
 type GroupBucket = { lunch: number; dinner: number; total: number };
 
@@ -1472,6 +1517,27 @@ export default function SalesReportsPage() {
       const c = (m[monthKey] ??= { food: 0, drinks: 0, packaging: 0, total: 0 });
       c[key] += Number(b.net_amount ?? 0);
       c.total += Number(b.net_amount ?? 0);
+    }
+    return m;
+  }, [gmCostBills]);
+
+  /** SG&A and repairs per month, from the same bills that feed the cost of goods. */
+  const groupOpex = useMemo(() => {
+    const lineOf = new Map<string, string>();
+    for (const l of SGA_LINES) for (const c of l.categories) lineOf.set(c, l.key);
+
+    const m: Record<string, OpexBucket> = {};
+    for (const b of gmCostBills) {
+      const monthKey = String(b.invoice_date ?? '').slice(0, 7);
+      if (!monthKey || monthKey < COGS_FROM) continue;
+      const cat = String(b.category ?? '');
+      const net = Number(b.net_amount ?? 0);
+      const o = (m[monthKey] ??= { lines: {}, total: 0, repairs: 0 });
+      if (REPAIR_CATEGORIES.includes(cat)) { o.repairs += net; continue; }
+      const key = lineOf.get(cat);
+      if (!key) continue;   // cost of goods, or a category no line claims
+      o.lines[key] = (o.lines[key] ?? 0) + net;
+      o.total += net;
     }
     return m;
   }, [gmCostBills]);
@@ -7608,9 +7674,17 @@ export default function SalesReportsPage() {
              */
             const cogsSuppliers = (part: string, colKey: string) => {
               const prefix = colKey.startsWith('FY') ? colKey.slice(2) + '-' : colKey;
-              const wanted = Object.entries(COGS_CATEGORIES)
-                .filter(([, key]) => part === 'total' || key === part)
-                .map(([cat]) => cat);
+              /* Which bill categories a fold-out covers. The cost-of-goods
+                 lines, every SG&A line, and repairs all open the same way. */
+              const wanted: string[] = part.startsWith('sga-')
+                ? (part === 'sga-total'
+                    ? SGA_LINES.flatMap(l => l.categories)
+                    : (SGA_LINES.find(l => 'sga-' + l.key === part)?.categories ?? []))
+                : part === 'repairs'
+                  ? REPAIR_CATEGORIES
+                  : Object.entries(COGS_CATEGORIES)
+                      .filter(([, key]) => part === 'total' || key === part)
+                      .map(([cat]) => cat);
               /* Keyed on the name in lower case: the same supplier is spelled
                  both "Bier-Zentrale Leleithner GmbH" and "BIER-ZENTRALE
                  Leleithner GmbH" across its own invoices, and two lines for one
@@ -7677,6 +7751,40 @@ export default function SalesReportsPage() {
                 </tr>
               ));
             };
+            /** SG&A and repairs for one column, a month or a whole year. */
+            const opexFor = (colKey: string): OpexBucket | null => {
+              const add = (a: OpexBucket, b: OpexBucket): OpexBucket => {
+                const lines = { ...a.lines };
+                for (const [k, v] of Object.entries(b.lines)) lines[k] = (lines[k] ?? 0) + v;
+                return { lines, total: a.total + b.total, repairs: a.repairs + b.repairs };
+              };
+              if (!colKey.startsWith('FY')) {
+                return colKey >= COGS_FROM ? (groupOpex[colKey] ?? null) : null;
+              }
+              const months = Object.entries(groupOpex).filter(([k]) => k.startsWith(colKey.slice(2)));
+              if (!months.length) return null;
+              return months.reduce<OpexBucket>((acc, [, v]) => add(acc, v), { lines: {}, total: 0, repairs: 0 });
+            };
+
+            /* Blank, not zero, where no bill carried the category: see SGA_LINES. */
+            const sgaLine = (key: string) => (colKey: string) => {
+              const o = opexFor(colKey);
+              if (!o) return null;
+              return o.lines[key] ?? null;
+            };
+            const sgaTotal = (colKey: string) => opexFor(colKey)?.total ?? null;
+
+            /** Payroll is not in the bills; the row waits for it. */
+            const staffCost = (colKey: string): number | null => {
+              if (!STAFF_FROM_BILLS) return null;
+              return opexFor(colKey) ? 0 : null;
+            };
+            const staffPct = (colKey: string) => {
+              const s = staffCost(colKey);
+              const sales = grandTotal(colKey).total;
+              return s === null || sales <= 0 ? null : (s / sales) * 100;
+            };
+
             /** What the group kept: everything sold, less what the goods cost. */
             const grossProfit = (colKey: string) => {
               const c = cogsFor(colKey);
@@ -7687,6 +7795,52 @@ export default function SalesReportsPage() {
               const sales = grandTotal(colKey).total;
               if (!c || sales <= 0) return null;
               return ((sales - c.total) / sales) * 100;
+            };
+
+            /**
+             * EBITDA: gross profit, less what it costs to keep the doors open.
+             *
+             * Staff counts as nothing while its row is blank, so the figure is
+             * gross profit less SG&A until the payroll is wired in — and is
+             * overstated by roughly a month's wages until then.
+             */
+            const ebitda = (colKey: string) => {
+              const gp = grossProfit(colKey);
+              const o = opexFor(colKey);
+              if (gp === null || !o) return null;
+              return gp - (staffCost(colKey) ?? 0) - o.total;
+            };
+            const ebitdaPct = (colKey: string) => {
+              const e = ebitda(colKey);
+              const sales = grandTotal(colKey).total;
+              return e === null || sales <= 0 ? null : (e / sales) * 100;
+            };
+
+            /** Work on the premises and the equipment — lumpy, so kept apart. */
+            const repairs = (colKey: string) => {
+              const o = opexFor(colKey);
+              if (!o) return null;
+              return o.repairs || null;
+            };
+
+            const freeCashFlow = (colKey: string) => {
+              const e = ebitda(colKey);
+              return e === null ? null : e - (repairs(colKey) ?? 0);
+            };
+
+            /**
+             * Interest waits for the loan statement.
+             *
+             * The Sparkasse Darlehen leaves as one payment of 7.206 € a month
+             * covering principal and interest together, and the bank narrative
+             * does not split them. Showing the whole payment here would call
+             * repayment "interest" and understate what the group keeps.
+             */
+            const financialInterest = (_colKey: string): number | null => null;
+
+            const fcfAfterInterest = (colKey: string) => {
+              const f = freeCashFlow(colKey);
+              return f === null ? null : f - (financialInterest(colKey) ?? 0);
             };
 
             /**
@@ -7752,6 +7906,33 @@ export default function SalesReportsPage() {
                       {headingRow('gm-head', 'Gross margin')}
                       {valueLine('gm-abs', 'Gross profit',   grossProfit,    { bold: true })}
                       {valueLine('gm-pct', 'Gross margin %', grossMarginPct, { indent: true, pct: true })}
+                      {spacerRow('gm-gap')}
+
+                      {headingRow('staff-head', 'Staff costs')}
+                      {valueLine('staff-abs', 'Staff costs',    staffCost, { bold: true })}
+                      {valueLine('staff-pct', 'as % of sales',  staffPct,  { indent: true, pct: true })}
+                      {spacerRow('staff-gap')}
+
+                      {headingRow('sga-head', 'SG&A')}
+                      {SGA_LINES.flatMap(l => [
+                        valueLine('sga-' + l.key, l.label, sgaLine(l.key), { indent: true, drill: 'sga-' + l.key }),
+                        ...drillRows('sga-' + l.key),
+                      ])}
+                      {valueLine('sga-total', 'Total SG&A', sgaTotal, { bold: true, drill: 'sga-total' })}
+                      {drillRows('sga-total')}
+                      {spacerRow('sga-gap')}
+
+                      {headingRow('ebitda-head', 'EBITDA')}
+                      {valueLine('ebitda-abs', 'EBITDA',          ebitda,    { bold: true })}
+                      {valueLine('ebitda-pct', 'EBITDA margin %', ebitdaPct, { indent: true, pct: true })}
+                      {valueLine('repairs', 'Repairs', repairs, { indent: true, drill: 'repairs' })}
+                      {drillRows('repairs')}
+                      {spacerRow('ebitda-gap')}
+
+                      {headingRow('fcf-head', 'Free cash flow')}
+                      {valueLine('fcf-abs',   'FCF',                 freeCashFlow,      { bold: true })}
+                      {valueLine('fcf-int',   'Financial interest',  financialInterest, { indent: true })}
+                      {valueLine('fcf-after', 'FCF after interest',  fcfAfterInterest,  { bold: true })}
                     </tbody>
                   </table>
                 </div>
@@ -7766,6 +7947,16 @@ export default function SalesReportsPage() {
                   by invoice date. It starts at {COGS_FROM} — earlier months are missing whole runs of supplier
                   invoices, and a cost line built on some of them would only flatter the margin, so those cells
                   are left empty and the gross margin with them.
+                  {' '}SG&amp;A is read the same way, from the bills by invoice date, and a line shows blank
+                  rather than zero where no bill carried its category that month — rent above all is still paid
+                  without an invoice reaching the inbox, so a 0 would read as &ldquo;nothing was spent&rdquo;
+                  when it means &ldquo;nothing was filed&rdquo;. Every cost line opens to show its suppliers.
+                  {' '}EBITDA is gross profit less staff and SG&amp;A; while the staff row is blank it counts as
+                  nothing, so EBITDA is currently overstated by about a month&rsquo;s wages. Repairs are held
+                  below EBITDA because a ventilation overhaul is work on the premises, not the cost of trading,
+                  and FCF is EBITDA less repairs. Financial interest waits on the loan statement: the Sparkasse
+                  Darlehen leaves as one payment covering principal and interest together, and calling the whole
+                  of it interest would be wrong.
                 </div>
               </div>
             );
