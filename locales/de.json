@@ -78,6 +78,7 @@
       "accounts": "Konten",
       "bills": "Kosten",
       "staffCosts": "Personalkosten",
+      "cogs": "COGS",
       "incoming": "Eingangsrechnungen",
       "outgoing": "Ausgangsrechnungen",
       "costsOther": "Sonstiges",

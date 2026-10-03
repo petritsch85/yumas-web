@@ -174,6 +174,7 @@ const NAV_GROUPS: NavGroup[] = [
         children: [
           { labelKey: 'sidebar.nav.staffCosts', href: '/bills/staff',   icon: Users },
           { labelKey: 'sidebar.nav.incoming',   href: '/bills',          icon: FilePlus,  permKey: 'bills' },
+          { labelKey: 'sidebar.nav.cogs',       href: '/bills/cogs',    icon: Package },
           { labelKey: 'sidebar.nav.costsOther', href: '/bills/other',   icon: FolderOpen },
         ],
       },

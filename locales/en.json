@@ -79,6 +79,7 @@
       "accounts": "Accounts",
       "bills": "Costs",
       "staffCosts": "Staff costs",
+      "cogs": "COGS",
       "incoming": "Incoming bills",
       "outgoing": "Outgoing bills",
       "costsOther": "Other",
