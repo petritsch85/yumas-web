@@ -162,6 +162,19 @@ const STAFF_PLACEHOLDER: Record<string, number> = {
   '2026-09': 115000,
 };
 
+/**
+ * SG&A figures standing in until the real ones arrive, keyed line|month.
+ *
+ * Shown red like the staff placeholder, and they replace what the bills say for
+ * that line and month rather than adding to it — an entered figure is a
+ * statement about the whole cost, not a top-up of the part that was invoiced.
+ * Energy is the case in point: Süwag and schwarzwald energy are collected by
+ * direct debit and send no invoice we file, so the bills show nothing.
+ */
+const SGA_PLACEHOLDER: Record<string, number> = {
+  'utilities|2026-09': 5000,
+};
+
 /** What SG&A and repairs came to in one month. */
 type OpexBucket = { lines: Record<string, number>; total: number; repairs: number };
 
@@ -7634,8 +7647,9 @@ export default function SalesReportsPage() {
                   const fy = col.type === 'fy';
                   const v = get(col.key);
                   const open = !!opts.drill && cogsDrill?.part === opts.drill && cogsDrill.colKey === col.key;
-                  const canDrill = !!opts.drill && v !== null && v !== 0;
                   const red = !!opts.assumed?.(col.key);
+                  /* A figure entered by hand has no bills to open. */
+                  const canDrill = !!opts.drill && v !== null && v !== 0 && !red;
                   const tone = red ? 'text-red-600' : 'text-gray-800';
                   const body = v === null
                     ? <span className="text-gray-300">—</span>
@@ -7785,13 +7799,29 @@ export default function SalesReportsPage() {
               return months.reduce<OpexBucket>((acc, [, v]) => add(acc, v), { lines: {}, total: 0, repairs: 0 });
             };
 
-            /* Blank, not zero, where no bill carried the category: see SGA_LINES. */
+            /** A figure entered by hand for this line and column, if there is one. */
+            const sgaPlaceholder = (key: string, colKey: string): number | null => {
+              if (!colKey.startsWith('FY')) return SGA_PLACEHOLDER[`${key}|${colKey}`] ?? null;
+              const year = colKey.slice(2);
+              const hits = Object.entries(SGA_PLACEHOLDER)
+                .filter(([k]) => { const [lk, m] = k.split('|'); return lk === key && m.startsWith(year); });
+              return hits.length ? hits.reduce((s, [, v]) => s + v, 0) : null;
+            };
+
+            /* Blank, not zero, where no bill carried the category: see SGA_LINES.
+               A placeholder stands in for the whole line, not beside it. */
             const sgaLine = (key: string) => (colKey: string) => {
+              const entered = sgaPlaceholder(key, colKey);
+              if (entered !== null) return entered;
               const o = opexFor(colKey);
               if (!o) return null;
               return o.lines[key] ?? null;
             };
-            const sgaTotal = (colKey: string) => opexFor(colKey)?.total ?? null;
+            const sgaTotal = (colKey: string) => {
+              const anyEntered = SGA_LINES.some(l => sgaPlaceholder(l.key, colKey) !== null);
+              if (!opexFor(colKey) && !anyEntered) return null;
+              return SGA_LINES.reduce((t, l) => t + (sgaLine(l.key)(colKey) ?? 0), 0);
+            };
 
             /**
              * Payroll is not in the bills, so the row carries a placeholder
@@ -7833,9 +7863,9 @@ export default function SalesReportsPage() {
              */
             const ebitda = (colKey: string) => {
               const gp = grossProfit(colKey);
-              const o = opexFor(colKey);
-              if (gp === null || !o) return null;
-              return gp - (staffCost(colKey) ?? 0) - o.total;
+              const sga = sgaTotal(colKey);
+              if (gp === null || sga === null) return null;
+              return gp - (staffCost(colKey) ?? 0) - sga;
             };
             const ebitdaPct = (colKey: string) => {
               const e = ebitda(colKey);
@@ -7942,7 +7972,12 @@ export default function SalesReportsPage() {
 
                       {headingRow('sga-head', 'SG&A')}
                       {SGA_LINES.flatMap(l => [
-                        valueLine('sga-' + l.key, l.label, sgaLine(l.key), { indent: true, drill: 'sga-' + l.key }),
+                        valueLine('sga-' + l.key, l.label, sgaLine(l.key), {
+                          indent: true,
+                          /* A placeholder has no bills behind it to open. */
+                          drill: 'sga-' + l.key,
+                          assumed: colKey => sgaPlaceholder(l.key, colKey) !== null,
+                        }),
                         ...drillRows('sga-' + l.key),
                       ])}
                       {valueLine('sga-total', 'Total SG&A', sgaTotal, { bold: true, drill: 'sga-total' })}
