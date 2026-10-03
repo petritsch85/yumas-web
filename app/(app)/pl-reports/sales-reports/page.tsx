@@ -78,6 +78,7 @@ import {
   Loader2, SlidersHorizontal, Ban, FileText,
 } from 'lucide-react';
 import { useT } from '@/lib/i18n';
+import { splitFinancing, isFinancing } from '@/lib/loan-split';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TYPES
@@ -1506,6 +1507,12 @@ export default function SalesReportsPage() {
     queryKey: ['group-monthly', 'wolt-capital'], enabled: groupMonthlyOn,
     queryFn: () => fetchAllRows('wolt_periods', 'invoice_date,wolt_capital', 'invoice_date'),
   });
+  /* The bank lines that carry interest or a repayment, for the two rows below
+     FCF. The split is printed in the narrative — see lib/loan-split.ts. */
+  const { data: gmFinancing = [] } = useQuery({
+    queryKey: ['group-monthly', 'financing'], enabled: groupMonthlyOn,
+    queryFn: () => fetchAllRows('cashflow_transactions', 'date,description,amount_cents,direction', 'date'),
+  });
   const { data: gmLieferando = [] } = useQuery({
     queryKey: ['group-monthly', 'lieferando'], enabled: groupMonthlyOn,
     queryFn: () => fetchAllRows('lieferando_shift_sales', 'location_id,sale_date,shift,net_final', 'sale_date'),
@@ -1557,18 +1564,34 @@ export default function SalesReportsPage() {
     return m;
   }, [gmCostBills]);
 
-  /** Capital repaid in a month, by the date Wolt withheld it. */
-  const groupCapital = useMemo(() => {
-    const m: Record<string, number> = {};
+  /**
+   * Interest and capital repaid, per month.
+   *
+   * Two sources. Wolt withholds its lending from the payout, so it never
+   * reaches the bank and is read from the Wolt statements; the Sparkasse loan,
+   * the shareholder loans and the overdraft all come off the account, and the
+   * bank prints the interest/capital split in the narrative.
+   */
+  const groupFinancing = useMemo(() => {
+    const capital: Record<string, number> = {};
+    const interest: Record<string, number> = {};
+
     for (const p of gmWoltCapital as Record<string, unknown>[]) {
       const v = Number(p.wolt_capital ?? 0);
-      if (!v) continue;
       const key = String(p.invoice_date ?? '').slice(0, 7);
-      if (!key) continue;
-      m[key] = (m[key] ?? 0) + v;
+      if (v && key) capital[key] = (capital[key] ?? 0) + v;
     }
-    return m;
-  }, [gmWoltCapital]);
+    for (const t of gmFinancing as Record<string, unknown>[]) {
+      const desc = String(t.description ?? '');
+      if (!isFinancing(desc)) continue;
+      const key = String(t.date ?? '').slice(0, 7);
+      if (!key) continue;
+      const s = splitFinancing(desc, Math.abs(Number(t.amount_cents ?? 0)) / 100);
+      if (s.capital)  capital[key]  = (capital[key]  ?? 0) + s.capital;
+      if (s.interest) interest[key] = (interest[key] ?? 0) + s.interest;
+    }
+    return { capital, interest };
+  }, [gmWoltCapital, gmFinancing]);
 
   /** SG&A and repairs per month, from the same bills that feed the cost of goods. */
   const groupOpex = useMemo(() => {
@@ -7909,15 +7932,20 @@ export default function SalesReportsPage() {
               return e === null ? null : e - (repairs(colKey) ?? 0);
             };
 
+            /** A month of a map, or the year's worth for an FY column. */
+            const monthOrYear = (map: Record<string, number>) => (colKey: string) => {
+              if (!colKey.startsWith('FY')) return map[colKey] ?? null;
+              const year = colKey.slice(2);
+              const hits = Object.entries(map).filter(([m]) => m.startsWith(year));
+              return hits.length ? hits.reduce((s, [, v]) => s + v, 0) : null;
+            };
+
             /**
-             * Interest waits for the loan statement.
-             *
-             * The Sparkasse Darlehen leaves as one payment of 7.206 € a month
-             * covering principal and interest together, and the bank narrative
-             * does not split them. Showing the whole payment here would call
-             * repayment "interest" and understate what the group keeps.
+             * What the borrowing costs: the Zinsen half of the Sparkasse loan,
+             * the shareholder loans' Zinsrückzahlung, and the overdraft
+             * interest buried in the monthly Abrechnung.
              */
-            const financialInterest = (_colKey: string): number | null => null;
+            const financialInterest = monthOrYear(groupFinancing.interest);
 
             const fcfAfterInterest = (colKey: string) => {
               const f = freeCashFlow(colKey);
@@ -7925,20 +7953,11 @@ export default function SalesReportsPage() {
             };
 
             /**
-             * Capital repaid, which is not a cost of trading.
-             *
-             * Wolt lends against future takings and withholds the repayment
-             * from the payout, so the money never reaches the account and would
-             * otherwise be invisible. Only Wolt for now; the Sparkasse Darlehen
-             * belongs here too, but it leaves as one payment covering principal
-             * and interest and the split has to come from the loan statement.
+             * Debt repaid, which is not a cost of trading: the Tilgung half of
+             * the Sparkasse loan, and the lending Wolt withholds from its
+             * payouts so that it never reaches the account at all.
              */
-            const capitalPayments = (colKey: string) => {
-              if (!colKey.startsWith('FY')) return groupCapital[colKey] ?? null;
-              const year = colKey.slice(2);
-              const months = Object.entries(groupCapital).filter(([m]) => m.startsWith(year));
-              return months.length ? months.reduce((s, [, v]) => s + v, 0) : null;
-            };
+            const capitalPayments = monthOrYear(groupFinancing.capital);
 
             const fcfAfterCapital = (colKey: string) => {
               const f = fcfAfterInterest(colKey);
@@ -8071,14 +8090,15 @@ export default function SalesReportsPage() {
                   in red — EBITDA rests on it until the payroll is wired in, and where no placeholder is set
                   staff counts as nothing and EBITDA is overstated by a month&rsquo;s wages. Repairs are held
                   below EBITDA because a ventilation overhaul is work on the premises, not the cost of trading,
-                  and FCF is EBITDA less repairs. Financial interest waits on the loan statement: the Sparkasse
-                  Darlehen leaves as one payment covering principal and interest together, and calling the whole
-                  of it interest would be wrong.
+                  and FCF is EBITDA less repairs. Financial interest is the Zinsen half of the Sparkasse
+                  Darlehen, which the bank prints on each booking alongside the Tilgung, plus the shareholder
+                  loans&rsquo; Zinsr&uuml;ckzahlung and the overdraft interest inside the monthly Abrechnung —
+                  the account fees in that same charge are not interest and stay out.
                   {' '}Capital payments are repayments of borrowing, not a cost of trading. Wolt lends against
                   future takings and withholds the repayment from the payout, so the money never reaches the
                   account — it is picked up from the Wolt statements, which is also why it is not already inside
-                  net sales the way Wolt&rsquo;s commission and advertising are. The Sparkasse Darlehen belongs
-                  on this line too, once the loan statement gives the split between principal and interest.
+                  net sales the way Wolt&rsquo;s commission and advertising are. The Tilgung half of the
+                  Sparkasse Darlehen sits here too.
                 </div>
               </div>
             );
