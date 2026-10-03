@@ -1498,6 +1498,14 @@ export default function SalesReportsPage() {
     queryKey: ['group-monthly', 'wolt-credits'], enabled: groupMonthlyOn,
     queryFn: () => fetchAllRows('wolt_month_credits', 'location_id,month,net', 'month'),
   });
+  /* Wolt lends against future takings and keeps the repayment out of the
+     payout. It is financing, not a cost of trading, so it sits below FCF —
+     and it is deliberately not deducted from net_sales_final, which is why it
+     has to be picked up here rather than being already inside sales. */
+  const { data: gmWoltCapital = [] } = useQuery({
+    queryKey: ['group-monthly', 'wolt-capital'], enabled: groupMonthlyOn,
+    queryFn: () => fetchAllRows('wolt_periods', 'invoice_date,wolt_capital', 'invoice_date'),
+  });
   const { data: gmLieferando = [] } = useQuery({
     queryKey: ['group-monthly', 'lieferando'], enabled: groupMonthlyOn,
     queryFn: () => fetchAllRows('lieferando_shift_sales', 'location_id,sale_date,shift,net_final', 'sale_date'),
@@ -1548,6 +1556,19 @@ export default function SalesReportsPage() {
     }
     return m;
   }, [gmCostBills]);
+
+  /** Capital repaid in a month, by the date Wolt withheld it. */
+  const groupCapital = useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const p of gmWoltCapital as Record<string, unknown>[]) {
+      const v = Number(p.wolt_capital ?? 0);
+      if (!v) continue;
+      const key = String(p.invoice_date ?? '').slice(0, 7);
+      if (!key) continue;
+      m[key] = (m[key] ?? 0) + v;
+    }
+    return m;
+  }, [gmWoltCapital]);
 
   /** SG&A and repairs per month, from the same bills that feed the cost of goods. */
   const groupOpex = useMemo(() => {
@@ -7904,6 +7925,27 @@ export default function SalesReportsPage() {
             };
 
             /**
+             * Capital repaid, which is not a cost of trading.
+             *
+             * Wolt lends against future takings and withholds the repayment
+             * from the payout, so the money never reaches the account and would
+             * otherwise be invisible. Only Wolt for now; the Sparkasse Darlehen
+             * belongs here too, but it leaves as one payment covering principal
+             * and interest and the split has to come from the loan statement.
+             */
+            const capitalPayments = (colKey: string) => {
+              if (!colKey.startsWith('FY')) return groupCapital[colKey] ?? null;
+              const year = colKey.slice(2);
+              const months = Object.entries(groupCapital).filter(([m]) => m.startsWith(year));
+              return months.length ? months.reduce((s, [, v]) => s + v, 0) : null;
+            };
+
+            const fcfAfterCapital = (colKey: string) => {
+              const f = fcfAfterInterest(colKey);
+              return f === null ? null : f - (capitalPayments(colKey) ?? 0);
+            };
+
+            /**
              * A block: the heading, a line per restaurant, then the total.
              *
              * The Total block closes differently — the stores' own total, the
@@ -7998,6 +8040,8 @@ export default function SalesReportsPage() {
                       {valueLine('fcf-abs',   'FCF',                 freeCashFlow,      { bold: true })}
                       {valueLine('fcf-int',   'Financial interest',  financialInterest, { indent: true })}
                       {valueLine('fcf-after', 'FCF after interest',  fcfAfterInterest,  { bold: true })}
+                      {valueLine('fcf-cap',   'Capital payments',    capitalPayments,   { indent: true })}
+                      {valueLine('fcf-final', 'FCF after int + cap pay', fcfAfterCapital, { bold: true })}
                     </tbody>
                   </table>
                 </div>
@@ -8030,6 +8074,11 @@ export default function SalesReportsPage() {
                   and FCF is EBITDA less repairs. Financial interest waits on the loan statement: the Sparkasse
                   Darlehen leaves as one payment covering principal and interest together, and calling the whole
                   of it interest would be wrong.
+                  {' '}Capital payments are repayments of borrowing, not a cost of trading. Wolt lends against
+                  future takings and withholds the repayment from the payout, so the money never reaches the
+                  account — it is picked up from the Wolt statements, which is also why it is not already inside
+                  net sales the way Wolt&rsquo;s commission and advertising are. The Sparkasse Darlehen belongs
+                  on this line too, once the loan statement gives the split between principal and interest.
                 </div>
               </div>
             );
