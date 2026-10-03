@@ -25,10 +25,25 @@ const REMITTERS = [
 ];
 
 /**
+ * Yumas is never its own supplier.
+ *
+ * Wolt settles by self-billing — "Rechnung (Selbstfakturierung)", with Yumas as
+ * the seller and Wolt billed — so extraction reads the supplier as Yumas, quite
+ * correctly. The document still records a payout: goods sold, less commission,
+ * equals the money Wolt transfers. Filed as a bill it became a payable, and
+ * seven of them put 5.181,18 € of our own revenue into the cost of goods.
+ *
+ * Any document naming us as the seller is one we issued or one issued for us,
+ * and neither is something we owe.
+ */
+const OURSELVES = /^\s*yumas\b/i;
+
+/**
  * True when a document comes from a counterparty that only ever pays us, and
  * so must not be filed as a bill however much it looks like one.
  */
 export function isRemitter(supplierName: string | null | undefined): boolean {
   const name = (supplierName ?? '').trim();
-  return name !== '' && REMITTERS.some(re => re.test(name));
+  if (name === '') return false;
+  return OURSELVES.test(name) || REMITTERS.some(re => re.test(name));
 }
