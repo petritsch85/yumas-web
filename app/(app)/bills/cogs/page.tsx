@@ -19,6 +19,7 @@ import { supabase } from '@/lib/supabase-browser';
 import { fetchAllRows } from '@/lib/fetch-all';
 import { Package, ChevronRight, ChevronDown } from 'lucide-react';
 import { classifyLine } from '@/lib/food-categories';
+import { counterpartyFor, type CategorySource } from '@/lib/counterparty-category';
 
 /** The three bill categories that are cost of goods, as the P&L uses them. */
 const COGS_CATEGORIES = ['Food Cost', 'Drinks Cost', 'Packaging'];
@@ -158,6 +159,15 @@ export default function CogsPage() {
     queryFn: () => fetchAllRows<Record<string, unknown>>((from, to) => supabase.from('bill_lines')
       .select('bill_id,description,line_total').order('id').range(from, to)),
   });
+  /* One supplier writes its own name several ways over a year — Hills bills as
+     HILLS, as Hills Früchte, and twice more as Adam Schneble Jr. The
+     counterparties you maintain already know which names are the same firm, so
+     the merge follows them rather than guessing at the spelling. */
+  const { data: counterparties = [] } = useQuery({
+    queryKey: ['cogs-page', 'counterparties'],
+    queryFn: () => fetchAllRows<CategorySource>((from, to) => supabase.from('counterparties')
+      .select('id,name,category,keywords').order('id').range(from, to)),
+  });
 
   const model = useMemo(() => {
     const cogsBills = (bills as Record<string, unknown>[])
@@ -165,10 +175,14 @@ export default function CogsPage() {
     const months = Array.from(new Set(cogsBills.map(b => String(b.invoice_date ?? '').slice(0, 7))))
       .filter(Boolean).sort();
 
-    /* By supplier: the bill net, so this section ties to the P&L. */
+    /* By supplier: the bill net, so this section ties to the P&L. A supplier
+       the counterparties recognise is shown under that one name, however it
+       spelled itself on the invoice; one they do not keeps its own. */
     const bySupplier = new Map<string, Row>();
     for (const b of cogsBills) {
-      const name = String(b.supplier_name ?? '—').trim();
+      const raw = String(b.supplier_name ?? '—').trim();
+      const known = counterpartyFor({ counterparty: raw }, counterparties)?.name;
+      const name = known ?? raw;
       const key = name.toLowerCase();
       const m = String(b.invoice_date ?? '').slice(0, 7);
       const v = Number(b.net_amount ?? 0);
@@ -238,7 +252,7 @@ export default function CogsPage() {
       }),
       billNet, lineTotal, monthNet, monthLines,
     };
-  }, [bills, lines]);
+  }, [bills, lines, counterparties]);
 
   const cols = model.months;
   const cell = (v: number | undefined) =>
@@ -366,7 +380,9 @@ export default function CogsPage() {
           </div>
           <div className="px-4 py-1.5 border-t border-gray-100 bg-gray-50 text-[11px] text-gray-500">
             Food Cost, Drinks Cost and Packaging only, by invoice date — the same three the P&amp;L COGS line uses.
-            By supplier is the net of the bills, so it ties to that line. By product is the net of the invoice
+            By supplier is the net of the bills, so it ties to that line. A supplier that has written its name
+            several ways is shown once, under the name its counterparty carries, so Hills is one line rather
+            than four; a supplier with no counterparty keeps the name on its invoice. By product is the net of the invoice
             lines, which comes to a little more, and the difference is shown rather than smoothed away. Products
             are grouped from the invoice wording with pack sizes and article numbers folded away; Non-food is
             everything on a Packaging bill plus crates, empties and the cleaning goods that arrive among the food.
