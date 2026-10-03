@@ -115,6 +115,28 @@ function productKey(description: string): string {
 
 type Row = { label: string; byMonth: Record<string, number>; total: number };
 
+/**
+ * Roll-ups shown above a bucket's products.
+ *
+ * Fruit & Veg runs to 190 products and the same vegetable arrives under a dozen
+ * spellings — avocado as RTE, as pulp, by the case, frozen. These lines gather
+ * them so the total for one thing can be read at a glance. They summarise the
+ * rows beneath and are never added to the bucket, or every product would count
+ * twice.
+ *
+ * The exclusions matter more than the matches. "Salat" catches 3.751 € of salad
+ * bowls and lids, which are packaging and already counted under Non-food;
+ * "Koriander" catches the polystyrene it is shipped in; "Zwiebel" catches fried
+ * onions, which are an ambient good rather than fresh veg. Each was checked
+ * against the actual invoice lines before being written here.
+ */
+const SUMMARY_ITEMS: { bucket: Bucket; label: string; match: RegExp; exclude?: RegExp }[] = [
+  { bucket: 'Fruit & Veg', label: 'Avocado',   match: /avocado/ },
+  { bucket: 'Fruit & Veg', label: 'Salat',     match: /salat/,    exclude: /salatschale|deckel|mayon/ },
+  { bucket: 'Fruit & Veg', label: 'Koriander', match: /koriander/, exclude: /\beps\b/ },
+  { bucket: 'Fruit & Veg', label: 'Zwiebeln',  match: /zwiebel/,  exclude: /rostzwiebel/ },
+];
+
 const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const fmt = (n: number) => Math.round(n).toLocaleString('de-DE');
 const LABEL_W = 260;
@@ -190,15 +212,30 @@ export default function CogsPage() {
     return {
       months,
       suppliers: [...bySupplier.values()].sort((a, z) => z.total - a.total),
-      buckets: BUCKETS.map(b => ({
-        bucket: b,
-        rows: [...byBucket[b].values()].sort((a, z) => z.total - a.total),
-        total: [...byBucket[b].values()].reduce((s, r) => s + r.total, 0),
-        byMonth: [...byBucket[b].values()].reduce<Record<string, number>>((acc, r) => {
-          for (const [m, v] of Object.entries(r.byMonth)) acc[m] = (acc[m] ?? 0) + v;
-          return acc;
-        }, {}),
-      })),
+      buckets: BUCKETS.map(b => {
+        const rows = [...byBucket[b].values()].sort((a, z) => z.total - a.total);
+        /* Built from the rows above, so a summary can never disagree with the
+           products it stands for, and never adds to the bucket. */
+        const summaries: Row[] = SUMMARY_ITEMS.filter(s => s.bucket === b).map(s => {
+          const hits = rows.filter(r => {
+            const f = flat(r.label);
+            return s.match.test(f) && !(s.exclude?.test(f) ?? false);
+          });
+          const byMonth: Record<string, number> = {};
+          for (const r of hits) for (const [m, v] of Object.entries(r.byMonth)) byMonth[m] = (byMonth[m] ?? 0) + v;
+          return { label: `${s.label} · ${hits.length}`, byMonth, total: hits.reduce((t, r) => t + r.total, 0) };
+        }).filter(r => r.total !== 0);
+        return {
+          bucket: b,
+          rows,
+          summaries,
+          total: rows.reduce((s, r) => s + r.total, 0),
+          byMonth: rows.reduce<Record<string, number>>((acc, r) => {
+            for (const [m, v] of Object.entries(r.byMonth)) acc[m] = (acc[m] ?? 0) + v;
+            return acc;
+          }, {}),
+        };
+      }),
       billNet, lineTotal, monthNet, monthLines,
     };
   }, [bills, lines]);
@@ -298,6 +335,22 @@ export default function CogsPage() {
                       <td className="text-right tabular-nums px-3 py-1.5 text-xs font-bold"
                         style={{ backgroundColor: '#fffbeb', borderLeft: '1px solid #fde68a' }}>{cell(b.total)}</td>
                     </tr>
+                    {open[b.bucket] && b.summaries.map(r => (
+                      <tr key={'sum-' + b.bucket + r.label} className="border-b border-indigo-100"
+                        style={{ backgroundColor: '#f5f3ff' }}>
+                        <td className="sticky left-0 z-10 px-4 py-1 pl-8 text-[11px] font-semibold text-indigo-900 border-r border-gray-100 truncate"
+                          style={{ backgroundColor: '#f5f3ff', maxWidth: LABEL_W }}
+                          title="Sums the matching products below — not an extra cost">
+                          Σ {r.label}
+                        </td>
+                        {cols.map(m => (
+                          <td key={m} className="text-right tabular-nums px-2 py-1 text-[11px] font-semibold text-indigo-900"
+                            style={{ backgroundColor: '#f5f3ff' }}>{cell(r.byMonth[m])}</td>
+                        ))}
+                        <td className="text-right tabular-nums px-3 py-1 text-[11px] font-semibold text-indigo-900"
+                          style={{ backgroundColor: '#f5f3ff', borderLeft: '1px solid #fde68a' }}>{cell(r.total)}</td>
+                      </tr>
+                    ))}
                     {open[b.bucket] && b.rows.map(r => dataRow(r, { indent: true }))}
                   </React.Fragment>
                 ))}
@@ -317,6 +370,9 @@ export default function CogsPage() {
             lines, which comes to a little more, and the difference is shown rather than smoothed away. Products
             are grouped from the invoice wording with pack sizes and article numbers folded away; Non-food is
             everything on a Packaging bill plus crates, empties and the cleaning goods that arrive among the food.
+            {' '}The shaded Σ lines summarise the products beneath them and are not an extra cost — they gather one
+            vegetable from the dozen spellings it arrives under. Salad bowls and lids are left out of Σ Salat:
+            they are packaging, and already counted under Non-food.
           </div>
         </div>
       )}
