@@ -66,8 +66,12 @@ export async function POST(req: NextRequest) {
    * the one document everything else is reconciled against — and nine uploads
    * had already gone that way. Stored under the month it covers, so the
    * Monatsabschluss page finds it without anyone looking for it again.
+   *
+   * Kept on any successful read, not only when something is applied. A month
+   * that already reconciles has nothing to apply, so September would never
+   * have been filed at all — which is exactly the month being closed.
    */
-  if (apply && from) {
+  if (from) {
     const month = from.slice(0, 7);
     const path = `monatsabschluss/${month}/kontoauszug_${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
     const stored = await admin.storage.from('cashflow-files')
