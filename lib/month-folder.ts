@@ -74,6 +74,18 @@ export const MANIFEST: ManifestItem[] = [
 
 export const itemFor = (key: string) => MANIFEST.find(i => i.key === key) ?? null;
 
+/**
+ * A record that was never going to have a document behind it.
+ *
+ * The landlords bill once in the lease and never again, so the monthly rent
+ * entries are Ersatzbelege written from the payment. Counting them as "missing
+ * a PDF" leaves five permanent warnings on every month that no one can clear,
+ * and a warning nobody can act on is one everybody learns to ignore. The lease
+ * itself is the document, and the Steuerberater already holds it.
+ */
+export const isSubstituteRecord = (notes: string | null | undefined) =>
+  /ersatzbeleg/i.test(notes ?? '');
+
 /** 2026-09 -> "September 2026", for headings and filenames. */
 const MONTH_NAMES = ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni',
   'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'];

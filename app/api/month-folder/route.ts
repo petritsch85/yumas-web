@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { zipSync, strToU8 } from 'fflate';
 import { getSupabaseAdmin } from '@/lib/supabase-admin';
 import {
-  MANIFEST, monthRange, monthLabel, documentName,
+  MANIFEST, monthRange, monthLabel, documentName, isSubstituteRecord,
   manifestSummary, type ItemStatus,
 } from '@/lib/month-folder';
 
@@ -39,12 +39,16 @@ async function gather(admin: Admin, key: string, month: string): Promise<{ docs:
 
   if (key === 'eingangsrechnungen') {
     const bills = await page<Record<string, unknown>>((a, b) => admin.from('bills')
-      .select('invoice_date,supplier_name,invoice_number,file_path')
+      .select('invoice_date,supplier_name,invoice_number,file_path,notes')
       .gte('invoice_date', from).lte('invoice_date', to).order('invoice_date').range(a, b));
     const withFile = bills.filter(x => x.file_path);
+    /* The rent Ersatzbelege never had an original — see isSubstituteRecord. */
+    const substitutes = bills.filter(x => !x.file_path && isSubstituteRecord(x.notes as string));
+    const reallyMissing = bills.length - withFile.length - substitutes.length;
     return {
-      missingFiles: bills.length - withFile.length,
-      detail: `${bills.length} Rechnungen`,
+      missingFiles: reallyMissing,
+      detail: `${bills.length} Rechnungen`
+        + (substitutes.length ? ` · ${substitutes.length} Ersatzbelege (Mietverträge liegen vor)` : ''),
       docs: withFile.map(x => ({
         bucket: 'bills', path: String(x.file_path),
         name: documentName({ date: x.invoice_date as string, party: x.supplier_name as string,
