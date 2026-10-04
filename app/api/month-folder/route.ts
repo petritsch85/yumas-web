@@ -89,33 +89,6 @@ async function gather(admin: Admin, key: string, month: string): Promise<{ docs:
     };
   }
 
-  if (key === 'lieferscheine') {
-    /* A delivery note hangs off its purchase order and is stored as a public
-       URL rather than a path, so the path is taken back out of the URL. The
-       delivery date is what matters, not when somebody photographed it. */
-    const orders = await page<Record<string, unknown>>((a, b) => admin.from('purchase_orders')
-      .select('po_number,actual_delivery_date,order_date,lieferschein_url')
-      .not('lieferschein_url', 'is', null).order('order_date').range(a, b));
-    const inMonth = orders.filter(o => {
-      const d = String(o.actual_delivery_date ?? o.order_date ?? '').slice(0, 10);
-      return d >= from && d <= to;
-    });
-    return {
-      missingFiles: 0,
-      detail: inMonth.length ? `${inMonth.length} Lieferscheine` : undefined,
-      docs: inMonth.map(o => {
-        const url = String(o.lieferschein_url);
-        const path = url.split('/lieferscheine/')[1] ?? url;
-        const ext = (path.match(/\.([a-z0-9]+)$/i) ?? [, 'jpg'])[1];
-        return {
-          bucket: 'lieferscheine', path,
-          name: documentName({ date: String(o.actual_delivery_date ?? o.order_date ?? '').slice(0, 10),
-            party: o.po_number as string, fallback: path }) + '.' + ext,
-        };
-      }),
-    };
-  }
-
   /* Everything else is uploaded against the month. */
   const { data } = await admin.from('month_documents')
     .select('filename,file_path,bucket').eq('kind', key).eq('month', from);

@@ -43,35 +43,31 @@ export const MANIFEST: ManifestItem[] = [
     note: 'Eigene Rechnungen auf Abgrenzungsbasis: Rechnungsdatum im Monat, auch ohne '
         + 'Zahlungseingang, zuzüglich älterer Rechnungen, die in diesem Monat bezahlt wurden.' },
 
-  { key: 'lieferscheine', folder: '04_Lieferscheine', label: 'Lieferscheine',
-    source: 'collected', required: false,
-    note: 'Lieferscheine zu den Eingangsrechnungen, soweit vorhanden.' },
-
-  { key: 'nexi', folder: '05_Nexi', label: 'Nexi Monatsabrechnung',
+  { key: 'nexi', folder: '04_Nexi', label: 'Nexi Monatsabrechnung',
     source: 'uploaded', required: true,
     note: 'Kartenumsätze im Haus, monatliche Abrechnung.' },
 
-  { key: 'amex', folder: '06_Amex', label: 'Amex Monatsabrechnung',
+  { key: 'amex', folder: '05_Amex', label: 'Amex Monatsabrechnung',
     source: 'uploaded', required: true,
     note: 'American Express, monatliche Abrechnung.' },
 
-  { key: 'paypal', folder: '07_PayPal', label: 'PayPal Monatsübersicht',
+  { key: 'paypal', folder: '06_PayPal', label: 'PayPal Monatsübersicht',
     source: 'uploaded', required: true,
     note: 'PayPal, monatliche Übersicht.' },
 
-  { key: 'toogoodtogo', folder: '08_TooGoodToGo', label: 'Too Good To Go Abrechnung',
+  { key: 'toogoodtogo', folder: '07_TooGoodToGo', label: 'Too Good To Go Abrechnung',
     source: 'uploaded', required: true,
     note: 'Too Good To Go, monatliche Abrechnung.' },
 
-  { key: 'webshop', folder: '09_Webshop', label: 'Webshop Monatsbericht',
+  { key: 'webshop', folder: '08_Webshop', label: 'Webshop Monatsbericht',
     source: 'uploaded', required: true,
     note: 'Monatsbericht des Webshops.' },
 
-  { key: 'wolt', folder: '10_Wolt', label: 'Wolt Abrechnungen',
+  { key: 'wolt', folder: '09_Wolt', label: 'Wolt Abrechnungen',
     source: 'uploaded', required: true,
     note: 'Wolt Selbstfakturierungen des Monats — Lieferbelege.' },
 
-  { key: 'lieferando', folder: '11_Lieferando', label: 'Lieferando Abrechnungen',
+  { key: 'lieferando', folder: '10_Lieferando', label: 'Lieferando Abrechnungen',
     source: 'uploaded', required: true,
     note: 'Lieferando Abrechnungen des Monats — Lieferbelege.' },
 ];

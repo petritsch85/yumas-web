@@ -206,10 +206,11 @@ export default function MonatsabschlussPage() {
       </div>
 
       <div className="px-4 py-2 mt-2 text-[11px] text-gray-500">
-        Die mit <em>automatisch</em> gekennzeichneten Positionen werden aus dem System gesammelt — Rechnungen
-        nach Rechnungsdatum, Lieferscheine nach Lieferdatum. Die übrigen kommen nur als PDF und werden hier
-        hochgeladen. Das ZIP enthält je Position einen nummerierten Ordner in Druckreihenfolge und vorne eine
-        Checkliste, die festhält, was enthalten ist und was fehlt.
+        Die mit <em>automatisch</em> gekennzeichneten Positionen werden aus dem System gesammelt:
+        Eingangsrechnungen nach Rechnungsdatum, Ausgangsrechnungen auf Abgrenzungsbasis — Rechnungsdatum im
+        Monat, auch unbezahlt, zuzüglich älterer Rechnungen mit Zahlungseingang in diesem Monat. Die übrigen
+        kommen nur als PDF und werden hier hochgeladen. Das ZIP enthält je Position einen nummerierten Ordner
+        in Druckreihenfolge und vorne eine Checkliste, die festhält, was enthalten ist und was fehlt.
       </div>
     </div>
   );
