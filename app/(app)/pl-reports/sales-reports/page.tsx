@@ -1503,9 +1503,13 @@ export default function SalesReportsPage() {
     queryFn: async () => {
       const { data, error } = await supabase.from('month_documents')
         .select('month,opening_balance,closing_balance').eq('kind', 'kontoauszug');
-      /* The columns arrive with supabase/add_month_balances.sql; without them
-         the statement simply has no balances to open and close on. */
-      if (error) return [] as Record<string, unknown>[];
+      /* Say so rather than returning nothing. An empty result is how a missing
+         RLS policy looks from here, and reading that as "no statement filed
+         yet" hid the balances for a month that had them. */
+      if (error) {
+        console.warn(`[cash flow] month_documents unreadable: ${error.message}`);
+        return [] as Record<string, unknown>[];
+      }
       return (data ?? []) as Record<string, unknown>[];
     },
   });
