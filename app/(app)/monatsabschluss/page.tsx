@@ -15,7 +15,6 @@
 
 import React, { useState, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/lib/supabase-browser';
 import { FolderDown, Upload, Check, AlertTriangle, Loader2, Trash2 } from 'lucide-react';
 import { monthLabel } from '@/lib/month-folder';
 
@@ -47,20 +46,22 @@ export default function MonatsabschlussPage() {
     },
   });
 
-  /** Upload a statement against this month; the same kind twice replaces. */
+  /**
+   * Upload a statement against this month; the same kind twice replaces.
+   *
+   * Through the server, like every other write to this bucket. The bucket and
+   * the table are closed to the browser client, and writing from here directly
+   * was refused with "new row violates row-level security policy".
+   */
   async function upload(kind: string, file: File) {
     setBusy(kind); setError(null);
     try {
-      const safe = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
-      const path = `monatsabschluss/${month}/${kind}_${Date.now()}_${safe}`;
-      const { error: upErr } = await supabase.storage.from('cashflow-files')
-        .upload(path, file, { contentType: file.type || 'application/pdf', upsert: true });
-      if (upErr) throw new Error(upErr.message);
-      const { error: dbErr } = await supabase.from('month_documents').upsert({
-        kind, month: `${month}-01`, filename: safe, file_path: path,
-        bucket: 'cashflow-files', byte_size: file.size,
-      }, { onConflict: 'kind,month' });
-      if (dbErr) throw new Error(dbErr.message);
+      const body = new FormData();
+      body.append('file', file);
+      body.append('kind', kind);
+      body.append('month', month);
+      const r = await fetch('/api/month-folder/upload', { method: 'POST', body });
+      if (!r.ok) throw new Error((await r.json()).error ?? 'Upload fehlgeschlagen');
       await qc.invalidateQueries({ queryKey: ['month-folder', month] });
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Upload fehlgeschlagen');
@@ -68,10 +69,13 @@ export default function MonatsabschlussPage() {
   }
 
   async function remove(kind: string) {
-    setBusy(kind);
+    setBusy(kind); setError(null);
     try {
-      await supabase.from('month_documents').delete().eq('kind', kind).eq('month', `${month}-01`);
+      const r = await fetch(`/api/month-folder/upload?kind=${kind}&month=${month}`, { method: 'DELETE' });
+      if (!r.ok) throw new Error((await r.json()).error ?? 'Entfernen fehlgeschlagen');
       await qc.invalidateQueries({ queryKey: ['month-folder', month] });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Entfernen fehlgeschlagen');
     } finally { setBusy(null); }
   }
 
