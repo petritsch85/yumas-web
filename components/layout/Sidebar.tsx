@@ -179,6 +179,7 @@ const NAV_GROUPS: NavGroup[] = [
         ],
       },
       { labelKey: 'sidebar.nav.cashFlowCheck', href: '/cashflow', icon: Banknote },
+      { labelKey: 'sidebar.nav.monthClose', href: '/monatsabschluss', icon: FolderOpen },
       { labelKey: 'sidebar.nav.purchasedGoods', href: '/items',    icon: Package },
       {
         labelKey: 'sidebar.nav.analytics', href: '/analytics', icon: SearchX,

@@ -58,6 +58,33 @@ export async function POST(req: NextRequest) {
   }
 
   const admin = getSupabaseAdmin();
+
+  /**
+   * Keep the statement, not just what it said.
+   *
+   * It was read and thrown away, which left the Steuerberater's folder without
+   * the one document everything else is reconciled against — and nine uploads
+   * had already gone that way. Stored under the month it covers, so the
+   * Monatsabschluss page finds it without anyone looking for it again.
+   */
+  if (apply && from) {
+    const month = from.slice(0, 7);
+    const path = `monatsabschluss/${month}/kontoauszug_${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+    const stored = await admin.storage.from('cashflow-files')
+      .upload(path, await file.arrayBuffer(), { contentType: 'application/pdf', upsert: true });
+    if (stored.error) {
+      console.warn(`[statement] could not keep the PDF: ${stored.error.message}`);
+    } else {
+      const { error } = await admin.from('month_documents').upsert({
+        kind: 'kontoauszug', month: `${month}-01`, filename: file.name,
+        file_path: path, bucket: 'cashflow-files', byte_size: file.size,
+      }, { onConflict: 'kind,month' });
+      /* The table arrives with supabase/add_month_documents.sql; until it has
+         been run the statement still applies, it just is not filed. */
+      if (error) console.warn(`[statement] month_documents not available: ${error.message}`);
+    }
+  }
+
   const rows: { id: string; date: string; direction: string; counterparty: string | null; amount_cents: number; bill_id: string | null }[] = [];
   for (let page = 0; ; page++) {
     const { data, error } = await admin.from('cashflow_transactions')
