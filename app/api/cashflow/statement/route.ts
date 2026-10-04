@@ -75,10 +75,21 @@ export async function POST(req: NextRequest) {
     if (stored.error) {
       console.warn(`[statement] could not keep the PDF: ${stored.error.message}`);
     } else {
-      const { error } = await admin.from('month_documents').upsert({
+      /* The balances travel with the document: the cash flow statement opens
+         and closes on the bank's own figures so that it and the ledger can
+         disagree and be seen to. */
+      const row = {
         kind: 'kontoauszug', month: `${month}-01`, filename: file.name,
         file_path: path, bucket: 'cashflow-files', byte_size: file.size,
-      }, { onConflict: 'kind,month' });
+        opening_balance: openingBalance, closing_balance: closingBalance,
+      };
+      let { error } = await admin.from('month_documents').upsert(row, { onConflict: 'kind,month' });
+      if (error && /opening_balance|closing_balance/.test(error.message)) {
+        /* Columns arrive with supabase/add_month_balances.sql. */
+        const { opening_balance: _o, closing_balance: _c, ...basic } = row;
+        void _o; void _c;
+        ({ error } = await admin.from('month_documents').upsert(basic, { onConflict: 'kind,month' }));
+      }
       /* The table arrives with supabase/add_month_documents.sql; until it has
          been run the statement still applies, it just is not filed. */
       if (error) console.warn(`[statement] month_documents not available: ${error.message}`);

@@ -16,6 +16,7 @@
 
 export type ItemSource = 'collected' | 'uploaded';
 
+
 export interface ManifestItem {
   /** Stable key — also the `kind` stored in month_documents. */
   key: string;

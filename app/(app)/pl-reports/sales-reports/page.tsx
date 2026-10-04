@@ -78,7 +78,6 @@ import {
   Loader2, SlidersHorizontal, Ban, FileText,
 } from 'lucide-react';
 import { useT } from '@/lib/i18n';
-import { splitFinancing, isFinancing } from '@/lib/loan-split';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TYPES
@@ -128,17 +127,9 @@ const SGA_LINES: { key: string; label: string; categories: string[] }[] = [
   { key: 'delivery',  label: 'Delivery platform fees', categories: ['Delivery Platform Fees'] },
   { key: 'cleaning',  label: 'Cleaning & hygiene',     categories: ['Cleaning Services'] },
   { key: 'marketing', label: 'Marketing',              categories: ['Marketing'] },
+  { key: 'repairs',   label: 'Repairs & maintenance',  categories: ['Repairs & Maintenance'] },
   { key: 'other',     label: 'Other operating costs',  categories: ['Other'] },
 ];
-
-/**
- * Repairs sit below EBITDA, not in SG&A.
- *
- * A ventilation overhaul or a new vacuum pump is work on the premises, not the
- * cost of opening the doors each day — holding it above EBITDA would make a
- * month with a breakdown look like a month that traded badly.
- */
-const REPAIR_CATEGORIES = ['Repairs & Maintenance'];
 
 /**
  * Staff costs are deliberately not read from the bills.
@@ -176,8 +167,8 @@ const SGA_PLACEHOLDER: Record<string, number> = {
   'utilities|2026-09': 5000,
 };
 
-/** What SG&A and repairs came to in one month. */
-type OpexBucket = { lines: Record<string, number>; total: number; repairs: number };
+/** What SG&A came to in one month, split by line. */
+type OpexBucket = { lines: Record<string, number>; total: number };
 
 /** Net sales for one restaurant in one month, split by shift. */
 type GroupBucket = { lunch: number; dinner: number; total: number };
@@ -1499,19 +1490,24 @@ export default function SalesReportsPage() {
     queryKey: ['group-monthly', 'wolt-credits'], enabled: groupMonthlyOn,
     queryFn: () => fetchAllRows('wolt_month_credits', 'location_id,month,net', 'month'),
   });
-  /* Wolt lends against future takings and keeps the repayment out of the
-     payout. It is financing, not a cost of trading, so it sits below FCF —
-     and it is deliberately not deducted from net_sales_final, which is why it
-     has to be picked up here rather than being already inside sales. */
-  const { data: gmWoltCapital = [] } = useQuery({
-    queryKey: ['group-monthly', 'wolt-capital'], enabled: groupMonthlyOn,
-    queryFn: () => fetchAllRows('wolt_periods', 'invoice_date,wolt_capital', 'invoice_date'),
-  });
-  /* The bank lines that carry interest or a repayment, for the two rows below
-     FCF. The split is printed in the narrative — see lib/loan-split.ts. */
+  /* Every booking, for the cash flow statement: which bucket a line falls in
+     is decided from its category and narrative. */
   const { data: gmFinancing = [] } = useQuery({
     queryKey: ['group-monthly', 'financing'], enabled: groupMonthlyOn,
-    queryFn: () => fetchAllRows('cashflow_transactions', 'date,description,amount_cents,direction', 'date'),
+    queryFn: () => fetchAllRows('cashflow_transactions',
+      'date,description,amount_cents,direction,category,counterparty', 'date'),
+  });
+  /* The bank's own opening and closing balances, kept with the Kontoauszug. */
+  const { data: gmBalances = [] } = useQuery({
+    queryKey: ['group-monthly', 'balances'], enabled: groupMonthlyOn,
+    queryFn: async () => {
+      const { data, error } = await supabase.from('month_documents')
+        .select('month,opening_balance,closing_balance').eq('kind', 'kontoauszug');
+      /* The columns arrive with supabase/add_month_balances.sql; without them
+         the statement simply has no balances to open and close on. */
+      if (error) return [] as Record<string, unknown>[];
+      return (data ?? []) as Record<string, unknown>[];
+    },
   });
   const { data: gmLieferando = [] } = useQuery({
     queryKey: ['group-monthly', 'lieferando'], enabled: groupMonthlyOn,
@@ -1564,36 +1560,53 @@ export default function SalesReportsPage() {
     return m;
   }, [gmCostBills]);
 
-  /**
-   * Interest and capital repaid, per month.
-   *
-   * Two sources. Wolt withholds its lending from the payout, so it never
-   * reaches the bank and is read from the Wolt statements; the Sparkasse loan,
-   * the shareholder loans and the overdraft all come off the account, and the
-   * bank prints the interest/capital split in the narrative.
-   */
-  const groupFinancing = useMemo(() => {
-    const capital: Record<string, number> = {};
-    const interest: Record<string, number> = {};
-
-    for (const p of gmWoltCapital as Record<string, unknown>[]) {
-      const v = Number(p.wolt_capital ?? 0);
-      const key = String(p.invoice_date ?? '').slice(0, 7);
-      if (v && key) capital[key] = (capital[key] ?? 0) + v;
-    }
-    for (const t of gmFinancing as Record<string, unknown>[]) {
-      const desc = String(t.description ?? '');
-      if (!isFinancing(desc)) continue;
-      const key = String(t.date ?? '').slice(0, 7);
+  /** The bank's balances per month, keyed 2026-09. */
+  const groupBalances = useMemo(() => {
+    const m: Record<string, { opening: number | null; closing: number | null }> = {};
+    for (const b of gmBalances as Record<string, unknown>[]) {
+      const key = String(b.month ?? '').slice(0, 7);
       if (!key) continue;
-      const s = splitFinancing(desc, Math.abs(Number(t.amount_cents ?? 0)) / 100);
-      if (s.capital)  capital[key]  = (capital[key]  ?? 0) + s.capital;
-      if (s.interest) interest[key] = (interest[key] ?? 0) + s.interest;
+      m[key] = {
+        opening: b.opening_balance === null || b.opening_balance === undefined ? null : Number(b.opening_balance),
+        closing: b.closing_balance === null || b.closing_balance === undefined ? null : Number(b.closing_balance),
+      };
     }
-    return { capital, interest };
-  }, [gmWoltCapital, gmFinancing]);
+    return m;
+  }, [gmBalances]);
 
-  /** SG&A and repairs per month, from the same bills that feed the cost of goods. */
+  /**
+   * Every booking of the month in exactly one of four buckets.
+   *
+   * Exactly one is the point: the four plus the opening balance must reach the
+   * closing balance, and they only can if nothing is counted twice and nothing
+   * falls through. Money in is split by whether it is trading — the sales
+   * categories — or not; money out by whether it is financing.
+   */
+  const groupCashflow = useMemo(() => {
+    const sales: Record<string, number> = {};
+    const otherIncome: Record<string, number> = {};
+    const operating: Record<string, number> = {};
+    const financing: Record<string, number> = {};
+
+    /* Putting money in, taking it out, and what the borrowing costs. */
+    const FINANCING = /darl\.-leistung|zinsr[üu]ckzahlung|gesellschafterdarlehen|darlehen vom/i;
+
+    for (const t of gmFinancing as Record<string, unknown>[]) {
+      const month = String(t.date ?? '').slice(0, 7);
+      if (!month) continue;
+      const value = Math.abs(Number(t.amount_cents ?? 0)) / 100;
+      if (!value) continue;
+      const isIn = t.direction === 'in';
+      const narrative = `${t.counterparty ?? ''} ${t.description ?? ''}`;
+      const bucket = FINANCING.test(narrative) ? financing
+        : isIn ? (String(t.category ?? '').startsWith('S - ') ? sales : otherIncome)
+        : operating;
+      bucket[month] = (bucket[month] ?? 0) + value;
+    }
+    return { sales, otherIncome, operating, financing };
+  }, [gmFinancing]);
+
+  /** SG&A per month, from the same bills that feed the cost of goods. */
   const groupOpex = useMemo(() => {
     const lineOf = new Map<string, string>();
     for (const l of SGA_LINES) for (const c of l.categories) lineOf.set(c, l.key);
@@ -1604,8 +1617,7 @@ export default function SalesReportsPage() {
       if (!monthKey || monthKey < COGS_FROM) continue;
       const cat = String(b.category ?? '');
       const net = Number(b.net_amount ?? 0);
-      const o = (m[monthKey] ??= { lines: {}, total: 0, repairs: 0 });
-      if (REPAIR_CATEGORIES.includes(cat)) { o.repairs += net; continue; }
+      const o = (m[monthKey] ??= { lines: {}, total: 0 });
       const key = lineOf.get(cat);
       if (!key) continue;   // cost of goods, or a category no line claims
       o.lines[key] = (o.lines[key] ?? 0) + net;
@@ -7760,9 +7772,7 @@ export default function SalesReportsPage() {
                 ? (part === 'sga-total'
                     ? SGA_LINES.flatMap(l => l.categories)
                     : (SGA_LINES.find(l => 'sga-' + l.key === part)?.categories ?? []))
-                : part === 'repairs'
-                  ? REPAIR_CATEGORIES
-                  : Object.entries(COGS_CATEGORIES)
+                : Object.entries(COGS_CATEGORIES)
                       .filter(([, key]) => part === 'total' || key === part)
                       .map(([cat]) => cat);
               /* Keyed on the name in lower case: the same supplier is spelled
@@ -7836,14 +7846,14 @@ export default function SalesReportsPage() {
               const add = (a: OpexBucket, b: OpexBucket): OpexBucket => {
                 const lines = { ...a.lines };
                 for (const [k, v] of Object.entries(b.lines)) lines[k] = (lines[k] ?? 0) + v;
-                return { lines, total: a.total + b.total, repairs: a.repairs + b.repairs };
+                return { lines, total: a.total + b.total };
               };
               if (!colKey.startsWith('FY')) {
                 return colKey >= COGS_FROM ? (groupOpex[colKey] ?? null) : null;
               }
               const months = Object.entries(groupOpex).filter(([k]) => k.startsWith(colKey.slice(2)));
               if (!months.length) return null;
-              return months.reduce<OpexBucket>((acc, [, v]) => add(acc, v), { lines: {}, total: 0, repairs: 0 });
+              return months.reduce<OpexBucket>((acc, [, v]) => add(acc, v), { lines: {}, total: 0 });
             };
 
             /** A figure entered by hand for this line and column, if there is one. */
@@ -7920,18 +7930,6 @@ export default function SalesReportsPage() {
               return e === null || sales <= 0 ? null : (e / sales) * 100;
             };
 
-            /** Work on the premises and the equipment — lumpy, so kept apart. */
-            const repairs = (colKey: string) => {
-              const o = opexFor(colKey);
-              if (!o) return null;
-              return o.repairs || null;
-            };
-
-            const freeCashFlow = (colKey: string) => {
-              const e = ebitda(colKey);
-              return e === null ? null : e - (repairs(colKey) ?? 0);
-            };
-
             /** A month of a map, or the year's worth for an FY column. */
             const monthOrYear = (map: Record<string, number>) => (colKey: string) => {
               if (!colKey.startsWith('FY')) return map[colKey] ?? null;
@@ -7940,28 +7938,44 @@ export default function SalesReportsPage() {
               return hits.length ? hits.reduce((s, [, v]) => s + v, 0) : null;
             };
 
-            /**
-             * What the borrowing costs: the Zinsen half of the Sparkasse loan,
-             * the shareholder loans' Zinsrückzahlung, and the overdraft
-             * interest buried in the monthly Abrechnung.
-             */
-            const financialInterest = monthOrYear(groupFinancing.interest);
-
-            const fcfAfterInterest = (colKey: string) => {
-              const f = freeCashFlow(colKey);
-              return f === null ? null : f - (financialInterest(colKey) ?? 0);
+            /* ── Cash flow statement ──────────────────────────────────────
+               Where the money went, as against what was earned. It opens and
+               closes on the bank's own balances so the two can disagree and be
+               seen to; a closing balance derived from the same movements would
+               always tie and prove nothing. */
+            const openingBalance = (colKey: string) => {
+              if (!colKey.startsWith('FY')) return groupBalances[colKey]?.opening ?? null;
+              const year = colKey.slice(2);
+              const months = Object.keys(groupBalances).filter(m => m.startsWith(year)).sort();
+              return months.length ? groupBalances[months[0]].opening : null;
             };
+            const closingBalance = (colKey: string) => {
+              if (!colKey.startsWith('FY')) return groupBalances[colKey]?.closing ?? null;
+              /* A year closes where its last month closed. */
+              const year = colKey.slice(2);
+              const months = Object.keys(groupBalances).filter(m => m.startsWith(year)).sort();
+              return months.length ? groupBalances[months[months.length - 1]].closing : null;
+            };
+            const regularSales = monthOrYear(groupCashflow.sales);
+            const otherIncome  = monthOrYear(groupCashflow.otherIncome);
+            const operatingOut = monthOrYear(groupCashflow.operating);
+            const financingOut = monthOrYear(groupCashflow.financing);
 
             /**
-             * Debt repaid, which is not a cost of trading: the Tilgung half of
-             * the Sparkasse loan, and the lending Wolt withholds from its
-             * payouts so that it never reaches the account at all.
+             * What the four lines fail to explain.
+             *
+             * Every booking lands in exactly one of them, so against a month
+             * whose ledger matches its statement this is zero — September's is,
+             * to the cent. It stops being zero when the ledger and the bank
+             * disagree, which is the one thing worth being told about.
              */
-            const capitalPayments = monthOrYear(groupFinancing.capital);
-
-            const fcfAfterCapital = (colKey: string) => {
-              const f = fcfAfterInterest(colKey);
-              return f === null ? null : f - (capitalPayments(colKey) ?? 0);
+            const unexplained = (colKey: string) => {
+              const open = openingBalance(colKey), close = closingBalance(colKey);
+              if (open === null || close === null) return null;
+              const movement = (regularSales(colKey) ?? 0) + (otherIncome(colKey) ?? 0)
+                - (operatingOut(colKey) ?? 0) - (financingOut(colKey) ?? 0);
+              const gap = close - (open + movement);
+              return Math.abs(gap) < 0.005 ? null : gap;
             };
 
             /**
@@ -8051,16 +8065,16 @@ export default function SalesReportsPage() {
                       {headingRow('ebitda-head', 'EBITDA')}
                       {valueLine('ebitda-abs', 'EBITDA',          ebitda,    { bold: true })}
                       {valueLine('ebitda-pct', 'EBITDA margin %', ebitdaPct, { indent: true, pct: true })}
-                      {valueLine('repairs', 'Repairs', repairs, { indent: true, drill: 'repairs' })}
-                      {drillRows('repairs')}
                       {spacerRow('ebitda-gap')}
 
-                      {headingRow('fcf-head', 'Free cash flow')}
-                      {valueLine('fcf-abs',   'FCF',                 freeCashFlow,      { bold: true })}
-                      {valueLine('fcf-int',   'Financial interest',  financialInterest, { indent: true })}
-                      {valueLine('fcf-after', 'FCF after interest',  fcfAfterInterest,  { bold: true })}
-                      {valueLine('fcf-cap',   'Capital payments',    capitalPayments,   { indent: true })}
-                      {valueLine('fcf-final', 'FCF after int + cap pay', fcfAfterCapital, { bold: true })}
+                      {headingRow('cf-head', 'Cash Flow Statement')}
+                      {valueLine('cf-open',  'Opening balance',  openingBalance, { bold: true })}
+                      {valueLine('cf-sales', 'Regular sales',    regularSales,   { indent: true })}
+                      {valueLine('cf-other', 'Other income',     otherIncome,    { indent: true })}
+                      {valueLine('cf-op',    'Operating costs',  operatingOut,   { indent: true })}
+                      {valueLine('cf-fin',   'Financing',        financingOut,   { indent: true })}
+                      {valueLine('cf-gap',   'Other (unexplained)', unexplained, { indent: true })}
+                      {valueLine('cf-close', 'Closing balance',  closingBalance, { bold: true })}
                     </tbody>
                   </table>
                 </div>
@@ -8086,19 +8100,16 @@ export default function SalesReportsPage() {
                   rather than zero where no bill carried its category that month — rent above all is still paid
                   without an invoice reaching the inbox, so a 0 would read as &ldquo;nothing was spent&rdquo;
                   when it means &ldquo;nothing was filed&rdquo;. Every cost line opens to show its suppliers.
-                  {' '}EBITDA is gross profit less staff and SG&amp;A. The staff figure is a placeholder, shown
-                  in red — EBITDA rests on it until the payroll is wired in, and where no placeholder is set
-                  staff counts as nothing and EBITDA is overstated by a month&rsquo;s wages. Repairs are held
-                  below EBITDA because a ventilation overhaul is work on the premises, not the cost of trading,
-                  and FCF is EBITDA less repairs. Financial interest is the Zinsen half of the Sparkasse
-                  Darlehen, which the bank prints on each booking alongside the Tilgung, plus the shareholder
-                  loans&rsquo; Zinsr&uuml;ckzahlung and the overdraft interest inside the monthly Abrechnung —
-                  the account fees in that same charge are not interest and stay out.
-                  {' '}Capital payments are repayments of borrowing, not a cost of trading. Wolt lends against
-                  future takings and withholds the repayment from the payout, so the money never reaches the
-                  account — it is picked up from the Wolt statements, which is also why it is not already inside
-                  net sales the way Wolt&rsquo;s commission and advertising are. The Tilgung half of the
-                  Sparkasse Darlehen sits here too.
+                  {' '}EBITDA is gross profit less staff and SG&amp;A, repairs included: a ventilation
+                  overhaul is lumpy but it is still a cost of keeping the doors open. The staff figure is a
+                  placeholder, shown in red, and EBITDA rests on it until the payroll is wired in.
+                  {' '}The cash flow statement is separate and answers a different question — where the money
+                  went, not what was earned. It opens and closes on the bank&rsquo;s own balances, read off the
+                  Kontoauszug, so that the ledger and the bank can disagree and be seen to; a closing balance
+                  derived from the same movements would always tie and prove nothing. Every booking falls in
+                  exactly one of the four lines, which is why they reach the closing balance exactly —
+                  September does, to the cent. &ldquo;Other&rdquo; is the residual and stays empty unless the
+                  two disagree.
                 </div>
               </div>
             );
