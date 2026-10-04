@@ -18,9 +18,14 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { FolderDown, Upload, Check, AlertTriangle, Loader2, Trash2 } from 'lucide-react';
 import { monthLabel } from '@/lib/month-folder';
 
+type Gap = {
+  id: string; date: string; counterparty: string; description: string;
+  amount: number; page?: number; seq?: number;
+};
 type Item = {
   key: string; label: string; folder: string; source: 'collected' | 'uploaded';
   required: boolean; note: string; count: number; missingFiles: number; detail?: string;
+  gaps: Gap[]; gapTotal: number;
 };
 
 const thisMonth = () => {
@@ -33,6 +38,7 @@ export default function MonatsabschlussPage() {
   const [month, setMonth] = useState(thisMonth());
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [showGaps, setShowGaps] = useState<Item | null>(null);
   const inputs = useRef<Record<string, HTMLInputElement | null>>({});
   const qc = useQueryClient();
 
@@ -42,7 +48,7 @@ export default function MonatsabschlussPage() {
       const r = await fetch(`/api/month-folder?month=${month}`);
       if (!r.ok) throw new Error((await r.json()).error ?? 'failed');
       return r.json() as Promise<{ items: Item[]; label: string;
-        summary: { ready: boolean; documents: number; missing: unknown[]; partial: unknown[] } }>;
+        summary: { ready: boolean; documents: number; missing: unknown[]; partial: unknown[]; gaps: number } }>;
     },
   });
 
@@ -129,14 +135,74 @@ export default function MonatsabschlussPage() {
         <div className="mb-3 px-3 py-2 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">{error}</div>
       )}
 
+      {showGaps && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-6"
+          onClick={() => setShowGaps(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-[980px] max-w-full max-h-[85vh] flex flex-col"
+            onClick={e => e.stopPropagation()}>
+            <div className="px-5 py-3 border-b border-gray-200 flex items-start justify-between">
+              <div>
+                <h2 className="text-sm font-bold text-gray-900">
+                  {showGaps.gaps.length} Zahlungen ohne Rechnung · {monthLabel(month)}
+                </h2>
+                <p className="text-[11px] text-gray-500 mt-0.5">
+                  Diese Buchungen stehen im Kontoauszug, es liegt aber keine Rechnung dazu vor —
+                  zusammen {showGaps.gapTotal.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €.
+                  Lohn, Krankenkassen, Finanzamt und Darlehen sind nicht aufgeführt: dafür gibt es keine Rechnung.
+                </p>
+              </div>
+              <button onClick={() => setShowGaps(null)}
+                className="text-gray-400 hover:text-gray-700 text-lg leading-none px-2">✕</button>
+            </div>
+            <div className="flex-1 overflow-y-auto">
+              <table className="w-full text-xs">
+                <thead className="sticky top-0 bg-gray-50 border-b border-gray-200 text-[11px] text-gray-500">
+                  <tr>
+                    <th className="px-4 py-2 text-left font-semibold">Kontoauszug</th>
+                    <th className="px-4 py-2 text-left font-semibold">Datum</th>
+                    <th className="px-4 py-2 text-right font-semibold">Betrag</th>
+                    <th className="px-4 py-2 text-left font-semibold">Empfänger / Verwendungszweck</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {showGaps.gaps.map(g => (
+                    <tr key={g.id} className="border-b border-gray-100 hover:bg-gray-50/60">
+                      <td className="px-4 py-1.5 font-mono text-[11px] text-gray-400 whitespace-nowrap">
+                        {g.page ? `S${String(g.page).padStart(2, '0')}/${String(g.seq).padStart(3, '0')}` : '—'}
+                      </td>
+                      <td className="px-4 py-1.5 whitespace-nowrap text-gray-600">{g.date}</td>
+                      <td className="px-4 py-1.5 text-right tabular-nums font-semibold text-gray-800 whitespace-nowrap">
+                        {g.amount.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                      </td>
+                      <td className="px-4 py-1.5">
+                        <div className="font-medium text-gray-800">{g.counterparty}</div>
+                        <div className="text-[11px] text-gray-500 truncate" title={g.description}>{g.description}</div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="px-5 py-2 border-t border-gray-100 bg-gray-50 text-[11px] text-gray-500">
+              Die Liste steht auch im ZIP, in der Checkliste vorne.
+            </div>
+          </div>
+        </div>
+      )}
+
       {data && (
         <div className={'mb-3 px-3 py-2 rounded-lg border text-xs flex items-center gap-2 '
-          + (data.summary.ready ? 'bg-green-50 border-green-200 text-green-800'
+          + (data.summary.ready && data.summary.gaps === 0 ? 'bg-green-50 border-green-200 text-green-800'
                                 : 'bg-amber-50 border-amber-200 text-amber-800')}>
-          {data.summary.ready ? <Check size={14} /> : <AlertTriangle size={14} />}
-          {data.summary.ready
+          {data.summary.ready && data.summary.gaps === 0 ? <Check size={14} /> : <AlertTriangle size={14} />}
+          {data.summary.ready && data.summary.gaps === 0
             ? <span><strong>{monthLabel(month)} ist vollständig</strong> · {data.summary.documents} Dokumente</span>
-            : <span><strong>{data.summary.missing.length} Position(en) fehlen noch</strong> · bisher {data.summary.documents} Dokumente</span>}
+            : <span>
+                {data.summary.missing.length > 0 && <strong>{data.summary.missing.length} Position(en) fehlen noch</strong>}
+                {data.summary.missing.length > 0 && data.summary.gaps > 0 && ' · '}
+                {data.summary.gaps > 0 && <strong>{data.summary.gaps} Zahlungen ohne Rechnung</strong>}
+                {' · '}bisher {data.summary.documents} Dokumente
+              </span>}
         </div>
       )}
 
@@ -156,7 +222,10 @@ export default function MonatsabschlussPage() {
             </thead>
             <tbody>
               {items.map(it => {
-                const ok = it.count > 0;
+                /* Documents present is not the same as nothing missing: a
+                   position can be full and still leave payments unexplained. */
+                const gaps = it.gaps?.length ?? 0;
+                const ok = it.count > 0 && gaps === 0;
                 return (
                   <tr key={it.key} className="border-b border-gray-100 hover:bg-gray-50/60">
                     <td className="px-4 py-2 font-mono text-[11px] text-gray-400 whitespace-nowrap">{it.folder}</td>
@@ -170,11 +239,22 @@ export default function MonatsabschlussPage() {
                     </td>
                     <td className="px-4 py-2 whitespace-nowrap">
                       {ok ? (
-                        <span className="inline-flex items-center gap-1 text-green-700"><Check size={12} /> vorhanden</span>
+                        <span className="inline-flex items-center gap-1 text-green-700"><Check size={12} /> vollständig</span>
+                      ) : gaps > 0 ? (
+                        <button onClick={() => setShowGaps(it)}
+                          className="inline-flex items-center gap-1 text-amber-700 font-semibold hover:underline cursor-pointer"
+                          title="Zeigen, welche Zahlungen keine Rechnung haben">
+                          <AlertTriangle size={12} /> {gaps} Rechnung{gaps === 1 ? '' : 'en'} fehlen
+                        </button>
                       ) : it.required ? (
                         <span className="inline-flex items-center gap-1 text-amber-700"><AlertTriangle size={12} /> fehlt</span>
                       ) : (
                         <span className="text-gray-400">optional</span>
+                      )}
+                      {gaps > 0 && (
+                        <div className="text-[10px] text-amber-700">
+                          {it.gapTotal.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                        </div>
                       )}
                       {it.missingFiles > 0 && (
                         <div className="text-[10px] text-amber-700">{it.missingFiles} ohne PDF</div>

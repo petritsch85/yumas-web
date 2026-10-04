@@ -8,6 +8,7 @@ import {
   MANIFEST, monthRange, monthLabel, documentName, isSubstituteRecord,
   manifestSummary, type ItemStatus,
 } from '@/lib/month-folder';
+import { findGaps, type Gap } from '@/lib/missing-invoices';
 
 export const maxDuration = 300;
 
@@ -222,14 +223,40 @@ async function gather(
   };
 }
 
-async function statuses(admin: Admin, month: string): Promise<(ItemStatus & { docs: Doc[] })[]> {
+/**
+ * Payments in the month that no invoice explains.
+ *
+ * Counted once and hung on the Eingangsrechnungen position, because that is
+ * what they are missing from: a booking on the statement with nothing to file
+ * behind it.
+ */
+async function gapsFor(admin: Admin, month: string, order: Map<string, Booking>): Promise<Gap[]> {
+  const { from, to } = monthRange(month);
+  const tx = await page<Record<string, unknown>>((a, b) => admin.from('cashflow_transactions')
+    .select('id,date,direction,counterparty,description,amount_cents,bill_id')
+    .gte('date', from).lte('date', to).order('id').range(a, b));
+  const links = await page<Record<string, unknown>>((a, b) => admin.from('transaction_bill_links')
+    .select('transaction_id').order('transaction_id').range(a, b));
+  const linked = new Set<string>([
+    ...links.map(l => String(l.transaction_id)),
+    ...tx.filter(t => t.bill_id).map(t => String(t.id)),
+  ]);
+  return findGaps(
+    tx as unknown as Parameters<typeof findGaps>[0], linked,
+    (date, cents) => order.get(`${date}|${cents}`),
+  );
+}
+
+async function statuses(admin: Admin, month: string): Promise<(ItemStatus & { docs: Doc[]; gaps?: Gap[] })[]> {
   const [order, keys] = await Promise.all([bookingOrder(admin, month), paymentKeys(admin)]);
-  const out: (ItemStatus & { docs: Doc[] })[] = [];
+  const gaps = await gapsFor(admin, month, order);
+  const out: (ItemStatus & { docs: Doc[]; gaps?: Gap[] })[] = [];
   for (const item of MANIFEST) {
     const { docs, missingFiles, detail } = await gather(admin, item.key, month, order, keys);
     const unplaced = docs.filter(d => d.seq === undefined).length;
     out.push({
       item, count: docs.length, missingFiles, docs,
+      gaps: item.key === 'eingangsrechnungen' ? gaps : undefined,
       detail: detail && item.source === 'collected'
         ? detail + (order.size === 0
             ? ' · Reihenfolge erst nach Upload des Kontoauszugs'
@@ -250,11 +277,18 @@ export async function GET(req: NextRequest) {
     const st = await statuses(admin, month);
     return NextResponse.json({
       month, label: monthLabel(month),
-      items: st.map(({ item, count, missingFiles, detail }) => ({
+      items: st.map(({ item, count, missingFiles, detail, gaps }) => ({
         key: item.key, label: item.label, folder: item.folder, source: item.source,
         required: item.required, note: item.note, count, missingFiles, detail,
+        gaps: gaps ?? [],
+        gapTotal: (gaps ?? []).reduce((s, g) => s + g.amount, 0),
       })),
-      summary: manifestSummary(st),
+      summary: {
+        ...manifestSummary(st),
+        /* A month with every position filled is still not ready while payments
+           sit unexplained, which is what the tick used to claim. */
+        gaps: st.reduce((n, s) => n + (s.gaps?.length ?? 0), 0),
+      },
     });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : 'failed' }, { status: 500 });
@@ -262,7 +296,7 @@ export async function GET(req: NextRequest) {
 }
 
 /** The checklist that travels with the folder, so gaps are visible on paper. */
-function checklist(month: string, st: (ItemStatus & { docs: Doc[] })[]): string {
+function checklist(month: string, st: (ItemStatus & { docs: Doc[]; gaps?: Gap[] })[]): string {
   const s = manifestSummary(st);
   const lines = [
     `MONATSABSCHLUSS ${monthLabel(month).toUpperCase()}`,
@@ -287,6 +321,22 @@ function checklist(month: string, st: (ItemStatus & { docs: Doc[] })[]): string 
   if (s.partial.length) {
     lines.push('', 'BELEGE OHNE PDF', '');
     for (const p of s.partial) lines.push(`  - ${p.item.label}: ${p.missingFiles} Vorgang/Vorgänge ohne Datei`);
+  }
+
+  /* The gaps belong in the folder itself: a page of the statement with nothing
+     filed behind it is easier to accept than to rediscover. */
+  const gaps = st.flatMap(x => x.gaps ?? []);
+  if (gaps.length) {
+    const total = gaps.reduce((t, g) => t + g.amount, 0);
+    lines.push('', '', `ZAHLUNGEN OHNE RECHNUNG — ${gaps.length} Stück, ${total.toFixed(2)} EUR`, '',
+      'Diese Buchungen stehen im Kontoauszug, es liegt aber keine Rechnung dazu vor.',
+      'Lohn, Krankenkassen, Finanzamt und Darlehen sind hier nicht aufgefuehrt — dafuer',
+      'gibt es keine Rechnung.', '');
+    for (const g of gaps) {
+      const where = g.page ? `S${String(g.page).padStart(2, '0')}/${String(g.seq).padStart(3, '0')}` : '  —   ';
+      lines.push(`  ${where}  ${g.date}  ${g.amount.toFixed(2).padStart(10)} EUR  ${g.counterparty.slice(0, 40)}`);
+      if (g.description) lines.push(`${' '.repeat(42)}${g.description.slice(0, 70)}`);
+    }
   }
   return lines.join('\n');
 }
