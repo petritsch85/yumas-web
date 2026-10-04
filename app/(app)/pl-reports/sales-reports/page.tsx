@@ -1602,9 +1602,14 @@ export default function SalesReportsPage() {
       if (!value) continue;
       const isIn = t.direction === 'in';
       const narrative = `${t.counterparty ?? ''} ${t.description ?? ''}`;
-      const bucket = FINANCING.test(narrative) ? financing
-        : isIn ? (String(t.category ?? '').startsWith('S - ') ? sales : otherIncome)
-        : operating;
+      if (FINANCING.test(narrative)) {
+        /* Financing runs both ways and must carry its sign: August took
+           65.000 € in from a shareholder and paid 9.206 € out, and summing the
+           magnitudes would have called that 74.206 € leaving. */
+        financing[month] = (financing[month] ?? 0) + (isIn ? value : -value);
+        continue;
+      }
+      const bucket = isIn ? (String(t.category ?? '').startsWith('S - ') ? sales : otherIncome) : operating;
       bucket[month] = (bucket[month] ?? 0) + value;
     }
     return { sales, otherIncome, operating, financing };
@@ -7807,10 +7812,55 @@ export default function SalesReportsPage() {
             };
 
             /** The opened-out rows sitting under a COGS line. */
+            /**
+             * The bookings behind one cash flow cell.
+             *
+             * A handful of payments reads better one by one — Financing is
+             * three Zinsrückzahlungen, and collapsing them to one line for
+             * Peters loses what they were. A couple of hundred does not, so
+             * past a point they are gathered by counterparty instead.
+             */
+            const cashflowItems = (bucket: string, colKey: string) => {
+              const prefix = colKey.startsWith('FY') ? colKey.slice(2) + '-' : colKey;
+              const FINANCING = /darl\.-leistung|zinsr[üu]ckzahlung|gesellschafterdarlehen|darlehen vom/i;
+              const hits = (gmFinancing as Record<string, unknown>[]).filter(t => {
+                if (!String(t.date ?? '').startsWith(prefix)) return false;
+                const narrative = `${t.counterparty ?? ''} ${t.description ?? ''}`;
+                const isFin = FINANCING.test(narrative);
+                const isIn = t.direction === 'in';
+                const where = isFin ? 'financing'
+                  : isIn ? (String(t.category ?? '').startsWith('S - ') ? 'sales' : 'otherIncome')
+                  : 'operating';
+                return where === bucket;
+              });
+
+              const value = (t: Record<string, unknown>) => Math.abs(Number(t.amount_cents ?? 0)) / 100;
+              if (hits.length <= 25) {
+                return hits
+                  .map(t => ({
+                    name: `${String(t.date).slice(8, 10)}.${String(t.date).slice(5, 7)}. · ${String(t.counterparty ?? '—').slice(0, 34)}`
+                      + (t.description ? ` — ${String(t.description).slice(0, 44)}` : ''),
+                    net: value(t), bills: 1,
+                  }))
+                  .sort((a, z) => z.net - a.net);
+              }
+              const by = new Map<string, { net: number; bills: number; name: string }>();
+              for (const t of hits) {
+                const name = String(t.counterparty ?? '—').trim() || '—';
+                const cur = by.get(name.toLowerCase()) ?? { net: 0, bills: 0, name };
+                cur.net += value(t);
+                cur.bills += 1;
+                by.set(name.toLowerCase(), cur);
+              }
+              return [...by.values()].sort((a, z) => z.net - a.net);
+            };
+
             const drillRows = (part: string) => {
               if (!cogsDrill || cogsDrill.part !== part) return [];
               const { colKey } = cogsDrill;
-              const rows = cogsSuppliers(part, colKey);
+              const rows = part.startsWith('cf-')
+                ? cashflowItems(part.slice(3), colKey)
+                : cogsSuppliers(part, colKey);
               const total = rows.reduce((t, r) => t + r.net, 0);
               const colLabel = colKey.startsWith('FY')
                 ? 'FY ' + colKey.slice(2)
@@ -7819,7 +7869,9 @@ export default function SalesReportsPage() {
                 return [(
                   <tr key={part + '-drill-none'} style={{ backgroundColor: '#f8fafc' }}>
                     <td className="sticky left-0 z-10 px-4 py-1 pl-12 text-[11px] text-gray-400 border-r border-gray-100"
-                      style={{ backgroundColor: '#f8fafc' }}>No bills in {colLabel}</td>
+                      style={{ backgroundColor: '#f8fafc' }}>
+                      {part.startsWith('cf-') ? 'Nothing in ' : 'No bills in '}{colLabel}
+                    </td>
                     {groupMonthCols.map(col => <td key={col.key} style={{ backgroundColor: '#f8fafc' }} />)}
                   </tr>
                 )];
@@ -7976,8 +8028,9 @@ export default function SalesReportsPage() {
             const unexplained = (colKey: string) => {
               const open = openingBalance(colKey), close = closingBalance(colKey);
               if (open === null || close === null) return null;
+              /* Financing already carries its sign; the other three do not. */
               const movement = (regularSales(colKey) ?? 0) + (otherIncome(colKey) ?? 0)
-                - (operatingOut(colKey) ?? 0) - (financingOut(colKey) ?? 0);
+                - (operatingOut(colKey) ?? 0) + (financingOut(colKey) ?? 0);
               const gap = close - (open + movement);
               return Math.abs(gap) < 0.005 ? null : gap;
             };
@@ -8073,10 +8126,14 @@ export default function SalesReportsPage() {
 
                       {headingRow('cf-head', 'Cash Flow Statement')}
                       {valueLine('cf-open',  'Opening balance',  openingBalance, { bold: true })}
-                      {valueLine('cf-sales', 'Regular sales',    regularSales,   { indent: true })}
-                      {valueLine('cf-other', 'Other income',     otherIncome,    { indent: true })}
-                      {valueLine('cf-op',    'Operating costs',  operatingOut,   { indent: true })}
-                      {valueLine('cf-fin',   'Financing',        financingOut,   { indent: true })}
+                      {valueLine('cf-sales', 'Regular sales',   regularSales, { indent: true, drill: 'cf-sales' })}
+                      {drillRows('cf-sales')}
+                      {valueLine('cf-other', 'Other income',    otherIncome,  { indent: true, drill: 'cf-otherIncome' })}
+                      {drillRows('cf-otherIncome')}
+                      {valueLine('cf-op',    'Operating costs', operatingOut, { indent: true, drill: 'cf-operating' })}
+                      {drillRows('cf-operating')}
+                      {valueLine('cf-fin',   'Financing (+ in / − out)', financingOut, { indent: true, drill: 'cf-financing' })}
+                      {drillRows('cf-financing')}
                       {valueLine('cf-gap',   'Other (unexplained)', unexplained, { indent: true })}
                       {valueLine('cf-close', 'Closing balance',  closingBalance, { bold: true })}
                     </tbody>
