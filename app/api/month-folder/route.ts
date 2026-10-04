@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { zipSync, strToU8 } from 'fflate';
+import { extractText, getDocumentProxy } from 'unpdf';
 import { getSupabaseAdmin } from '@/lib/supabase-admin';
+// Plain ESM, shared with scripts/ which runs outside the Next.js build.
+import { parseKontoauszug } from '@/lib/kontoauszug.mjs';
 import {
   MANIFEST, monthRange, monthLabel, documentName, isSubstituteRecord,
   manifestSummary, type ItemStatus,
@@ -19,7 +22,95 @@ export const maxDuration = 300;
  */
 
 type Admin = ReturnType<typeof getSupabaseAdmin>;
-type Doc = { path: string; bucket: string; name: string };
+type Doc = { path: string; bucket: string; name: string; seq?: number; page?: number };
+
+/**
+ * Where each booking sits in the printed statement.
+ *
+ * The folder is assembled by hand: the statement is printed and each invoice
+ * filed behind the page that shows its payment. Sorted any other way that is a
+ * search through 134 PDFs per page; sorted this way it is a single pass. So the
+ * statement's own order is read back out of it and every invoice is numbered by
+ * the booking that paid it.
+ *
+ * Keyed on date and signed amount, which is what reconciled the month exactly.
+ */
+type Booking = { seq: number; page: number };
+async function bookingOrder(admin: Admin, month: string): Promise<Map<string, Booking>> {
+  const order = new Map<string, Booking>();
+  const { data: doc } = await admin.from('month_documents')
+    .select('file_path,bucket').eq('kind', 'kontoauszug').eq('month', `${month}-01`).maybeSingle();
+  if (!doc?.file_path) return order;
+
+  try {
+    const { data: file } = await admin.storage.from(doc.bucket || 'cashflow-files').download(doc.file_path);
+    if (!file) return order;
+    const pdf = await getDocumentProxy(new Uint8Array(await file.arrayBuffer()));
+    const { text } = await extractText(pdf, { mergePages: true });
+    const parsed = parseKontoauszug(text) as { entries: { date: string; amount: number; page: number }[] };
+    parsed.entries.forEach((e, i) => {
+      const key = `${e.date}|${Math.round(e.amount * 100)}`;
+      /* First occurrence wins: two identical bookings on a day are filed in the
+         order they print, and the second invoice takes the later slot anyway. */
+      if (!order.has(key)) order.set(key, { seq: i + 1, page: e.page });
+    });
+  } catch { /* an unreadable statement just means no ordering */ }
+  return order;
+}
+
+/** The bookings that settled a bill, as keys into the order map. */
+async function paymentKeys(admin: Admin): Promise<Map<string, string[]>> {
+  const out = new Map<string, string[]>();
+  const add = (billId: string, key: string) =>
+    out.set(billId, [...(out.get(billId) ?? []), key]);
+
+  const tx = await page<Record<string, unknown>>((a, b) => admin.from('cashflow_transactions')
+    .select('id,date,amount_cents,direction,bill_id,outgoing_bill_id').order('id').range(a, b));
+  const links = await page<Record<string, unknown>>((a, b) => admin.from('transaction_bill_links')
+    .select('transaction_id,bill_id').order('transaction_id').range(a, b));
+
+  const keyOf = (t: Record<string, unknown>) => {
+    const signed = (t.direction === 'in' ? 1 : -1) * Math.abs(Number(t.amount_cents ?? 0));
+    return `${String(t.date).slice(0, 10)}|${signed}`;
+  };
+  const byId = new Map(tx.map(t => [String(t.id), t]));
+  for (const t of tx) {
+    if (t.bill_id) add(String(t.bill_id), keyOf(t));
+    if (t.outgoing_bill_id) add(String(t.outgoing_bill_id), keyOf(t));
+  }
+  for (const l of links) {
+    const t = byId.get(String(l.transaction_id));
+    if (t) add(String(l.bill_id), keyOf(t));
+  }
+  return out;
+}
+
+/**
+ * Name the files so a file browser sorts them into filing order.
+ *
+ * `S03_041_…` is page three of the statement, forty-first booking. Printed in
+ * that order the pile goes behind the statement page by page without anybody
+ * searching. What no booking paid for — invoices still open, or settled in
+ * another month — is prefixed ZZ and lands at the end, together, rather than
+ * being silently dropped or scattered through the sequence.
+ */
+function inStatementOrder(docs: Doc[]): Doc[] {
+  const placed = docs.filter(d => d.seq !== undefined).sort((a, b) => a.seq! - b.seq!);
+  const rest   = docs.filter(d => d.seq === undefined).sort((a, b) => a.name.localeCompare(b.name));
+  return [
+    ...placed.map(d => ({ ...d,
+      name: `S${String(d.page).padStart(2, '0')}_${String(d.seq).padStart(3, '0')}_${d.name}` })),
+    ...rest.map(d => ({ ...d, name: `ZZ_ohne_Zahlung_im_Monat_${d.name}` })),
+  ];
+}
+
+/** The earliest booking that settled this bill, if any did. */
+function placeOf(billId: string, keys: Map<string, string[]>, order: Map<string, Booking>): Booking | null {
+  const found = (keys.get(billId) ?? [])
+    .map(k => order.get(k)).filter((b): b is Booking => !!b)
+    .sort((a, b) => a.seq - b.seq);
+  return found[0] ?? null;
+}
 
 const page = async <T,>(build: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>) => {
   const out: T[] = [];
@@ -34,13 +125,31 @@ const page = async <T,>(build: (from: number, to: number) => PromiseLike<{ data:
 };
 
 /** The documents behind one manifest item, and what is missing from it. */
-async function gather(admin: Admin, key: string, month: string): Promise<{ docs: Doc[]; missingFiles: number; detail?: string }> {
+async function gather(
+  admin: Admin, key: string, month: string,
+  order: Map<string, Booking>, keys: Map<string, string[]>,
+): Promise<{ docs: Doc[]; missingFiles: number; detail?: string }> {
   const { from, to } = monthRange(month);
 
   if (key === 'eingangsrechnungen') {
-    const bills = await page<Record<string, unknown>>((a, b) => admin.from('bills')
-      .select('invoice_date,supplier_name,invoice_number,file_path,notes')
-      .gte('invoice_date', from).lte('invoice_date', to).order('invoice_date').range(a, b));
+    /**
+     * The same accounting basis as the outgoing side, and for the same reason
+     * twice over.
+     *
+     * An invoice dated in September with a fortnight's terms is paid in
+     * October, and an August invoice is paid in September: 90 of those for
+     * 09/2026. Taking invoice date alone leaves 90 bookings in the statement
+     * with nothing to file behind them, which is exactly the search this is
+     * meant to spare whoever assembles the folder.
+     */
+    const all = await page<Record<string, unknown>>((a, b) => admin.from('bills')
+      .select('id,invoice_date,supplier_name,invoice_number,file_path,notes')
+      .order('invoice_date').range(a, b));
+    const bills = all.filter(x => {
+      const dated = String(x.invoice_date ?? '').slice(0, 10);
+      if (dated >= from && dated <= to) return true;
+      return placeOf(String(x.id), keys, order) !== null;
+    });
     const withFile = bills.filter(x => x.file_path);
     /* The rent Ersatzbelege never had an original — see isSubstituteRecord. */
     const substitutes = bills.filter(x => !x.file_path && isSubstituteRecord(x.notes as string));
@@ -48,11 +157,18 @@ async function gather(admin: Admin, key: string, month: string): Promise<{ docs:
     return {
       missingFiles: reallyMissing,
       detail: `${bills.length} Rechnungen`
+        + (() => {
+          const later = bills.filter(x => !(String(x.invoice_date ?? '') >= from && String(x.invoice_date ?? '') <= to));
+          return later.length ? ` · davon ${later.length} aus Vormonaten, hier bezahlt` : '';
+        })()
         + (substitutes.length ? ` · ${substitutes.length} Ersatzbelege (Mietverträge liegen vor)` : ''),
-      docs: withFile.map(x => ({
-        bucket: 'bills', path: String(x.file_path),
-        name: documentName({ date: x.invoice_date as string, party: x.supplier_name as string,
-          number: x.invoice_number as string, fallback: String(x.file_path) }) + '.pdf',
+      docs: inStatementOrder(withFile.map(x => {
+        const at = placeOf(String(x.id), keys, order);
+        return {
+          bucket: 'bills', path: String(x.file_path), seq: at?.seq, page: at?.page,
+          name: documentName({ date: x.invoice_date as string, party: x.supplier_name as string,
+            number: x.invoice_number as string, fallback: String(x.file_path) }) + '.pdf',
+        };
       })),
     };
   }
@@ -85,10 +201,13 @@ async function gather(admin: Admin, key: string, month: string): Promise<{ docs:
       missingFiles: bills.length - withFile.length,
       detail: `${bills.length} Rechnungen`
         + (later.length ? ` · davon ${later.length} aus Vormonaten, hier bezahlt` : ''),
-      docs: withFile.map(x => ({
-        bucket: 'bills', path: String(x.file_path),
-        name: documentName({ date: x.invoice_date as string, party: x.customer_name as string,
-          number: x.invoice_number as string, fallback: String(x.file_path) }) + '.pdf',
+      docs: inStatementOrder(withFile.map(x => {
+        const at = placeOf(String(x.id), keys, order);
+        return {
+          bucket: 'bills', path: String(x.file_path), seq: at?.seq, page: at?.page,
+          name: documentName({ date: x.invoice_date as string, party: x.customer_name as string,
+            number: x.invoice_number as string, fallback: String(x.file_path) }) + '.pdf',
+        };
       })),
     };
   }
@@ -104,10 +223,19 @@ async function gather(admin: Admin, key: string, month: string): Promise<{ docs:
 }
 
 async function statuses(admin: Admin, month: string): Promise<(ItemStatus & { docs: Doc[] })[]> {
+  const [order, keys] = await Promise.all([bookingOrder(admin, month), paymentKeys(admin)]);
   const out: (ItemStatus & { docs: Doc[] })[] = [];
   for (const item of MANIFEST) {
-    const { docs, missingFiles, detail } = await gather(admin, item.key, month);
-    out.push({ item, count: docs.length, missingFiles, detail, docs });
+    const { docs, missingFiles, detail } = await gather(admin, item.key, month, order, keys);
+    const unplaced = docs.filter(d => d.seq === undefined).length;
+    out.push({
+      item, count: docs.length, missingFiles, docs,
+      detail: detail && item.source === 'collected'
+        ? detail + (order.size === 0
+            ? ' · Reihenfolge erst nach Upload des Kontoauszugs'
+            : unplaced ? ` · ${unplaced} ohne Zahlung in diesem Monat` : ' · nach Kontoauszug sortiert')
+        : detail,
+    });
   }
   return out;
 }

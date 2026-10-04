@@ -211,6 +211,10 @@ export default function MonatsabschlussPage() {
         Monat, auch unbezahlt, zuzüglich älterer Rechnungen mit Zahlungseingang in diesem Monat. Die übrigen
         kommen nur als PDF und werden hier hochgeladen. Das ZIP enthält je Position einen nummerierten Ordner
         in Druckreihenfolge und vorne eine Checkliste, die festhält, was enthalten ist und was fehlt.
+        {' '}Die Rechnungen sind nach dem Kontoauszug benannt — <code>S03_029_…</code> heißt Seite 3,
+        Buchung 29 — und lassen sich so der Reihe nach hinter die jeweilige Seite heften, ohne zu suchen.
+        Dafür muss der Kontoauszug hochgeladen sein. Rechnungen ohne Zahlung in diesem Monat stehen unter
+        <code> ZZ_ohne_Zahlung_im_Monat_</code> am Ende.
       </div>
     </div>
   );

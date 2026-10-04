@@ -36,12 +36,15 @@ export const MANIFEST: ManifestItem[] = [
 
   { key: 'eingangsrechnungen', folder: '02_Eingangsrechnungen', label: 'Eingangsrechnungen',
     source: 'collected', required: true,
-    note: 'Alle Lieferantenrechnungen mit Rechnungsdatum in diesem Monat.' },
+    note: 'Lieferantenrechnungen auf Abgrenzungsbasis: Rechnungsdatum im Monat, auch unbezahlt, '
+        + 'zuzüglich älterer Rechnungen, die in diesem Monat bezahlt wurden. '
+        + 'Dateiname = Seite und Position im Kontoauszug.' },
 
   { key: 'ausgangsrechnungen', folder: '03_Ausgangsrechnungen', label: 'Ausgangsrechnungen',
     source: 'collected', required: true,
     note: 'Eigene Rechnungen auf Abgrenzungsbasis: Rechnungsdatum im Monat, auch ohne '
-        + 'Zahlungseingang, zuzüglich älterer Rechnungen, die in diesem Monat bezahlt wurden.' },
+        + 'Zahlungseingang, zuzüglich älterer Rechnungen, die in diesem Monat bezahlt wurden. '
+        + 'Dateiname = Seite und Position im Kontoauszug.' },
 
   { key: 'nexi', folder: '04_Nexi', label: 'Nexi Monatsabrechnung',
     source: 'uploaded', required: true,
