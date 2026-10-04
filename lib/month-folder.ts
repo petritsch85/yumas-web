@@ -40,7 +40,8 @@ export const MANIFEST: ManifestItem[] = [
 
   { key: 'ausgangsrechnungen', folder: '03_Ausgangsrechnungen', label: 'Ausgangsrechnungen',
     source: 'collected', required: true,
-    note: 'Rechnungen, die wir selbst gestellt haben — Caterings und Veranstaltungen.' },
+    note: 'Eigene Rechnungen auf Abgrenzungsbasis: Rechnungsdatum im Monat, auch ohne '
+        + 'Zahlungseingang, zuzüglich älterer Rechnungen, die in diesem Monat bezahlt wurden.' },
 
   { key: 'lieferscheine', folder: '04_Lieferscheine', label: 'Lieferscheine',
     source: 'collected', required: false,
@@ -62,13 +63,17 @@ export const MANIFEST: ManifestItem[] = [
     source: 'uploaded', required: true,
     note: 'Too Good To Go, monatliche Abrechnung.' },
 
-  { key: 'wolt', folder: '09_Wolt', label: 'Wolt Abrechnungen',
-    source: 'uploaded', required: false,
-    note: 'Wolt Selbstfakturierungen des Monats.' },
+  { key: 'webshop', folder: '09_Webshop', label: 'Webshop Monatsbericht',
+    source: 'uploaded', required: true,
+    note: 'Monatsbericht des Webshops.' },
 
-  { key: 'lieferando', folder: '10_Lieferando', label: 'Lieferando Abrechnungen',
-    source: 'uploaded', required: false,
-    note: 'Lieferando Abrechnungen des Monats.' },
+  { key: 'wolt', folder: '10_Wolt', label: 'Wolt Abrechnungen',
+    source: 'uploaded', required: true,
+    note: 'Wolt Selbstfakturierungen des Monats — Lieferbelege.' },
+
+  { key: 'lieferando', folder: '11_Lieferando', label: 'Lieferando Abrechnungen',
+    source: 'uploaded', required: true,
+    note: 'Lieferando Abrechnungen des Monats — Lieferbelege.' },
 ];
 
 export const itemFor = (key: string) => MANIFEST.find(i => i.key === key) ?? null;

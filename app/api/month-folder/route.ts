@@ -54,13 +54,33 @@ async function gather(admin: Admin, key: string, month: string): Promise<{ docs:
   }
 
   if (key === 'ausgangsrechnungen') {
-    const bills = await page<Record<string, unknown>>((a, b) => admin.from('outgoing_bills')
-      .select('invoice_date,customer_name,invoice_number,file_path')
-      .gte('invoice_date', from).lte('invoice_date', to).order('invoice_date').range(a, b));
+    /**
+     * On an accounting basis, not a cash one.
+     *
+     * A September folder owes every invoice dated in September whether or not
+     * the customer has paid, and also the older invoices the customer settled
+     * in September — six of those for 09/2026, dated July and August. Taking
+     * invoice date alone would drop them; taking payment alone would drop the
+     * eleven September invoices still outstanding.
+     */
+    const all = await page<Record<string, unknown>>((a, b) => admin.from('outgoing_bills')
+      .select('id,invoice_date,customer_name,invoice_number,file_path')
+      .order('invoice_date').range(a, b));
+    const paid = await page<Record<string, unknown>>((a, b) => admin.from('cashflow_transactions')
+      .select('outgoing_bill_id,date').not('outgoing_bill_id', 'is', null)
+      .gte('date', from).lte('date', to).order('id').range(a, b));
+    const paidThisMonth = new Set(paid.map(p => String(p.outgoing_bill_id)));
+
+    const bills = all.filter(x => {
+      const dated = String(x.invoice_date ?? '').slice(0, 10);
+      return (dated >= from && dated <= to) || paidThisMonth.has(String(x.id));
+    });
+    const later = bills.filter(x => !(String(x.invoice_date ?? '') >= from && String(x.invoice_date ?? '') <= to));
     const withFile = bills.filter(x => x.file_path);
     return {
       missingFiles: bills.length - withFile.length,
-      detail: `${bills.length} Rechnungen`,
+      detail: `${bills.length} Rechnungen`
+        + (later.length ? ` · davon ${later.length} aus Vormonaten, hier bezahlt` : ''),
       docs: withFile.map(x => ({
         bucket: 'bills', path: String(x.file_path),
         name: documentName({ date: x.invoice_date as string, party: x.customer_name as string,
