@@ -44,19 +44,34 @@ export async function POST(req: NextRequest) {
     });
   if (upErr) return NextResponse.json({ error: `Upload: ${upErr.message}` }, { status: 500 });
 
-  /* Replacing, not adding: the same position twice in a month would otherwise
-     put two copies in the Steuerberater's folder. */
-  const { data: old } = await admin.from('month_documents')
-    .select('file_path').eq('kind', kind).eq('month', `${month}-01`).maybeSingle();
+  /**
+   * A position that holds one document replaces; one that holds many adds.
+   *
+   * A Kontoauszug uploaded twice should leave one copy in the folder. Wolt's
+   * eighteen periods of four PDFs each should leave seventy-odd — so only the
+   * single-document positions are cleared first, and the rest are kept unique
+   * by filename so re-uploading the same file overwrites itself.
+   */
+  const superseded: string[] = [];
+  if (!item.multi) {
+    const { data: old } = await admin.from('month_documents')
+      .select('file_path').eq('kind', kind).eq('month', `${month}-01`);
+    for (const o of old ?? []) if (o.file_path !== path) superseded.push(o.file_path as string);
+    await admin.from('month_documents').delete().eq('kind', kind).eq('month', `${month}-01`);
+  } else {
+    const { data: same } = await admin.from('month_documents')
+      .select('file_path').eq('kind', kind).eq('month', `${month}-01`).eq('filename', file.name);
+    for (const o of same ?? []) if (o.file_path !== path) superseded.push(o.file_path as string);
+  }
 
   const { error } = await admin.from('month_documents').upsert({
     kind, month: `${month}-01`, filename: file.name, file_path: path,
     bucket: 'cashflow-files', byte_size: file.size,
-  }, { onConflict: 'kind,month' });
+  }, { onConflict: 'kind,month,filename' });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  if (old?.file_path && old.file_path !== path) {
-    await admin.storage.from('cashflow-files').remove([old.file_path]).catch(() => {});
+  if (superseded.length) {
+    await admin.storage.from('cashflow-files').remove(superseded).catch(() => {});
   }
   return NextResponse.json({ ok: true, filename: file.name });
 }

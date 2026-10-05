@@ -2853,7 +2853,41 @@ export default function SalesReportsPage() {
    * parse neither loses the ones already read nor blocks those after it. It
    * also gives the upload a progress count.
    */
+  /**
+   * The files as dropped, kept so they can be filed after a successful import.
+   *
+   * Parsing reads a statement and keeps the numbers; the PDF itself was thrown
+   * away, which left the Steuerberater's folder without the delivery documents
+   * every month. The parsed sets record only filenames, so the originals have
+   * to be held here from the moment they arrive.
+   */
+  const woltRawFiles = useRef<File[]>([]);
+  const lfRawFiles = useRef<File[]>([]);
+
+  /**
+   * File the statements a month was built from, so the Monatsabschluss has them.
+   *
+   * Through the server, like every other write to that bucket. A failure is
+   * reported but never fails the import: the numbers are already saved, and
+   * losing those to a filing error would be the worse trade.
+   */
+  const fileMonthDocuments = useCallback(async (kind: string, month: string, files: File[]) => {
+    for (const file of files) {
+      try {
+        const body = new FormData();
+        body.append('file', file);
+        body.append('kind', kind);
+        body.append('month', month);
+        const r = await fetch('/api/month-folder/upload', { method: 'POST', body });
+        if (!r.ok) console.warn(`[${kind}] ${file.name} nicht abgelegt: ${(await r.json()).error}`);
+      } catch (e) {
+        console.warn(`[${kind}] ${file.name} nicht abgelegt:`, e);
+      }
+    }
+  }, []);
+
   const parseWoltFiles = useCallback(async (files: File[]) => {
+    woltRawFiles.current = files;
     setWoltParsing(true); setWoltError(null); setWoltSets([]); setWoltSaved(null);
     setWoltItemRows([]); setWoltItemSummary(null); setWoltItemsSaved(null);
     setWoltProgress({ done: 0, total: files.length });
@@ -2937,6 +2971,7 @@ export default function SalesReportsPage() {
   const parseLieferandoFiles = useCallback(async (files: File[]) => {
     const usable = files.filter(f => /\.(pdf|zip)$/i.test(f.name));
     if (usable.length === 0) { setLfError('Drop the Lieferando statement PDFs (TAKEAWAY_EXPORT).'); return; }
+    lfRawFiles.current = usable;
     setLfParsing(true); setLfError(null); setLfSets([]); setLfSaved(null);
     const collected: LieferandoSetResult[] = [];
     try {
@@ -3031,6 +3066,12 @@ export default function SalesReportsPage() {
         if (insRows) { setLfError(`${set.source}: ${insRows.message}`); return; }
         saved += 1;
       }
+      /* The month the statements belong to, from the periods just imported. */
+      const lfMonths = [...new Set(lfImportable
+        .map(s => String(s.data?.invoiceDate ?? s.data?.periodEnd ?? '').slice(0, 7))
+        .filter(m => /^\d{4}-\d{2}$/.test(m)))];
+      for (const m of lfMonths) await fileMonthDocuments('lieferando', m, lfRawFiles.current);
+
       setLfSets([]); setLfSaved(saved);
       queryClient.invalidateQueries({ queryKey: ['lieferando-periods'] });
       queryClient.invalidateQueries({ queryKey: ['lieferando-shift-sales'] });
@@ -3039,7 +3080,7 @@ export default function SalesReportsPage() {
     } finally {
       setImporting(false);
     }
-  }, [lfImportable, queryClient]);
+  }, [lfImportable, queryClient, fileMonthDocuments]);
 
   const handleWoltFiles = useCallback((files: File[]) => {
     // A CSV in this card is the purchases export; zips and PDFs are the
@@ -3157,6 +3198,12 @@ export default function SalesReportsPage() {
         if (credErr) { setWoltError(credErr.message); return; }
       }
 
+      /* The month the statements belong to, from the periods just imported. */
+      const woltMonths = [...new Set(woltImportable
+        .map(s => String(s.data?.invoiceDate ?? '').slice(0, 7))
+        .filter(m => /^\d{4}-\d{2}$/.test(m)))];
+      for (const m of woltMonths) await fileMonthDocuments('wolt', m, woltRawFiles.current);
+
       setWoltSets([]); setWoltSaved(saved);
       queryClient.invalidateQueries({ queryKey: ['wolt-periods'] });
       queryClient.invalidateQueries({ queryKey: ['wolt-shift-sales'] });
@@ -3164,7 +3211,7 @@ export default function SalesReportsPage() {
     } finally {
       setImporting(false);
     }
-  }, [woltImportable, queryClient]);
+  }, [woltImportable, queryClient, fileMonthDocuments]);
 
   /** Reads the webshop export. Parsing happens server-side so venue matching
    *  and the closed-shift rule stay identical to the Wolt import. */

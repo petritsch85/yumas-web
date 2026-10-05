@@ -28,6 +28,14 @@ export interface ManifestItem {
   note: string;
   /** A month without it is incomplete; shown as a warning, never blocks. */
   required: boolean;
+  /**
+   * Whether the position holds more than one document.
+   *
+   * A Kontoauszug is one document and uploading it again replaces it. Wolt is
+   * eighteen five-day periods of four or five PDFs each, which only makes
+   * sense as a collection.
+   */
+  multi?: boolean;
 }
 
 export const MANIFEST: ManifestItem[] = [
@@ -68,11 +76,11 @@ export const MANIFEST: ManifestItem[] = [
     note: 'Monatsbericht des Webshops.' },
 
   { key: 'wolt', folder: '09_Wolt', label: 'Wolt Abrechnungen',
-    source: 'uploaded', required: true,
+    source: 'uploaded', required: true, multi: true,
     note: 'Wolt Selbstfakturierungen des Monats — Lieferbelege.' },
 
   { key: 'lieferando', folder: '10_Lieferando', label: 'Lieferando Abrechnungen',
-    source: 'uploaded', required: true,
+    source: 'uploaded', required: true, multi: true,
     note: 'Lieferando Abrechnungen des Monats — Lieferbelege.' },
 ];
 
