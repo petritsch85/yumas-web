@@ -1615,7 +1615,10 @@ export default function SalesReportsPage() {
         financing[month] = (financing[month] ?? 0) + (isIn ? value : -value);
         continue;
       }
-      const bucket = isIn ? (String(t.category ?? '').startsWith('S - ') ? sales : otherIncome) : operating;
+      /* Everything carries its sign: money in positive, money out negative,
+         so a column reads as a column and nothing has to be negated by eye. */
+      if (!isIn) { operating[month] = (operating[month] ?? 0) - value; continue; }
+      const bucket = String(t.category ?? '').startsWith('S - ') ? sales : otherIncome;
       bucket[month] = (bucket[month] ?? 0) + value;
     }
 
@@ -7907,7 +7910,9 @@ export default function SalesReportsPage() {
                 return where === bucket;
               });
 
-              const value = (t: Record<string, unknown>) => Math.abs(Number(t.amount_cents ?? 0)) / 100;
+              /* Signed like the line above: out negative, in positive. */
+              const value = (t: Record<string, unknown>) =>
+                (t.direction === 'in' ? 1 : -1) * Math.abs(Number(t.amount_cents ?? 0)) / 100;
 
               /* The Wolt lending is in these two lines but never in the bank,
                  so it has no booking to list. Without a row of its own the
@@ -7930,7 +7935,7 @@ export default function SalesReportsPage() {
                     net: value(t), bills: 1,
                   }))
                   .concat(synthetic)
-                  .sort((a, z) => z.net - a.net);
+                  .sort((a, z) => Math.abs(z.net) - Math.abs(a.net));
               }
               const by = new Map<string, { net: number; bills: number; name: string }>();
               for (const t of hits) {
@@ -7940,7 +7945,7 @@ export default function SalesReportsPage() {
                 cur.bills += 1;
                 by.set(name.toLowerCase(), cur);
               }
-              return [...by.values(), ...synthetic].sort((a, z) => z.net - a.net);
+              return [...by.values(), ...synthetic].sort((a, z) => Math.abs(z.net) - Math.abs(a.net));
             };
 
             const drillRows = (part: string) => {
@@ -7949,7 +7954,9 @@ export default function SalesReportsPage() {
               const rows = part.startsWith('cf-')
                 ? cashflowItems(part.slice(3), colKey)
                 : cogsSuppliers(part, colKey);
-              const total = rows.reduce((t, r) => t + r.net, 0);
+              /* Shares are taken on magnitudes: against a signed net total a single
+                 line can read 916%, which tells nobody anything. */
+              const total = rows.reduce((t, r) => t + Math.abs(r.net), 0);
               const colLabel = colKey.startsWith('FY')
                 ? 'FY ' + colKey.slice(2)
                 : MONTH_ABBR[Number(colKey.slice(5)) - 1] + ' ' + colKey.slice(2, 4);
@@ -7977,7 +7984,7 @@ export default function SalesReportsPage() {
                       {col.key === colKey
                         ? <span className="text-gray-700">
                             {fmtNum(Math.round(r.net))}
-                            <span className="text-gray-400 ml-1">{total > 0 ? Math.round(r.net / total * 100) + '%' : ''}</span>
+                            <span className="text-gray-400 ml-1">{total > 0 ? Math.round(Math.abs(r.net) / total * 100) + '%' : ''}</span>
                           </span>
                         : null}
                     </td>
@@ -8116,9 +8123,9 @@ export default function SalesReportsPage() {
             const unexplained = (colKey: string) => {
               const open = openingBalance(colKey), close = closingBalance(colKey);
               if (open === null || close === null) return null;
-              /* Financing already carries its sign; the other three do not. */
+              /* Every line carries its own sign, so the movement is their sum. */
               const movement = (regularSales(colKey) ?? 0) + (otherIncome(colKey) ?? 0)
-                - (operatingOut(colKey) ?? 0) + (financingOut(colKey) ?? 0);
+                + (operatingOut(colKey) ?? 0) + (financingOut(colKey) ?? 0);
               const gap = close - (open + movement);
               return Math.abs(gap) < 0.005 ? null : gap;
             };
@@ -8220,7 +8227,7 @@ export default function SalesReportsPage() {
                       {drillRows('cf-otherIncome')}
                       {valueLine('cf-op',    'Operating costs', operatingOut, { indent: true, drill: 'cf-operating' })}
                       {drillRows('cf-operating')}
-                      {valueLine('cf-fin',   'Financing (+ in / − out)', financingOut, { indent: true, drill: 'cf-financing' })}
+                      {valueLine('cf-fin',   'Financing',       financingOut, { indent: true, drill: 'cf-financing' })}
                       {drillRows('cf-financing')}
                       {valueLine('cf-gap',   'Other (unexplained)', unexplained, { indent: true })}
                       {valueLine('cf-close', 'Closing balance',  closingBalance, { bold: true })}
@@ -8259,6 +8266,8 @@ export default function SalesReportsPage() {
                   exactly one of the four lines, which is why they reach the closing balance exactly —
                   September does, to the cent. &ldquo;Other&rdquo; is the residual and stays empty unless the
                   two disagree.
+                  {' '}Every line carries its own sign: money in positive, money out negative, so the
+                  movement is simply their sum.
                   {' '}Wolt withholds its lending from the payout, so that money never reaches the account.
                   It is added back to Regular sales and taken out again under Financing, because it is
                   borrowing repaid rather than trade not done. The two cancel, so the closing balance is
