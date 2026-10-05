@@ -5,6 +5,9 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
 import { useActiveLocations, restaurantsOnly } from '@/lib/use-locations';
 import { parseOpenTableCsv, summariseOpenTable, OpenTableParseError } from '@/lib/opentable-csv';
+import { parseShiftCSV, parseNum, parseDate, SECTION_NAMES } from '@/lib/orderbird-shift-csv';
+import type { ShiftCat, ShiftProduct, ShiftParseResult } from '@/lib/orderbird-shift-csv';
+import { OrderbirdSyncBar } from '@/components/orderbird-sync-bar';
 import { parseGdpduZip, GdpduParseError } from '@/lib/gdpdu';
 import { isoWeek, isoWeekYear, isoWeekRange, isoWeeksInYear, currentISOWeek } from '@/lib/iso-week';
 import { shiftClosedCheckerFor } from '@/lib/opening-hours';
@@ -249,15 +252,6 @@ type WeeklyParseResult = {
   error?:          string;
 };
 
-type ShiftCat = {
-  name:            string;
-  isMain:          boolean;
-  quantity:        number;
-  revenue:         number;
-  inhouseRevenue:  number;
-  takeawayRevenue: number;
-};
-
 type MonthlyParseResult = {
   year:               number;
   month:              number;
@@ -276,36 +270,12 @@ type MonthlyParseResult = {
   error?:             string;
 };
 
-type ShiftProduct = {
-  name:        string;
-  quantity:    number;
-  gross_sales: number;
-};
-
 type QShiftProduct = {
   product_name: string;
   quantity:     number;
   gross_sales:  number;
   report_date:  string;
   shift_type:   'lunch' | 'dinner' | null;
-};
-
-type ShiftParseResult = {
-  date:               string;
-  zReportNumber:      string;
-  grossTotal:         number;
-  grossFood:          number;
-  grossDrinks:        number;
-  netTotal:           number;
-  vatTotal:           number;
-  tips:               number;
-  inhouseTotal:       number;
-  takeawayTotal:      number;
-  cancellationsCount: number;
-  cancellationsTotal: number;
-  categories:         ShiftCat[];
-  products:           ShiftProduct[];
-  error?:             string;
 };
 
 type WeeklyBatchItem = {
@@ -408,24 +378,6 @@ type DRow = {
 // HELPERS
 // ─────────────────────────────────────────────────────────────────────────────
 
-function parseNum(s: string): number {
-  if (!s) return 0;
-  const c = s.trim().replace(/[€$\s%]/g, '');
-  if (!c) return 0;
-  if (c.includes(',') && c.includes('.')) return parseFloat(c.replace(/\./g, '').replace(',', '.')) || 0;
-  if (c.includes(',')) return parseFloat(c.replace(',', '.')) || 0;
-  return parseFloat(c) || 0;
-}
-
-function parseDate(s: string): string | null {
-  if (!s) return null;
-  const de = s.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})/);
-  if (de) return `${de[3]}-${de[2].padStart(2, '0')}-${de[1].padStart(2, '0')}`;
-  const iso = s.match(/^(\d{4}-\d{2}-\d{2})/);
-  if (iso) return iso[1];
-  return null;
-}
-
 function daysInMonth(year: number, month: number): number {
   return new Date(year, month, 0).getDate(); // month is 1-based
 }
@@ -515,13 +467,6 @@ function sumMap(map: Record<string, DayAgg>): DayAgg | null {
 // CSV PARSERS
 // ─────────────────────────────────────────────────────────────────────────────
 
-const SECTION_NAMES = new Set([
-  'turnover','gross turnover','net turnover','taxes',
-  'types of payment','taxes by payment method','revenue breakdown',
-  'cancellations','discounts','tables','guests',
-  'main categories','categories','products',
-]);
-
 function parseWeeklyCSV(raw: string): WeeklyParseResult {
   const content = raw.replace(/^\uFEFF/,'').replace(/\r\n/g,'\n').replace(/\r/g,'\n');
   const lines   = content.split('\n').map(l => l.trim()).filter(l => l.length > 0);
@@ -603,87 +548,6 @@ function parseWeeklyCSV(raw: string): WeeklyParseResult {
   if (netTotal === 0 && grossTotal > 0 && taxTotal > 0) netTotal = grossTotal - taxTotal;
 
   return { rows, summary:{ weekStart, weekEnd, grossTotal, grossFood, grossDrinks, netTotal, taxTotal, tips, inhouseTotal, takeawayTotal }, categoryRevenue };
-}
-
-function parseShiftCSV(raw: string): ShiftParseResult {
-  const empty: ShiftParseResult = { date:'', zReportNumber:'', grossTotal:0, grossFood:0, grossDrinks:0, netTotal:0, vatTotal:0, tips:0, inhouseTotal:0, takeawayTotal:0, cancellationsCount:0, cancellationsTotal:0, categories:[], products:[] };
-
-  const content = raw.replace(/^\uFEFF/,'').replace(/\r\n/g,'\n').replace(/\r/g,'\n');
-  const lines   = content.split('\n').map(l => l.trim()).filter(l => l.length > 0);
-  if (lines.length < 5) return { ...empty, error:'File appears to be empty.' };
-
-  const split = (line: string) => line.split(';').map(v => v.replace(/^"|"$/g,'').trim());
-
-  let date = '', zReportNumber = '';
-  for (let i = 0; i < Math.min(10, lines.length); i++) {
-    const cols = split(lines[i]);
-    if (cols[0].toLowerCase().startsWith('date'))     { date           = parseDate(cols[1] ?? '') ?? ''; }
-    if (cols[0].toLowerCase().includes('z report'))   { zReportNumber  = cols[1] ?? ''; }
-  }
-
-  let section = '';
-  let grossTotal = 0, grossFood = 0, grossDrinks = 0;
-  let netTotal = 0, vatTotal = 0, tips = 0;
-  let inhouseTotal = 0, takeawayTotal = 0;
-  let cancellationsCount = 0, cancellationsTotal = 0;
-  const categories: ShiftCat[] = [];
-  const products: ShiftProduct[] = [];
-
-  for (const line of lines) {
-    const cols  = split(line);
-    const first = cols[0].toLowerCase();
-    if (cols.every(c => c === '')) { section = ''; continue; }
-    if (SECTION_NAMES.has(first))  { section = first; continue; }
-    if (first === 'date:' || first === 'z report:') continue;
-
-    switch (section) {
-      case 'turnover':
-        if (first === 'tip') tips = parseNum(cols[3]);
-        break;
-      case 'gross turnover':
-        if      (first.startsWith('7.'))  grossFood   = parseNum(cols[3]);
-        else if (first.startsWith('19.')) grossDrinks = parseNum(cols[3]);
-        else if (first === 'total')       grossTotal  = parseNum(cols[3]);
-        break;
-      case 'net turnover':
-        if (first === 'total') netTotal = parseNum(cols[3]);
-        break;
-      case 'taxes':
-        if (first === 'total') vatTotal = parseNum(cols[3]);
-        break;
-      case 'cancellations':
-        if (first === 'total') { cancellationsCount = Math.round(parseNum(cols[2])); cancellationsTotal = parseNum(cols[3]); }
-        break;
-      case 'main categories': {
-        if (!cols[0] || first === 'total') break;
-        const qty = Math.round(parseNum(cols[2])), rev = parseNum(cols[3]);
-        const inh = parseNum(cols[7]),              tak = parseNum(cols[10]);
-        inhouseTotal  += inh;
-        takeawayTotal += tak;
-        categories.push({ name:cols[0], isMain:true, quantity:qty, revenue:rev, inhouseRevenue:inh, takeawayRevenue:tak });
-        break;
-      }
-      case 'categories': {
-        if (!cols[0] || first === 'total') break;
-        const qty = Math.round(parseNum(cols[2])), rev = parseNum(cols[3]);
-        const inh = parseNum(cols[7]),              tak = parseNum(cols[10]);
-        if (rev > 0) categories.push({ name:cols[0], isMain:false, quantity:qty, revenue:rev, inhouseRevenue:inh, takeawayRevenue:tak });
-        break;
-      }
-      case 'products': {
-        if (!cols[0] || first === 'total') break;
-        const qty = parseNum(cols[2]);
-        const rev = parseNum(cols[3]);
-        if (cols[0] && (qty > 0 || rev > 0)) products.push({ name:cols[0], quantity:qty, gross_sales:rev });
-        break;
-      }
-    }
-  }
-
-  if (grossTotal === 0 && date === '')
-    return { ...empty, error:'Could not parse this file as an Orderbird shift report.' };
-
-  return { date, zReportNumber, grossTotal, grossFood, grossDrinks, netTotal, vatTotal, tips, inhouseTotal, takeawayTotal, cancellationsCount, cancellationsTotal, categories, products };
 }
 
 function parseMonthlyCSV(raw: string): MonthlyParseResult {
@@ -4131,6 +3995,8 @@ export default function SalesReportsPage() {
       ══════════════════════════════════════════════════════════════════ */}
       {activeTab === 'upload' && (
         <div>
+          <OrderbirdSyncBar />
+
           {/* Report type toggle */}
           <div className="flex gap-3 mb-5">
             {([
