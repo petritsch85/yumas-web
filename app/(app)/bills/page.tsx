@@ -7,11 +7,12 @@ import {
   Upload, FileCheck, AlertCircle, Loader2,
   CheckCircle2, Clock, Banknote, Trash2,
   ChevronDown, ChevronUp, Eye, X, FilePlus, Save, MapPin, Calendar, Pencil, LayoutList,
-  AlertTriangle, Landmark, Download,
+  AlertTriangle, Landmark, Download, Inbox, ArrowDownToLine, FileX,
 } from 'lucide-react';
 import { buildPain001, painFilename, validateOrder, isValidIban, normaliseIban } from '@/lib/sepa-credit-transfer';
 import { resolveDueDate, SOFORT_DAYS, isAutoCollected } from '@/lib/payment-terms';
 import { STATUS_LABELS } from '@/lib/bill-status';
+import { DOCUMENT_TYPE_LABELS } from '@/lib/document-types';
 import type { SepaTransfer } from '@/lib/sepa-credit-transfer';
 
 import { useT } from '@/lib/i18n';
@@ -73,6 +74,19 @@ type QueueItem = {
   periodEnd?:     string | null;
 };
 
+/** A document the email import set aside as not a bill. */
+type SkippedDoc = {
+  id:            string;
+  received_at:   string;
+  file_name:     string | null;
+  file_path:     string;
+  document_type: string | null;
+  supplier_name: string | null;
+  gross_amount:  number | null;
+  email_from:    string | null;
+  email_subject: string | null;
+};
+
 type Counterparty = {
   id:       string;
   name:     string;
@@ -106,6 +120,8 @@ type Bill = {
   period_start:   string | null;
   period_end:     string | null;
   status:         'pending' | 'approved' | 'to_be_paid' | 'paid';
+  /** Arrived by email and not yet moved to Pending — shown under Newly Received. */
+  is_new?:        boolean;
   file_path:      string | null;
   /** The account printed on the invoice itself, where the extraction found one. */
   creditor_iban?: string | null;
@@ -564,7 +580,9 @@ export default function BillsPage() {
     queryFn: async () => {
       // PostgREST caps a single response at 1000 rows, so page through the full
       // table — otherwise older bills silently vanish and the totals under-report.
-      const COLS = 'id, created_at, supplier_name, invoice_number, invoice_date, due_date, due_date_source, payment_method, gross_amount, net_amount, vat_amount, category, location_label, period_type, period_start, period_end, status, file_path, creditor_iban, creditor_name';
+      const BASE = 'id, created_at, supplier_name, invoice_number, invoice_date, due_date, due_date_source, payment_method, gross_amount, net_amount, vat_amount, category, location_label, period_type, period_start, period_end, status, file_path, creditor_iban, creditor_name';
+      // is_new arrives with supabase/add_bill_inbox.sql; the page works without it until then
+      let COLS = `${BASE}, is_new`;
       const PAGE = 1000;
       const all: Bill[] = [];
       for (let page = 0; ; page++) {
@@ -574,6 +592,7 @@ export default function BillsPage() {
           .order('invoice_date', { ascending: false, nullsFirst: false })
           .order('id', { ascending: false }) // stable tiebreak so pages don't overlap
           .range(page * PAGE, (page + 1) * PAGE - 1);
+        if (error && COLS !== BASE && /is_new/.test(error.message)) { COLS = BASE; page--; continue; }
         if (error) throw error;
         if (!data?.length) break;
         all.push(...(data as unknown as Bill[]));
@@ -582,6 +601,41 @@ export default function BillsPage() {
       return all;
     },
   });
+
+  /* Documents the email import judged not to be bills. Listed so nothing is
+     lost silently — one read wrongly can still be imported by hand. */
+  const { data: skippedDocs = [] } = useQuery<SkippedDoc[]>({
+    queryKey: ['inbound-skipped'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('inbound_skipped')
+        .select('id, received_at, file_name, file_path, document_type, supplier_name, gross_amount, email_from, email_subject')
+        .eq('status', 'skipped')
+        .order('received_at', { ascending: false })
+        .limit(200);
+      if (error) return []; // the table arrives with supabase/add_bill_inbox.sql
+      return (data ?? []) as SkippedDoc[];
+    },
+  });
+  const [skippedOpen, setSkippedOpen] = useState(false);
+  const [skippedBusy, setSkippedBusy] = useState<string | null>(null);
+
+  const actOnSkipped = async (id: string, action: 'import' | 'dismiss') => {
+    setSkippedBusy(id);
+    try {
+      const res = await fetch(`/api/bills/inbound-skipped/${id}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) alert(body.error ?? 'Failed');
+      else if (body.message) alert(body.message);
+      queryClient.invalidateQueries({ queryKey: ['inbound-skipped'] });
+      queryClient.invalidateQueries({ queryKey: ['bills'] });
+    } finally {
+      setSkippedBusy(null);
+    }
+  };
 
   /* The cash flows that paid each bill — linked on the Cash Flow page, either
      directly or as one of several bills a transfer covered. Shown as a tick
@@ -779,7 +833,10 @@ export default function BillsPage() {
   // New bills land as "pending" and stay in the top table until they are checked
   // off; approving (or paying) one moves it down. Changing the status back moves
   // it straight back up, since both lists derive from the same sorted array.
-  const pendingRows = useMemo(() => sortedFiltered.filter(b => b.status === 'pending'), [sortedFiltered]);
+  /* Bills that came in by email sit above Pending until moved down by hand —
+     an overview of what has just arrived. They are pending all the while. */
+  const newRows     = useMemo(() => sortedFiltered.filter(b => b.status === 'pending' && b.is_new), [sortedFiltered]);
+  const pendingRows = useMemo(() => sortedFiltered.filter(b => b.status === 'pending' && !b.is_new), [sortedFiltered]);
   /* Approved means checked; to be paid means it has to be transferred by hand
      (a SEPA debit skips it and goes straight to paid); paid means the money has
      gone. Each table holds only its own status. */
@@ -1089,7 +1146,16 @@ export default function BillsPage() {
   };
 
   const updateStatus = async (id: string, status: string) => {
-    await supabase.from('bills').update({ status }).eq('id', id);
+    // A status set by hand means the bill has been looked at: it leaves Newly Received
+    const wasNew = bills.find(b => b.id === id)?.is_new;
+    await supabase.from('bills').update(wasNew ? { status, is_new: false } : { status }).eq('id', id);
+    queryClient.invalidateQueries({ queryKey: ['bills'] });
+  };
+
+  const moveToPending = async (ids: string[]) => {
+    if (ids.length === 0) return;
+    const { error } = await supabase.from('bills').update({ is_new: false }).in('id', ids);
+    if (error) alert(`Could not move: ${error.message}`);
     queryClient.invalidateQueries({ queryKey: ['bills'] });
   };
 
@@ -1177,6 +1243,8 @@ export default function BillsPage() {
     tp: number,
     setPg: React.Dispatch<React.SetStateAction<number>>,
     total: number,
+    /** Newly Received only: the per-row button that moves a bill to Pending. */
+    onAccept?: (id: string) => void,
   ) => {
     const t = sumRows(rows);
 
@@ -1386,6 +1454,12 @@ export default function BillsPage() {
                           </td>
                           <td className="px-1.5 py-1.5">
                             <div className="grid grid-cols-3 gap-x-1.5 gap-y-1 items-center justify-items-center">
+                              {onAccept && (
+                                <button onClick={() => onAccept(bill.id)} title="Move to Pending"
+                                  className="text-sky-500 hover:text-amber-600 transition-colors">
+                                  <ArrowDownToLine size={14} />
+                                </button>
+                              )}
                               {bill.invoice_number && (
                                 <span title={`Invoice #${bill.invoice_number}`} className="text-gray-300 cursor-default text-[10px] font-mono leading-none">#</span>
                               )}
@@ -1955,7 +2029,7 @@ export default function BillsPage() {
                 </select>
               </label>
               <span className="text-xs text-gray-400">
-                {pendingRows.length} pending · {settledRows.length} upcoming SEPA · {toBePaidRows.length} to be paid · {paidRows.length} paid
+                {newRows.length > 0 && <>{newRows.length} new · </>}{pendingRows.length} pending · {settledRows.length} upcoming SEPA · {toBePaidRows.length} to be paid · {paidRows.length} paid
               </span>
             </div>
           </div>
@@ -1976,6 +2050,93 @@ export default function BillsPage() {
             </div>
           ) : (
             <div className="space-y-6">
+              <section>
+                <div className="flex items-center gap-2 mb-2">
+                  <Inbox size={14} className="text-sky-600" />
+                  <h2 className="text-sm font-bold text-gray-900">Newly Received</h2>
+                  <span className="text-xs font-semibold text-sky-700 bg-sky-50 border border-sky-200 rounded-full px-2 py-0.5">
+                    {newRows.length}
+                  </span>
+                  <span className="text-xs text-gray-400">imported from admin@yumas.de</span>
+                  {newRows.length > 0 && (
+                    <button onClick={() => moveToPending(newRows.map(b => b.id))}
+                      className="ml-auto flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-sky-700 border border-sky-200 bg-white rounded-lg hover:bg-sky-50 transition-colors">
+                      <ArrowDownToLine size={12} />
+                      Move all to Pending
+                    </button>
+                  )}
+                </div>
+                {newRows.length === 0 ? (
+                  <div className="flex items-center justify-center h-14 border border-dashed border-gray-200 rounded-xl">
+                    <p className="text-xs text-gray-400">Nothing new since you last looked</p>
+                  </div>
+                ) : renderBillsTable(newRows, 1, 1, () => {}, newRows.length, id => moveToPending([id]))}
+
+                {skippedDocs.length > 0 && (
+                  <div className="mt-2 border border-gray-200 rounded-xl bg-white overflow-hidden">
+                    <button onClick={() => setSkippedOpen(o => !o)}
+                      className="w-full flex items-center gap-2 px-3 py-2 text-xs font-semibold text-gray-500 hover:bg-gray-50">
+                      <FileX size={13} className="text-gray-400" />
+                      Not imported — not a bill
+                      <span className="bg-gray-100 text-gray-600 font-bold px-1.5 py-0.5 rounded-full">{skippedDocs.length}</span>
+                      <span className="font-normal text-gray-400 truncate">Lieferscheine, order confirmations … check in case one is a bill after all</span>
+                      {skippedOpen ? <ChevronUp size={13} className="ml-auto flex-shrink-0" /> : <ChevronDown size={13} className="ml-auto flex-shrink-0" />}
+                    </button>
+                    {skippedOpen && (
+                      <table className="w-full text-xs border-t border-gray-100">
+                        <thead>
+                          <tr className="bg-gray-50 text-gray-500 uppercase tracking-wide">
+                            <th className="px-2 py-1.5 text-left font-semibold">Received</th>
+                            <th className="px-2 py-1.5 text-left font-semibold">Type</th>
+                            <th className="px-2 py-1.5 text-left font-semibold">From</th>
+                            <th className="px-2 py-1.5 text-left font-semibold">Email</th>
+                            <th className="px-2 py-1.5 text-left font-semibold">Amount</th>
+                            <th className="px-2 py-1.5"></th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100">
+                          {skippedDocs.map(d => (
+                            <tr key={d.id} className="hover:bg-gray-50">
+                              <td className="px-2 py-1.5 whitespace-nowrap text-gray-600">{fmtDate(d.received_at.slice(0, 10))}</td>
+                              <td className="px-2 py-1.5 whitespace-nowrap font-semibold text-gray-700">
+                                {DOCUMENT_TYPE_LABELS[d.document_type ?? ''] ?? d.document_type ?? '—'}
+                              </td>
+                              <td className="px-2 py-1.5 text-gray-900 max-w-[180px] truncate" title={d.email_from ?? ''}>
+                                {d.supplier_name ?? d.email_from ?? '—'}
+                              </td>
+                              <td className="px-2 py-1.5 text-gray-500 max-w-[260px] truncate" title={d.email_subject ?? ''}>
+                                {d.email_subject ?? d.file_name ?? '—'}
+                              </td>
+                              <td className="px-2 py-1.5 whitespace-nowrap tabular-nums text-gray-600">
+                                {d.gross_amount != null ? fmt(d.gross_amount) : '—'}
+                              </td>
+                              <td className="px-2 py-1.5">
+                                <div className="flex items-center justify-end gap-2 whitespace-nowrap">
+                                  <a href={`${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/bills/${d.file_path}`}
+                                    target="_blank" rel="noopener noreferrer" title="View document"
+                                    className="text-gray-300 hover:text-blue-500 transition-colors">
+                                    <Eye size={14} />
+                                  </a>
+                                  <button onClick={() => actOnSkipped(d.id, 'import')} disabled={skippedBusy === d.id}
+                                    className="px-2 py-0.5 font-semibold text-[#1B5E20] border border-green-200 rounded-md hover:bg-green-50 disabled:opacity-40">
+                                    {skippedBusy === d.id ? <Loader2 size={11} className="animate-spin" /> : 'Import as bill'}
+                                  </button>
+                                  <button onClick={() => actOnSkipped(d.id, 'dismiss')} disabled={skippedBusy === d.id}
+                                    title="Remove from this list (the file is kept)"
+                                    className="text-gray-300 hover:text-red-500 transition-colors disabled:opacity-40">
+                                    <X size={14} />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
+                )}
+              </section>
+
               <section>
                 <div className="flex items-baseline gap-2 mb-2">
                   <h2 className="text-sm font-bold text-gray-900">Pending</h2>

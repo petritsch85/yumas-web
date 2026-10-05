@@ -1,5 +1,5 @@
 /**
- * Postmark → Supabase Storage → Vercel.
+ * Gmail import script (scripts/gmail-bill-import.gs) → Supabase Storage → Vercel.
  *
  * Vercel refuses a request body over 4.5 MB, and an email carrying a few
  * invoices — or a batch forwarded "as attachment" — is often larger. Postmark

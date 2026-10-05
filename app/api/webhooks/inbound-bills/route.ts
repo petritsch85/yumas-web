@@ -4,8 +4,7 @@ import PostalMime from 'postal-mime';
 import { createHash } from 'crypto';
 import { getSupabaseAdmin } from '@/lib/supabase-admin';
 import { canonicalizeSupplierName, getKnownTerms } from '@/lib/canonical-supplier';
-import { resolveDueDate, addDaysTo, DEFAULT_DAYS } from '@/lib/payment-terms';
-import { isRemitter } from '@/lib/remitters';
+import { fileBill, findDuplicate, isBillDocument } from '@/lib/inbound-bills';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const SECRET = process.env.INBOUND_BILLS_WEBHOOK_SECRET ?? '';
@@ -33,6 +32,7 @@ The invoices may be in German or English. German terms to know:
 
 Return this exact JSON structure:
 {
+  "document_type": "one of: invoice | credit_note | delivery_note | order_confirmation | quote | reminder | statement | other",
   "supplier_name": "string",
   "invoice_number": "string or null",
   "invoice_date": "YYYY-MM-DD or null",
@@ -58,6 +58,17 @@ Return this exact JSON structure:
     }
   ]
 }
+
+document_type — decide this first. The mailbox also receives documents that are not bills, and only a bill may be filed as one:
+- invoice: a Rechnung asking for or recording payment for goods or services — including Sammelrechnung, Abschlagsrechnung, Dauerrechnung, a self-billing Gutschrift (Gutschriftverfahren), a platform's monthly Abrechnung that carries an invoice number or VAT breakdown, and a till receipt / Quittung for a purchase
+- credit_note: a Gutschrift, Rechnungskorrektur or Stornorechnung that reduces or cancels an earlier invoice
+- delivery_note: a Lieferschein / Warenbegleitschein — lists goods delivered, even when it shows prices, but asks for no payment
+- order_confirmation: Auftragsbestätigung / Bestellbestätigung
+- quote: Angebot / Kostenvoranschlag
+- reminder: Zahlungserinnerung / Mahnung about an invoice already sent
+- statement: Kontoauszug, Kontoübersicht, Saldenbestätigung, open-items list
+- other: anything else (price lists, newsletters, contracts, terms, payslips …)
+The title printed on the document is the strongest signal ("Rechnung", "Lieferschein", …). A Lieferschein that also says "Rechnung folgt" is a delivery_note; a combined "Lieferschein / Rechnung" with a total due is an invoice. For anything other than invoice or credit_note, still fill in the other fields as far as the document allows.
 
 Rules:
 - All amounts as plain numbers (no currency symbols), using dot as decimal separator
@@ -98,7 +109,7 @@ type Attachment = { Name: string; Content: string; ContentType: string; ContentI
 
 /* A batch arrives as one email with each original forwarded "as attachment"
    (Gmail: select several → ⋮ → Forward as attachment). The work runs after
-   the reply to Postmark, so a batch of bills is not cut off by its timeout. */
+   the reply to the sender, so a batch of bills is not cut off by its timeout. */
 export const maxDuration = 300;
 
 /** Where the inbound-relay function parks an email too large to post here. */
@@ -148,7 +159,7 @@ async function collectBills(attachments: Attachment[], depth = 0): Promise<Attac
 }
 
 /* The same file arriving twice at once — one email in two batches, or a
-   manual retry overlapping Postmark's own — would pass the duplicate check
+   manual retry overlapping an automatic one — would pass the duplicate check
    below in both copies, since neither is saved until it has been read. So a
    file is claimed by its content first: creating the claim fails if it
    exists, and only one copy gets past. A claim is released if reading fails,
@@ -182,24 +193,6 @@ async function claimFile(a: Attachment): Promise<boolean> {
 
 const releaseFile = (a: Attachment) =>
   getSupabaseAdmin().storage.from(INBOUND_BUCKET).remove([claimPath(a)]);
-
-/* A bill forwarded twice — or a batch Postmark delivers again — must not
-   appear twice. Same supplier, same number, same amount is the same bill. */
-async function findDuplicate(extracted: Record<string, unknown>): Promise<string | null> {
-  const invoiceNumber = extracted.invoice_number as string | null;
-  if (!invoiceNumber) return null;
-  const { data } = await getSupabaseAdmin()
-    .from('bills')
-    .select('id, supplier_name, gross_amount')
-    .eq('invoice_number', invoiceNumber)
-    .limit(10);
-  const gross = Number(extracted.gross_amount ?? 0);
-  const supplier = String(extracted.supplier_name ?? '').toLowerCase();
-  const hit = (data ?? []).find(b =>
-    Math.abs(Number(b.gross_amount) - gross) < 0.01 &&
-    String(b.supplier_name ?? '').toLowerCase() === supplier);
-  return hit?.id ?? null;
-}
 
 /** Case, accents and punctuation removed — two spellings of one name match here. */
 const nameKey = (s: string) => s.toLowerCase()
@@ -301,127 +294,47 @@ async function extractFromAttachment(attachment: Attachment): Promise<Record<str
   return extracted;
 }
 
-/** The new bill's id, or null when the document was filed without one. */
+/** Stores the file, then files the bill. The new bill's id, or null when the document was filed without one. */
 async function saveBillToDB(attachment: Attachment, extracted: Record<string, unknown>): Promise<string | null> {
-  const admin = getSupabaseAdmin();
+  const path = await storeFile(attachment, 'bills');
+  return fileBill(path, extracted, { isNew: true });
+}
 
+/** Puts the file in the bills bucket under `folder`, returning its path. */
+async function storeFile(attachment: Attachment, folder: 'bills' | 'skipped'): Promise<string> {
   const bytes = Buffer.from(attachment.Content, 'base64');
   const fileName = attachment.Name.replace(/[^a-zA-Z0-9._-]/g, '_');
-  const path = `bills/${Date.now()}_${fileName}`;
-
-  const { error: upErr } = await admin.storage
+  const path = `${folder}/${Date.now()}_${fileName}`;
+  const { error } = await getSupabaseAdmin().storage
     .from('bills')
     .upload(path, bytes, { contentType: attachment.ContentType || 'application/pdf' });
-  if (upErr) throw new Error(`Storage upload failed: ${upErr.message}`);
+  if (error) throw new Error(`Storage upload failed: ${error.message}`);
+  return path;
+}
 
-  const invoiceDate = (extracted.invoice_date as string | null) ?? null;
+type EmailMeta = { from: string | null; subject: string | null };
 
-  /* Skonto: only accepted when the three printed figures agree with the gross.
-     A settlement read off the wrong line would quietly break bank matching,
-     which is the one thing this field exists to fix. */
-  const grossAmount = Number(extracted.gross_amount ?? 0);
-  const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
-  let settlementAmount = num(extracted.settlement_amount);
-  let discountAmount = num(extracted.discount_amount);
-  if (settlementAmount !== null && grossAmount > 0) {
-    if (discountAmount === null) discountAmount = Math.round((grossAmount - settlementAmount) * 100) / 100;
-    const agrees = Math.abs(grossAmount - discountAmount - settlementAmount) <= 0.02;
-    const sane = settlementAmount > 0 && settlementAmount <= grossAmount + 0.01 && settlementAmount >= grossAmount * 0.85;
-    if (!agrees || !sane) {
-      console.warn(`[inbound-bills] ${attachment.Name}: ignoring implausible Skonto ${settlementAmount} against gross ${grossAmount}`);
-      settlementAmount = null;
-      discountAmount = null;
-    }
-  } else {
-    settlementAmount = null;
-    discountAmount = null;
+/* A document that is not a bill is kept, not dropped: it is listed under
+   "Not imported" on the Bills page, where it can still be imported by hand if
+   the reading was wrong. Should that list not exist yet, the document is
+   filed as a bill after all — a stray Lieferschein is better than a lost
+   invoice. */
+async function setAside(attachment: Attachment, extracted: Record<string, unknown>, email: EmailMeta): Promise<void> {
+  const path = await storeFile(attachment, 'skipped');
+  const { error } = await getSupabaseAdmin().from('inbound_skipped').insert({
+    file_name:     attachment.Name,
+    file_path:     path,
+    document_type: String(extracted.document_type ?? 'other'),
+    supplier_name: (extracted.supplier_name as string | null) ?? null,
+    gross_amount:  typeof extracted.gross_amount === 'number' ? extracted.gross_amount : null,
+    email_from:    email.from,
+    email_subject: email.subject,
+    extracted,
+  });
+  if (error) {
+    console.error(`[inbound-bills] ${attachment.Name}: could not set aside (${error.message}) — filing as a bill instead`);
+    await fileBill(path, extracted, { isNew: true });
   }
-
-  /* Every bill gets a deadline. A printed date wins; then the condition the
-     invoice states ("Zahlbar sofort" is a condition, not a date); then the day
-     the Skonto line says the debit falls; and failing all of that a fortnight,
-     which is the commercial norm and keeps the bill inside the next payment
-     run. due_date_source records which, so a date worked out never passes for
-     one the supplier printed. */
-  const printedDue = (extracted.due_date as string | null) ?? null;
-  const terms = (extracted.payment_method as string | null) ?? null;
-  let dueDate = resolveDueDate({ invoiceDate, dueDate: printedDue, terms });
-  let dueSource: string | null =
-    printedDue ? 'printed' : dueDate ? 'stated-term' : null;
-  if (!dueDate && settlementAmount !== null && extracted.settlement_date) {
-    dueDate = extracted.settlement_date as string;
-    dueSource = 'settlement';
-  }
-  if (!dueDate && invoiceDate) {
-    dueDate = addDaysTo(invoiceDate, DEFAULT_DAYS);
-    dueSource = 'default';
-  }
-
-  /* Some counterparties only ever pay us. Their remittance advice carries an
-     amount, a date and a reference, so it extracts cleanly as an invoice and
-     lands in the ledger as a payable nobody owes. The file is kept — it is
-     still a document the Steuerberater needs — but no bill is created. */
-  if (isRemitter(extracted.supplier_name as string | null)) {
-    console.log(`[inbound-bills] ${extracted.supplier_name} remits to us — stored at ${path}, no payable created`);
-    return null;
-  }
-
-  const row: Record<string, unknown> = {
-    supplier_name:  extracted.supplier_name  ?? 'Unknown',
-    invoice_number: extracted.invoice_number ?? null,
-    invoice_date:   invoiceDate,
-    due_date:       dueDate,
-    net_amount:     extracted.net_amount     ?? 0,
-    vat_amount:     extracted.vat_amount     ?? 0,
-    gross_amount:   extracted.gross_amount   ?? 0,
-    currency:       extracted.currency       ?? 'EUR',
-    category:       extracted.suggested_category ?? null,
-    payment_method: extracted.payment_method ?? null,
-    status:         'pending',
-    file_path:      path,
-    uploaded_by:    null,
-    location_id:    null,
-    location_label: null,
-    period_type:    'single_date',
-    period_start:   invoiceDate,
-    period_end:     invoiceDate,
-  };
-
-  /* The gross stays the invoice total; this is what the bank will show. The
-     columns arrive with supabase/add_bill_settlement.sql — until that has been
-     run, a bill is still worth filing without them. */
-  const settlementCols = {
-    due_date_source:   dueSource,
-    settlement_amount: settlementAmount,
-    settlement_date:   settlementAmount !== null ? ((extracted.settlement_date as string | null) ?? null) : null,
-    discount_amount:   discountAmount,
-    discount_percent:  settlementAmount !== null ? num(extracted.discount_percent) : null,
-  };
-  let { data: bill, error: billErr } = await admin.from('bills')
-    .insert({ ...row, ...settlementCols }).select('id').single();
-  if (billErr && /due_date_source|settlement_amount|discount_amount|discount_percent|settlement_date/.test(billErr.message)) {
-    console.warn('[inbound-bills] settlement columns missing — run supabase/add_bill_settlement.sql');
-    ({ data: bill, error: billErr } = await admin.from('bills').insert(row).select('id').single());
-  }
-  if (billErr) throw billErr;
-  if (!bill) throw new Error('Bill insert returned no row');
-
-  const lines = extracted.lines as Record<string, unknown>[] | undefined;
-  if (lines?.length && bill) {
-    await admin.from('bill_lines').insert(
-      lines.map((l) => ({
-        bill_id:     bill.id,
-        description: l.description,
-        quantity:    l.quantity,
-        unit_price:  l.unit_price,
-        vat_rate:    l.vat_rate,
-        line_total:  l.line_total,
-        category:    extracted.suggested_category ?? null,
-      }))
-    );
-  }
-
-  return bill.id as string;
 }
 
 export async function POST(req: NextRequest) {
@@ -462,9 +375,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ message: 'No bill attachments found — email ignored' });
   }
 
+  // Postmark's field names, which the Gmail import script (scripts/gmail-bill-import.gs) uses too
+  const email: EmailMeta = {
+    from:    typeof payload.From === 'string' ? payload.From : null,
+    subject: typeof payload.Subject === 'string' ? payload.Subject : null,
+  };
+
   after(async () => {
     try {
-      await processBills(billAttachments);
+      await processBills(billAttachments, email);
     } finally {
       await discard();
     }
@@ -473,8 +392,8 @@ export async function POST(req: NextRequest) {
   return NextResponse.json({ queued: billAttachments.map(a => a.Name) });
 }
 
-/** Reads each bill and files it, a few at a time. */
-async function processBills(billAttachments: Attachment[]) {
+/** Reads each document and files the bills among them, a few at a time. */
+async function processBills(billAttachments: Attachment[], email: EmailMeta) {
   const queue = [...billAttachments];
   const worker = async () => {
     for (let a = queue.shift(); a; a = queue.shift()) {
@@ -484,6 +403,11 @@ async function processBills(billAttachments: Attachment[]) {
       }
       try {
         const extracted = await extractFromAttachment(a);
+        if (!isBillDocument(extracted)) {
+          await setAside(a, extracted, email);
+          console.log(`[inbound-bills] ${a.Name}: ${extracted.document_type}, not a bill — set aside`);
+          continue;
+        }
         const duplicate = await findDuplicate(extracted);
         if (duplicate) {
           console.log(`[inbound-bills] ${a.Name}: already on file as ${duplicate} — skipped`);
