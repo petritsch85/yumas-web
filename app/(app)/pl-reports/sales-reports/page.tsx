@@ -1490,6 +1490,12 @@ export default function SalesReportsPage() {
     queryKey: ['group-monthly', 'wolt-credits'], enabled: groupMonthlyOn,
     queryFn: () => fetchAllRows('wolt_month_credits', 'location_id,month,net', 'month'),
   });
+  /* Wolt keeps its lending out of the payout, so the bank only ever sees the
+     net. The cash flow statement grosses it back up — see groupCashflow. */
+  const { data: gmWoltCapital = [] } = useQuery({
+    queryKey: ['group-monthly', 'wolt-capital'], enabled: groupMonthlyOn,
+    queryFn: () => fetchAllRows('wolt_periods', 'invoice_date,wolt_capital', 'invoice_date'),
+  });
   /* Every booking, for the cash flow statement: which bucket a line falls in
      is decided from its category and narrative. */
   const { data: gmFinancing = [] } = useQuery({
@@ -1612,8 +1618,28 @@ export default function SalesReportsPage() {
       const bucket = isIn ? (String(t.category ?? '').startsWith('S - ') ? sales : otherIncome) : operating;
       bucket[month] = (bucket[month] ?? 0) + value;
     }
+
+    /**
+     * Gross the Wolt lending back up.
+     *
+     * Wolt withholds its repayment from the payout, so the bank sees only the
+     * net and the repayment would otherwise hide inside sales as a smaller
+     * inflow — 4.282 € of September's. Economically it is financing, not
+     * reduced trade, so the amount is added back to what was earned and taken
+     * out again as financing.
+     *
+     * The two cancel, so the closing balance is untouched and which month the
+     * withholding is attributed to cannot break the reconciliation.
+     */
+    for (const p of gmWoltCapital as Record<string, unknown>[]) {
+      const v = Number(p.wolt_capital ?? 0);
+      const month = String(p.invoice_date ?? '').slice(0, 7);
+      if (!v || !month) continue;
+      sales[month] = (sales[month] ?? 0) + v;
+      financing[month] = (financing[month] ?? 0) - v;
+    }
     return { sales, otherIncome, operating, financing };
-  }, [gmFinancing]);
+  }, [gmFinancing, gmWoltCapital]);
 
   /** SG&A per month, from the same bills that feed the cost of goods. */
   const groupOpex = useMemo(() => {
@@ -7882,6 +7908,20 @@ export default function SalesReportsPage() {
               });
 
               const value = (t: Record<string, unknown>) => Math.abs(Number(t.amount_cents ?? 0)) / 100;
+
+              /* The Wolt lending is in these two lines but never in the bank,
+                 so it has no booking to list. Without a row of its own the
+                 fold-out would not add up to the figure above it. */
+              const capital = (gmWoltCapital as Record<string, unknown>[])
+                .filter(p => String(p.invoice_date ?? '').startsWith(prefix))
+                .reduce((s, p) => s + Number(p.wolt_capital ?? 0), 0);
+              const synthetic = capital && (bucket === 'sales' || bucket === 'financing')
+                ? [{ name: bucket === 'sales'
+                      ? 'Wolt Capital — von Wolt einbehalten, nie auf dem Konto'
+                      : 'Wolt Capital — Tilgung, vom Auszahlungsbetrag einbehalten',
+                    net: bucket === 'sales' ? capital : -capital, bills: 0 }]
+                : [];
+
               if (hits.length <= 25) {
                 return hits
                   .map(t => ({
@@ -7889,6 +7929,7 @@ export default function SalesReportsPage() {
                       + (t.description ? ` — ${String(t.description).slice(0, 44)}` : ''),
                     net: value(t), bills: 1,
                   }))
+                  .concat(synthetic)
                   .sort((a, z) => z.net - a.net);
               }
               const by = new Map<string, { net: number; bills: number; name: string }>();
@@ -7899,7 +7940,7 @@ export default function SalesReportsPage() {
                 cur.bills += 1;
                 by.set(name.toLowerCase(), cur);
               }
-              return [...by.values()].sort((a, z) => z.net - a.net);
+              return [...by.values(), ...synthetic].sort((a, z) => z.net - a.net);
             };
 
             const drillRows = (part: string) => {
@@ -8218,6 +8259,10 @@ export default function SalesReportsPage() {
                   exactly one of the four lines, which is why they reach the closing balance exactly —
                   September does, to the cent. &ldquo;Other&rdquo; is the residual and stays empty unless the
                   two disagree.
+                  {' '}Wolt withholds its lending from the payout, so that money never reaches the account.
+                  It is added back to Regular sales and taken out again under Financing, because it is
+                  borrowing repaid rather than trade not done. The two cancel, so the closing balance is
+                  unaffected either way.
                 </div>
               </div>
             );
