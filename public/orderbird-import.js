@@ -78,6 +78,34 @@
     });
   }
 
+  /* Lunch left open into the evening: opened before 15:00, still open at
+     18:00. The app splits such a Z-report at 16:00 (lib/orderbird-import.ts). */
+  var SPLIT_HOUR = 16;
+  function leftOpen(t) {
+    if (!t.start || !t.end) return false;
+    var startHour = Number(t.start.slice(11, 13));
+    var endHour = Number(t.end.slice(11, 13));
+    return startHour < 15 && (t.end.slice(0, 10) !== t.start.slice(0, 10) || endHour >= 18);
+  }
+
+  /* What was taken from the shift's opening hour until 16:00, read off the
+     day view's hourly chart (all categories, paid). */
+  function lunchGross(start) {
+    var date = start.slice(0, 10), from = Number(start.slice(11, 13));
+    return fetch('/reports/day/' + date, { credentials: 'include' }).then(function (r) {
+      return r.ok ? r.text() : '';
+    }).then(function (html) {
+      var m = html.match(/var dataset = \{[\s\S]*?\};/);
+      if (!m) return null;
+      var sum = 0, re = /\["(\d{2}):00",\s*"(-?[\d.]+)"\]/g, x;
+      while ((x = re.exec(m[0]))) {
+        var h = Number(x[1]);
+        if (h >= from && h < SPLIT_HOUR) sum += Number(x[2]);
+      }
+      return Math.round(sum * 100) / 100;
+    });
+  }
+
   async function fetchVenue(v) {
     var shifts = [];
     await switchTo(v.venueId);
@@ -88,7 +116,9 @@
       if (!r.ok || type.indexOf('csv') === -1) throw new Error('Z-report ' + z + ' could not be fetched (HTTP ' + r.status + ')');
       var csv = await r.text();
       var t = await shiftTimes(z);
-      shifts.push({ z: z, csv: csv, start: t.start, end: t.end });
+      var shift = { z: z, csv: csv, start: t.start, end: t.end };
+      if (leftOpen(t)) shift.lunchGross = await lunchGross(t.start);
+      shifts.push(shift);
     }
     return shifts;
   }
