@@ -17,16 +17,19 @@ export const ORDERBIRD_VENUES: { venueId: string; location: string }[] = [
   { venueId: '120621', location: 'Taunus' }, // "Yumas Bahnhofsviertel" in Orderbird
 ];
 
-/* A shift that opens before three in the afternoon is lunch. The Z-report
+/* A shift that is closed before five in the afternoon is lunch. The Z-report
    CSV carries no times, but the shift's page does ("05.10.2026 11:33 -
-   05.10.2026 15:05"), which beats guessing from the sales mix. */
-const LUNCH_BEFORE_HOUR = 15;
+   05.10.2026 15:05"), which beats guessing from the sales mix. The closing
+   time, not the opening: when lunch is closed at 14:33 the evening shift
+   opens the same minute, so an early start does not make a lunch. */
+const LUNCH_ENDS_BEFORE_HOUR = 17;
 
 export type IncomingShift = {
   z:     number;
   csv:   string;
   /** "YYYY-MM-DD HH:MM", read off the shift page; null when it could not be read. */
   start: string | null;
+  end?:  string | null;
 };
 
 export type ImportedShift = { location: string; z: string; date: string; shift: 'lunch' | 'dinner'; gross: number };
@@ -79,9 +82,11 @@ export async function importVenueShifts(venueId: string, shifts: IncomingShift[]
       throw new Error(`${venue.location}: asked for Z-report ${s.z} but the file is ${sr.zReportNumber}`);
     }
 
-    const m = s.start?.match(/^(\d{4}-\d{2}-\d{2}) (\d{2}):\d{2}$/);
-    const date = m?.[1] ?? sr.date;
-    const shiftType: 'lunch' | 'dinner' = m && Number(m[2]) < LUNCH_BEFORE_HOUR ? 'lunch' : 'dinner';
+    const start = s.start?.match(/^(\d{4}-\d{2}-\d{2}) (\d{2}):\d{2}$/);
+    const end   = s.end?.match(/^(\d{4}-\d{2}-\d{2}) (\d{2}):\d{2}$/);
+    const date = start?.[1] ?? sr.date;
+    const shiftType: 'lunch' | 'dinner' =
+      start && end && end[1] === start[1] && Number(end[2]) < LUNCH_ENDS_BEFORE_HOUR ? 'lunch' : 'dinner';
 
     const { data: inserted, error } = await admin.from('shift_reports').insert({
       location_id: locationId, report_date: date,

@@ -64,13 +64,17 @@
     });
   }
 
-  /* The shift page reads "05.10.2026 11:33 - 05.10.2026 15:05"; only the start is needed. */
-  function shiftStart(z) {
+  /* The shift page reads "05.10.2026 11:33 - 05.10.2026 15:05". */
+  function shiftTimes(z) {
     return fetch('/reports/shift/' + z, { credentials: 'include' }).then(function (r) {
       return r.ok ? r.text() : '';
     }).then(function (html) {
-      var m = html.match(/(\d{2})\.(\d{2})\.(\d{4}) (\d{2}):(\d{2})\s*-\s*\d{2}\.\d{2}\.\d{4} \d{2}:\d{2}/);
-      return m ? m[3] + '-' + m[2] + '-' + m[1] + ' ' + m[4] + ':' + m[5] : null;
+      var m = html.match(/(\d{2})\.(\d{2})\.(\d{4}) (\d{2}):(\d{2})\s*-\s*(\d{2})\.(\d{2})\.(\d{4}) (\d{2}):(\d{2})/);
+      if (!m) return { start: null, end: null };
+      return {
+        start: m[3] + '-' + m[2] + '-' + m[1] + ' ' + m[4] + ':' + m[5],
+        end:   m[8] + '-' + m[7] + '-' + m[6] + ' ' + m[9] + ':' + m[10],
+      };
     });
   }
 
@@ -82,7 +86,9 @@
       if (r.status === 404) break; // not closed yet
       var type = r.headers.get('content-type') || '';
       if (!r.ok || type.indexOf('csv') === -1) throw new Error('Z-report ' + z + ' could not be fetched (HTTP ' + r.status + ')');
-      shifts.push({ z: z, csv: await r.text(), start: await shiftStart(z) });
+      var csv = await r.text();
+      var t = await shiftTimes(z);
+      shifts.push({ z: z, csv: csv, start: t.start, end: t.end });
     }
     return shifts;
   }
