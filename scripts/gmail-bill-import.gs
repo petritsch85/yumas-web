@@ -112,6 +112,11 @@ function run_() {
         text = res.getContentText().slice(0, 300);
       } catch (e) {
         text = String(e);
+        if (/permission/i.test(text)) {
+          // Not this email's fault: access to the internet has not been granted yet
+          Logger.log('Missing permission — run "authorize" once. ' + text);
+          break outer;
+        }
       }
 
       if (code === 200) {
@@ -139,6 +144,15 @@ function run_() {
   saveSeen_(props, seen);
   props.setProperty('tries', JSON.stringify(tries));
   if (sent) Logger.log(sent + ' email(s) sent to the app');
+}
+
+/** Run by hand if the log says a permission is missing: Google then asks for it. */
+function authorize() {
+  UrlFetchApp.fetch('https://www.google.com');
+  ScriptApp.getProjectTriggers();
+  GmailApp.getUserLabels();
+  PropertiesService.getScriptProperties().deleteProperty('tries');
+  Logger.log('All permissions granted.');
 }
 
 function label_(name) {
