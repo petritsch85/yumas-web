@@ -263,13 +263,16 @@ function optionBg(cat: string): string {
 }
 
 /* ── Period helpers ─────────────────────────────────────────────────── */
-type Period = 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'H1' | 'H2' | 'Jan' | 'Feb' | 'Mar' | 'Apr' | 'May' | 'Jun' | 'Jul' | 'Aug' | 'Sep' | 'Oct' | 'Nov' | 'Dec';
+type Period = 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'H1' | 'H2' | 'FY' | 'Jan' | 'Feb' | 'Mar' | 'Apr' | 'May' | 'Jun' | 'Jul' | 'Aug' | 'Sep' | 'Oct' | 'Nov' | 'Dec';
 
+/* Each span as its months. periodDateRange reads the first and the last, so a
+   new span is a line here and nothing else. */
 const QUARTER_PERIODS: Record<string, Period[]> = {
   Q1: ['Jan','Feb','Mar'], Q2: ['Apr','May','Jun'],
   Q3: ['Jul','Aug','Sep'], Q4: ['Oct','Nov','Dec'],
   H1: ['Jan','Feb','Mar','Apr','May','Jun'],
   H2: ['Jul','Aug','Sep','Oct','Nov','Dec'],
+  FY: ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'],
 };
 
 const MONTH_NUM: Record<string, number> = {
@@ -1859,6 +1862,12 @@ export default function CashFlowPage() {
                     selectedPeriod === h ? 'bg-[#1B5E20] text-white border-[#1B5E20]' : 'bg-white text-gray-700 border-gray-200 hover:border-gray-400'
                   }`}>{h}</button>
               ))}
+              <div className="w-px bg-gray-200 self-stretch mx-1" />
+              <button onClick={() => { setSelectedPeriod('FY'); resetFilters(); }}
+                title={`Das ganze Jahr ${selectedYear}`}
+                className={`px-4 py-1.5 rounded-lg text-sm font-bold border transition-colors ${
+                  selectedPeriod === 'FY' ? 'bg-[#1B5E20] text-white border-[#1B5E20]' : 'bg-white text-gray-700 border-gray-200 hover:border-gray-400'
+                }`}>FY</button>
             </div>
             <div className="flex gap-1.5 flex-wrap">
               {allMonths.map(m => {
