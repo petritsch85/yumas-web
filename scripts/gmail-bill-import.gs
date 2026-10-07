@@ -16,6 +16,8 @@
  *   2. Replace everything in Code.gs with this file
  *   3. Paste the webhook address into RELAY_URL below
  *   4. Choose "setup" in the function menu at the top → Run → allow access
+ *
+ * TO FETCH AN OLDER MONTH: see "backfill" near the bottom.
  */
 
 // The inbound-relay address, including ?secret=…  (same as the old Postmark webhook URL)
@@ -144,6 +146,130 @@ function run_() {
   saveSeen_(props, seen);
   props.setProperty('tries', JSON.stringify(tries));
   if (sent) Logger.log(sent + ' email(s) sent to the app');
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * Nachtrag — fetching an older month out of the mailbox
+ *
+ * The timer above only ever looks back WINDOW_DAYS, and only forward of the
+ * date setup was run. That is right for the daily job and useless for closing
+ * a month that is already past: by the time 66 September payments turned out
+ * to have no invoice behind them, every one of those emails was outside the
+ * window.
+ *
+ * So this sweeps a date range of its own, ignores the "already seen" list, and
+ * sends everything with an attachment. Re-sending costs nothing: the app turns
+ * away a file it has seen before, and turns away a bill whose supplier, number
+ * and amount it already holds. Worst case it does the work twice.
+ *
+ * TO USE: set the two dates below, pick "backfill" in the function menu, Run.
+ * Google stops a run after six minutes — if the log says it is not finished,
+ * just run it again. It carries on where it stopped.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+// The emails to sweep, as yyyy/mm/dd. Start well before the month: an invoice
+// dated 21 August is paid in September and arrived in the inbox in August.
+const BACKFILL_FROM = '2026/08/20';
+const BACKFILL_TO   = '2026/10/08';   // exclusive
+
+const LABEL_BACKFILL = 'Yumas/Nachtrag';
+
+function backfill() {
+  if (RELAY_URL.indexOf('http') !== 0) throw new Error('Paste the webhook address into RELAY_URL first.');
+  const began = Date.now();
+  const props = PropertiesService.getScriptProperties();
+  const tag = 'bf_' + BACKFILL_FROM + '_' + BACKFILL_TO;
+  let at = Number(props.getProperty(tag) || 0);   // how many threads are behind us
+
+  const me = Session.getEffectiveUser().getEmail().toLowerCase();
+  const mark = label_(LABEL_BACKFILL);
+  const query = 'has:attachment -in:trash -in:spam -in:drafts'
+    + ' after:' + BACKFILL_FROM + ' before:' + BACKFILL_TO;
+
+  let sent = 0, skipped = 0, failed = 0;
+
+  outer:
+  for (;;) {
+    /* In pages, because search returns at most a few hundred at a time and
+       seven weeks of attachments is more than that. */
+    const threads = GmailApp.search(query, at, 50);
+    if (threads.length === 0) {
+      props.deleteProperty(tag);
+      Logger.log('Nachtrag finished: ' + BACKFILL_FROM + ' to ' + BACKFILL_TO
+        + ' — ' + sent + ' sent, ' + skipped + ' without attachments, ' + failed + ' failed.');
+      return;
+    }
+
+    for (const thread of threads) {
+      if (Date.now() - began > RUN_LIMIT_MS) {
+        props.setProperty(tag, String(at));
+        Logger.log('Paused at thread ' + at + ' (' + sent + ' sent so far). Run "backfill" again to carry on.');
+        break outer;
+      }
+      at++;
+
+      for (const msg of thread.getMessages()) {
+        const d = msg.getDate();
+        if (msg.isInTrash()) continue;
+        if (msg.getFrom().toLowerCase().indexOf(me) !== -1) continue;   // our own
+        /* The search is by thread, so a thread that qualifies can still hold
+           messages from outside the range. Check each one. */
+        if (d < new Date(BACKFILL_FROM) || d >= new Date(BACKFILL_TO)) continue;
+
+        const files = msg.getAttachments({ includeInlineImages: false })
+          .filter(a => WANTED.test(a.getName())
+            || a.getContentType() === 'application/pdf'
+            || a.getContentType() === 'message/rfc822');
+        if (files.length === 0) { skipped++; continue; }
+
+        const res = send_({
+          From:      msg.getFrom(),
+          Subject:   msg.getSubject(),
+          MessageID: msg.getId(),
+          Date:      d.toISOString(),
+          Attachments: files.map(a => ({
+            Name:        a.getName(),
+            ContentType: a.getContentType(),
+            Content:     Utilities.base64Encode(a.getBytes()),
+          })),
+        });
+
+        if (res.code === 200) {
+          sent++;
+          thread.addLabel(mark);
+        } else if (res.code === 401 || res.code === 404) {
+          props.setProperty(tag, String(at - 1));
+          Logger.log('The app refused the address (' + res.code + '). Check RELAY_URL. ' + res.text);
+          break outer;
+        } else {
+          failed++;
+          Logger.log('Failed (' + res.code + '): ' + msg.getSubject() + ' — ' + res.text);
+        }
+      }
+    }
+  }
+}
+
+/** Start the next backfill from the beginning, whatever the last one did. */
+function backfillReset() {
+  const props = PropertiesService.getScriptProperties();
+  props.getKeys().filter(k => k.indexOf('bf_') === 0).forEach(k => props.deleteProperty(k));
+  Logger.log('Nachtrag will start from the beginning.');
+}
+
+/** One POST to the app. Never throws — the caller decides what a failure means. */
+function send_(payload) {
+  try {
+    const res = UrlFetchApp.fetch(RELAY_URL, {
+      method: 'post',
+      contentType: 'application/json',
+      payload: JSON.stringify(payload),
+      muteHttpExceptions: true,
+    });
+    return { code: res.getResponseCode(), text: res.getContentText().slice(0, 300) };
+  } catch (e) {
+    return { code: 0, text: String(e) };
+  }
 }
 
 /** Run by hand if the log says a permission is missing: Google then asks for it. */
