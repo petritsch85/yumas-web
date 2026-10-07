@@ -128,11 +128,30 @@ const SGA_LINES: { key: string; label: string; categories: string[] }[] = [
   { key: 'utilities', label: 'Utilities & energy',     categories: ['Utilities', 'Fuel & Energy', 'Fuel Cost'] },
   { key: 'software',  label: 'Software & technology',  categories: ['Software & Technology'] },
   { key: 'delivery',  label: 'Delivery platform fees', categories: ['Delivery Platform Fees'] },
+  /**
+   * What the card and wallet providers charge.
+   *
+   * Sales are recorded gross — the till rings the full amount and the webshop
+   * records what the customer paid — so the provider's cut is a cost and has
+   * to appear here or the margin is overstated. It cannot come from the bills:
+   * PayPal and Amex net their fee off before paying out, so no invoice exists
+   * to upload. The figures come from the statements instead, which is why this
+   * line names no bill category.
+   */
+  { key: 'payment_fees', label: 'Payment provider fees', categories: [] },
   { key: 'cleaning',  label: 'Cleaning & hygiene',     categories: ['Cleaning Services'] },
   { key: 'marketing', label: 'Marketing',              categories: ['Marketing'] },
   { key: 'repairs',   label: 'Repairs & maintenance',  categories: ['Repairs & Maintenance'] },
   { key: 'other',     label: 'Other operating costs',  categories: ['Other'] },
 ];
+
+/**
+ * A supplier whose cost is already counted from its own statement.
+ *
+ * Kept narrow on purpose: each pattern is the provider's own name and nothing
+ * a food supplier could share. See groupOpex for why it matters.
+ */
+const PAYMENT_PROVIDER = /\bnexi\b|\bpaypal\b|american\s+express|\bamex\b/i;
 
 /**
  * Staff costs are deliberately not read from the bills.
@@ -1354,6 +1373,12 @@ export default function SalesReportsPage() {
     queryKey: ['group-monthly', 'wolt-credits'], enabled: groupMonthlyOn,
     queryFn: () => fetchAllRows('wolt_month_credits', 'location_id,month,net', 'month'),
   });
+  /* Nexi bills its fees monthly and debits them; PayPal and Amex keep theirs
+     out of the payout. Either way they are a cost of taking the money. */
+  const { data: gmNexi = [] } = useQuery({
+    queryKey: ['group-monthly', 'nexi-fees'], enabled: groupMonthlyOn,
+    queryFn: () => fetchAllRows('nexi_statements', 'period_start,period_end,fees_net', 'period_start'),
+  });
   /* Wolt keeps its lending out of the payout, so the bank only ever sees the
      net. The cash flow statement grosses it back up — see groupCashflow. */
   const { data: gmWoltCapital = [] } = useQuery({
@@ -1367,13 +1392,23 @@ export default function SalesReportsPage() {
     queryFn: () => fetchAllRows('cashflow_transactions',
       'date,description,amount_cents,direction,category,counterparty', 'date'),
   });
-  /* The bank's own opening and closing balances, kept with the Kontoauszug. */
+  /* The bank's own opening and closing balances, kept with the Kontoauszug,
+     plus what PayPal and Amex withheld — fees and loan — which never reach the
+     bank and so exist only on their own statements. */
   const { data: gmBalances = [] } = useQuery({
     queryKey: ['group-monthly', 'balances'], enabled: groupMonthlyOn,
     queryFn: async () => {
-      const { data, error } = await supabase.from('month_documents')
-        .select('kind,month,opening_balance,closing_balance,working_capital')
-        .in('kind', ['kontoauszug', 'paypal']);
+      const kinds = ['kontoauszug', 'paypal', 'amex'];
+      const read = (cols: string) =>
+        supabase.from('month_documents').select(cols).in('kind', kinds);
+
+      let { data, error } = await read('kind,month,opening_balance,closing_balance,working_capital,fees');
+      /* The figure columns arrive with supabase/add_paypal_figures.sql, and a
+         select naming a column that is not there fails the whole query — so
+         fall back to the balances alone rather than losing them too. */
+      if (error && /working_capital|fees|opening_balance|closing_balance/.test(error.message)) {
+        ({ data, error } = await read('kind,month'));
+      }
       /* Say so rather than returning nothing. An empty result is how a missing
          RLS policy looks from here, and reading that as "no statement filed
          yet" hid the balances for a month that had them. */
@@ -1381,7 +1416,7 @@ export default function SalesReportsPage() {
         console.warn(`[cash flow] month_documents unreadable: ${error.message}`);
         return [] as Record<string, unknown>[];
       }
-      return (data ?? []) as Record<string, unknown>[];
+      return (data ?? []) as unknown as Record<string, unknown>[];
     },
   });
   const { data: gmLieferando = [] } = useQuery({
@@ -1528,6 +1563,35 @@ export default function SalesReportsPage() {
     return { sales, otherIncome, operating, financing };
   }, [gmFinancing, gmWoltCapital, gmBalances]);
 
+  /**
+   * What the payment providers charged, per month.
+   *
+   * Nexi invoices monthly and debits the account, so its fee is taken from the
+   * statement period it covers rather than the day it was debited — August's
+   * fee belongs to August even though it left on 3 September. PayPal and Amex
+   * net theirs off the payout, so theirs are read from the monthly statement
+   * when it is filed.
+   *
+   * Nexi's figure is taken net, like every other cost here, because its VAT is
+   * reclaimable. PayPal's and Amex's carry no VAT to strip — card acceptance is
+   * an exempt financial service — so what the statement shows is the cost.
+   */
+  const groupPaymentFees = useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const n of gmNexi as Record<string, unknown>[]) {
+      const month = String(n.period_end ?? n.period_start ?? '').slice(0, 7);
+      const v = Number(n.fees_net ?? 0);
+      if (month && v) m[month] = (m[month] ?? 0) + v;
+    }
+    for (const d of gmBalances as Record<string, unknown>[]) {
+      if (d.kind !== 'paypal' && d.kind !== 'amex') continue;
+      const month = String(d.month ?? '').slice(0, 7);
+      const v = Math.abs(Number(d.fees ?? 0));
+      if (month && v) m[month] = (m[month] ?? 0) + v;
+    }
+    return m;
+  }, [gmNexi, gmBalances]);
+
   /** SG&A per month, from the same bills that feed the cost of goods. */
   const groupOpex = useMemo(() => {
     const lineOf = new Map<string, string>();
@@ -1537,6 +1601,11 @@ export default function SalesReportsPage() {
     for (const b of gmCostBills) {
       const monthKey = String(b.invoice_date ?? '').slice(0, 7);
       if (!monthKey || monthKey < COGS_FROM) continue;
+      /* The payment providers are counted from their statements, so a bill
+         from one of them would be the same cost twice. None is in the system
+         today — Nexi's arrives as a statement, PayPal and Amex never invoice
+         at all — but the day one is forwarded it must not land here. */
+      if (PAYMENT_PROVIDER.test(String(b.supplier_name ?? ''))) continue;
       const cat = String(b.category ?? '');
       const net = Number(b.net_amount ?? 0);
       const o = (m[monthKey] ??= { lines: {}, total: 0 });
@@ -7834,12 +7903,54 @@ export default function SalesReportsPage() {
               return [...by.values(), ...synthetic].sort((a, z) => Math.abs(z.net) - Math.abs(a.net));
             };
 
+            /**
+             * The providers behind the payment-fee cell.
+             *
+             * These have no bills to open, so the fold-out is built from the
+             * same statements the line itself is built from — otherwise the row
+             * would read "No bills" over a figure that is plainly there.
+             */
+            const paymentFeeItems = (colKey: string) => {
+              const match = (month: string) =>
+                month >= COGS_FROM
+                && (colKey.startsWith('FY') ? month.startsWith(colKey.slice(2)) : month === colKey);
+
+              const by = new Map<string, { name: string; net: number; bills: number }>();
+              const add = (name: string, net: number) => {
+                if (!net) return;
+                const cur = by.get(name) ?? { name, net: 0, bills: 0 };
+                cur.net += net;
+                cur.bills += 1;
+                by.set(name, cur);
+              };
+
+              for (const n of gmNexi as Record<string, unknown>[]) {
+                const month = String(n.period_end ?? n.period_start ?? '').slice(0, 7);
+                if (month && match(month)) add('Nexi — Kartenentgelte (netto)', Number(n.fees_net ?? 0));
+              }
+              for (const d of gmBalances as Record<string, unknown>[]) {
+                if (d.kind !== 'paypal' && d.kind !== 'amex') continue;
+                const month = String(d.month ?? '').slice(0, 7);
+                if (!month || !match(month)) continue;
+                add(d.kind === 'paypal'
+                  ? 'PayPal — Gebühren, vom Auszahlungsbetrag einbehalten'
+                  : 'Amex — Gebühren, vom Auszahlungsbetrag einbehalten',
+                  Math.abs(Number(d.fees ?? 0)));
+              }
+              return [...by.values()].sort((a, z) => z.net - a.net);
+            };
+
             const drillRows = (part: string) => {
               if (!cogsDrill || cogsDrill.part !== part) return [];
               const { colKey } = cogsDrill;
               const rows = part.startsWith('cf-')
                 ? cashflowItems(part.slice(3), colKey)
-                : cogsSuppliers(part, colKey);
+                : part === 'sga-payment_fees'
+                  ? paymentFeeItems(colKey)
+                  : part === 'sga-total'
+                    ? [...cogsSuppliers(part, colKey), ...paymentFeeItems(colKey)]
+                        .sort((a, z) => z.net - a.net)
+                    : cogsSuppliers(part, colKey);
               /* Shares are taken on magnitudes: against a signed net total a single
                  line can read 916%, which tells nobody anything. */
               const total = rows.reduce((t, r) => t + Math.abs(r.net), 0);
@@ -7902,18 +8013,31 @@ export default function SalesReportsPage() {
               return hits.length ? hits.reduce((s, [, v]) => s + v, 0) : null;
             };
 
+            /** The providers' cut for a month, or a year's worth of months. */
+            const paymentFees = (colKey: string): number | null => {
+              if (!colKey.startsWith('FY')) {
+                return colKey >= COGS_FROM ? (groupPaymentFees[colKey] ?? null) : null;
+              }
+              const hits = Object.entries(groupPaymentFees)
+                .filter(([k]) => k.startsWith(colKey.slice(2)) && k >= COGS_FROM);
+              return hits.length ? hits.reduce((t, [, v]) => t + v, 0) : null;
+            };
+
             /* Blank, not zero, where no bill carried the category: see SGA_LINES.
                A placeholder stands in for the whole line, not beside it. */
             const sgaLine = (key: string) => (colKey: string) => {
               const entered = sgaPlaceholder(key, colKey);
               if (entered !== null) return entered;
+              /* The one line the bills cannot supply — it comes off the
+                 providers' own statements. See SGA_LINES. */
+              if (key === 'payment_fees') return paymentFees(colKey);
               const o = opexFor(colKey);
               if (!o) return null;
               return o.lines[key] ?? null;
             };
             const sgaTotal = (colKey: string) => {
               const anyEntered = SGA_LINES.some(l => sgaPlaceholder(l.key, colKey) !== null);
-              if (!opexFor(colKey) && !anyEntered) return null;
+              if (!opexFor(colKey) && !anyEntered && paymentFees(colKey) === null) return null;
               return SGA_LINES.reduce((t, l) => t + (sgaLine(l.key)(colKey) ?? 0), 0);
             };
 
