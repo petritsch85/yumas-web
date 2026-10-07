@@ -59,6 +59,17 @@ async function bookingOrder(admin: Admin, month: string): Promise<Map<string, Bo
   return order;
 }
 
+/** The bookings that went through PayPal, as keys into the order map. */
+async function paypalBookings(admin: Admin): Promise<Set<string>> {
+  const tx = await page<Record<string, unknown>>((a, b) => admin.from('cashflow_transactions')
+    .select('date,amount_cents,direction,counterparty').ilike('counterparty', '%paypal%')
+    .order('id').range(a, b));
+  return new Set(tx.map(t => {
+    const signed = (t.direction === 'in' ? 1 : -1) * Math.abs(Number(t.amount_cents ?? 0));
+    return `${String(t.date).slice(0, 10)}|${signed}`;
+  }));
+}
+
 /** The bookings that settled a bill, as keys into the order map. */
 async function paymentKeys(admin: Admin): Promise<Map<string, string[]>> {
   const out = new Map<string, string[]>();
@@ -128,11 +139,22 @@ const page = async <T,>(build: (from: number, to: number) => PromiseLike<{ data:
 /** The documents behind one manifest item, and what is missing from it. */
 async function gather(
   admin: Admin, key: string, month: string,
-  order: Map<string, Booking>, keys: Map<string, string[]>,
+  order: Map<string, Booking>, keys: Map<string, string[]>, paypalKeys: Set<string>,
 ): Promise<{ docs: Doc[]; missingFiles: number; detail?: string }> {
   const { from, to } = monthRange(month);
 
-  if (key === 'eingangsrechnungen') {
+  /**
+   * Which bills were paid through PayPal.
+   *
+   * PayPal is a second account, so those invoices are filed together against
+   * the PayPal statement rather than behind a page of the Sparkasse one. The
+   * paying booking names the merchant — "Ihr Einkauf bei Walch Food GmbH" —
+   * so the counterparty is what decides it.
+   */
+  const paidByPaypal = (billId: string) =>
+    (keys.get(billId) ?? []).some(k => paypalKeys.has(k));
+
+  if (key === 'paypal_einkaeufe' || key === 'eingangsrechnungen') {
     /**
      * The same accounting basis as the outgoing side, and for the same reason
      * twice over.
@@ -146,11 +168,14 @@ async function gather(
     const all = await page<Record<string, unknown>>((a, b) => admin.from('bills')
       .select('id,invoice_date,supplier_name,invoice_number,file_path,notes')
       .order('invoice_date').range(a, b));
-    const bills = all.filter(x => {
+    const inMonth = all.filter(x => {
       const dated = String(x.invoice_date ?? '').slice(0, 10);
       if (dated >= from && dated <= to) return true;
       return placeOf(String(x.id), keys, order) !== null;
     });
+    /* The PayPal purchases go to their own position, so neither holds them twice. */
+    const wantPaypal = key === 'paypal_einkaeufe';
+    const bills = inMonth.filter(x => paidByPaypal(String(x.id)) === wantPaypal);
     const withFile = bills.filter(x => x.file_path);
     /* The rent Ersatzbelege never had an original — see isSubstituteRecord. */
     const substitutes = bills.filter(x => !x.file_path && isSubstituteRecord(x.notes as string));
@@ -163,14 +188,18 @@ async function gather(
           return later.length ? ` · davon ${later.length} aus Vormonaten, hier bezahlt` : '';
         })()
         + (substitutes.length ? ` · ${substitutes.length} Ersatzbelege (Mietverträge liegen vor)` : ''),
-      docs: inStatementOrder(withFile.map(x => {
-        const at = placeOf(String(x.id), keys, order);
-        return {
-          bucket: 'bills', path: String(x.file_path), seq: at?.seq, page: at?.page,
-          name: documentName({ date: x.invoice_date as string, party: x.supplier_name as string,
-            number: x.invoice_number as string, fallback: String(x.file_path) }) + '.pdf',
-        };
-      })),
+      docs: (() => {
+        const docs = withFile.map(x => {
+          const at = wantPaypal ? undefined : placeOf(String(x.id), keys, order);
+          return {
+            bucket: 'bills', path: String(x.file_path), seq: at?.seq, page: at?.page,
+            name: documentName({ date: x.invoice_date as string, party: x.supplier_name as string,
+              number: x.invoice_number as string, fallback: String(x.file_path) }) + '.pdf',
+          };
+        });
+        /* PayPal's go by date, since they are not filed behind a statement page. */
+        return wantPaypal ? docs.sort((a, b) => a.name.localeCompare(b.name)) : inStatementOrder(docs);
+      })(),
     };
   }
 
@@ -248,15 +277,22 @@ async function gapsFor(admin: Admin, month: string, order: Map<string, Booking>)
 }
 
 async function statuses(admin: Admin, month: string): Promise<(ItemStatus & { docs: Doc[]; gaps?: Gap[] })[]> {
-  const [order, keys] = await Promise.all([bookingOrder(admin, month), paymentKeys(admin)]);
-  const gaps = await gapsFor(admin, month, order);
+  const [order, keys, paypalKeys] = await Promise.all([
+    bookingOrder(admin, month), paymentKeys(admin), paypalBookings(admin)]);
+  const allGaps = await gapsFor(admin, month, order);
+  /* A PayPal purchase with no invoice belongs to the PayPal position, not the
+     general one, so each is chased where it will be filed. */
+  const isPaypalGap = (g: Gap) => /paypal/i.test(g.counterparty);
+  const gaps = allGaps.filter(g => !isPaypalGap(g));
+  const paypalGaps = allGaps.filter(isPaypalGap);
   const out: (ItemStatus & { docs: Doc[]; gaps?: Gap[] })[] = [];
   for (const item of MANIFEST) {
-    const { docs, missingFiles, detail } = await gather(admin, item.key, month, order, keys);
+    const { docs, missingFiles, detail } = await gather(admin, item.key, month, order, keys, paypalKeys);
     const unplaced = docs.filter(d => d.seq === undefined).length;
     out.push({
       item, count: docs.length, missingFiles, docs,
-      gaps: item.key === 'eingangsrechnungen' ? gaps : undefined,
+      gaps: item.key === 'eingangsrechnungen' ? gaps
+        : item.key === 'paypal_einkaeufe' ? paypalGaps : undefined,
       detail: detail && item.source === 'collected'
         ? detail + (order.size === 0
             ? ' · Reihenfolge erst nach Upload des Kontoauszugs'

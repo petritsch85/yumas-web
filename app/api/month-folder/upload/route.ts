@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { extractText, getDocumentProxy } from 'unpdf';
 import { getSupabaseAdmin } from '@/lib/supabase-admin';
 import { itemFor } from '@/lib/month-folder';
+import { parsePaypalStatement } from '@/lib/paypal-statement';
 
 export const maxDuration = 60;
 
@@ -64,10 +66,47 @@ export async function POST(req: NextRequest) {
     for (const o of same ?? []) if (o.file_path !== path) superseded.push(o.file_path as string);
   }
 
-  const { error } = await admin.from('month_documents').upsert({
+  /**
+   * Read the PayPal statement as it is filed.
+   *
+   * The loan repayment and the fees are deducted inside PayPal and never reach
+   * the bank, so they exist only on this document. Reading them here means the
+   * cash flow statement can show them without anything re-opening the PDF.
+   *
+   * A statement that does not balance is still filed — the Steuerberater wants
+   * the document regardless — but its figures are not kept, because a figure
+   * that cannot prove itself is worse than none.
+   */
+  const extra: Record<string, number | null> = {};
+  if (kind === 'paypal') {
+    try {
+      const pdf = await getDocumentProxy(new Uint8Array(await file.arrayBuffer()));
+      const { text } = await extractText(pdf, { mergePages: true });
+      const s = parsePaypalStatement(text);
+      if (s.balanced) {
+        extra.working_capital = Math.abs(s.workingCapital);
+        extra.fees = Math.abs(s.fees);
+        extra.opening_balance = s.openingBalance;
+        extra.closing_balance = s.closingBalance;
+      } else {
+        console.warn('[month-folder] PayPal statement does not balance; figures not kept');
+      }
+    } catch (e) {
+      console.warn('[month-folder] PayPal statement unreadable:', e);
+    }
+  }
+
+  const row: Record<string, unknown> = {
     kind, month: `${month}-01`, filename: file.name, file_path: path,
-    bucket: 'cashflow-files', byte_size: file.size,
-  }, { onConflict: 'kind,month,filename' });
+    bucket: 'cashflow-files', byte_size: file.size, ...extra,
+  };
+  let { error } = await admin.from('month_documents').upsert(row, { onConflict: 'kind,month,filename' });
+  if (error && /working_capital|fees|opening_balance|closing_balance/.test(error.message)) {
+    /* Columns arrive with supabase/add_paypal_figures.sql. */
+    const { working_capital: _w, fees: _f, opening_balance: _o, closing_balance: _c, ...basic } = row;
+    void _w; void _f; void _o; void _c;
+    ({ error } = await admin.from('month_documents').upsert(basic, { onConflict: 'kind,month,filename' }));
+  }
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
   if (superseded.length) {

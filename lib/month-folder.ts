@@ -55,31 +55,43 @@ export const MANIFEST: ManifestItem[] = [
         + 'Zahlungseingang, zuzüglich älterer Rechnungen, die in diesem Monat bezahlt wurden. '
         + 'Dateiname = Seite und Position im Kontoauszug.' },
 
-  { key: 'nexi', folder: '04_Nexi', label: 'Nexi Monatsabrechnung',
+  /**
+   * The PayPal purchases, kept together.
+   *
+   * PayPal is a second account, so its invoices are not filed behind a page of
+   * the Sparkasse statement the way the others are — they belong in one place
+   * the Steuerberater can work through against the PayPal Monatsübersicht.
+   */
+  { key: 'paypal_einkaeufe', folder: '04_PayPal_Einkaeufe', label: 'PayPal-Einkäufe (Rechnungen)',
+    source: 'collected', required: true,
+    note: 'Rechnungen zu den über PayPal bezahlten Einkäufen — zusammen abgelegt und nach '
+        + 'Datum sortiert, nicht hinter die Kontoauszugsseiten verteilt.' },
+
+  { key: 'nexi', folder: '05_Nexi', label: 'Nexi Monatsabrechnung',
     source: 'uploaded', required: true,
     note: 'Kartenumsätze im Haus, monatliche Abrechnung.' },
 
-  { key: 'amex', folder: '05_Amex', label: 'Amex Monatsabrechnung',
+  { key: 'amex', folder: '06_Amex', label: 'Amex Monatsabrechnung',
     source: 'uploaded', required: true,
     note: 'American Express, monatliche Abrechnung.' },
 
-  { key: 'paypal', folder: '06_PayPal', label: 'PayPal Monatsübersicht',
+  { key: 'paypal', folder: '07_PayPal_Monatsuebersicht', label: 'PayPal Monatsübersicht',
     source: 'uploaded', required: true,
-    note: 'PayPal, monatliche Übersicht.' },
+    note: 'PayPal, monatliche Übersicht — der Beleg für Gebühren und Working-Capital-Tilgung.' },
 
-  { key: 'toogoodtogo', folder: '07_TooGoodToGo', label: 'Too Good To Go Abrechnung',
+  { key: 'toogoodtogo', folder: '08_TooGoodToGo', label: 'Too Good To Go Abrechnung',
     source: 'uploaded', required: true,
     note: 'Too Good To Go, monatliche Abrechnung.' },
 
-  { key: 'webshop', folder: '08_Webshop', label: 'Webshop Monatsbericht',
+  { key: 'webshop', folder: '09_Webshop', label: 'Webshop Monatsbericht',
     source: 'uploaded', required: true,
     note: 'Monatsbericht des Webshops.' },
 
-  { key: 'wolt', folder: '09_Wolt', label: 'Wolt Abrechnungen',
+  { key: 'wolt', folder: '10_Wolt', label: 'Wolt Abrechnungen',
     source: 'uploaded', required: true, multi: true,
     note: 'Wolt Selbstfakturierungen des Monats — Lieferbelege.' },
 
-  { key: 'lieferando', folder: '10_Lieferando', label: 'Lieferando Abrechnungen',
+  { key: 'lieferando', folder: '11_Lieferando', label: 'Lieferando Abrechnungen',
     source: 'uploaded', required: true, multi: true,
     note: 'Lieferando Abrechnungen des Monats — Lieferbelege.' },
 ];

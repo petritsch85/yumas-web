@@ -1372,7 +1372,8 @@ export default function SalesReportsPage() {
     queryKey: ['group-monthly', 'balances'], enabled: groupMonthlyOn,
     queryFn: async () => {
       const { data, error } = await supabase.from('month_documents')
-        .select('month,opening_balance,closing_balance').eq('kind', 'kontoauszug');
+        .select('kind,month,opening_balance,closing_balance,working_capital')
+        .in('kind', ['kontoauszug', 'paypal']);
       /* Say so rather than returning nothing. An empty result is how a missing
          RLS policy looks from here, and reading that as "no statement filed
          yet" hid the balances for a month that had them. */
@@ -1439,7 +1440,9 @@ export default function SalesReportsPage() {
     const m: Record<string, { opening: number | null; closing: number | null }> = {};
     for (const b of gmBalances as Record<string, unknown>[]) {
       const key = String(b.month ?? '').slice(0, 7);
-      if (!key) continue;
+      /* Only the Sparkasse statement sets the balances the month opens and
+         closes on; PayPal's row is there for its Working Capital figure. */
+      if (!key || b.kind !== 'kontoauszug') continue;
       m[key] = {
         opening: b.opening_balance === null || b.opening_balance === undefined ? null : Number(b.opening_balance),
         closing: b.closing_balance === null || b.closing_balance === undefined ? null : Number(b.closing_balance),
@@ -1505,8 +1508,25 @@ export default function SalesReportsPage() {
       sales[month] = (sales[month] ?? 0) + v;
       financing[month] = (financing[month] ?? 0) - v;
     }
+
+    /**
+     * PayPal Working Capital, the same way.
+     *
+     * The loan takes a share of every PayPal sale — 163 deductions in September
+     * — so it never appears as an instalment and the bank only ever receives
+     * what is left. Adding it back to sales and out again under financing shows
+     * the borrowing without moving the closing balance, which the bank fixes.
+     */
+    for (const d of gmBalances as Record<string, unknown>[]) {
+      if (d.kind !== 'paypal') continue;
+      const v = Number(d.working_capital ?? 0);
+      const month = String(d.month ?? '').slice(0, 7);
+      if (!v || !month) continue;
+      sales[month] = (sales[month] ?? 0) + v;
+      financing[month] = (financing[month] ?? 0) - v;
+    }
     return { sales, otherIncome, operating, financing };
-  }, [gmFinancing, gmWoltCapital]);
+  }, [gmFinancing, gmWoltCapital, gmBalances]);
 
   /** SG&A per month, from the same bills that feed the cost of goods. */
   const groupOpex = useMemo(() => {
@@ -8134,10 +8154,11 @@ export default function SalesReportsPage() {
                   two disagree.
                   {' '}Every line carries its own sign: money in positive, money out negative, so the
                   movement is simply their sum.
-                  {' '}Wolt withholds its lending from the payout, so that money never reaches the account.
-                  It is added back to Regular sales and taken out again under Financing, because it is
-                  borrowing repaid rather than trade not done. The two cancel, so the closing balance is
-                  unaffected either way.
+                  {' '}Wolt and PayPal both withhold their lending from the payout, so that money never
+                  reaches the account. It is added back to Regular sales and taken out again under Financing,
+                  because it is borrowing repaid rather than trade not done. The two cancel, so the closing
+                  balance is unaffected either way, and the P&amp;L&rsquo;s own sales figures are untouched —
+                  those come from the till and the webshop, not from this statement.
                 </div>
               </div>
             );
