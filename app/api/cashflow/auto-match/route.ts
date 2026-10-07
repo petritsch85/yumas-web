@@ -5,6 +5,7 @@ import type { RefBill, TakenBill } from '@/lib/payment-reference';
 import { linkObjection } from '@/lib/match-rules';
 import { payableAmounts } from '@/lib/skonto';
 import { markBillsPaid, unmarkBillsIfUnlinked } from '@/lib/bill-payment-status';
+import { partyPaid } from '@/lib/payment-intermediary';
 
 type WoltMatch = {
   /** Which delivery platform's settlement the payout ties to. */
@@ -325,9 +326,14 @@ export async function POST(req: NextRequest) {
     'vertrieb', 'handel', 'grosshandel', 'gastronomie', 'company',
   ]);
   function definitelySameSupplier(tx: any, b: { supplier_name: string }): boolean {
-    const resolved = matchedSupplier(tx.counterparty ?? '');
+    /* partyPaid, not tx.counterparty: a PayPal purchase names PayPal in the
+       counterparty and the merchant only in the narrative, so comparing the
+       counterparty compared PayPal against thirteen different merchants and
+       matched none of them. See lib/payment-intermediary.ts. */
+    const party = partyPaid(tx);
+    const resolved = matchedSupplier(party);
     if (resolved) return matchedSupplier(b.supplier_name ?? '') === resolved;
-    const txLower = (tx.counterparty ?? '').toLowerCase();
+    const txLower = party.toLowerCase();
     return (b.supplier_name ?? '').toLowerCase()
       .split(/[^a-zà-ÿ0-9]+/)
       .some((w: string) => w.length > 3 && !LEGAL_FORMS.has(w) && txLower.includes(w));
@@ -335,7 +341,8 @@ export async function POST(req: NextRequest) {
 
   /** Whether a bill's supplier is the party the bank paid. */
   function sameSupplier(tx: any, b: any): boolean {
-    const resolvedSupplier = matchedSupplier(tx.counterparty ?? '');
+    const party = partyPaid(tx);
+    const resolvedSupplier = matchedSupplier(party);
     const bLower = (b.supplier_name ?? '').toLowerCase();
     if (resolvedSupplier) {
       /* The bill's supplier goes through the same keywords as the bank's
@@ -347,7 +354,7 @@ export async function POST(req: NextRequest) {
       if (resolvedBill) return resolvedBill === resolvedSupplier;
       return bLower.includes(resolvedSupplier) || resolvedSupplier.includes(bLower);
     }
-    const txLower = (tx.counterparty ?? '').toLowerCase();
+    const txLower = party.toLowerCase();
     return bLower.split(' ').some((w: string) => w.length > 3 && txLower.includes(w));
   }
 
@@ -624,14 +631,14 @@ export async function POST(req: NextRequest) {
       const toppingUp = multiLinkedTx.has(tx.id);
       if (toppingUp && Math.abs(shortfall) < 0.01) continue;   // nothing left owing
 
-      const resolved = matchedSupplier(tx.counterparty);
+      const resolved = matchedSupplier(partyPaid(tx));
       const sameParty = (b: { supplier_name: string }) => {
         const bLower = b.supplier_name.toLowerCase();
         if (resolved) {
           const resolvedBill = matchedSupplier(b.supplier_name);
           return resolvedBill ? resolvedBill === resolved : bLower.includes(resolved);
         }
-        const txLower = (tx.counterparty ?? '').toLowerCase();
+        const txLower = partyPaid(tx).toLowerCase();
         return bLower.split(' ').some((w: string) => w.length > 3 && txLower.includes(w));
       };
 
