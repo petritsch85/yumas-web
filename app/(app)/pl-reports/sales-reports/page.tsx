@@ -7875,11 +7875,28 @@ export default function SalesReportsPage() {
               const capital = (gmWoltCapital as Record<string, unknown>[])
                 .filter(p => String(p.invoice_date ?? '').startsWith(prefix))
                 .reduce((s, p) => s + Number(p.wolt_capital ?? 0), 0);
-              const synthetic = capital && (bucket === 'sales' || bucket === 'financing')
-                ? [{ name: bucket === 'sales'
-                      ? 'Wolt Capital — von Wolt einbehalten, nie auf dem Konto'
-                      : 'Wolt Capital — Tilgung, vom Auszahlungsbetrag einbehalten',
-                    net: bucket === 'sales' ? capital : -capital, bills: 0 }]
+              /* PayPal Working Capital is grossed up exactly the same way, and
+                 was missing here: the fold-out came to 8.782 under a Financing
+                 line of 10.220. See groupCashflow for the gross-up itself. */
+              const paypalWc = (gmBalances as Record<string, unknown>[])
+                .filter(d => d.kind === 'paypal' && String(d.month ?? '').startsWith(prefix))
+                .reduce((s, d) => s + Number(d.working_capital ?? 0), 0);
+
+              const synthetic = (bucket === 'sales' || bucket === 'financing')
+                ? [
+                    ...(capital ? [{
+                      name: bucket === 'sales'
+                        ? 'Wolt Capital — von Wolt einbehalten, nie auf dem Konto'
+                        : 'Wolt Capital — Tilgung, vom Auszahlungsbetrag einbehalten',
+                      net: bucket === 'sales' ? capital : -capital, bills: 0,
+                    }] : []),
+                    ...(paypalWc ? [{
+                      name: bucket === 'sales'
+                        ? 'PayPal Working Capital — im PayPal-Konto einbehalten, nie auf dem Konto'
+                        : 'PayPal Working Capital — Tilgung, von jedem Verkauf einbehalten',
+                      net: bucket === 'sales' ? paypalWc : -paypalWc, bills: 0,
+                    }] : []),
+                  ]
                 : [];
 
               if (hits.length <= 25) {
