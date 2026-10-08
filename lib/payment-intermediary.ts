@@ -74,3 +74,33 @@ export function merchantBehind(tx: {
  */
 export const partyPaid = (tx: { counterparty?: string | null; description?: string | null }): string =>
   merchantBehind(tx) ?? (tx.counterparty ?? '');
+
+/* PayPal opens every narrative with its own transaction id:
+     1053075995406/. Bottcher AG, …
+     1052735420909/PP.1178.PP/. Labelident GmbH, …
+   Thirteen digits, sometimes with the merchant account between slashes. */
+const OWN_REFERENCE = /^\s*\d{10,}\s*\/(?:PP\.[\d.]+\.PP\/)?\.?\s*/i;
+
+/**
+ * The narrative with the intermediary's own reference taken out.
+ *
+ * The veto on matching reads any number the bank prints as a possible invoice
+ * number, and refuses the match when it is not the bill's. That is right for a
+ * supplier's own transfer and wrong here: PayPal's transaction id is not an
+ * invoice and never was. Böttcher's happened to be twelve digits, the same
+ * length as the invoice it was paying, so the rule declared the bank had named
+ * a different invoice and forbade a match that agreed to the cent one day
+ * apart.
+ *
+ * Only the leading reference is removed, and only from an intermediary's
+ * narrative. Anything a merchant writes after it — a genuine invoice number
+ * among it — still counts, because that veto is worth keeping.
+ */
+export function narrativeWithoutOwnRef(tx: {
+  counterparty?: string | null;
+  description?: string | null;
+}): string {
+  const d = String(tx.description ?? '');
+  if (!INTERMEDIARY.test(tx.counterparty ?? '')) return d;
+  return d.replace(OWN_REFERENCE, '');
+}

@@ -22,6 +22,7 @@
  */
 
 import { referenceTokens, normaliseRef, tailSegment } from './payment-reference';
+import { narrativeWithoutOwnRef } from './payment-intermediary';
 
 /**
  * An invoice may be dated a little after the payment and still be that
@@ -94,7 +95,10 @@ export function linkObjection(
   tx: { date: string; description: string | null; counterparty: string | null },
   bill: { invoice_number: string | null; invoice_date: string | null },
 ): Objection | null {
-  const text = `${tx.description ?? ''} ${tx.counterparty ?? ''}`;
+  /* A payment intermediary's own transaction id is not an invoice number, and
+     reading it as one vetoes matches that are plainly right. See
+     lib/payment-intermediary.ts. */
+  const text = `${narrativeWithoutOwnRef(tx)} ${tx.counterparty ?? ''}`;
 
   const named = contradictingNumber(text, bill.invoice_number);
   if (named) {
