@@ -1095,9 +1095,17 @@ export default function SalesReportsPage() {
   const locations: Location[] = restaurantsOnly(allLocations);
 
   // Weekly imports
+  /**
+   * Uploaded weekly Z-reports — one restaurant's, never the group's.
+   *
+   * There are nine of them, all Westend, all from the spring. A single
+   * restaurant's statement cannot stand in for the group's week, so in group
+   * mode this is not read at all and the week is derived from the shifts of
+   * every restaurant instead. See weekMap.
+   */
   const { data: weeklyImports = [] } = useQuery({
     queryKey: ['weekly-sales', location?.id, year],
-    enabled: !!location,
+    enabled: !!location && !isGroup,
     queryFn: async () => {
       const { data } = await supabase
         .from('sales_imports')
@@ -1732,16 +1740,29 @@ export default function SalesReportsPage() {
     queryFn: async () => {
       // Every column the weekly and monthly sections read: those tables are
       // built from the shifts themselves, not from a separate upload.
-      const { data } = await supabase
-        .from('shift_reports')
-        .select('report_date,shift_type,z_report_number,net_total,gross_total,gross_food,gross_beverages,vat_total,tips,inhouse_total,takeaway_total')
-        .eq('location_id', location!.id)
-        // A week can straddle the turn of the year, so the fetch reaches a
-        // little either side and the rows are bucketed by ISO week-year below.
-        .gte('report_date', `${year - 1}-12-22`)
-        .lte('report_date', `${year + 1}-01-07`)
-        .order('report_date', { ascending: true });
-      return (data ?? []) as ShiftRow[];
+      /* Group reads every restaurant, exactly as the monthly view does. Before
+         this the filter was unconditional, so "Group — all restaurants" asked
+         for a location id that is not a location and the whole weekly sheet
+         came back empty. */
+      const out: ShiftRow[] = [];
+      for (let pg = 0; ; pg++) {
+        let q = supabase
+          .from('shift_reports')
+          .select('report_date,shift_type,z_report_number,net_total,gross_total,gross_food,gross_beverages,vat_total,tips,inhouse_total,takeaway_total')
+          // A week can straddle the turn of the year, so the fetch reaches a
+          // little either side and the rows are bucketed by ISO week-year below.
+          .gte('report_date', `${year - 1}-12-22`)
+          .lte('report_date', `${year + 1}-01-07`);
+        if (!isGroup) q = q.eq('location_id', location!.id);
+        /* Paginated because the group's year is more than a thousand shifts —
+           1.193 in 2026 — and the cap would silently cut the back of the year. */
+        const { data } = await q.order('report_date', { ascending: true })
+          .range(pg * 1000, (pg + 1) * 1000 - 1);
+        if (!data?.length) break;
+        out.push(...(data as ShiftRow[]));
+        if (data.length < 1000) break;
+      }
+      return out;
     },
   });
 
@@ -2305,9 +2326,15 @@ export default function SalesReportsPage() {
       w.inhouse_revenue  += safeNum(r.inhouse_total)   ?? 0;
       w.takeaway_revenue += safeNum(r.takeaway_total)  ?? 0;
     }
-    for (const imp of weeklyImports) if (imp.week_start) m[isoWeek(imp.week_start)] = imp;
+    /* An uploaded weekly report replaces the derived week, because it is the
+       till's own statement. Only for a single restaurant, though: the uploads
+       are Westend's alone, and letting one of them stand for the group would
+       report Westend's week as all three restaurants'. */
+    if (!isGroup) {
+      for (const imp of weeklyImports) if (imp.week_start) m[isoWeek(imp.week_start)] = imp;
+    }
     return m;
-  }, [yearShiftRows, weeklyImports, year]);
+  }, [yearShiftRows, weeklyImports, year, isGroup]);
 
   const cwk = currentISOWeek();
   /** 52 for most years, 53 for one like 2026 — see isoWeeksInYear. */
