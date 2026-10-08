@@ -19,6 +19,27 @@
  * links get made.
  */
 
+/**
+ * A spelling of a name that an umlaut cannot change.
+ *
+ * The bank writes "Bottcher AG"; the invoice is headed "Böttcher AG"; a third
+ * system would write "Boettcher". Comparing any two of those as written finds
+ * nothing, which is why a 312,66 € purchase sat in the gap list while its
+ * invoice sat in the bills table, a day apart and to the cent.
+ *
+ * Both of the usual ways of losing an umlaut are collapsed: the diaeresis is
+ * dropped, and the "oe" that German transliteration puts in its place is
+ * folded back to "o". So all three spellings meet at "bottcher". It also folds
+ * "Goethe" to "gothe", which is wrong as German and harmless here — this is a
+ * comparison key, never anything anybody reads.
+ */
+export const foldName = (s: string | null | undefined): string =>
+  String(s ?? '')
+    .toLowerCase()
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/ae/g, 'a').replace(/oe/g, 'o').replace(/ue/g, 'u').replace(/ß|ss/g, 's')
+    .replace(/[^a-z0-9]/g, '');
+
 /** The payment services that appear on the statement in place of the payee. */
 const INTERMEDIARY = /\bpaypal\b/i;
 

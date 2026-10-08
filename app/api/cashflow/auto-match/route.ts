@@ -5,7 +5,7 @@ import type { RefBill, TakenBill } from '@/lib/payment-reference';
 import { linkObjection } from '@/lib/match-rules';
 import { payableAmounts } from '@/lib/skonto';
 import { markBillsPaid, unmarkBillsIfUnlinked } from '@/lib/bill-payment-status';
-import { partyPaid } from '@/lib/payment-intermediary';
+import { partyPaid, foldName } from '@/lib/payment-intermediary';
 
 type WoltMatch = {
   /** Which delivery platform's settlement the payout ties to. */
@@ -333,10 +333,15 @@ export async function POST(req: NextRequest) {
     const party = partyPaid(tx);
     const resolved = matchedSupplier(party);
     if (resolved) return matchedSupplier(b.supplier_name ?? '') === resolved;
-    const txLower = party.toLowerCase();
+    /* Folded, so the bank's "Bottcher" reaches the invoice's "Böttcher". */
+    const txFolded = foldName(party);
     return (b.supplier_name ?? '').toLowerCase()
       .split(/[^a-zà-ÿ0-9]+/)
-      .some((w: string) => w.length > 3 && !LEGAL_FORMS.has(w) && txLower.includes(w));
+      .some((w: string) => {
+        if (LEGAL_FORMS.has(w)) return false;
+        const f = foldName(w);
+        return f.length > 3 && txFolded.includes(f);
+      });
   }
 
   /** Whether a bill's supplier is the party the bank paid. */
@@ -354,8 +359,11 @@ export async function POST(req: NextRequest) {
       if (resolvedBill) return resolvedBill === resolvedSupplier;
       return bLower.includes(resolvedSupplier) || resolvedSupplier.includes(bLower);
     }
-    const txLower = party.toLowerCase();
-    return bLower.split(' ').some((w: string) => w.length > 3 && txLower.includes(w));
+    const txFolded = foldName(party);
+    return bLower.split(' ').some((w: string) => {
+      const f = foldName(w);
+      return f.length > 3 && txFolded.includes(f);
+    });
   }
 
   const cents = (euros: number) => Math.round(Number(euros) * 100);
@@ -638,8 +646,11 @@ export async function POST(req: NextRequest) {
           const resolvedBill = matchedSupplier(b.supplier_name);
           return resolvedBill ? resolvedBill === resolved : bLower.includes(resolved);
         }
-        const txLower = partyPaid(tx).toLowerCase();
-        return bLower.split(' ').some((w: string) => w.length > 3 && txLower.includes(w));
+        const txFolded = foldName(partyPaid(tx));
+        return bLower.split(' ').some((w: string) => {
+          const f = foldName(w);
+          return f.length > 3 && txFolded.includes(f);
+        });
       };
 
       const free = (b: { id: string }) => !linkedByAnything.has(b.id) && !claimed.has(b.id);
