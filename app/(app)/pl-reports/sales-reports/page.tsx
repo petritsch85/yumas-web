@@ -1181,16 +1181,41 @@ export default function SalesReportsPage() {
    * time: a restaurant's trend is the thing being looked at, and a year
    * dropdown cuts it exactly where the comparison matters.
    */
+  /* Both the monthly and the weekly summary read every year, so both need the
+     unbounded queries below. */
+  const monthlyTabOn = !!location && activeTab === 'daily' && (subTab === 'monthly' || subTab === 'weekly');
+
+  /**
+   * Which restaurants a query covers.
+   *
+   * One id for a single restaurant, every restaurant for the group — and the
+   * restaurants only, so the weekly and monthly group totals are the same set.
+   * ZK is a production site and sells nothing over a till.
+   *
+   * The six "all" queries below each filtered on location!.id outright, which
+   * is why the whole weekly sheet was blank for the group: it asked for a
+   * location id that is not a location.
+   */
+  const scopeIds = useMemo(
+    () => (isGroup ? locations.map(l => l.id) : location ? [location.id] : []),
+    [isGroup, locations, location],
+  );
+  const scopeKey = scopeIds.join(',');
+
   const { data: allShiftRows = [] } = useQuery({
-    queryKey: ['shift-reports-all', location?.id],
-    enabled: !!location && activeTab === 'daily' && subTab === 'monthly',
+    /* Keyed on the scope, not the location: the group is many ids and they are
+       what decides the answer. */
+    queryKey: ['shift-reports-all', scopeKey],
+    /* Was gated to the monthly sub-tab alone, so the weekly Orderbird row sat
+       empty even for a single restaurant. */
+    enabled: monthlyTabOn && scopeIds.length > 0,
     queryFn: async () => {
       const all: ShiftRow[] = [];
       for (let pg = 0; ; pg++) {
         const { data, error } = await supabase
           .from('shift_reports')
           .select('report_date,shift_type,gross_total,gross_food,gross_beverages,net_total,vat_total,tips,inhouse_total,takeaway_total,cancellations_count,cancellations_total')
-          .eq('location_id', location!.id)
+          .in('location_id', scopeIds)
           .order('report_date')
           .range(pg * 1000, (pg + 1) * 1000 - 1);
         if (error) throw error;
@@ -1207,18 +1232,14 @@ export default function SalesReportsPage() {
    * summary. Each is the same table and the same filters the daily summary
    * reads for a quarter; only the date bounds differ.
    */
-  /* Both the monthly and the weekly summary read every year, so both need the
-     unbounded queries below. */
-  const monthlyTabOn = !!location && activeTab === 'daily' && (subTab === 'monthly' || subTab === 'weekly');
-
   const { data: allWoltRows = [] } = useQuery({
-    queryKey: ['wolt-shift-sales-all', location?.id],
-    enabled: monthlyTabOn,
+    queryKey: ['wolt-shift-sales-all', scopeKey],
+    enabled: monthlyTabOn && scopeIds.length > 0,
     queryFn: async () => {
-      const all: { sale_date: string; shift: 'lunch' | 'dinner'; net_sales: number; net_final: number | null }[] = [];
+      const all: { location_id: string; sale_date: string; shift: 'lunch' | 'dinner'; net_sales: number; net_final: number | null }[] = [];
       for (let pg = 0; ; pg++) {
         const { data } = await supabase.from('wolt_shift_sales')
-          .select('sale_date,shift,net_sales,net_final').eq('location_id', location!.id)
+          .select('location_id,sale_date,shift,net_sales,net_final').in('location_id', scopeIds)
           .order('sale_date').range(pg * 1000, (pg + 1) * 1000 - 1);
         if (!data?.length) break;
         all.push(...(data as typeof all));
@@ -1229,13 +1250,13 @@ export default function SalesReportsPage() {
   });
 
   const { data: allLieferandoRows = [] } = useQuery({
-    queryKey: ['lieferando-shift-sales-all', location?.id],
-    enabled: monthlyTabOn,
+    queryKey: ['lieferando-shift-sales-all', scopeKey],
+    enabled: monthlyTabOn && scopeIds.length > 0,
     queryFn: async () => {
       const all: { sale_date: string; shift: 'lunch' | 'dinner'; net_final: number | null }[] = [];
       for (let pg = 0; ; pg++) {
         const { data } = await supabase.from('lieferando_shift_sales')
-          .select('sale_date,shift,net_final').eq('location_id', location!.id)
+          .select('sale_date,shift,net_final').in('location_id', scopeIds)
           .order('sale_date').range(pg * 1000, (pg + 1) * 1000 - 1);
         if (!data?.length) break;
         all.push(...(data as typeof all));
@@ -1246,23 +1267,23 @@ export default function SalesReportsPage() {
   });
 
   const { data: allWoltCredits = [] } = useQuery({
-    queryKey: ['wolt-month-credits-all', location?.id],
-    enabled: monthlyTabOn,
+    queryKey: ['wolt-month-credits-all', scopeKey],
+    enabled: monthlyTabOn && scopeIds.length > 0,
     queryFn: async () => {
       const { data } = await supabase.from('wolt_month_credits')
-        .select('month,net').eq('location_id', location!.id);
-      return (data ?? []) as { month: string; net: number }[];
+        .select('location_id,month,net').in('location_id', scopeIds);
+      return (data ?? []) as { location_id: string; month: string; net: number }[];
     },
   });
 
   const { data: allWebshopRows = [] } = useQuery({
-    queryKey: ['webshop-orders-all', location?.id],
-    enabled: monthlyTabOn,
+    queryKey: ['webshop-orders-all', scopeKey],
+    enabled: monthlyTabOn && scopeIds.length > 0,
     queryFn: async () => {
       const all: { sale_date: string; shift: 'lunch' | 'dinner'; net_cents: number }[] = [];
       for (let pg = 0; ; pg++) {
         const { data } = await supabase.from('webshop_orders')
-          .select('sale_date,shift,net_cents').eq('location_id', location!.id).eq('counts', true)
+          .select('sale_date,shift,net_cents').in('location_id', scopeIds).eq('counts', true)
           .order('sale_date').range(pg * 1000, (pg + 1) * 1000 - 1);
         if (!data?.length) break;
         all.push(...(data as typeof all));
@@ -1273,14 +1294,19 @@ export default function SalesReportsPage() {
   });
 
   const { data: allOutgoingBills = [] } = useQuery({
-    queryKey: ['outgoing-bills-all', location?.name],
+    /* Catering is filed under the issuing location's NAME, not its id, so this
+       one scopes by name — the group taking every restaurant's. */
+    queryKey: ['outgoing-bills-all', isGroup ? 'group' : location?.name],
     enabled: monthlyTabOn,
     queryFn: async () => {
-      const { data } = await supabase.from('outgoing_bills')
+      let q = supabase.from('outgoing_bills')
         .select('event_date,shift_type,net_total')
-        .eq('issuing_location', location!.name)
         .eq('paid_in_store', false)
         .or('invoice_number.is.null,invoice_number.not.ilike.BB%');
+      q = isGroup
+        ? q.in('issuing_location', locations.map(l => l.name))
+        : q.eq('issuing_location', location!.name);
+      const { data } = await q;
       return (data ?? []) as { event_date: string | null; shift_type: 'lunch' | 'dinner' | null; net_total: number }[];
     },
   });
@@ -1335,7 +1361,11 @@ export default function SalesReportsPage() {
        belongs to — which for a week straddling two months is the right one. */
     for (const c of allWoltCredits) {
       const mk = c.month.slice(0, 7);
-      const inMonth = allWoltRows.filter(r => r.sale_date.startsWith(mk));
+      /* A credit belongs to one restaurant, so it is shared over that
+         restaurant's own Wolt sales. Spreading it over the group's would leave
+         the total right and every week wrong. */
+      const inMonth = allWoltRows.filter(r =>
+        r.sale_date.startsWith(mk) && (!c.location_id || r.location_id === c.location_id));
       const base = inMonth.reduce((t, r) => t + Number(r.net_sales), 0);
       if (base <= 0) continue;
       for (const r of inMonth) {
