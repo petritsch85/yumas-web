@@ -165,6 +165,15 @@ const PAYMENT_PROVIDER = /\bnexi\b|\bpaypal\b|american\s+express|\bamex\b/i;
 const STAFF_FROM_BILLS = false;
 
 /**
+ * The bill category that belongs to staff costs rather than SG&A.
+ *
+ * No SG&A line claims it, so before this these bills fell out of the P&L
+ * entirely — 6.853 € of September's staff cost among them. They now sit on the
+ * staff line, which is where the money went.
+ */
+const STAFF_CATEGORY = 'Labour';
+
+/**
  * Staff cost standing in until the payroll is wired in.
  *
  * Shown in red, the colour this house uses for a figure somebody put in and
@@ -173,7 +182,7 @@ const STAFF_FROM_BILLS = false;
  * hiding inside a total.
  */
 const STAFF_PLACEHOLDER: Record<string, number> = {
-  '2026-09': 115000,
+  '2026-09': 110000,
 };
 
 /**
@@ -1591,6 +1600,30 @@ export default function SalesReportsPage() {
     }
     return m;
   }, [gmNexi, gmBalances]);
+
+  /**
+   * Staff costs that do arrive as a bill, per month.
+   *
+   * Payroll itself leaves the account as transfers and has no invoice, so it
+   * stands in the placeholder. But a good deal of what the staff actually cost
+   * is invoiced: the agency hours from Aydan and M. Balakiryev, and the Edenred
+   * benefit cards. Those were in the bills all along and in no line of the
+   * P&L — Labour is a category no SG&A line claims, so groupOpex dropped them
+   * and they appeared nowhere at all.
+   *
+   * They are added to the placeholder rather than replacing it: the two are
+   * different costs, not two readings of one.
+   */
+  const groupStaffBills = useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const b of gmCostBills) {
+      if (String(b.category ?? '') !== STAFF_CATEGORY) continue;
+      const month = String(b.invoice_date ?? '').slice(0, 7);
+      if (!month || month < COGS_FROM) continue;
+      m[month] = (m[month] ?? 0) + Number(b.net_amount ?? 0);
+    }
+    return m;
+  }, [gmCostBills]);
 
   /** SG&A per month, from the same bills that feed the cost of goods. */
   const groupOpex = useMemo(() => {
@@ -7731,7 +7764,8 @@ export default function SalesReportsPage() {
                  red: a figure somebody entered and will replace, not one the
                  bills or the till produced. */
               opts: { bold?: boolean; indent?: boolean; pct?: boolean; drill?: string;
-                      assumed?: (colKey: string) => boolean } = {},
+                      assumed?: (colKey: string) => boolean;
+                      drillAssumed?: boolean } = {},
             ) => (
               <tr key={rowKey} className="border-b border-gray-100 hover:bg-gray-50/60 group"
                 style={{ backgroundColor: opts.bold ? '#f9fafb' : '#ffffff' }}>
@@ -7747,8 +7781,10 @@ export default function SalesReportsPage() {
                   const v = get(col.key);
                   const open = !!opts.drill && cogsDrill?.part === opts.drill && cogsDrill.colKey === col.key;
                   const red = !!opts.assumed?.(col.key);
-                  /* A figure entered by hand has no bills to open. */
-                  const canDrill = !!opts.drill && v !== null && v !== 0 && !red;
+                  /* A figure entered by hand has no bills to open — unless the
+                     line mixes one with real bills, as staff costs does, where
+                     the fold-out names the placeholder among them. */
+                  const canDrill = !!opts.drill && v !== null && v !== 0 && (!red || !!opts.drillAssumed);
                   const tone = red ? 'text-red-600' : 'text-gray-800';
                   const body = v === null
                     ? <span className="text-gray-300">—</span>
@@ -7808,7 +7844,9 @@ export default function SalesReportsPage() {
               const prefix = colKey.startsWith('FY') ? colKey.slice(2) + '-' : colKey;
               /* Which bill categories a fold-out covers. The cost-of-goods
                  lines, every SG&A line, and repairs all open the same way. */
-              const wanted: string[] = part.startsWith('sga-')
+              const wanted: string[] = part === 'staff'
+                ? [STAFF_CATEGORY]
+                : part.startsWith('sga-')
                 ? (part === 'sga-total'
                     ? SGA_LINES.flatMap(l => l.categories)
                     : (SGA_LINES.find(l => 'sga-' + l.key === part)?.categories ?? []))
@@ -7957,10 +7995,29 @@ export default function SalesReportsPage() {
               return [...by.values()].sort((a, z) => z.net - a.net);
             };
 
+            /**
+             * What the staff line is made of.
+             *
+             * The placeholder is listed as a row of its own rather than left
+             * implicit: it is most of the figure, and a reader should be able
+             * to see at once how much of the line is a typed number and how
+             * much is invoices.
+             */
+            const staffItems = (colKey: string) => {
+              const rows = cogsSuppliers('staff', colKey);
+              const entered = staffPlaceholder(colKey);
+              return (entered === null
+                ? rows
+                : [{ name: 'Lohn, Krankenkassen, Lohnsteuer — Platzhalter', net: entered, bills: 0 }, ...rows]
+              ).sort((a, z) => z.net - a.net);
+            };
+
             const drillRows = (part: string) => {
               if (!cogsDrill || cogsDrill.part !== part) return [];
               const { colKey } = cogsDrill;
-              const rows = part.startsWith('cf-')
+              const rows = part === 'staff'
+                ? staffItems(colKey)
+                : part.startsWith('cf-')
                 ? cashflowItems(part.slice(3), colKey)
                 : part === 'sga-payment_fees'
                   ? paymentFeeItems(colKey)
@@ -8058,19 +8115,41 @@ export default function SalesReportsPage() {
               return SGA_LINES.reduce((t, l) => t + (sgaLine(l.key)(colKey) ?? 0), 0);
             };
 
-            /**
-             * Payroll is not in the bills, so the row carries a placeholder
-             * where one has been set and stays empty everywhere else.
-             */
-            const staffCost = (colKey: string): number | null => {
-              if (STAFF_FROM_BILLS) return opexFor(colKey) ? 0 : null;
+            /** The payroll placeholder for a column: wages, the funds, Lohnsteuer. */
+            const staffPlaceholder = (colKey: string): number | null => {
               if (!colKey.startsWith('FY')) return STAFF_PLACEHOLDER[colKey] ?? null;
               const year = colKey.slice(2);
               const months = Object.entries(STAFF_PLACEHOLDER).filter(([m]) => m.startsWith(year));
               return months.length ? months.reduce((s, [, v]) => s + v, 0) : null;
             };
-            /** True where the figure is the placeholder, not a measured cost. */
-            const staffIsAssumed = (colKey: string) => staffCost(colKey) !== null;
+
+            /** What the invoiced part of staff costs came to for a column. */
+            const staffFromBills = (colKey: string): number | null => {
+              if (!colKey.startsWith('FY')) {
+                return colKey >= COGS_FROM ? (groupStaffBills[colKey] ?? null) : null;
+              }
+              const hits = Object.entries(groupStaffBills)
+                .filter(([m]) => m.startsWith(colKey.slice(2)) && m >= COGS_FROM);
+              return hits.length ? hits.reduce((t, [, v]) => t + v, 0) : null;
+            };
+
+            /**
+             * Staff costs: the payroll that has no invoice, plus the part that does.
+             *
+             * Wages, the Krankenkassen and the Lohnsteuer leave as transfers and
+             * stand in the placeholder until the payroll is wired in. The agency
+             * hours and the benefit cards are invoiced, so they are read from the
+             * bills and added — two different costs, not two readings of one.
+             */
+            const staffCost = (colKey: string): number | null => {
+              if (STAFF_FROM_BILLS) return opexFor(colKey) ? 0 : null;
+              const entered = staffPlaceholder(colKey);
+              const billed = staffFromBills(colKey);
+              if (entered === null && billed === null) return null;
+              return (entered ?? 0) + (billed ?? 0);
+            };
+            /** Red while the payroll behind it is still a figure somebody typed. */
+            const staffIsAssumed = (colKey: string) => staffPlaceholder(colKey) !== null;
             const staffPct = (colKey: string) => {
               const s = staffCost(colKey);
               const sales = grandTotal(colKey).total;
@@ -8223,7 +8302,8 @@ export default function SalesReportsPage() {
                       {spacerRow('gm-gap')}
 
                       {headingRow('staff-head', 'Staff costs')}
-                      {valueLine('staff-abs', 'Staff costs',   staffCost, { bold: true, assumed: staffIsAssumed })}
+                      {valueLine('staff-abs', 'Staff costs',   staffCost, { bold: true, assumed: staffIsAssumed, drill: 'staff', drillAssumed: true })}
+                      {drillRows('staff')}
                       {valueLine('staff-pct', 'as % of sales', staffPct,  { indent: true, pct: true })}
                       {spacerRow('staff-gap')}
 
