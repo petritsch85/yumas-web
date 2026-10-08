@@ -79,19 +79,23 @@ export const MANIFEST: ManifestItem[] = [
     source: 'uploaded', required: true,
     note: 'PayPal, monatliche Übersicht — der Beleg für Gebühren und Working-Capital-Tilgung.' },
 
-  { key: 'toogoodtogo', folder: '08_TooGoodToGo', label: 'Too Good To Go Abrechnung',
+  { key: 'stripe', folder: '08_Stripe', label: 'Stripe Monatsabrechnung',
+    source: 'uploaded', required: true,
+    note: 'Stripe, monatliche Abrechnung — Zahlungen und einbehaltene Gebühren.' },
+
+  { key: 'toogoodtogo', folder: '09_TooGoodToGo', label: 'Too Good To Go Abrechnung',
     source: 'uploaded', required: true,
     note: 'Too Good To Go, monatliche Abrechnung.' },
 
-  { key: 'webshop', folder: '09_Webshop', label: 'Webshop Monatsbericht',
+  { key: 'webshop', folder: '10_Webshop', label: 'Webshop Monatsbericht',
     source: 'uploaded', required: true,
     note: 'Monatsbericht des Webshops.' },
 
-  { key: 'wolt', folder: '10_Wolt', label: 'Wolt Abrechnungen',
+  { key: 'wolt', folder: '11_Wolt', label: 'Wolt Abrechnungen',
     source: 'uploaded', required: true, multi: true,
     note: 'Wolt Selbstfakturierungen des Monats — Lieferbelege.' },
 
-  { key: 'lieferando', folder: '11_Lieferando', label: 'Lieferando Abrechnungen',
+  { key: 'lieferando', folder: '12_Lieferando', label: 'Lieferando Abrechnungen',
     source: 'uploaded', required: true, multi: true,
     note: 'Lieferando Abrechnungen des Monats — Lieferbelege.' },
 ];

@@ -151,7 +151,23 @@ const SGA_LINES: { key: string; label: string; categories: string[] }[] = [
  * Kept narrow on purpose: each pattern is the provider's own name and nothing
  * a food supplier could share. See groupOpex for why it matters.
  */
-const PAYMENT_PROVIDER = /\bnexi\b|\bpaypal\b|american\s+express|\bamex\b/i;
+const PAYMENT_PROVIDER = /\bnexi\b|\bpaypal\b|american\s+express|\bamex\b|\bstripe\b/i;
+
+/**
+ * The providers that keep their fee out of the payout, so it never reaches the
+ * bank and exists only on their own monthly statement.
+ *
+ * Nexi is not among them: it invoices and debits separately, so its fee is read
+ * from nexi_statements instead. These are keys of month_documents.
+ */
+const WITHHELD_FEES = ['paypal', 'amex', 'stripe'];
+
+/** How each of those reads in the fold-out under the fee line. */
+const FEE_LABEL: Record<string, string> = {
+  paypal: 'PayPal — Gebühren, vom Auszahlungsbetrag einbehalten',
+  amex:   'Amex — Gebühren, vom Auszahlungsbetrag einbehalten',
+  stripe: 'Stripe — Gebühren, vom Auszahlungsbetrag einbehalten',
+};
 
 /**
  * Staff costs are deliberately not read from the bills.
@@ -1415,7 +1431,7 @@ export default function SalesReportsPage() {
   const { data: gmBalances = [] } = useQuery({
     queryKey: ['group-monthly', 'balances'], enabled: groupMonthlyOn,
     queryFn: async () => {
-      const kinds = ['kontoauszug', 'paypal', 'amex'];
+      const kinds = ['kontoauszug', 'paypal', 'amex', 'stripe'];
       const read = (cols: string) =>
         supabase.from('month_documents').select(cols).in('kind', kinds);
 
@@ -1601,7 +1617,7 @@ export default function SalesReportsPage() {
       if (month && v) m[month] = (m[month] ?? 0) + v;
     }
     for (const d of gmBalances as Record<string, unknown>[]) {
-      if (d.kind !== 'paypal' && d.kind !== 'amex') continue;
+      if (!WITHHELD_FEES.includes(String(d.kind))) continue;
       const month = String(d.month ?? '').slice(0, 7);
       const v = Math.abs(Number(d.fees ?? 0));
       if (month && v) m[month] = (m[month] ?? 0) + v;
@@ -8011,13 +8027,11 @@ export default function SalesReportsPage() {
                 if (month && match(month)) add('Nexi — Kartenentgelte (netto)', Number(n.fees_net ?? 0));
               }
               for (const d of gmBalances as Record<string, unknown>[]) {
-                if (d.kind !== 'paypal' && d.kind !== 'amex') continue;
+                const kind = String(d.kind);
+                if (!WITHHELD_FEES.includes(kind)) continue;
                 const month = String(d.month ?? '').slice(0, 7);
                 if (!month || !match(month)) continue;
-                add(d.kind === 'paypal'
-                  ? 'PayPal — Gebühren, vom Auszahlungsbetrag einbehalten'
-                  : 'Amex — Gebühren, vom Auszahlungsbetrag einbehalten',
-                  Math.abs(Number(d.fees ?? 0)));
+                add(FEE_LABEL[kind] ?? kind, Math.abs(Number(d.fees ?? 0)));
               }
               return [...by.values()].sort((a, z) => z.net - a.net);
             };
