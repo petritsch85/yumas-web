@@ -89,7 +89,13 @@ export async function POST(req: NextRequest) {
 
   /* The conversation itself. The trigger on this table carries the date and
      the summary up onto the contact, so the list always shows the latest. */
-  const { error: histErr } = await admin.from('event_contact_threads').upsert({
+  /* Looked up rather than upserted: the uniqueness index is partial — it
+     ignores rows without a thread_id — and Postgres will not infer a partial
+     index from a plain ON CONFLICT column list. */
+  const { data: already } = await admin.from('event_contact_threads')
+    .select('id').eq('contact_id', contactId).eq('thread_id', cand.thread_id).maybeSingle();
+
+  const history = {
     contact_id:  contactId,
     occurred_on: cand.thread_date ?? new Date().toISOString().slice(0, 10),
     subject:     cand.subject,
@@ -98,7 +104,10 @@ export async function POST(req: NextRequest) {
     party_size:  cand.party_size,
     source:      'email',
     thread_id:   cand.thread_id,
-  }, { onConflict: 'contact_id,thread_id' });
+  };
+  const { error: histErr } = already
+    ? await admin.from('event_contact_threads').update(history).eq('id', already.id)
+    : await admin.from('event_contact_threads').insert(history);
   if (histErr) return NextResponse.json({ error: histErr.message }, { status: 500 });
 
   const { error: markErr } = await admin.from('event_contact_candidates')

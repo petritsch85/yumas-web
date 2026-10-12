@@ -115,7 +115,14 @@ for (const [company, c] of [...by.entries()].sort((a, z) => z[1].net - a[1].net)
      neither doubles them nor disturbs a note added by hand. */
   for (const ev of c.events) {
     const key = ev.no ? `invoice:${ev.no}` : `invoice:${company}:${ev.on}`;
-    const { error } = await db.from('event_contact_threads').upsert({
+    /* Looked up rather than upserted: the uniqueness index is partial (it
+       ignores rows without a thread_id) and Postgres will not infer a partial
+       index from a plain ON CONFLICT column list. */
+    const { data: already } = await db.from('event_contact_threads')
+      .select('id').eq('contact_id', contactId).eq('thread_id', key).maybeSingle();
+    if (already) continue;
+
+    const { error } = await db.from('event_contact_threads').insert({
       contact_id: contactId,
       occurred_on: ev.on,
       subject: `Veranstaltung ${de(ev.on)}${ev.where ? ` · ${ev.where}` : ''}`,
@@ -124,7 +131,7 @@ for (const [company, c] of [...by.entries()].sort((a, z) => z[1].net - a[1].net)
       outcome: 'won',
       source: 'invoice',
       thread_id: key,
-    }, { onConflict: 'contact_id,thread_id', ignoreDuplicates: true });
+    });
     if (error) console.log(`     Verlauf FEHLER: ${error.message}`);
   }
 }
