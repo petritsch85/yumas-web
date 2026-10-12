@@ -126,12 +126,23 @@ export default function EventContactsPage() {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ years: 5, batch: 25, dryRun, pageToken: sweep.token }),
       });
-      const j = await res.json();
-      if (!res.ok) throw new Error(j.error ?? 'Sweep fehlgeschlagen');
-      const line = `${dryRun ? 'Testlauf' : 'Lauf'}: ${j.read} Threads gelesen, `
-        + `${j.found} Treffer, ${j.rejected} verworfen, ${j.skipped} schon bekannt`
-        + (j.done ? ' · fertig' : ' · weitere vorhanden');
-      setSweep(s => ({ running: false, token: j.nextPageToken ?? null, log: [line, ...s.log].slice(0, 12) }));
+      /* Read as text first. A function that runs out of time is killed with no
+         body at all, and res.json() on that says "Unexpected end of JSON
+         input" — which tells nobody what went wrong. */
+      const raw = await res.text();
+      let j: Record<string, unknown>;
+      try {
+        j = JSON.parse(raw);
+      } catch {
+        throw new Error(raw.trim()
+          ? `Unerwartete Antwort (${res.status}): ${raw.slice(0, 160)}`
+          : `Der Lauf wurde nach ${res.status === 504 ? 'Zeitüberschreitung' : `Status ${res.status}`} abgebrochen. Nochmal drücken — er macht dort weiter, wo er aufgehört hat.`);
+      }
+      if (!res.ok) throw new Error(String(j.error ?? 'Sweep fehlgeschlagen'));
+      const line = `${dryRun ? 'Testlauf' : 'Lauf'}: ${j.read} gelesen, `
+        + `${j.triaged} direkt verworfen, ${j.found} Treffer, ${j.rejected} nach Prüfung verworfen, ${j.skipped} schon bekannt`
+        + (j.done ? ' · fertig' : j.outOfTime ? ' · Zeit um, bitte nochmal' : ' · weitere vorhanden');
+      setSweep(s => ({ running: false, token: typeof j.nextPageToken === 'string' ? j.nextPageToken : null, log: [line, ...s.log].slice(0, 12) }));
       if (!dryRun) qc.invalidateQueries({ queryKey: ['event-candidates'] });
       if (dryRun && Array.isArray(j.candidates)) {
         for (const c of j.candidates.slice(0, 8)) {

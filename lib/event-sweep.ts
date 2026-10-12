@@ -43,6 +43,24 @@ export function sweepQuery(years: number): string {
   return `(${any}) -in:trash -in:spam -in:drafts newer_than:${years}y`;
 }
 
+/**
+ * The cheap first look.
+ *
+ * Nine threads in ten are a newsletter, a supplier invoice or a table booking
+ * for four, and deciding that needs no judgement worth paying for. A small
+ * model reads the opening message and says yes or no; only a yes is read
+ * properly. Without this, five years of mail is thousands of calls to a large
+ * model and a run that cannot finish inside any request.
+ */
+export const TRIAGE_PROMPT = `Du siehst den Anfang eines E-Mail-Threads aus dem Postfach eines Frankfurter Restaurantbetriebs.
+
+Frage: Könnte es hier um eine GRÖSSERE VERANSTALTUNG gehen (Weihnachtsfeier, Firmenfeier, Gruppenbuchung ab ca. 10 Personen, Catering, Raumbuchung)?
+
+Antworte NUR mit "JA" oder "NEIN".
+
+NEIN bei: Newsletter, Werbung, Lieferantenrechnungen, Bewerbungen, Zeitungsartikel, Portalbenachrichtigungen (OpenTable, Google, Lieferando), kleinen Tischreservierungen, internen Mails.
+JA im Zweifel — ein zu Unrecht durchgelassener Thread kostet wenig, ein zu Unrecht verworfener ist ein verlorener Kontakt.`;
+
 /** What the model is asked to return for one thread. */
 export interface Candidate {
   is_event: boolean;

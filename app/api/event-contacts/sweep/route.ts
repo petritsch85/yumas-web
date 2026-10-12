@@ -2,9 +2,19 @@ import { NextRequest, NextResponse } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
 import { getSupabaseAdmin } from '@/lib/supabase-admin';
 import { getGmailClient, decodeBody } from '@/lib/gmail';
-import { sweepQuery, EXTRACT_PROMPT, worthKeeping, type Candidate } from '@/lib/event-sweep';
+import { sweepQuery, TRIAGE_PROMPT, EXTRACT_PROMPT, worthKeeping, type Candidate } from '@/lib/event-sweep';
 
 export const maxDuration = 300;
+
+/**
+ * Stop with time to spare and hand back a page token.
+ *
+ * A request that runs past its limit is killed mid-flight and returns no body
+ * at all — which reaches the browser as "Unexpected end of JSON input" and
+ * loses every thread it had already read. Better to do less and say where to
+ * carry on from.
+ */
+const BUDGET_MS = 45_000;
 
 /**
  * Reading five years of mail for the people who booked events.
@@ -70,17 +80,47 @@ export async function POST(req: NextRequest) {
     .select('thread_id').in('thread_id', ids.length ? ids : ['-']);
   const seen = new Set((seenRows ?? []).map(r => r.thread_id as string));
 
+  const started = Date.now();
   const found: Record<string, unknown>[] = [];
-  let read = 0, skipped = 0, rejected = 0;
+  let read = 0, skipped = 0, rejected = 0, triaged = 0;
+  /* Where to resume inside this page when the budget runs out before the
+     threads do. Gmail's own token only moves a whole page at a time. */
+  let stoppedAt: string | null = null;
 
   for (const t of threads) {
     if (!t.id) continue;
     if (seen.has(t.id)) { skipped++; continue; }
+    if (Date.now() - started > BUDGET_MS) { stoppedAt = t.id; break; }
 
     const full = await gmail.users.threads.get({ userId: 'me', id: t.id, format: 'full' });
     const messages = full.data.messages ?? [];
     if (!messages.length) continue;
     read++;
+
+    /* The cheap look first. Most threads end here, for a fraction of a cent
+       and under a second, which is what makes five years affordable. */
+    const opening = threadText(messages.slice(0, 2)).slice(0, 3000);
+    try {
+      const t1 = await anthropic.messages.create({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 8,
+        system: TRIAGE_PROMPT,
+        messages: [{ role: 'user', content: opening }],
+      });
+      const verdict = t1.content.map(b => (b.type === 'text' ? b.text : '')).join('').trim().toUpperCase();
+      if (!verdict.startsWith('JA')) {
+        triaged++;
+        if (!dryRun) {
+          await admin.from('event_sweep_seen')
+            .upsert({ thread_id: t.id, outcome: 'triage-no' }, { onConflict: 'thread_id' });
+        }
+        continue;
+      }
+    } catch (e) {
+      /* A triage failure must not drop the thread — fall through and let the
+         proper read decide. */
+      console.warn(`[event-sweep] triage ${t.id}: ${(e as Error).message}`);
+    }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const first = messages[0].payload as any;
@@ -128,9 +168,14 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({
     query: q,
-    inBatch: threads.length, read, skipped, rejected, found: found.length,
-    nextPageToken: list.data.nextPageToken ?? null,
-    done: !list.data.nextPageToken,
+    inBatch: threads.length, read, skipped, rejected, triaged, found: found.length,
+    /* Staying on this page when the budget cut it short: the threads already
+       judged are recorded, so pressing again skips straight past them. */
+    nextPageToken: stoppedAt
+      ? (typeof body.pageToken === 'string' ? body.pageToken : null)
+      : (list.data.nextPageToken ?? null),
+    done: !stoppedAt && !list.data.nextPageToken,
+    outOfTime: !!stoppedAt,
     candidates: dryRun ? found : undefined,
   });
 }
