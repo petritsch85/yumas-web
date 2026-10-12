@@ -14,7 +14,16 @@ export const maxDuration = 300;
  * loses every thread it had already read. Better to do less and say where to
  * carry on from.
  */
-const BUDGET_MS = 45_000;
+const BUDGET_MS = 30_000;
+/**
+ * The last moment a slow call may be started.
+ *
+ * The budget above decides whether to begin another thread; this decides
+ * whether to finish one properly. A thread begun at 29 seconds still has a
+ * Gmail fetch, a triage and a full read ahead of it, which is enough to run
+ * past a sixty-second limit and lose the whole request.
+ */
+const SLOW_CALL_DEADLINE_MS = 42_000;
 
 /**
  * Reading five years of mail for the people who booked events.
@@ -129,6 +138,11 @@ export async function POST(req: NextRequest) {
     const when = messages.at(-1)?.internalDate
       ? new Date(Number(messages.at(-1)!.internalDate)).toISOString().slice(0, 10)
       : null;
+
+    /* Triage said yes, but there is no longer time to read it properly. Leave
+       it unrecorded so the next press picks it up rather than half-judging it
+       now. */
+    if (Date.now() - started > SLOW_CALL_DEADLINE_MS) { stoppedAt = t.id; break; }
 
     let c: Candidate | null = null;
     try {
