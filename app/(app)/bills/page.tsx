@@ -7,7 +7,7 @@ import {
   Upload, FileCheck, AlertCircle, Loader2,
   CheckCircle2, Clock, Banknote, Trash2,
   ChevronDown, ChevronUp, Eye, X, FilePlus, Save, MapPin, Calendar, Pencil, LayoutList,
-  AlertTriangle, Landmark, Download, Inbox, ArrowDownToLine, FileX,
+  AlertTriangle, Landmark, Download, Inbox, ArrowDownToLine, FileX, Check,
 } from 'lucide-react';
 import { buildPain001, painFilename, validateOrder, isValidIban, normaliseIban } from '@/lib/sepa-credit-transfer';
 import { resolveDueDate, SOFORT_DAYS, isAutoCollected } from '@/lib/payment-terms';
@@ -880,6 +880,44 @@ export default function BillsPage() {
     return matchedCpByBill.get(b.id)?.iban ?? b.creditor_iban ?? '';
   }, [payIbans, matchedCpByBill]);
 
+  /**
+   * What is known about where this bill's money would go.
+   *
+   * Two independent facts have to agree before a transfer is safe: the account
+   * a person approved for this supplier, and the account printed on the
+   * invoice in hand. The approved one is what gets paid — but when the invoice
+   * names a different one, that disagreement is the whole signal.
+   *
+   * It is also exactly what invoice fraud looks like: a genuine supplier, a
+   * genuine letterhead, one line of bank details changed. So a conflict does
+   * not quietly resolve in favour of either side; it stops the row and asks.
+   *
+   *   approved   — the invoice agrees with what was approved
+   *   conflict   — the invoice names a different account
+   *   unapproved — nobody has approved an account for this supplier yet
+   *   unknown    — no counterparty, so nothing can be remembered
+   */
+  const ibanState = useCallback((b: Bill): {
+    kind: 'approved' | 'conflict' | 'unapproved' | 'unknown';
+    approved: string | null;
+    onBill: string | null;
+  } => {
+    const cp = matchedCpByBill.get(b.id);
+    const approved = cp?.iban ? normaliseIban(cp.iban) : null;
+    const onBill = b.creditor_iban ? normaliseIban(b.creditor_iban) : null;
+
+    if (!cp) return { kind: 'unknown', approved, onBill };
+    if (!approved) return { kind: 'unapproved', approved, onBill };
+    if (onBill && onBill !== approved) return { kind: 'conflict', approved, onBill };
+    return { kind: 'approved', approved, onBill };
+  }, [matchedCpByBill]);
+
+  /** Payable: the IBAN is valid AND nothing contradicts it. */
+  const payableNow = useCallback(
+    (b: Bill) => isValidIban(ibanFor(b)) && ibanState(b).kind !== 'conflict',
+    [ibanFor, ibanState],
+  );
+
   const openPaymentRun = useCallback(() => {
     // Tomorrow, or Monday when tomorrow is a weekend — banks do not execute then.
     const d = new Date();
@@ -887,11 +925,9 @@ export default function BillsPage() {
     while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() + 1);
     setPayDate(d.toISOString().slice(0, 10));
     setPayIbans({});
-    setPaySel(new Set(payableRows.filter(b => isValidIban(
-      matchedCpByBill.get(b.id)?.iban ?? b.creditor_iban ?? '',
-    )).map(b => b.id)));
+    setPaySel(new Set(payableRows.filter(payableNow).map(b => b.id)));
     setPayOpen(true);
-  }, [payableRows, matchedCpByBill]);
+  }, [payableRows, payableNow]);
 
   /** Saves an IBAN onto the counterparty, so it is entered once and not again. */
   /**
@@ -2295,9 +2331,9 @@ export default function BillsPage() {
                   <tr>
                     <th className="px-3 py-2 w-8">
                       <input type="checkbox"
-                        checked={paySel.size > 0 && paySel.size === payableRows.filter(b => isValidIban(ibanFor(b))).length}
+                        checked={paySel.size > 0 && paySel.size === payableRows.filter(payableNow).length}
                         onChange={e => setPaySel(e.target.checked
-                          ? new Set(payableRows.filter(b => isValidIban(ibanFor(b))).map(b => b.id))
+                          ? new Set(payableRows.filter(payableNow).map(b => b.id))
                           : new Set())}
                         className="w-4 h-4 accent-green-600" />
                     </th>
@@ -2336,6 +2372,8 @@ export default function BillsPage() {
                     const iban = ibanFor(b);
                     const ok = isValidIban(iban);
                     const cp = matchedCpByBill.get(b.id);
+                    const state = ibanState(b);
+                    const blocked = state.kind === 'conflict';
                     /* Overdue against the execution date, not today: the run is
                        dated 14.10., so a bill due the 13th is late when it is
                        paid, whatever the calendar says now. */
@@ -2344,7 +2382,7 @@ export default function BillsPage() {
                     return (
                       <tr key={b.id} className={`border-b border-gray-50 ${paySel.has(b.id) ? 'bg-green-50/40' : ''}`}>
                         <td className="px-3 py-1.5">
-                          <input type="checkbox" checked={paySel.has(b.id)} disabled={!ok}
+                          <input type="checkbox" checked={paySel.has(b.id)} disabled={!ok || blocked}
                             onChange={e => setPaySel(sel => {
                               const n = new Set(sel);
                               if (e.target.checked) n.add(b.id); else n.delete(b.id);
@@ -2373,10 +2411,30 @@ export default function BillsPage() {
                             className={`w-64 font-mono border rounded px-2 py-1 text-[11px] focus:outline-none focus:ring-1 focus:ring-[#1B5E20]/40 ${
                               !iban ? 'border-amber-300 bg-amber-50' : ok ? 'border-gray-200' : 'border-red-300 bg-red-50'
                             }`} />
-                          {cp && iban && ok && !cp.iban && (
-                            <span className="ml-2 text-[10px] text-gray-400">saved to {cp.name}</span>
+                          {/* The second factor, said out loud. An approved
+                              account that the invoice also names is the only
+                              state that needs no thought. */}
+                          {state.kind === 'approved' && (
+                            <span className="ml-2 inline-flex items-center gap-1 text-[10px] font-semibold text-green-700">
+                              <Check size={11} /> freigegeben
+                              {state.onBill
+                                ? ' · stimmt mit der Rechnung überein'
+                                : ' · für ' + cp!.name}
+                            </span>
                           )}
-                          {!cp && iban && (
+                          {blocked && (
+                            <span className="ml-2 inline-flex items-center gap-1 text-[10px] font-semibold text-red-700">
+                              <AlertTriangle size={11} />
+                              Rechnung nennt {state.onBill} — weicht von der freigegebenen ab. In den
+                              Counterparties prüfen und freigeben.
+                            </span>
+                          )}
+                          {state.kind === 'unapproved' && iban && ok && (
+                            <span className="ml-2 text-[10px] text-amber-600">
+                              nicht freigegeben · wird für {cp!.name} gespeichert
+                            </span>
+                          )}
+                          {state.kind === 'unknown' && iban && (
                             <span className="ml-2 text-[10px] text-amber-600">no counterparty — not remembered</span>
                           )}
                         </td>
@@ -2408,6 +2466,16 @@ export default function BillsPage() {
                 <p className="text-xs text-amber-700">
                   {payableRows.filter(b => !isValidIban(ibanFor(b))).length} bill(s) have no usable IBAN and cannot be
                   included. Type one in and it is saved to that counterparty for next time.
+                </p>
+              )}
+              {/* Held back deliberately, and said separately from "no IBAN":
+                  these have one, and that is the problem. */}
+              {payableRows.some(b => ibanState(b).kind === 'conflict') && (
+                <p className="text-xs text-red-700 font-semibold flex items-start gap-1.5">
+                  <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+                  {payableRows.filter(b => ibanState(b).kind === 'conflict').length} Rechnung(en) nennen eine andere
+                  Bankverbindung als die freigegebene und sind gesperrt. Das ist das Muster von
+                  Rechnungsbetrug — bitte in den Counterparties prüfen, bevor etwas überwiesen wird.
                 </p>
               )}
               <div className="flex items-center justify-end gap-2">
