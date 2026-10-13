@@ -44,9 +44,59 @@ function validIban(raw) {
   return rem === 1;
 }
 
-/* Printed with spaces as often as not; the checksum discards what this
-   over-matches. */
-const IBAN_RE = /\b([A-Z]{2}\d{2}(?:[ ]?[A-Z0-9]{2,4}){2,8})\b/g;
+/**
+ * How long an IBAN is, by country. This is the whole trick.
+ *
+ * A pattern that simply matches "letters, digits and spaces" cannot tell where
+ * an IBAN ends, and greedily swallows whatever follows: "IBAN: LT06 3250 0390
+ * 1028 4321 BIC" took the BIC with it and then failed its checksum, so a
+ * perfectly legible account was reported as missing. Lengths are fixed per
+ * country, so the right number of characters is taken and nothing else.
+ */
+const IBAN_LENGTH = {
+  AT: 20, BE: 16, BG: 22, CH: 21, CY: 28, CZ: 24, DE: 22, DK: 18, EE: 20,
+  ES: 24, FI: 18, FR: 27, GB: 22, GR: 27, HR: 21, HU: 28, IE: 22, IT: 27,
+  LI: 21, LT: 20, LU: 20, LV: 21, MT: 31, NL: 18, NO: 15, PL: 28, PT: 25,
+  RO: 24, SE: 24, SI: 19, SK: 24,
+};
+
+/**
+ * Every valid IBAN in a piece of text.
+ *
+ * Tried from EVERY position a country code appears, not once per regex match,
+ * because a single pass lets a bad early match eat a good later one: on
+ * "USTID DE212657916 IBAN DE11 8504 …" the VAT number matched first, consumed
+ * the rest of the line, failed its checksum, and the real account — four words
+ * further on — was never looked at.
+ *
+ * From each start the next characters are gathered, spaces skipped, until the
+ * country's own length is reached. Then mod-97 decides. Wrong starts cost two
+ * dozen character comparisons and are thrown out by the checksum.
+ */
+function findIbans(text) {
+  const s = String(text ?? '').toUpperCase();
+  const out = new Set();
+
+  for (let i = 0; i < s.length - 4; i++) {
+    if (!/[A-Z]/.test(s[i]) || !/[A-Z]/.test(s[i + 1])) continue;
+    /* A country code is a word of its own or starts one: without this every
+       pair of letters inside a word is a starting point. */
+    if (i > 0 && /[A-Z0-9]/.test(s[i - 1])) continue;
+
+    const len = IBAN_LENGTH[s.slice(i, i + 2)];
+    if (!len) continue;
+
+    let got = '';
+    for (let j = i; j < s.length && got.length < len; j++) {
+      const c = s[j];
+      if (/[A-Z0-9]/.test(c)) got += c;
+      else if (c === ' ' || c === ' ') continue;   // printed in groups
+      else break;                                        // punctuation ends it
+    }
+    if (got.length === len && validIban(got)) out.add(got);
+  }
+  return [...out];
+}
 
 /* A supplier that collects takes the money itself. Copied verbatim from
    AUTO_COLLECTED in lib/payment-terms.ts rather than written afresh: a second,
@@ -84,8 +134,7 @@ for (const b of wanted) {
       console.log(`  ✘    ${label} Scan ohne Textebene`);
       noFile++; continue;
     }
-    hits = [...new Set([...t.matchAll(IBAN_RE)].map(m => normalise(m[1]))
-      .filter(validIban).filter(i => i !== OURS))];
+    hits = findIbans(t).filter(i => i !== OURS);
   } catch (e) {
     needsHand.push({ b, why: String(e.message).slice(0, 40) });
     console.log(`  ✘    ${label} ${String(e.message).slice(0, 40)}`);
