@@ -529,6 +529,10 @@ export default function BillsPage() {
   const [paySel,    setPaySel]    = useState<Set<string>>(new Set());
   const [payDate,   setPayDate]   = useState('');
   const [payIbans,  setPayIbans]  = useState<Record<string, string>>({});
+  /* How the payment list is ordered. Due date first, ascending: what a person
+     opening a payment run wants to know is what is overdue. */
+  const [paySort,   setPaySort]   = useState<{ col: 'party' | 'invoice' | 'due' | 'iban' | 'amount'; dir: 'asc' | 'desc' }>(
+    { col: 'due', dir: 'asc' });
   const [debtor,    setDebtor]    = useState(DEBTOR_DEFAULT);
   const [paySaving, setPaySaving] = useState(false);
 
@@ -890,6 +894,43 @@ export default function BillsPage() {
   }, [payableRows, matchedCpByBill]);
 
   /** Saves an IBAN onto the counterparty, so it is entered once and not again. */
+  /**
+   * The payment list in the chosen order.
+   *
+   * A bill with no due date sorts last whichever way the column runs: an
+   * unknown date is not an early one, and floating it to the top of an
+   * ascending sort would put the least informative rows where the most urgent
+   * ones belong.
+   */
+  const sortedPayable = useMemo(() => {
+    const { col, dir } = paySort;
+    const sign = dir === 'asc' ? 1 : -1;
+    const party = (b: Bill) => (matchedCpByBill.get(b.id)?.account_holder
+      ?? matchedCpByBill.get(b.id)?.name ?? b.supplier_name ?? '').toLowerCase();
+
+    return [...payableRows].sort((a, b) => {
+      switch (col) {
+        case 'party':  return sign * party(a).localeCompare(party(b));
+        case 'amount': return sign * ((a.gross_amount ?? 0) - (b.gross_amount ?? 0));
+        case 'iban': {
+          /* Grouped by whether it can be paid at all, which is the only
+             question this column really answers. */
+          const rank = (x: Bill) => (isValidIban(ibanFor(x)) ? 1 : 0);
+          return sign * (rank(a) - rank(b)) || party(a).localeCompare(party(b));
+        }
+        case 'invoice':
+        case 'due': {
+          const key = col === 'due' ? 'due_date' : 'invoice_date';
+          const av = (a[key] ?? '') as string, bv = (b[key] ?? '') as string;
+          if (!av && !bv) return 0;
+          if (!av) return 1;                      // undated last, both ways
+          if (!bv) return -1;
+          return sign * av.localeCompare(bv);
+        }
+      }
+    });
+  }, [payableRows, paySort, matchedCpByBill, ibanFor]);
+
   const rememberIban = useCallback(async (b: Bill, iban: string) => {
     const cp = matchedCpByBill.get(b.id);
     if (!cp || !isValidIban(iban)) return;
@@ -2260,17 +2301,46 @@ export default function BillsPage() {
                           : new Set())}
                         className="w-4 h-4 accent-green-600" />
                     </th>
-                    <th className="px-3 py-2 text-left font-semibold text-gray-500 uppercase tracking-wide">Empfänger</th>
-                    <th className="px-3 py-2 text-left font-semibold text-gray-500 uppercase tracking-wide">Rechnung</th>
-                    <th className="px-3 py-2 text-left font-semibold text-gray-500 uppercase tracking-wide">IBAN</th>
-                    <th className="px-3 py-2 text-right font-semibold text-gray-500 uppercase tracking-wide">Betrag</th>
+                    {([
+                      ['party',   'Empfänger',  'left'],
+                      ['invoice', 'Rechnung',   'left'],
+                      ['due',     'Fällig',     'left'],
+                      ['iban',    'IBAN',       'left'],
+                      ['amount',  'Betrag',     'right'],
+                    ] as const).map(([col, label, align]) => (
+                      <th key={col}
+                        className={`px-3 py-2 font-semibold text-gray-500 uppercase tracking-wide select-none ${
+                          align === 'right' ? 'text-right' : 'text-left'}`}>
+                        <button
+                          onClick={() => setPaySort(s => ({
+                            col,
+                            /* Same column again reverses; a new one starts
+                               ascending, except amounts, where the big ones are
+                               what anybody is looking for. */
+                            dir: s.col === col ? (s.dir === 'asc' ? 'desc' : 'asc')
+                               : col === 'amount' ? 'desc' : 'asc',
+                          }))}
+                          className={`inline-flex items-center gap-1 hover:text-gray-700 ${
+                            paySort.col === col ? 'text-gray-800' : ''}`}>
+                          {label}
+                          <span className={paySort.col === col ? 'opacity-100' : 'opacity-0'}>
+                            {paySort.dir === 'asc' ? '▲' : '▼'}
+                          </span>
+                        </button>
+                      </th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {payableRows.map(b => {
+                  {sortedPayable.map(b => {
                     const iban = ibanFor(b);
                     const ok = isValidIban(iban);
                     const cp = matchedCpByBill.get(b.id);
+                    /* Overdue against the execution date, not today: the run is
+                       dated 14.10., so a bill due the 13th is late when it is
+                       paid, whatever the calendar says now. */
+                    const due = b.due_date ?? null;
+                    const late = !!due && !!payDate && due < payDate;
                     return (
                       <tr key={b.id} className={`border-b border-gray-50 ${paySel.has(b.id) ? 'bg-green-50/40' : ''}`}>
                         <td className="px-3 py-1.5">
@@ -2288,6 +2358,11 @@ export default function BillsPage() {
                         <td className="px-3 py-1.5 text-gray-500 whitespace-nowrap">
                           {b.invoice_number ?? '—'}
                           <span className="text-gray-300 ml-1">{fmtDate(b.invoice_date)}</span>
+                        </td>
+                        <td className={`px-3 py-1.5 whitespace-nowrap tabular-nums ${
+                          late ? 'text-red-600 font-semibold' : 'text-gray-500'}`}>
+                          {due ? fmtDate(due) : <span className="text-gray-300">—</span>}
+                          {late && <span className="ml-1 text-[10px] font-normal">überfällig</span>}
                         </td>
                         <td className="px-3 py-1.5">
                           <input
