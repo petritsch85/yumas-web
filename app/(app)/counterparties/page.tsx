@@ -13,6 +13,8 @@ type Counterparty = {
   default_vat_rate: number | null;
   notes: string | null;
   keywords: string[];
+  /** The account we transfer to. Set means approved: the payment run uses it. */
+  iban: string | null;
   created_at: string;
 };
 
@@ -329,7 +331,7 @@ function CpPanel({ cp }: { cp: Counterparty }) {
     queryFn: async () => {
       const { data } = await supabase
         .from('bills')
-        .select('id,supplier_name,invoice_number,invoice_date,gross_amount,net_amount,status,cashflow_transactions(id),transaction_bill_links(id,transaction_id)')
+        .select('id,supplier_name,invoice_number,invoice_date,gross_amount,net_amount,status,creditor_iban,cashflow_transactions(id),transaction_bill_links(id,transaction_id)')
         .order('invoice_date', { ascending: false });
       return data ?? [];
     },
@@ -371,6 +373,40 @@ function CpPanel({ cp }: { cp: Counterparty }) {
   const matchedBills = useMemo(() =>
     bills.filter(b => kwMatch(b.supplier_name, cp.keywords, cp.name))
   , [bills, cp.keywords, cp.name]);
+
+  /**
+   * The accounts this supplier's own invoices ask to be paid into.
+   *
+   * Read off the PDFs, so they are a proposal and nothing more — the payment
+   * run uses cp.iban, which is set only when somebody approves one here. Most
+   * recent first, because an IBAN changes and the newest invoice is the one
+   * that says where the money goes now.
+   */
+  const proposedIbans = useMemo(() => {
+    const seen = new Map<string, { iban: string; count: number; latest: string | null }>();
+    for (const b of matchedBills) {
+      const raw = (b as { creditor_iban?: string | null }).creditor_iban;
+      if (!raw) continue;
+      const iban = raw.replace(/\s+/g, '').toUpperCase();
+      const cur = seen.get(iban) ?? { iban, count: 0, latest: null };
+      cur.count += 1;
+      if (!cur.latest || (b.invoice_date ?? '') > cur.latest) cur.latest = b.invoice_date ?? null;
+      seen.set(iban, cur);
+    }
+    return [...seen.values()].sort((a, z) => (z.latest ?? '').localeCompare(a.latest ?? ''));
+  }, [matchedBills]);
+
+  const [savingIban, setSavingIban] = useState<string | null>(null);
+  const approveIban = async (iban: string) => {
+    setSavingIban(iban);
+    try {
+      await fetch(`/api/counterparties/${cp.id}`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: cp.name, keywords: cp.keywords, iban }),
+      });
+      await qc.invalidateQueries({ queryKey: ['counterparties'] });
+    } finally { setSavingIban(null); }
+  };
 
   const toggleTxSort   = (col: string) => setTxSort(s   => ({ col, dir: s.col === col && s.dir === 'asc' ? 'desc' : 'asc' }));
   const toggleBillSort = (col: string) => setBillSort(s => ({ col, dir: s.col === col && s.dir === 'asc' ? 'desc' : 'asc' }));
@@ -476,6 +512,59 @@ function CpPanel({ cp }: { cp: Counterparty }) {
               <div className="text-xs text-gray-400">{stats.net >= 0 ? 'Positive' : 'Negative'}</div>
             </div>
           </div>
+
+          {/* Bankverbindung — approved once, then used by every payment run */}
+          {(cp.iban || proposedIbans.length > 0) && (
+            <div className="mb-4">
+              <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+                Bankverbindung
+              </div>
+              <div className="space-y-1.5">
+                {cp.iban && (
+                  <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-green-50 border border-green-200">
+                    <Check size={14} className="text-green-600 flex-shrink-0" />
+                    <span className="font-mono text-xs text-gray-800">{cp.iban}</span>
+                    <span className="text-[11px] font-semibold text-green-700">
+                      freigegeben · wird für Überweisungen verwendet
+                    </span>
+                  </div>
+                )}
+                {proposedIbans
+                  .filter(p => p.iban !== (cp.iban ?? '').replace(/\s+/g, '').toUpperCase())
+                  .map(p => (
+                    <div key={p.iban}
+                      className={`flex items-center gap-2 px-3 py-2 rounded-lg border ${
+                        cp.iban ? 'bg-red-50 border-red-200' : 'bg-amber-50 border-amber-200'}`}>
+                      <span className="font-mono text-xs text-gray-800">{p.iban}</span>
+                      <span className="text-[11px] text-gray-500">
+                        auf {p.count} Rechnung{p.count === 1 ? '' : 'en'}
+                        {p.latest && ` · zuletzt ${p.latest.slice(8)}.${p.latest.slice(5, 7)}.${p.latest.slice(0, 4)}`}
+                      </span>
+                      {/* A different account on a supplier that already has an
+                          approved one is how invoice fraud looks. Say so, and
+                          make replacing it a deliberate act. */}
+                      {cp.iban && (
+                        <span className="text-[11px] font-semibold text-red-700">
+                          weicht von der freigegebenen ab — bitte prüfen
+                        </span>
+                      )}
+                      <button
+                        onClick={() => void approveIban(p.iban)}
+                        disabled={savingIban === p.iban}
+                        className={`ml-auto px-2 py-1 rounded-md text-[11px] font-semibold text-white disabled:opacity-50 ${
+                          cp.iban ? 'bg-red-600 hover:bg-red-700' : 'bg-[#1B5E20] hover:bg-[#164a1a]'}`}>
+                        {savingIban === p.iban ? '…' : cp.iban ? 'Ersetzen' : 'Freigeben'}
+                      </button>
+                    </div>
+                  ))}
+                {!cp.iban && (
+                  <div className="text-[11px] text-gray-400">
+                    Vorschlag aus den Rechnungen. Erst nach Freigabe wird er für Überweisungen verwendet.
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Cash Flows */}
           <div>
