@@ -432,19 +432,39 @@ function BillPeriodPicker({ bill, onSave }: {
     return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey); };
   }, [open]);
 
+  /**
+   * Switching type reshapes the date, because the two kinds are not the same
+   * string.
+   *
+   * One-off and Other period hold a day, 2026-09-09; Monthly and Annual hold a
+   * month, 2026-09. Changing the type alone left a day in a field that wanted
+   * a month, and Apply then built "2026-09-09" + "-01" — a date Postgres
+   * refuses. The PATCH failed, nothing reported it, and the period never
+   * changed however many times it was set.
+   */
+  const changeType = (next: BPType) => {
+    const wantsMonth = next === 'monthly' || next === 'annual';
+    const hasMonth = type === 'monthly' || type === 'annual';
+    if (wantsMonth && !hasMonth) setStart(s => s.slice(0, 7));
+    if (!wantsMonth && hasMonth) setStart(s => (s ? `${s.slice(0, 7)}-01` : s));
+    setType(next);
+  };
+
   const apply = () => {
     let pt: string, ps: string | null, pe: string | null;
+    /* Belt and braces: whatever the state says, a month field gets a month. */
+    const month = start.slice(0, 7);
     if (type === 'one-off') {
       pt = 'single_date'; ps = start || null; pe = ps;
-    } else if (type === 'monthly' && start) {
+    } else if (type === 'monthly' && month) {
       pt = 'month';
-      ps = `${start}-01`;
-      pe = bpLastDay(start);
-    } else if (type === 'annual' && start) {
+      ps = `${month}-01`;
+      pe = bpLastDay(month);
+    } else if (type === 'annual' && month) {
       pt = 'year';
-      ps = `${start}-01`;
+      ps = `${month}-01`;
       // end = last day of the month 11 months later (start + 12 months − 1 day)
-      const [sy, sm] = start.split('-').map(Number);
+      const [sy, sm] = month.split('-').map(Number);
       const endMonth = ((sm - 1 + 11) % 12) + 1;
       const endYear  = sy + Math.floor((sm - 1 + 11) / 12);
       pe = bpLastDay(`${String(endYear)}-${String(endMonth).padStart(2,'0')}`);
@@ -465,6 +485,11 @@ function BillPeriodPicker({ bill, onSave }: {
       : fmtDate(bill.period_start)
     : '';
 
+  /** A period someone chose, as against the invoice date a bill is born with. */
+  const spansPeriod = bill.period_type === 'month'
+    || bill.period_type === 'year'
+    || bill.period_type === 'custom';
+
   const TYPES: { key: BPType; label: string }[] = [
     { key: 'one-off',  label: 'One-off' },
     { key: 'monthly',  label: 'Monthly' },
@@ -475,11 +500,18 @@ function BillPeriodPicker({ bill, onSave }: {
 
   return (
     <div className="relative inline-block">
+      {/* Green where a real period was chosen, blue where the bill simply
+          carries its own date. Every bill gets a date at import, so without
+          the distinction a column of blue says nothing about which ones have
+          actually been thought about. */}
       <button ref={btnRef} onClick={openPicker}
+        title={spansPeriod ? 'Zeitraum gesetzt — wird in der GuV verteilt' : 'Nur das Rechnungsdatum'}
         className={`text-xs rounded px-1.5 py-0.5 border whitespace-nowrap transition-colors ${
-          label
-            ? 'bg-blue-50 border-blue-200 text-blue-800 hover:bg-blue-100'
-            : 'bg-white border-dashed border-gray-300 text-gray-400 hover:border-gray-500 hover:text-gray-600'
+          !label
+            ? 'bg-white border-dashed border-gray-300 text-gray-400 hover:border-gray-500 hover:text-gray-600'
+            : spansPeriod
+              ? 'bg-green-50 border-green-300 text-green-800 font-medium hover:bg-green-100'
+              : 'bg-blue-50 border-blue-200 text-blue-800 hover:bg-blue-100'
         }`}>
         {label || '+ Set period'}
       </button>
@@ -490,7 +522,7 @@ function BillPeriodPicker({ bill, onSave }: {
           className="bg-white border border-gray-200 rounded-xl shadow-2xl p-4 w-72">
           <div className="grid grid-cols-2 gap-1.5 mb-4">
             {TYPES.map(t => (
-              <button key={t.key} onClick={() => setType(t.key)}
+              <button key={t.key} onClick={() => changeType(t.key)}
                 className={`py-1.5 px-2 text-xs rounded-lg font-medium border transition-colors ${
                   type === t.key ? 'bg-[#1B5E20] text-white border-[#1B5E20]' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'
                 }`}>{t.label}</button>
@@ -1229,11 +1261,18 @@ export default function BillsPage() {
   const removeFromQueue = (id: string) => setQueue((q) => q.filter((i) => i.id !== id));
 
   const patchBillPeriod = async (billId: string, periodType: string, periodStart: string | null, periodEnd: string | null) => {
-    await fetch(`/api/bills/${billId}`, {
+    const res = await fetch(`/api/bills/${billId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ period_type: periodType || null, period_start: periodStart, period_end: periodEnd }),
     });
+    /* A date the database refuses used to fail in silence, which is how a
+       period could be set over and over and never change. */
+    if (!res.ok) {
+      const msg = await res.text().catch(() => '');
+      alert(`Zeitraum nicht gespeichert: ${msg.slice(0, 200) || res.status}`);
+      return;
+    }
     queryClient.invalidateQueries({ queryKey: ['bills'] });
   };
 
