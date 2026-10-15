@@ -475,11 +475,25 @@ function BillPeriodPicker({ bill, onSave }: {
     setOpen(false);
   };
 
+  /** "Sep 26", from a date. */
+  const shortMonth = (d: string) =>
+    new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { month: 'short', year: '2-digit' });
+
+  /**
+   * An annual period is a year of twelve months, not a calendar year.
+   *
+   * The Lufttechnik Wartung runs September to August, and a chip reading
+   * "2026" says the opposite of what was set — it is the detail that decides
+   * which months carry the cost. Only a period that really is January to
+   * December gets to show the bare year.
+   */
   const label = bill.period_start
     ? bill.period_type === 'month'
         ? new Date(bill.period_start + 'T00:00:00').toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })
       : bill.period_type === 'year'
-        ? new Date(bill.period_start + 'T00:00:00').getFullYear().toString()
+        ? (bill.period_start.slice(5, 7) === '01' && bill.period_end?.slice(5, 7) === '12'
+            ? bill.period_start.slice(0, 4)
+            : `${shortMonth(bill.period_start)} – ${bill.period_end ? shortMonth(bill.period_end) : '?'}`)
       : bill.period_type === 'custom'
         ? `${fmtDate(bill.period_start)} – ${fmtDate(bill.period_end)}`
       : fmtDate(bill.period_start)
@@ -505,7 +519,9 @@ function BillPeriodPicker({ bill, onSave }: {
           the distinction a column of blue says nothing about which ones have
           actually been thought about. */}
       <button ref={btnRef} onClick={openPicker}
-        title={spansPeriod ? 'Zeitraum gesetzt — wird in der GuV verteilt' : 'Nur das Rechnungsdatum'}
+        title={spansPeriod
+          ? `Zeitraum ${fmtDate(bill.period_start)} – ${fmtDate(bill.period_end)} — wird in der GuV über diese Monate verteilt`
+          : 'Nur das Rechnungsdatum'}
         className={`text-xs rounded px-1.5 py-0.5 border whitespace-nowrap transition-colors ${
           !label
             ? 'bg-white border-dashed border-gray-300 text-gray-400 hover:border-gray-500 hover:text-gray-600'
