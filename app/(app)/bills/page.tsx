@@ -566,6 +566,89 @@ function BillPeriodPicker({ bill, onSave }: {
   );
 }
 
+/**
+ * Which store a bill belongs to, set from the row.
+ *
+ * Until now this could only be changed by opening the bill for editing, so in
+ * practice it was whatever the import guessed from the delivery address — and
+ * a store P&L is only worth having if the costs behind it are attributed
+ * honestly. One click per bill is the difference between that being possible
+ * and not.
+ *
+ * Shows a dashed placeholder where nothing is set, so an unattributed bill is
+ * visible rather than simply blank.
+ */
+function BillLocationPicker({ bill, options, onSave }: {
+  bill: Bill;
+  options: { id: string; name: string }[];
+  onSave: (label: string | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState({ top: 0, left: 0 });
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const popRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (!popRef.current?.contains(e.target as Node) && !btnRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey); };
+  }, [open]);
+
+  const openPicker = () => {
+    const rect = btnRef.current?.getBoundingClientRect();
+    if (rect) {
+      const width = 190;
+      setPos({
+        top: window.innerHeight - rect.bottom < 240 ? rect.top - 8 : rect.bottom + 4,
+        left: Math.max(8, Math.min(rect.left, window.innerWidth - width - 8)),
+      });
+    }
+    setOpen(true);
+  };
+
+  const pick = (label: string | null) => { onSave(label); setOpen(false); };
+
+  return (
+    <div className="relative inline-block">
+      <button ref={btnRef} onClick={openPicker}
+        title={bill.location_label ? 'Standort ändern' : 'Standort setzen'}
+        className={`inline-flex items-center gap-1 px-1.5 py-0.5 text-xs rounded-full whitespace-nowrap border transition-colors ${
+          bill.location_label
+            ? 'bg-indigo-50 border-indigo-200 text-indigo-700 hover:bg-indigo-100'
+            : 'bg-white border-dashed border-gray-300 text-gray-400 hover:border-gray-500 hover:text-gray-600'
+        }`}>
+        <MapPin size={9} />{bill.location_label || 'Standort'}
+      </button>
+
+      {open && (
+        <div ref={popRef}
+          style={{ position: 'fixed', top: pos.top, left: pos.left, zIndex: 9999, width: 190 }}
+          className="bg-white border border-gray-200 rounded-xl shadow-2xl py-1">
+          {options.map(o => (
+            <button key={o.id} onClick={() => pick(o.name)}
+              className={`w-full text-left px-3 py-1.5 text-xs hover:bg-gray-50 flex items-center gap-1.5 ${
+                bill.location_label === o.name ? 'text-indigo-700 font-semibold' : 'text-gray-700'
+              }`}>
+              <MapPin size={10} className="text-gray-300" />{o.name}
+            </button>
+          ))}
+          {bill.location_label && (
+            <button onClick={() => pick(null)}
+              className="w-full text-left px-3 py-1.5 text-xs text-red-600 hover:bg-red-50 border-t border-gray-100 mt-1">
+              Standort entfernen
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default function BillsPage() {
   const queryClient  = useQueryClient();
@@ -1276,6 +1359,13 @@ export default function BillsPage() {
     queryClient.invalidateQueries({ queryKey: ['bills'] });
   };
 
+  /* Straight to the table: the location is one column, not a whole bill edit. */
+  const patchBillLocation = async (billId: string, label: string | null) => {
+    const { error } = await supabase.from('bills').update({ location_label: label }).eq('id', billId);
+    if (error) { alert(`Standort nicht gespeichert: ${error.message}`); return; }
+    queryClient.invalidateQueries({ queryKey: ['bills'] });
+  };
+
   const [editingDueId, setEditingDueId] = useState<string | null>(null);
   const updateDueDate = async (id: string, due: string) => {
     setEditingDueId(null);
@@ -1551,11 +1641,11 @@ export default function BillsPage() {
                             />
                           </td>
                           <td className="px-1.5 py-1.5">
-                            {bill.location_label && (
-                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-indigo-50 text-indigo-700 text-xs rounded-full whitespace-nowrap">
-                                <MapPin size={9} />{bill.location_label}
-                              </span>
-                            )}
+                            <BillLocationPicker
+                              bill={bill}
+                              options={allLocationOptions}
+                              onSave={label => patchBillLocation(bill.id, label)}
+                            />
                           </td>
                           <td className="px-1.5 py-1.5 max-w-[110px]">
                             {bill.category && (
