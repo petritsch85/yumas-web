@@ -7,7 +7,7 @@ import {
   Upload, FileCheck, AlertCircle, Loader2,
   CheckCircle2, Clock, Banknote, Trash2,
   ChevronDown, ChevronUp, Eye, X, FilePlus, Save, MapPin, Calendar, Pencil, LayoutList,
-  AlertTriangle, Landmark, Download, Inbox, ArrowDownToLine, FileX, Check,
+  AlertTriangle, Landmark, Download, Inbox, ArrowDownToLine, FileX, Check, Search,
 } from 'lucide-react';
 import { buildPain001, painFilename, validateOrder, isValidIban, normaliseIban } from '@/lib/sepa-credit-transfer';
 import { resolveDueDate, SOFORT_DAYS, isAutoCollected } from '@/lib/payment-terms';
@@ -690,6 +690,7 @@ export default function BillsPage() {
   const [paySaving, setPaySaving] = useState(false);
 
   const [filterStatus,     setFilterStatus]     = useState('all');
+  const [search,           setSearch]           = useState('');
   const [filterCategory,   setFilterCategory]   = useState('all');
   const [filterLocation,   setFilterLocation]   = useState('all');
   const [filterMonth,      setFilterMonth]      = useState('all');
@@ -945,7 +946,31 @@ export default function BillsPage() {
   }, [bills, queue]);
 
 
+  /**
+   * What a search term looks for.
+   *
+   * Supplier, invoice number, category, location and the amount — the things
+   * somebody actually remembers about a bill they are trying to find again.
+   * The amount is matched as it is stored and as it is written here, so both
+   * "1188.85" and "1.188,85" find the Sandoro invoice.
+   *
+   * Several words all have to match, and not necessarily in the same field:
+   * "sandoro 1188" finds it, and so does "taunus aufzug".
+   */
+  const searchTerms = search.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const haystack = (b: Bill) => [
+    b.supplier_name, b.creditor_name, b.invoice_number, b.category, b.location_label,
+    b.invoice_date, b.due_date,
+    b.gross_amount?.toFixed(2),
+    b.gross_amount?.toLocaleString('de-DE', { minimumFractionDigits: 2 }),
+    b.net_amount?.toFixed(2),
+  ].join(' ').toLowerCase();
+
   const filtered = bills.filter((b) => {
+    if (searchTerms.length) {
+      const hay = haystack(b);
+      if (!searchTerms.every(t => hay.includes(t))) return false;
+    }
     if (filterStatus   !== 'all' && b.status         !== filterStatus)   return false;
     if (filterCategory !== 'all' && b.category        !== filterCategory) return false;
     if (filterLocation !== 'all' && b.location_label  !== filterLocation) return false;
@@ -1192,7 +1217,7 @@ export default function BillsPage() {
   const paidPageRows   = paidRows.slice((paidPage - 1) * pageSize, paidPage * pageSize);
 
   // Snap back to page 1 whenever the result set changes underneath us
-  useEffect(() => { setPage(1); setPage2(1); setPage3(1); setPage4(1); }, [filterStatus, filterCategory, filterLocation, filterMonth, filterDuplicates, sortCol, sortDir, pageSize]);
+  useEffect(() => { setPage(1); setPage2(1); setPage3(1); setPage4(1); }, [search, filterStatus, filterCategory, filterLocation, filterMonth, filterDuplicates, sortCol, sortDir, pageSize]);
 
   // ── Match delivery address to a known location ────────────────────────────────
   const matchLocation = useCallback((addr: DeliveryAddress | null, locs: Location[]): { locationId: string; locationLabel: string } | null => {
@@ -2223,6 +2248,23 @@ export default function BillsPage() {
 
           {/* Filters */}
           <div className="flex items-center gap-3 mb-4 flex-wrap">
+            {/* First, because with 1.300 settled bills it is the way most of
+                them will ever be found again. */}
+            <div className="relative">
+              <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+              <input
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder="Lieferant, Rechnungsnr., Betrag…"
+                className="w-64 pl-7 pr-7 py-1.5 border border-gray-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30" />
+              {search && (
+                <button onClick={() => setSearch('')}
+                  title="Suche löschen"
+                  className="absolute right-1.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                  <X size={13} />
+                </button>
+              )}
+            </div>
             <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}
               className="border border-gray-200 rounded-lg px-3 py-1.5 text-xs font-semibold text-gray-600 focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/30">
               <option value="all">All statuses</option>
