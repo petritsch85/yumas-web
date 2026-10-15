@@ -48,6 +48,11 @@ const NO_INVOICE_EXPECTED = [
   [/abrechnung \d{2}\.\d{2}\.\d{4}|kontof[üu]hrung|entgelte vom/i, 'Bankentgelte'],
   [/bundeskasse|stadtkasse|gemeinschaftskasse|landeswohlfahrt|rundfunk/i, 'Behörden/Gebühren'],
   [/^wohnraum|^strabag|^patricia wohninveste|^laura klein/i, 'Miete (Ersatzbeleg vorhanden)'],
+  /* Die Acquirer schicken eine Monatsabrechnung, nie eine Rechnung — Nexis
+     Lastschrift nennt ihre Zahlen selbst im Verwendungszweck. PayPal steht
+     bewusst nicht hier: dessen Lastschriften sind Einkäufe bei Händlern, und
+     die wollen jeweils eine Rechnung. */
+  [/^nexi|^concardis|^payone|american express|^amex\b|^stripe/i, 'Zahlungsdienstleister (Monatsabrechnung)'],
 ];
 const expected = t => {
   const s = `${t.counterparty ?? ''} ${t.description ?? ''}`;

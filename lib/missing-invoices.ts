@@ -37,6 +37,21 @@ const NO_INVOICE_EXPECTED: [RegExp, string][] = [
   [/bundeskasse|stadtkasse|gemeinschaftskasse|landeswohlfahrt|rundfunk/i, 'Behörden/Gebühren'],
   /* The landlords bill once in the lease; the Ersatzbelege stand in for it. */
   [/^wohnraum|^strabag|^patricia wohninveste|^laura klein/i, 'Miete (Ersatzbeleg)'],
+  /**
+   * The card acquirers send a monthly statement, never an invoice.
+   *
+   * Nexi's debit of 03.09. quotes its own figures in the narrative —
+   * "ENTG1256,24:UST235,62" — and the August Monatsabrechnung carries exactly
+   * those, netting to the 1.491,86 € that left the account. The document is on
+   * file, in position 05 of the month folder; it is simply not a bill, so
+   * looking for one found nothing and called it a gap.
+   *
+   * PayPal is deliberately NOT here. Its debits are purchases from merchants —
+   * Böttcher, Canva, Walch Food — and each of those does want an invoice. Only
+   * an acquirer that debits its own fee belongs in this line.
+   */
+  [/^nexi|^concardis|^payone|american express|^amex\b|^stripe/i,
+    'Zahlungsdienstleister (Monatsabrechnung)'],
 ];
 
 /** Why no invoice is expected for this payment, or null if one should exist. */
