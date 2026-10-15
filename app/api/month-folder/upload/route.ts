@@ -3,6 +3,7 @@ import { extractText, getDocumentProxy } from 'unpdf';
 import { getSupabaseAdmin } from '@/lib/supabase-admin';
 import { itemFor } from '@/lib/month-folder';
 import { parsePaypalStatement } from '@/lib/paypal-statement';
+import { importNexiPdf } from '@/lib/nexi-import';
 
 export const maxDuration = 60;
 
@@ -78,6 +79,30 @@ export async function POST(req: NextRequest) {
    * that cannot prove itself is worse than none.
    */
   const extra: Record<string, number | null> = {};
+
+  /**
+   * A Nexi statement filed here is also read here.
+   *
+   * It used to be filed and nothing more: the parser lived behind the upload
+   * on the counterparty card, so the same PDF did two different things
+   * depending on which page you dropped it on. September's statement was on
+   * file, position 05 showed "vollständig", and its 1.4xx € of fees were
+   * missing from the P&L — because nobody had also dropped it somewhere else.
+   *
+   * Filing a document and reading it should not be two jobs.
+   */
+  if (kind === 'nexi') {
+    try {
+      const res = await importNexiPdf(new Uint8Array(await file.arrayBuffer()), file.name);
+      if (res.error) console.warn(`[month-folder] Nexi statement not read: ${res.error}`);
+      else console.log(`[month-folder] Nexi ${res.data?.periodStart}–${res.data?.periodEnd} imported`);
+    } catch (e) {
+      /* The document still belongs in the folder even when the figures cannot
+         be read from it. */
+      console.warn('[month-folder] Nexi statement unreadable:', e);
+    }
+  }
+
   if (kind === 'paypal') {
     try {
       const pdf = await getDocumentProxy(new Uint8Array(await file.arrayBuffer()));
