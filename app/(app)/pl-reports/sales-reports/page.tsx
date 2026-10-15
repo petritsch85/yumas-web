@@ -1504,7 +1504,7 @@ export default function SalesReportsPage() {
       const out: Record<string, unknown>[] = [];
       for (let pg = 0; ; pg++) {
         const { data, error } = await supabase.from('bills')
-          .select('invoice_date,category,net_amount,supplier_name,invoice_number')
+          .select('invoice_date,category,net_amount,supplier_name,invoice_number,period_type,period_start,period_end')
           .gte('invoice_date', COGS_FROM + '-01')
           .order('invoice_date')
           .range(pg * 1000, (pg + 1) * 1000 - 1);
@@ -1675,6 +1675,65 @@ export default function SalesReportsPage() {
       const month = String(b.invoice_date ?? '').slice(0, 7);
       if (!month || month < COGS_FROM) continue;
       m[month] = (m[month] ?? 0) + Number(b.net_amount ?? 0);
+    }
+    return m;
+  }, [gmCostBills]);
+
+  /**
+   * Spreading a bill that pays for a whole year across that year.
+   *
+   * The Lufttechnik Wartung in the Taunusstraße is done once and invoiced
+   * once, and the month it lands in carries the lot — 6.000 € against a
+   * September that earned 233.000. That is not what the month cost to run; it
+   * is what the year cost to run, arriving in one piece.
+   *
+   * So a bill with a period longer than its own month is spread evenly over
+   * the months it covers, and the adjustment is the difference between that
+   * and where the bill actually fell:
+   *
+   *   adjustment[m] = what m should carry − what m was charged
+   *
+   * Which makes the adjustments sum to zero over the whole period. Nothing is
+   * created or removed; it is moved. A bill whose period is just its own
+   * month adjusts by nothing, which is most of them.
+   */
+  const groupSgaAdjustments = useMemo(() => {
+    const lineOf = new Map<string, string>();
+    for (const l of SGA_LINES) for (const c of l.categories) lineOf.set(c, l.key);
+
+    const m: Record<string, number> = {};
+    const add = (month: string, v: number) => {
+      if (!month || !v) return;
+      m[month] = (m[month] ?? 0) + v;
+    };
+
+    for (const b of gmCostBills) {
+      /* SG&A only. Spreading a food delivery over a year would be nonsense,
+         and staff costs do not come from these bills at all. */
+      if (!lineOf.has(String(b.category ?? ''))) continue;
+
+      const start = String(b.period_start ?? '').slice(0, 7);
+      const end   = String(b.period_end ?? '').slice(0, 7);
+      const booked = String(b.invoice_date ?? '').slice(0, 7);
+      const net = Number(b.net_amount ?? 0);
+      if (!start || !end || !booked || !net) continue;
+      if (start === end) continue;              // one month: nothing to spread
+
+      /* Every month the period touches, inclusive. */
+      const months: string[] = [];
+      for (let [y, mo] = start.split('-').map(Number); ; ) {
+        const key = `${y}-${String(mo).padStart(2, '0')}`;
+        months.push(key);
+        if (key === end || months.length > 120) break;
+        if (++mo > 12) { mo = 1; y++; }
+      }
+      if (months.length < 2) continue;
+
+      const share = net / months.length;
+      for (const mo of months) add(mo, share);
+      /* Taken out of the month that was charged — which may be outside the
+         period itself, when a Wartung is invoiced before the year it covers. */
+      add(booked, -net);
     }
     return m;
   }, [gmCostBills]);
@@ -8083,10 +8142,57 @@ export default function SalesReportsPage() {
               ).sort((a, z) => z.net - a.net);
             };
 
+            /**
+             * Which bills moved cost into or out of this column, and why.
+             *
+             * Both halves are shown: the share a spread bill contributes here,
+             * and the whole amount taken back out of the month that was
+             * charged. Seeing only the net would make a line that says −5.500
+             * unaccountable.
+             */
+            const adjustmentItems = (colKey: string) => {
+              const inCol = (m: string) => colKey.startsWith('FY')
+                ? m.startsWith(colKey.slice(2)) : m === colKey;
+              const lineOf = new Map<string, string>();
+              for (const l of SGA_LINES) for (const c of l.categories) lineOf.set(c, l.key);
+
+              const rows: { name: string; net: number; bills: number }[] = [];
+              for (const b of gmCostBills) {
+                if (!lineOf.has(String(b.category ?? ''))) continue;
+                const start = String(b.period_start ?? '').slice(0, 7);
+                const end   = String(b.period_end ?? '').slice(0, 7);
+                const booked = String(b.invoice_date ?? '').slice(0, 7);
+                const net = Number(b.net_amount ?? 0);
+                if (!start || !end || !booked || !net || start === end) continue;
+
+                const months: string[] = [];
+                for (let [y, mo] = start.split('-').map(Number); ; ) {
+                  const key = `${y}-${String(mo).padStart(2, '0')}`;
+                  months.push(key);
+                  if (key === end || months.length > 120) break;
+                  if (++mo > 12) { mo = 1; y++; }
+                }
+                if (months.length < 2) continue;
+
+                const who = String(b.supplier_name ?? '—').slice(0, 34);
+                const share = net / months.length;
+                const hereCount = months.filter(inCol).length;
+                if (hereCount) {
+                  rows.push({ name: `${who} · Anteil ${hereCount}/${months.length} Monate`, net: share * hereCount, bills: 1 });
+                }
+                if (inCol(booked)) {
+                  rows.push({ name: `${who} · voller Betrag aus ${booked} herausgenommen`, net: -net, bills: 1 });
+                }
+              }
+              return rows.sort((a, z) => Math.abs(z.net) - Math.abs(a.net));
+            };
+
             const drillRows = (part: string) => {
               if (!cogsDrill || cogsDrill.part !== part) return [];
               const { colKey } = cogsDrill;
-              const rows = part === 'staff'
+              const rows = part === 'sga-adj'
+                ? adjustmentItems(colKey)
+                : part === 'staff'
                 ? staffItems(colKey)
                 : part.startsWith('cf-')
                 ? cashflowItems(part.slice(3), colKey)
@@ -8246,9 +8352,33 @@ export default function SalesReportsPage() {
              * placeholder — so EBITDA rests on that figure wherever one is set,
              * and is overstated by a month's wages wherever one is not.
              */
+            /** What periodisation moves into or out of this column. */
+            const sgaAdjustment = (colKey: string): number | null => {
+              const sum = (pred: (m: string) => boolean) => {
+                const hits = Object.entries(groupSgaAdjustments).filter(([m]) => pred(m) && m >= COGS_FROM);
+                if (!hits.length) return null;
+                const v = hits.reduce((t, [, x]) => t + x, 0);
+                /* Rounding in the shares leaves fractions of a cent behind;
+                   a line reading 0 where nothing moved is noise. */
+                return Math.abs(v) < 0.005 ? null : v;
+              };
+              return colKey.startsWith('FY')
+                ? sum(m => m.startsWith(colKey.slice(2)))
+                : (colKey >= COGS_FROM ? sum(m => m === colKey) : null);
+            };
+
+            /** SG&A as the month should carry it, once the periods are honoured. */
+            const sgaAdjusted = (colKey: string): number | null => {
+              const base = sgaTotal(colKey);
+              if (base === null) return null;
+              return base + (sgaAdjustment(colKey) ?? 0);
+            };
+
             const ebitda = (colKey: string) => {
               const gp = grossProfit(colKey);
-              const sga = sgaTotal(colKey);
+              /* The adjusted figure, not the raw one: a year's Wartung landing
+                 whole in September is not what September cost to run. */
+              const sga = sgaAdjusted(colKey);
               if (gp === null || sga === null) return null;
               return gp - (staffCost(colKey) ?? 0) - sga;
             };
@@ -8390,6 +8520,9 @@ export default function SalesReportsPage() {
                       ])}
                       {valueLine('sga-total', 'Total SG&A', sgaTotal, { bold: true, drill: 'sga-total' })}
                       {drillRows('sga-total')}
+                      {valueLine('sga-adj', 'Adjustments', sgaAdjustment, { indent: true, drill: 'sga-adj' })}
+                      {drillRows('sga-adj')}
+                      {valueLine('sga-adjusted', 'Total adjusted SG&A', sgaAdjusted, { bold: true })}
                       {spacerRow('sga-gap')}
 
                       {headingRow('ebitda-head', 'EBITDA')}

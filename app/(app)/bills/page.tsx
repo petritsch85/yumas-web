@@ -335,12 +335,31 @@ async function saveBillToDB(item: QueueItem, userId: string | null): Promise<voi
 // ── Bill Period Picker ────────────────────────────────────────────────────────
 const BP_MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
-function BPMonthSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+/**
+ * A month and a year, as two dropdowns.
+ *
+ * `fallback` is what the missing half means. Without it the control could not
+ * be used at all from empty: picking a month reported nothing because no year
+ * was known yet, so the state never changed, so picking a year reported
+ * nothing either. Both dropdowns looked answered — the DOM keeps its own
+ * selection — and Apply then did nothing, with no way to tell why.
+ *
+ * One half chosen is now enough; the other takes the fallback.
+ */
+function BPMonthSelect({ value, onChange, fallback }: {
+  value: string; onChange: (v: string) => void; fallback?: string;
+}) {
+  const [fy, fm] = (fallback && /^\d{4}-\d{2}$/.test(fallback) ? fallback : '')
+    .split('-');
   const [y, m] = value ? value.split('-') : ['', ''];
   const cls = 'border border-gray-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-[#1B5E20] bg-white';
   const curYear = new Date().getFullYear();
   const years = Array.from({ length: 10 }, (_, i) => curYear - 7 + i);
-  const set = (ny: string, nm: string) => { if (ny && nm) onChange(`${ny}-${nm}`); };
+  const set = (ny: string, nm: string) => {
+    const yy = ny || fy || String(curYear);
+    const mm = nm || fm || String(new Date().getMonth() + 1).padStart(2, '0');
+    onChange(`${yy}-${mm}`);
+  };
   return (
     <div className="flex gap-2">
       <select value={m ?? ''} onChange={e => set(y, e.target.value)} className={`${cls} flex-1`}>
@@ -383,7 +402,10 @@ function BillPeriodPicker({ bill, onSave }: {
     else if (pt === 'month')  { setType('monthly');  setStart(ps.slice(0,7)); setEnd(''); }
     else if (pt === 'year')   { setType('annual');   setStart(ps.slice(0,7)); setEnd(pe.slice(0,7)); }
     else if (pt === 'custom') { setType('custom');   setStart(ps); setEnd(pe); }
-    else                      { setType('monthly');  setStart(''); setEnd(''); }
+    /* No period yet: start from the bill's own month. A period that begins
+       somewhere other than the invoice month is the exception, and an empty
+       picker is the thing that could not be saved. */
+    else                      { setType('monthly');  setStart((bill.invoice_date ?? '').slice(0, 7)); setEnd(''); }
   };
 
   const openPicker = () => {
@@ -481,11 +503,11 @@ function BillPeriodPicker({ bill, onSave }: {
             )}
             {type === 'monthly' && (
               <div><label className="text-xs text-gray-500 block mb-1">Month</label>
-                <BPMonthSelect value={start} onChange={setStart} /></div>
+                <BPMonthSelect value={start} onChange={setStart} fallback={(bill.invoice_date ?? '').slice(0, 7)} /></div>
             )}
             {type === 'annual' && (
               <div><label className="text-xs text-gray-500 block mb-1">Start month</label>
-                <BPMonthSelect value={start} onChange={setStart} /></div>
+                <BPMonthSelect value={start} onChange={setStart} fallback={(bill.invoice_date ?? '').slice(0, 7)} /></div>
             )}
             {type === 'custom' && (<>
               <div><label className="text-xs text-gray-500 block mb-1">Start date</label>
