@@ -1436,6 +1436,39 @@ export default function SalesReportsPage() {
     queryKey: ['group-monthly', 'wolt-credits'], enabled: groupMonthlyOn,
     queryFn: () => fetchAllRows('wolt_month_credits', 'location_id,month,net', 'month'),
   });
+  /**
+   * The part of a bill the payroll already carries.
+   *
+   * An Edenred invoice is two things on one page: the fees for loading the
+   * cards (Aufladegebühr, Einrichtungsgebühr — 19 % VAT) and the benefit
+   * itself, the Sachbezug (0 %). The Sachbezug is booked through the payroll
+   * and is inside the FiBu-Journal's total, so counting the whole invoice
+   * counted it twice. Only the fees belong on the bill side.
+   *
+   * Taken from the bill's own line items, by the Sachbezug lines, and
+   * subtracted from its net — not by summing the fee lines, because a couple
+   * of older invoices stored the fee line gross. The Sachbezug line is 0 %,
+   * so its net and gross agree and it is the safe one to subtract.
+   */
+  const { data: gmPayrollLines = [] } = useQuery({
+    queryKey: ['group-monthly', 'payroll-lines'], enabled: groupMonthlyOn,
+    queryFn: async () => {
+      const { data, error } = await supabase.from('bill_lines')
+        .select('bill_id,description,line_total').ilike('description', '%sachbezug%');
+      if (error) { console.warn(`[P&L] bill_lines unreadable: ${error.message}`); return []; }
+      return (data ?? []) as { bill_id: string; line_total: number }[];
+    },
+  });
+  /** Per bill, what is left once the payroll's share is taken out. */
+  const inPayroll = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const l of gmPayrollLines) m.set(l.bill_id, (m.get(l.bill_id) ?? 0) + Number(l.line_total ?? 0));
+    return m;
+  }, [gmPayrollLines]);
+  const billNet = useCallback(
+    (b: Record<string, unknown>) => Number(b.net_amount ?? 0) - (inPayroll.get(String(b.id)) ?? 0),
+    [inPayroll]);
+
   /* The payroll's reconciled monthly figure, from the FiBu-Journal. Read via
      the server route: the table is closed to the browser client. */
   const { data: gmPayrollRows = [] } = useQuery({
@@ -1522,7 +1555,7 @@ export default function SalesReportsPage() {
       const out: Record<string, unknown>[] = [];
       for (let pg = 0; ; pg++) {
         const { data, error } = await supabase.from('bills')
-          .select('invoice_date,category,net_amount,supplier_name,invoice_number,period_type,period_start,period_end')
+          .select('id,invoice_date,category,net_amount,supplier_name,invoice_number,period_type,period_start,period_end')
           .gte('invoice_date', COGS_FROM + '-01')
           .order('invoice_date')
           .range(pg * 1000, (pg + 1) * 1000 - 1);
@@ -1692,10 +1725,10 @@ export default function SalesReportsPage() {
       if (String(b.category ?? '') !== STAFF_CATEGORY) continue;
       const month = String(b.invoice_date ?? '').slice(0, 7);
       if (!month || month < COGS_FROM) continue;
-      m[month] = (m[month] ?? 0) + Number(b.net_amount ?? 0);
+      m[month] = (m[month] ?? 0) + billNet(b);
     }
     return m;
-  }, [gmCostBills]);
+  }, [gmCostBills, billNet]);
 
   /**
    * Spreading a bill that pays for a whole year across that year.
@@ -1771,7 +1804,7 @@ export default function SalesReportsPage() {
          at all — but the day one is forwarded it must not land here. */
       if (PAYMENT_PROVIDER.test(String(b.supplier_name ?? ''))) continue;
       const cat = String(b.category ?? '');
-      const net = Number(b.net_amount ?? 0);
+      const net = billNet(b);
       const o = (m[monthKey] ??= { lines: {}, total: 0 });
       const key = lineOf.get(cat);
       if (!key) continue;   // cost of goods, or a category no line claims
@@ -1779,7 +1812,7 @@ export default function SalesReportsPage() {
       o.total += net;
     }
     return m;
-  }, [gmCostBills]);
+  }, [gmCostBills, billNet]);
 
   /* The three restaurants, in a fixed order so the columns never move. */
   const groupRestaurants = useMemo(
@@ -8016,7 +8049,7 @@ export default function SalesReportsPage() {
                 const name = String(b.supplier_name ?? '—').trim();
                 const key = name.toLowerCase();
                 const cur = by.get(key) ?? { net: 0, bills: 0, names: new Map<string, number>() };
-                cur.net += Number(b.net_amount ?? 0);
+                cur.net += billNet(b);
                 cur.bills += 1;
                 cur.names.set(name, (cur.names.get(name) ?? 0) + 1);
                 by.set(key, cur);
