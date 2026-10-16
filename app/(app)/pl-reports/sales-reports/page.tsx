@@ -1436,6 +1436,24 @@ export default function SalesReportsPage() {
     queryKey: ['group-monthly', 'wolt-credits'], enabled: groupMonthlyOn,
     queryFn: () => fetchAllRows('wolt_month_credits', 'location_id,month,net', 'month'),
   });
+  /* The payroll's reconciled monthly figure, from the FiBu-Journal. Read via
+     the server route: the table is closed to the browser client. */
+  const { data: gmPayrollRows = [] } = useQuery({
+    queryKey: ['group-monthly', 'payroll'], enabled: groupMonthlyOn,
+    queryFn: async () => {
+      const res = await fetch('/api/staff-costs');
+      if (!res.ok) { console.warn('[P&L] staff costs unreadable'); return []; }
+      const j = await res.json();
+      return (j.months ?? []) as { month: string; total: number }[];
+    },
+  });
+  /** Payroll per month, keyed 2026-09. */
+  const groupPayroll = useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const r of gmPayrollRows) m[String(r.month).slice(0, 7)] = Number(r.total);
+    return m;
+  }, [gmPayrollRows]);
+
   /* Nexi bills its fees monthly and debits them; PayPal and Amex keep theirs
      out of the payout. Either way they are a cost of taking the money. */
   const { data: gmNexi = [] } = useQuery({
@@ -8136,9 +8154,12 @@ export default function SalesReportsPage() {
             const staffItems = (colKey: string) => {
               const rows = cogsSuppliers('staff', colKey);
               const entered = staffPlaceholder(colKey);
+              const label = payrollTyped(colKey)
+                ? 'Lohn, Krankenkassen, Lohnsteuer — Platzhalter'
+                : 'Lohn, SV, Lohnsteuer — laut FiBu-Journal (Konto 3790)';
               return (entered === null
                 ? rows
-                : [{ name: 'Lohn, Krankenkassen, Lohnsteuer — Platzhalter', net: entered, bills: 0 }, ...rows]
+                : [{ name: label, net: entered, bills: 0 }, ...rows]
               ).sort((a, z) => z.net - a.net);
             };
 
@@ -8292,13 +8313,34 @@ export default function SalesReportsPage() {
               return SGA_LINES.reduce((t, l) => t + (sgaLine(l.key)(colKey) ?? 0), 0);
             };
 
-            /** The payroll placeholder for a column: wages, the funds, Lohnsteuer. */
-            const staffPlaceholder = (colKey: string): number | null => {
-              if (!colKey.startsWith('FY')) return STAFF_PLACEHOLDER[colKey] ?? null;
-              const year = colKey.slice(2);
-              const months = Object.entries(STAFF_PLACEHOLDER).filter(([m]) => m.startsWith(year));
-              return months.length ? months.reduce((s, [, v]) => s + v, 0) : null;
+            /**
+             * The payroll for one month: the FiBu-Journal where one is filed,
+             * the typed placeholder where not. The journal always wins — it is
+             * the payroll's own reconciled figure, and the placeholder only
+             * ever existed to stand in for it.
+             */
+            const payrollMonth = (month: string): { value: number; filed: boolean } | null => {
+              const filed = groupPayroll[month];
+              if (filed !== undefined) return { value: filed, filed: true };
+              const typed = STAFF_PLACEHOLDER[month];
+              return typed !== undefined ? { value: typed, filed: false } : null;
             };
+            /** Every month a column covers that has a payroll figure of either kind. */
+            const payrollMonths = (colKey: string) => {
+              if (!colKey.startsWith('FY')) return [colKey];
+              const year = colKey.slice(2);
+              return [...new Set([...Object.keys(groupPayroll), ...Object.keys(STAFF_PLACEHOLDER)])]
+                .filter(m => m.startsWith(year));
+            };
+
+            /** Wages, the funds, Lohnsteuer — filed or typed — for a column. */
+            const staffPlaceholder = (colKey: string): number | null => {
+              const hits = payrollMonths(colKey).map(payrollMonth).filter(Boolean) as { value: number }[];
+              return hits.length ? hits.reduce((s, h) => s + h.value, 0) : null;
+            };
+            /** Whether any month in the column still rests on a typed figure. */
+            const payrollTyped = (colKey: string) =>
+              payrollMonths(colKey).some(m => payrollMonth(m)?.filed === false);
 
             /** What the invoiced part of staff costs came to for a column. */
             const staffFromBills = (colKey: string): number | null => {
@@ -8325,8 +8367,8 @@ export default function SalesReportsPage() {
               if (entered === null && billed === null) return null;
               return (entered ?? 0) + (billed ?? 0);
             };
-            /** Red while the payroll behind it is still a figure somebody typed. */
-            const staffIsAssumed = (colKey: string) => staffPlaceholder(colKey) !== null;
+            /** Red while any payroll behind it is still a figure somebody typed. */
+            const staffIsAssumed = (colKey: string) => payrollTyped(colKey);
             const staffPct = (colKey: string) => {
               const s = staffCost(colKey);
               const sales = grandTotal(colKey).total;
