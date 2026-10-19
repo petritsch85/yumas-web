@@ -764,15 +764,23 @@ export default function BillsPage() {
      lost silently — one read wrongly can still be imported by hand. */
   const { data: skippedDocs = [] } = useQuery<SkippedDoc[]>({
     queryKey: ['inbound-skipped'],
+    /* All of them, paged. It used to stop at 200, so the count read "200"
+       while more sat behind it — and the ones cut off were the oldest, the
+       very ones nobody would think to go looking for. */
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('inbound_skipped')
-        .select('id, received_at, file_name, file_path, document_type, supplier_name, gross_amount, email_from, email_subject')
-        .eq('status', 'skipped')
-        .order('received_at', { ascending: false })
-        .limit(200);
-      if (error) return []; // the table arrives with supabase/add_bill_inbox.sql
-      return (data ?? []) as SkippedDoc[];
+      const out: SkippedDoc[] = [];
+      for (let page = 0; ; page++) {
+        const { data, error } = await supabase
+          .from('inbound_skipped')
+          .select('id, received_at, file_name, file_path, document_type, supplier_name, gross_amount, email_from, email_subject')
+          .eq('status', 'skipped')
+          .order('received_at', { ascending: false })
+          .order('id')
+          .range(page * 1000, page * 1000 + 999);
+        if (error) return out; // the table arrives with supabase/add_bill_inbox.sql
+        out.push(...((data ?? []) as SkippedDoc[]));
+        if ((data ?? []).length < 1000) return out;
+      }
     },
   });
   const [skippedOpen, setSkippedOpen] = useState(false);
