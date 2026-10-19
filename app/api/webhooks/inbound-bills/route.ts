@@ -118,7 +118,15 @@ const INBOUND_BUCKET = 'inbound-emails';
 /** How many bills are read at once — enough to clear a batch, few enough not to hit the API's rate limit. */
 const CONCURRENCY = 3;
 
-const isPdf   = (ct: string, name: string) => ct === 'application/pdf' || name.endsWith('.pdf');
+/* A PDF is recognised by its content as well as its label. Some invoicing
+   systems send "application/octet-stream" and a name with no extension; every
+   PDF still begins "%PDF", which is "JVBERi" in base64. Going by the label
+   alone, such an invoice was answered "no bill attachments", the Gmail script
+   took the 200 as success and labelled it Imported, and the bill appeared
+   nowhere at all. */
+const looksLikePdf = (content: string | undefined) => (content ?? '').trimStart().startsWith('JVBERi');
+const isPdf   = (ct: string, name: string, content?: string) =>
+  ct === 'application/pdf' || name.endsWith('.pdf') || looksLikePdf(content);
 const isImage = (ct: string, name: string) =>
   ct === 'image/jpeg' || ct === 'image/jpg' || ct === 'image/png' ||
   name.endsWith('.jpg') || name.endsWith('.jpeg') || name.endsWith('.png');
@@ -149,7 +157,7 @@ async function collectBills(attachments: Attachment[], depth = 0): Promise<Attac
       } catch (e) {
         console.error(`[inbound-bills] could not read forwarded email ${a.Name}:`, e);
       }
-    } else if (isPdf(ct, name)) {
+    } else if (isPdf(ct, name, a.Content)) {
       found.push(a);
     } else if (isImage(ct, name) && !isSignatureImage(name, !!a.ContentID, bytes)) {
       found.push(a);
@@ -371,8 +379,37 @@ export async function POST(req: NextRequest) {
   const billAttachments = await collectBills(attachments);
 
   if (billAttachments.length === 0) {
+    /**
+     * Never ignore an email without a trace.
+     *
+     * The Gmail script reads any 200 as "imported" and labels the thread so,
+     * which made an email whose attachment nothing recognised look done while
+     * it appeared nowhere — not in the bills, not in Not imported. Each
+     * attachment is now filed under Not imported as "unrecognised", where it
+     * can be looked at and imported by hand. Signature logos are still left
+     * out; they are never anything.
+     */
+    const meta: EmailMeta = {
+      from:    typeof payload.From === 'string' ? payload.From : null,
+      subject: typeof payload.Subject === 'string' ? payload.Subject : null,
+    };
+    let kept = 0;
+    for (const a of attachments) {
+      const bytes = Math.floor((a.Content?.length ?? 0) * 3 / 4);
+      if (isSignatureImage((a.Name ?? '').toLowerCase(), !!a.ContentID, bytes)) continue;
+      try {
+        await setAside(a, { document_type: 'unrecognised', supplier_name: null }, meta);
+        kept++;
+      } catch (e) {
+        console.error(`[inbound-bills] ${a.Name}: could not keep unrecognised attachment:`, e);
+      }
+    }
     await discard();
-    return NextResponse.json({ message: 'No bill attachments found — email ignored' });
+    return NextResponse.json({
+      message: kept
+        ? `No attachment recognised as a bill — ${kept} kept under Not imported`
+        : 'No bill attachments found — email ignored',
+    });
   }
 
   // Postmark's field names, which the Gmail import script (scripts/gmail-bill-import.gs) uses too
