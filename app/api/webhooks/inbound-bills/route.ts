@@ -457,6 +457,23 @@ async function processBills(billAttachments: Attachment[], email: EmailMeta) {
       } catch (err) {
         console.error(`[inbound-bills] ${a.Name}: processing failed:`, err);
         await releaseFile(a);
+        /**
+         * A failure here used to leave nothing behind. The email had already
+         * been answered "queued" — the Gmail script took that as Imported —
+         * so a bill whose reading failed was gone from everywhere but a
+         * server log: KVE's invoice 22622326 went this way. It is now kept
+         * under Not imported as "failed", with the reason, where it can be
+         * imported by hand.
+         */
+        try {
+          await setAside(a, {
+            document_type: 'failed',
+            supplier_name: null,
+            error: String((err as Error)?.message ?? err).slice(0, 300),
+          }, email);
+        } catch (e) {
+          console.error(`[inbound-bills] ${a.Name}: could not even keep the failed file:`, e);
+        }
       }
     }
   };

@@ -15,4 +15,8 @@ export const DOCUMENT_TYPE_LABELS: Record<string, string> = {
   reminder:           'Payment reminder',
   statement:          'Statement',
   other:              'Other',
+  /* Not judgements about the document — the import could not read it. Both
+     want a person to look, which is why they are named plainly. */
+  failed:             'Konnte nicht gelesen werden',
+  unrecognised:       'Anhang nicht erkannt',
 };
