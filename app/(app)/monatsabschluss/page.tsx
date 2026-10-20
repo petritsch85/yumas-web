@@ -17,6 +17,7 @@ import React, { useState, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { FolderDown, Upload, Check, AlertTriangle, Loader2, Trash2 } from 'lucide-react';
 import { monthLabel } from '@/lib/month-folder';
+import { unzipSync } from 'fflate';
 
 type Gap = {
   id: string; date: string; counterparty: string; description: string;
@@ -24,6 +25,7 @@ type Gap = {
 };
 type Item = {
   key: string; label: string; folder: string; source: 'collected' | 'uploaded';
+  multi?: boolean;
   required: boolean; note: string; count: number; missingFiles: number; detail?: string;
   gaps: Gap[]; gapTotal: number;
 };
@@ -72,6 +74,49 @@ export default function MonatsabschlussPage() {
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Upload fehlgeschlagen');
     } finally { setBusy(null); }
+  }
+
+  /**
+   * Many files for a position that holds many — Wolt and Lieferando.
+   *
+   * Wolt hands a month over as one zip per restaurant and period: eighteen
+   * zips, four PDFs in most, so sixty-odd documents. Zips are opened here in
+   * the browser and every PDF inside is filed on its own, because the
+   * Steuerberater prints PDFs, and a zip inside the month's zip is a document
+   * nobody can print. One request per PDF keeps each well under the upload
+   * limit, and one that fails does not take the rest with it.
+   */
+  const [progress, setProgress] = useState<string | null>(null);
+  async function uploadMany(kind: string, files: File[]) {
+    setBusy(kind); setError(null);
+    try {
+      const pdfs: File[] = [];
+      for (const f of files) {
+        if (/\.zip$/i.test(f.name)) {
+          const entries = unzipSync(new Uint8Array(await f.arrayBuffer()));
+          for (const [name, bytes] of Object.entries(entries)) {
+            if (name.startsWith('__MACOSX/') || !/\.pdf$/i.test(name)) continue;
+            pdfs.push(new File([bytes], name.split('/').pop() ?? name, { type: 'application/pdf' }));
+          }
+        } else {
+          pdfs.push(f);
+        }
+      }
+      const failed: string[] = [];
+      for (const [i, pdf] of pdfs.entries()) {
+        setProgress(`${i + 1} / ${pdfs.length}`);
+        const body = new FormData();
+        body.append('file', pdf);
+        body.append('kind', kind);
+        body.append('month', month);
+        const r = await fetch('/api/month-folder/upload', { method: 'POST', body });
+        if (!r.ok) failed.push(`${pdf.name}: ${(await r.json().catch(() => ({}))).error ?? r.status}`);
+      }
+      await qc.invalidateQueries({ queryKey: ['month-folder', month] });
+      if (failed.length) setError(`${failed.length} von ${pdfs.length} nicht hochgeladen — ${failed.slice(0, 3).join('; ')}`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Upload fehlgeschlagen');
+    } finally { setBusy(null); setProgress(null); }
   }
 
   async function remove(kind: string) {
@@ -263,17 +308,25 @@ export default function MonatsabschlussPage() {
                     <td className="px-4 py-2 text-right whitespace-nowrap">
                       {it.source === 'uploaded' ? (
                         <>
-                          <input type="file" className="hidden" accept=".pdf,.jpg,.jpeg,.png,.csv"
+                          <input type="file" className="hidden"
+                            accept={it.multi ? '.pdf,.zip' : '.pdf,.jpg,.jpeg,.png,.csv'}
+                            multiple={!!it.multi}
                             ref={el => { inputs.current[it.key] = el; }}
-                            onChange={e => { const f = e.target.files?.[0]; e.target.value = '';
-                              if (f) upload(it.key, f); }} />
+                            onChange={e => {
+                              const files = Array.from(e.target.files ?? []); e.target.value = '';
+                              if (!files.length) return;
+                              if (it.multi) void uploadMany(it.key, files);
+                              else upload(it.key, files[0]);
+                            }} />
                           <button onClick={() => inputs.current[it.key]?.click()} disabled={busy === it.key}
                             className="inline-flex items-center gap-1 border border-gray-200 hover:bg-gray-50 disabled:opacity-50 rounded-lg px-2 py-1 text-[11px] font-semibold text-gray-600">
                             {busy === it.key ? <Loader2 size={11} className="animate-spin" /> : <Upload size={11} />}
-                            {ok ? 'ersetzen' : 'hochladen'}
+                            {busy === it.key && progress ? progress
+                              : it.multi ? (ok ? 'weitere hinzufügen' : 'hochladen')
+                              : (ok ? 'ersetzen' : 'hochladen')}
                           </button>
                           {ok && (
-                            <button onClick={() => remove(it.key)} title="Entfernen"
+                            <button onClick={() => { if (it.count > 1 && !window.confirm(`Alle ${it.count} Dateien dieser Position entfernen?`)) return; void remove(it.key); }} title="Entfernen"
                               className="ml-1 p-1 text-gray-300 hover:text-red-600"><Trash2 size={12} /></button>
                           )}
                         </>

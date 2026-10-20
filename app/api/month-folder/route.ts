@@ -315,7 +315,7 @@ export async function GET(req: NextRequest) {
       month, label: monthLabel(month),
       items: st.map(({ item, count, missingFiles, detail, gaps }) => ({
         key: item.key, label: item.label, folder: item.folder, source: item.source,
-        required: item.required, note: item.note, count, missingFiles, detail,
+        required: item.required, note: item.note, multi: !!item.multi, count, missingFiles, detail,
         gaps: gaps ?? [],
         gapTotal: (gaps ?? []).reduce((s, g) => s + g.amount, 0),
       })),

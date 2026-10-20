@@ -147,15 +147,25 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ error: 'kind und month erforderlich.' }, { status: 400 });
   }
   const admin = getSupabaseAdmin();
-  const { data: row } = await admin.from('month_documents')
-    .select('file_path,bucket').eq('kind', kind).eq('month', `${month}-01`).maybeSingle();
+  /* Every file the position holds. maybeSingle() assumed one, and on a Wolt
+     position with sixty-odd it errored, came back empty, and the rows were
+     deleted while the PDFs stayed behind in storage with nothing pointing at
+     them. */
+  const { data: rows } = await admin.from('month_documents')
+    .select('file_path,bucket').eq('kind', kind).eq('month', `${month}-01`);
 
   const { error } = await admin.from('month_documents')
     .delete().eq('kind', kind).eq('month', `${month}-01`);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  if (row?.file_path) {
-    await admin.storage.from(row.bucket || 'cashflow-files').remove([row.file_path]).catch(() => {});
+  const byBucket = new Map<string, string[]>();
+  for (const r of rows ?? []) {
+    if (!r.file_path) continue;
+    const b = (r.bucket as string) || 'cashflow-files';
+    byBucket.set(b, [...(byBucket.get(b) ?? []), r.file_path as string]);
   }
-  return NextResponse.json({ ok: true });
+  for (const [b, paths] of byBucket) {
+    await admin.storage.from(b).remove(paths).catch(() => {});
+  }
+  return NextResponse.json({ ok: true, removed: rows?.length ?? 0 });
 }
