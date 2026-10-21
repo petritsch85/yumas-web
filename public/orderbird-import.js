@@ -150,22 +150,50 @@
 
       if (originalVenue) await switchTo(originalVenue).catch(function () {});
 
-      log('Sending to the Yumas app…');
-      var res = await fetch(APP + '/api/webhooks/orderbird-shifts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Import-Token': TOKEN },
-        body: JSON.stringify({ venues: payload }),
+      /*
+       * Sent in small batches, not all at once. Twelve Z-reports in one
+       * request took longer to save than the app is allowed to run: the
+       * server was stopped partway through, one restaurant's shifts were in
+       * and the rest were not, and the browser saw only "Failed to fetch".
+       * A few shifts per request finishes well inside the limit, and a batch
+       * that fails no longer takes the others with it.
+       */
+      var BATCH = 3;
+      var batches = [];
+      payload.forEach(function (v) {
+        if (v.error && !(v.shifts || []).length) { batches.push({ venueId: v.venueId, shifts: [], error: v.error }); return; }
+        for (var k = 0; k < (v.shifts || []).length; k += BATCH) {
+          batches.push({ venueId: v.venueId, shifts: v.shifts.slice(k, k + BATCH), error: k === 0 ? v.error : undefined });
+        }
       });
-      var out = await res.json();
-      (out.imported || []).forEach(function (s) {
-        log('✓ ' + s.location + ' · ' + s.date.split('-').reverse().join('.') + ' · ' + (s.shift === 'lunch' ? 'Lunch' : 'Dinner') +
-          ' · € ' + Number(s.gross).toFixed(2).replace('.', ','), '#166534');
-      });
-      if (out.error) {
-        log('Problem: ' + out.error, '#b91c1c');
+
+      var imported = [], problems = [];
+      for (var b = 0; b < batches.length; b++) {
+        log('Sending to the Yumas app… (' + (b + 1) + '/' + batches.length + ')');
+        try {
+          var res = await fetch(APP + '/api/webhooks/orderbird-shifts', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Import-Token': TOKEN },
+            body: JSON.stringify({ venues: [batches[b]] }),
+          });
+          var out = await res.json();
+          (out.imported || []).forEach(function (s) {
+            imported.push(s);
+            log('✓ ' + s.location + ' · ' + s.date.split('-').reverse().join('.') + ' · ' + (s.shift === 'lunch' ? 'Lunch' : 'Dinner') +
+              ' · € ' + Number(s.gross).toFixed(2).replace('.', ','), '#166534');
+          });
+          if (out.error) problems.push(out.error);
+        } catch (e) {
+          problems.push('batch ' + (b + 1) + ': ' + e.message);
+        }
+      }
+
+      if (problems.length) {
+        log('Problem: ' + problems.join(' · '), '#b91c1c');
+        log('Click "Yumas Import" again — it picks up where it stopped.', '#b45309');
         finish(false);
       } else {
-        log(out.imported && out.imported.length ? 'Done — ' + out.imported.length + ' shift(s) imported.' : 'Done — everything was already up to date.', '#1B5E20');
+        log(imported.length ? 'Done — ' + imported.length + ' shift(s) imported.' : 'Done — everything was already up to date.', '#1B5E20');
         finish(true);
       }
     } catch (e) {
