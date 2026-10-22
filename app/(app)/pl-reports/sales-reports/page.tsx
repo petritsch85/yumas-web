@@ -7950,7 +7950,9 @@ export default function SalesReportsPage() {
                       assumed?: (colKey: string) => boolean;
                       drillAssumed?: boolean;
                       /** A zero here is a check that passed, and says so. */
-                      zeroIsReconciled?: boolean } = {},
+                      zeroIsReconciled?: boolean;
+                      /** Blue: a figure taken as printed from a company document, not calculated. */
+                      reported?: boolean } = {},
             ) => (
               <tr key={rowKey} className="border-b border-gray-100 hover:bg-gray-50/60 group"
                 style={{ backgroundColor: opts.bold ? '#f9fafb' : '#ffffff' }}>
@@ -7970,7 +7972,7 @@ export default function SalesReportsPage() {
                      line mixes one with real bills, as staff costs does, where
                      the fold-out names the placeholder among them. */
                   const canDrill = !!opts.drill && v !== null && v !== 0 && (!red || !!opts.drillAssumed);
-                  const tone = red ? 'text-red-600' : 'text-gray-800';
+                  const tone = red ? 'text-red-600' : opts.reported ? 'text-blue-700' : 'text-gray-800';
                   const body = v === null
                     ? <span className="text-gray-300">—</span>
                     : opts.zeroIsReconciled && v === 0
@@ -8638,7 +8640,7 @@ export default function SalesReportsPage() {
                       {spacerRow('ebitda-gap')}
 
                       {headingRow('cf-head', 'Cash Flow Statement')}
-                      {valueLine('cf-open',  'Opening balance',  openingBalance, { bold: true })}
+                      {valueLine('cf-open',  'Opening balance',  openingBalance, { bold: true, reported: true })}
                       {valueLine('cf-sales', 'Regular sales',   regularSales, { indent: true, drill: 'cf-sales' })}
                       {drillRows('cf-sales')}
                       {valueLine('cf-other', 'Other income',    otherIncome,  { indent: true, drill: 'cf-otherIncome' })}
@@ -8648,7 +8650,7 @@ export default function SalesReportsPage() {
                       {valueLine('cf-fin',   'Financing',       financingOut, { indent: true, drill: 'cf-financing' })}
                       {drillRows('cf-financing')}
                       {valueLine('cf-gap',   'Other (unexplained)', unexplained, { indent: true, zeroIsReconciled: true })}
-                      {valueLine('cf-close', 'Closing balance',  closingBalance, { bold: true })}
+                      {valueLine('cf-close', 'Closing balance',  closingBalance, { bold: true, reported: true })}
                     </tbody>
                   </table>
                 </div>
