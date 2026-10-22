@@ -8138,6 +8138,32 @@ export default function SalesReportsPage() {
                 cur.bills += 1;
                 by.set(name.toLowerCase(), cur);
               }
+
+              /*
+               * On the sales side the withheld loan repayment belongs inside
+               * the platform's own line, not beside it. Listed separately it
+               * read as though Wolt Capital were a source of income; it is
+               * sales money that went to a loan before it reached the bank.
+               * So it is added to the Wolt (or PayPal) row, and the name says
+               * how that row is made up. Financing keeps its own rows — there
+               * the repayment IS the item.
+               */
+              if (bucket === 'sales') {
+                const fold = (re: RegExp, extra: number, label: string) => {
+                  if (!extra) return false;
+                  const row = [...by.values()].find(r => re.test(r.name));
+                  if (!row) return false;
+                  const paid = row.net;
+                  row.net += extra;
+                  row.name = `${row.name} — ${fmtNum(Math.round(paid))} ausgezahlt + ${fmtNum(Math.round(extra))} ${label}`;
+                  return true;
+                };
+                const woltDone = fold(/wolt/i, capital, 'Wolt Capital einbehalten');
+                const ppDone = fold(/paypal/i, paypalWc, 'Working Capital einbehalten');
+                const rest = synthetic.filter(s =>
+                  !(woltDone && /^Wolt Capital/.test(s.name)) && !(ppDone && /^PayPal Working Capital/.test(s.name)));
+                return [...by.values(), ...rest].sort((a, z) => Math.abs(z.net) - Math.abs(a.net));
+              }
               return [...by.values(), ...synthetic].sort((a, z) => Math.abs(z.net) - Math.abs(a.net));
             };
 
