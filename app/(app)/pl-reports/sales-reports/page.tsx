@@ -7948,7 +7948,9 @@ export default function SalesReportsPage() {
                  bills or the till produced. */
               opts: { bold?: boolean; indent?: boolean; pct?: boolean; drill?: string;
                       assumed?: (colKey: string) => boolean;
-                      drillAssumed?: boolean } = {},
+                      drillAssumed?: boolean;
+                      /** A zero here is a check that passed, and says so. */
+                      zeroIsReconciled?: boolean } = {},
             ) => (
               <tr key={rowKey} className="border-b border-gray-100 hover:bg-gray-50/60 group"
                 style={{ backgroundColor: opts.bold ? '#f9fafb' : '#ffffff' }}>
@@ -7971,6 +7973,8 @@ export default function SalesReportsPage() {
                   const tone = red ? 'text-red-600' : 'text-gray-800';
                   const body = v === null
                     ? <span className="text-gray-300">—</span>
+                    : opts.zeroIsReconciled && v === 0
+                      ? <span className="text-green-700 font-semibold" title="Abgestimmt: Anfangssaldo plus alle Bewegungen ergibt genau den Endsaldo des Kontoauszugs">✓ 0</span>
                     : opts.pct
                       ? <span className={tone}>{v.toFixed(1).replace('.', ',')}%</span>
                       : <span className={tone} title={red ? 'Placeholder — to be replaced' : undefined}>
@@ -8535,7 +8539,9 @@ export default function SalesReportsPage() {
               const movement = (regularSales(colKey) ?? 0) + (otherIncome(colKey) ?? 0)
                 + (operatingOut(colKey) ?? 0) + (financingOut(colKey) ?? 0);
               const gap = close - (open + movement);
-              return Math.abs(gap) < 0.005 ? null : gap;
+              /* Zero, not blank, when it reconciles: blank is kept for the months
+                 that cannot be checked because no balances are on file. */
+              return Math.abs(gap) < 0.005 ? 0 : gap;
             };
 
             /**
@@ -8641,7 +8647,7 @@ export default function SalesReportsPage() {
                       {drillRows('cf-operating')}
                       {valueLine('cf-fin',   'Financing',       financingOut, { indent: true, drill: 'cf-financing' })}
                       {drillRows('cf-financing')}
-                      {valueLine('cf-gap',   'Other (unexplained)', unexplained, { indent: true })}
+                      {valueLine('cf-gap',   'Other (unexplained)', unexplained, { indent: true, zeroIsReconciled: true })}
                       {valueLine('cf-close', 'Closing balance',  closingBalance, { bold: true })}
                     </tbody>
                   </table>
