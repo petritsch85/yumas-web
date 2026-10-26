@@ -71,8 +71,10 @@ export const MANIFEST: ManifestItem[] = [
     source: 'uploaded', required: true,
     note: 'Kartenumsätze im Haus, monatliche Abrechnung.' },
 
+  /* One statement per merchant number, and there are three — one per
+     restaurant — so the position holds several. */
   { key: 'amex', folder: '06_Amex', label: 'Amex Monatsabrechnung',
-    source: 'uploaded', required: true,
+    source: 'uploaded', required: true, multi: true,
     note: 'American Express, monatliche Abrechnung.' },
 
   { key: 'paypal', folder: '07_PayPal_Monatsuebersicht', label: 'PayPal Monatsübersicht',

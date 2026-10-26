@@ -72,6 +72,8 @@ type CfTx = {
     payment_number: string; payout_date: string; amount: number;
     statement: { invoice_number: string; period_start: string; period_end: string } | null;
   } | null;
+  /** A monthly statement in the Monatsabschluss evidencing this payment (Amex …). */
+  statement_document?: { kind: string; month: string; filename: string } | null;
   /** The settlement whose fees this debit collects. */
   nexi_statement_id: string | null;
   nexi_statement: {
@@ -952,6 +954,20 @@ function TxRow({ tx, onSave, counterparties, onShowDetails, selected, onToggleSe
               return (
                 <span
                   title={`Nexi transaction fees for ${n.period_start} – ${n.period_end} · settlement ${n.invoice_number}`}
+                  className="flex items-center justify-center w-6 h-6 rounded-full bg-green-50 border border-green-200 text-green-600">
+                  <CheckCircle2 size={13} />
+                </span>
+              );
+            }
+
+            /* A card acquirer's payout, evidenced by its monthly statement in
+               the Monatsabschluss — Amex today, any other acquirer that only
+               sends a statement tomorrow. */
+            if (tx.statement_document) {
+              const d = tx.statement_document;
+              return (
+                <span
+                  title={`Belegt durch ${d.filename} (${d.kind}, ${String(d.month).slice(0, 7)})`}
                   className="flex items-center justify-center w-6 h-6 rounded-full bg-green-50 border border-green-200 text-green-600">
                   <CheckCircle2 size={13} />
                 </span>

@@ -4,6 +4,8 @@ import { getSupabaseAdmin } from '@/lib/supabase-admin';
 import { itemFor } from '@/lib/month-folder';
 import { parsePaypalStatement } from '@/lib/paypal-statement';
 import { importNexiPdf } from '@/lib/nexi-import';
+import { parseAmexStatement, type AmexStatement } from '@/lib/amex-statement';
+import { linkAmexStatement } from '@/lib/amex-import';
 
 export const maxDuration = 60;
 
@@ -121,6 +123,20 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  /* An Amex statement is read as it is filed: its payouts are what the bank's
+     Amex credits are evidence of, and its fee belongs in the P&L. Read before
+     the row is written; linked after, because the links point at the row. */
+  let amex: AmexStatement | null = null;
+  if (kind === 'amex') {
+    try {
+      const pdf = await getDocumentProxy(new Uint8Array(await file.arrayBuffer()));
+      const { text } = await extractText(pdf, { mergePages: true });
+      amex = parseAmexStatement(text);
+    } catch (e) {
+      console.warn('[month-folder] Amex statement not read:', e instanceof Error ? e.message : e);
+    }
+  }
+
   const row: Record<string, unknown> = {
     kind, month: `${month}-01`, filename: file.name, file_path: path,
     bucket: 'cashflow-files', byte_size: file.size, ...extra,
@@ -134,10 +150,17 @@ export async function POST(req: NextRequest) {
   }
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
+  let amexResult: Awaited<ReturnType<typeof linkAmexStatement>> | null = null;
+  if (amex) {
+    const { data: saved } = await admin.from('month_documents').select('id')
+      .eq('kind', kind).eq('month', `${month}-01`).eq('filename', file.name).maybeSingle();
+    if (saved?.id) amexResult = await linkAmexStatement(admin, saved.id as string, amex);
+  }
+
   if (superseded.length) {
     await admin.storage.from('cashflow-files').remove(superseded).catch(() => {});
   }
-  return NextResponse.json({ ok: true, filename: file.name });
+  return NextResponse.json({ ok: true, filename: file.name, amex: amexResult });
 }
 
 export async function DELETE(req: NextRequest) {

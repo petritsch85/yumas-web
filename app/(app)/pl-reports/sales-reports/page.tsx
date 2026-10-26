@@ -1700,9 +1700,10 @@ export default function SalesReportsPage() {
    * net theirs off the payout, so theirs are read from the monthly statement
    * when it is filed.
    *
-   * Nexi's figure is taken net, like every other cost here, because its VAT is
-   * reclaimable. PayPal's and Amex's carry no VAT to strip — card acceptance is
-   * an exempt financial service — so what the statement shows is the cost.
+   * Every figure is taken net of VAT, like every other cost here, because the
+   * VAT is reclaimable. Nexi and Amex both charge 19 % on their fee — Amex's
+   * September statement for Eschborn: 141,04 € plus 26,80 € VAT — and the
+   * stored figure is the 141,04. PayPal's fee carries no VAT.
    */
   const groupPaymentFees = useMemo(() => {
     const m: Record<string, number> = {};
