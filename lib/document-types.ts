@@ -18,5 +18,8 @@ export const DOCUMENT_TYPE_LABELS: Record<string, string> = {
   /* Not judgements about the document — the import could not read it. Both
      want a person to look, which is why they are named plainly. */
   failed:             'Konnte nicht gelesen werden',
+  /* Wolt's own period documents: their sales reach the P&L through the Wolt
+     import, net of fees, so none of them is a payable. */
+  platform_statement: 'Wolt-Abrechnung',
   unrecognised:       'Anhang nicht erkannt',
 };

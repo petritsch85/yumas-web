@@ -429,6 +429,29 @@ export async function POST(req: NextRequest) {
   return NextResponse.json({ queued: billAttachments.map(a => a.Name) });
 }
 
+/**
+ * Wolt's settlement documents are not bills.
+ *
+ * Wolt sends every period as a set: its fee invoice to us, the self-billing
+ * invoice for our own sales, a netting or payout report, a sales report. The
+ * sales they evidence reach the P&L through the Wolt import, already net of
+ * Wolt's fees and advertising — so filing the fee invoice as a bill counted
+ * those fees a second time in SG&A, and the self-billing invoice is our
+ * revenue, not something we owe.
+ *
+ * Recognised three ways, because no single one is reliable: Wolt's own file
+ * names, Wolt's commercial register number on its invoices (HRB 217122 B),
+ * and our self-billing series (…/HRB96797/…), whose "supplier" reads as us.
+ * The documents are kept under Not imported, and the Steuerberater's copies
+ * go in through the Monatsabschluss Wolt position as before.
+ */
+function isWoltSettlement(fileName: string, extracted: Record<string, unknown>): boolean {
+  if (/WOLT_TO_MERCHANT|MERCHANT_TO_WOLT|NETTING_REPORT|PAYOUT_REPORT|HEXA_MONTHLY/i.test(fileName)) return true;
+  const number = String(extracted.invoice_number ?? '').replace(/\s+/g, '');
+  if (/HRB217122B/i.test(number) || /\/HRB96797\//i.test(number)) return true;
+  return /\bwolt\b/i.test(String(extracted.supplier_name ?? ''));
+}
+
 /** Reads each document and files the bills among them, a few at a time. */
 async function processBills(billAttachments: Attachment[], email: EmailMeta) {
   const queue = [...billAttachments];
@@ -440,6 +463,11 @@ async function processBills(billAttachments: Attachment[], email: EmailMeta) {
       }
       try {
         const extracted = await extractFromAttachment(a);
+        if (isWoltSettlement(a.Name, extracted)) {
+          await setAside(a, { ...extracted, document_type: 'platform_statement' }, email);
+          console.log(`[inbound-bills] ${a.Name}: Wolt settlement document — set aside, not a bill`);
+          continue;
+        }
         if (!isBillDocument(extracted)) {
           await setAside(a, extracted, email);
           console.log(`[inbound-bills] ${a.Name}: ${extracted.document_type}, not a bill — set aside`);

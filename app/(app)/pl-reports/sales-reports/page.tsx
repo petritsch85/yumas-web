@@ -153,6 +153,9 @@ const SGA_LINES: { key: string; label: string; categories: string[] }[] = [
  */
 const PAYMENT_PROVIDER = /\bnexi\b|\bpaypal\b|american\s+express|\bamex\b|\bstripe\b/i;
 
+/** Platforms whose charges are already deducted inside their own sales figure. */
+const NETTED_IN_SALES = /wolt/i;
+
 /**
  * The providers that keep their fee out of the payout, so it never reaches the
  * bank and exists only on their own monthly statement.
@@ -1803,6 +1806,9 @@ export default function SalesReportsPage() {
          today — Nexi's arrives as a statement, PayPal and Amex never invoice
          at all — but the day one is forwarded it must not land here. */
       if (PAYMENT_PROVIDER.test(String(b.supplier_name ?? ''))) continue;
+      /* Wolt's fees and advertising are already netted out of the Wolt sales
+         figure, so a Wolt invoice in the bills would count them twice. */
+      if (NETTED_IN_SALES.test(String(b.supplier_name ?? ''))) continue;
       const cat = String(b.category ?? '');
       const net = billNet(b);
       const o = (m[monthKey] ??= { lines: {}, total: 0 });
@@ -8052,6 +8058,7 @@ export default function SalesReportsPage() {
                 const date = String(b.invoice_date ?? '');
                 if (!date.startsWith(prefix) || date.slice(0, 7) < COGS_FROM) continue;
                 if (!wanted.includes(String(b.category ?? ''))) continue;
+                if (part.startsWith('sga-') && (PAYMENT_PROVIDER.test(String(b.supplier_name ?? '')) || NETTED_IN_SALES.test(String(b.supplier_name ?? '')))) continue;
                 const name = String(b.supplier_name ?? '—').trim();
                 const key = name.toLowerCase();
                 const cur = by.get(key) ?? { net: 0, bills: 0, names: new Map<string, number>() };
