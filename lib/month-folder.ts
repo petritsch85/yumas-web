@@ -157,14 +157,16 @@ export interface ItemStatus {
   /** Records that exist but carry no file — the gap worth chasing. */
   missingFiles: number;
   detail?: string;
+  /** Some documents present, but not all the position needs — e.g. one Amex statement of three. */
+  incomplete?: string;
 }
 
 /** Whether the month can be handed over, and what is still open. */
 export function manifestSummary(statuses: ItemStatus[]) {
   const missing = statuses.filter(s => s.item.required && s.count === 0);
-  const partial = statuses.filter(s => s.missingFiles > 0);
+  const partial = statuses.filter(s => s.missingFiles > 0 || (s.count > 0 && s.incomplete));
   return {
-    ready: missing.length === 0,
+    ready: missing.length === 0 && !statuses.some(s => s.count > 0 && s.incomplete),
     missing,
     partial,
     documents: statuses.reduce((t, s) => t + s.count, 0),

@@ -140,7 +140,7 @@ const page = async <T,>(build: (from: number, to: number) => PromiseLike<{ data:
 async function gather(
   admin: Admin, key: string, month: string,
   order: Map<string, Booking>, keys: Map<string, string[]>, paypalKeys: Set<string>,
-): Promise<{ docs: Doc[]; missingFiles: number; detail?: string }> {
+): Promise<{ docs: Doc[]; missingFiles: number; detail?: string; incomplete?: string }> {
   const { from, to } = monthRange(month);
 
   /**
@@ -246,6 +246,37 @@ async function gather(
   const { data } = await admin.from('month_documents')
     .select('filename,file_path,bucket').eq('kind', key).eq('month', from);
   const rows = (data ?? []) as { filename: string; file_path: string; bucket: string }[];
+
+  /**
+   * Amex is complete only with every merchant's statement.
+   *
+   * There are three merchant numbers, one statement each, and a single upload
+   * turned the position green while two were still missing. The bank says
+   * which merchants paid out this month — the narrative names the number,
+   * "American Express/VU7041786070/…" — and a merchant is covered once one of
+   * its payouts is tied to a filed statement.
+   */
+  if (key === 'amex') {
+    const tx = await page<Record<string, unknown>>((a, b) => admin.from('cashflow_transactions')
+      .select('id,description,statement_document_id')
+      .eq('direction', 'in').ilike('counterparty', '%american express%')
+      .gte('date', from).lte('date', to).order('id').range(a, b));
+    const paid = new Set<string>(), covered = new Set<string>();
+    for (const t of tx) {
+      const vu = String(t.description ?? '').match(/VU\s?(\d{10})/i)?.[1];
+      if (!vu) continue;
+      paid.add(vu);
+      if (t.statement_document_id) covered.add(vu);
+    }
+    const open = [...paid].filter(v => !covered.has(v)).sort();
+    return {
+      missingFiles: 0,
+      incomplete: open.length ? `${open.length} von ${paid.size} Abrechnungen fehlen: ${open.map(v => 'VU ' + v).join(', ')}` : undefined,
+      detail: paid.size ? `${covered.size} von ${paid.size} Händlernummern belegt` : undefined,
+      docs: rows.map(r => ({ bucket: r.bucket || 'cashflow-files', path: r.file_path, name: r.filename })),
+    };
+  }
+
   return {
     missingFiles: 0,
     docs: rows.map(r => ({ bucket: r.bucket || 'cashflow-files', path: r.file_path, name: r.filename })),
@@ -287,10 +318,10 @@ async function statuses(admin: Admin, month: string): Promise<(ItemStatus & { do
   const paypalGaps = allGaps.filter(isPaypalGap);
   const out: (ItemStatus & { docs: Doc[]; gaps?: Gap[] })[] = [];
   for (const item of MANIFEST) {
-    const { docs, missingFiles, detail } = await gather(admin, item.key, month, order, keys, paypalKeys);
+    const { docs, missingFiles, detail, incomplete } = await gather(admin, item.key, month, order, keys, paypalKeys);
     const unplaced = docs.filter(d => d.seq === undefined).length;
     out.push({
-      item, count: docs.length, missingFiles, docs,
+      item, count: docs.length, missingFiles, incomplete, docs,
       gaps: item.key === 'eingangsrechnungen' ? gaps
         : item.key === 'paypal_einkaeufe' ? paypalGaps : undefined,
       detail: detail && item.source === 'collected'
@@ -313,9 +344,9 @@ export async function GET(req: NextRequest) {
     const st = await statuses(admin, month);
     return NextResponse.json({
       month, label: monthLabel(month),
-      items: st.map(({ item, count, missingFiles, detail, gaps }) => ({
+      items: st.map(({ item, count, missingFiles, detail, gaps, incomplete }) => ({
         key: item.key, label: item.label, folder: item.folder, source: item.source,
-        required: item.required, note: item.note, multi: !!item.multi, count, missingFiles, detail,
+        required: item.required, note: item.note, multi: !!item.multi, count, missingFiles, detail, incomplete,
         gaps: gaps ?? [],
         gapTotal: (gaps ?? []).reduce((s, g) => s + g.amount, 0),
       })),
@@ -356,7 +387,7 @@ function checklist(month: string, st: (ItemStatus & { docs: Doc[]; gaps?: Gap[] 
   }
   if (s.partial.length) {
     lines.push('', 'BELEGE OHNE PDF', '');
-    for (const p of s.partial) lines.push(`  - ${p.item.label}: ${p.missingFiles} Vorgang/Vorgänge ohne Datei`);
+    for (const p of s.partial) lines.push(`  - ${p.item.label}: ${p.incomplete ?? `${p.missingFiles} Vorgang/Vorgänge ohne Datei`}`);
   }
 
   /* The gaps belong in the folder itself: a page of the statement with nothing

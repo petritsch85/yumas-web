@@ -26,7 +26,7 @@ type Gap = {
 type Item = {
   key: string; label: string; folder: string; source: 'collected' | 'uploaded';
   multi?: boolean;
-  required: boolean; note: string; count: number; missingFiles: number; detail?: string;
+  required: boolean; note: string; count: number; missingFiles: number; detail?: string; incomplete?: string;
   gaps: Gap[]; gapTotal: number;
 };
 
@@ -270,7 +270,7 @@ export default function MonatsabschlussPage() {
                 /* Documents present is not the same as nothing missing: a
                    position can be full and still leave payments unexplained. */
                 const gaps = it.gaps?.length ?? 0;
-                const ok = it.count > 0 && gaps === 0;
+                const ok = it.count > 0 && gaps === 0 && !it.incomplete;
                 return (
                   <tr key={it.key} className="border-b border-gray-100 hover:bg-gray-50/60">
                     <td className="px-4 py-2 font-mono text-[11px] text-gray-400 whitespace-nowrap">{it.folder}</td>
@@ -291,6 +291,10 @@ export default function MonatsabschlussPage() {
                           title="Zeigen, welche Zahlungen keine Rechnung haben">
                           <AlertTriangle size={12} /> {gaps} Rechnung{gaps === 1 ? '' : 'en'} fehlen
                         </button>
+                      ) : it.count > 0 && it.incomplete ? (
+                        <span className="inline-flex items-center gap-1 text-amber-700 font-semibold" title={it.incomplete}>
+                          <AlertTriangle size={12} /> teilweise
+                        </span>
                       ) : it.required ? (
                         <span className="inline-flex items-center gap-1 text-amber-700"><AlertTriangle size={12} /> fehlt</span>
                       ) : (
@@ -300,6 +304,9 @@ export default function MonatsabschlussPage() {
                         <div className="text-[10px] text-amber-700">
                           {it.gapTotal.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
                         </div>
+                      )}
+                      {it.count > 0 && it.incomplete && (
+                        <div className="text-[10px] text-amber-700 whitespace-normal max-w-[220px]">{it.incomplete}</div>
                       )}
                       {it.missingFiles > 0 && (
                         <div className="text-[10px] text-amber-700">{it.missingFiles} ohne PDF</div>
