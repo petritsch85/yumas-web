@@ -154,7 +154,7 @@ const SGA_LINES: { key: string; label: string; categories: string[] }[] = [
 const PAYMENT_PROVIDER = /\bnexi\b|\bpaypal\b|american\s+express|\bamex\b|\bstripe\b/i;
 
 /** Platforms whose charges are already deducted inside their own sales figure. */
-const NETTED_IN_SALES = /wolt/i;
+const NETTED_IN_SALES = /\bwolt\b/i;
 
 /**
  * The providers that keep their fee out of the payout, so it never reaches the
