@@ -66,6 +66,22 @@ async function knownZ(locationId: string): Promise<Set<number>> {
   return known;
 }
 
+/**
+ * Whether the venue already closed a Z-report earlier the same day.
+ *
+ * Checked in the table rather than in the batch: shifts are inserted in Z
+ * order as they are read, so a lunch from the same import is already there
+ * by the time its dinner is looked at.
+ */
+async function hasEarlierZ(locationId: string, date: string, z: number): Promise<boolean> {
+  const { data } = await getSupabaseAdmin().from('shift_reports')
+    .select('z_report_number').eq('location_id', locationId).eq('report_date', date);
+  return (data ?? []).some(r => {
+    const n = parseInt(String(r.z_report_number ?? ''), 10);
+    return Number.isFinite(n) && n < z;
+  });
+}
+
 /** Where the bookmark should start for each venue: the last Z number on file. */
 export async function venueStatus() {
   return Promise.all(ORDERBIRD_VENUES.map(async v => {
@@ -95,8 +111,16 @@ export async function importVenueShifts(venueId: string, shifts: IncomingShift[]
     const date = start?.[1] ?? sr.date;
 
     /* Lunch left open into the evening: one Z-report for both shifts. The
-       bookmark sends what was taken before SPLIT_HOUR; the rest is dinner. */
-    const merged = start && end && Number(start[2]) < LUNCH_STARTS_BEFORE_HOUR &&
+       bookmark sends what was taken before SPLIT_HOUR; the rest is dinner.
+
+       Only when this is the day's FIRST Z-report, though. A dinner shift
+       opened early — 14:34, 14:56 — looks exactly like a lunch left open by
+       its times alone, and five were split that way although lunch had been
+       closed on its own Z-report an hour earlier: the first receipts of the
+       evening were booked as a sliver of lunch. If the day already has an
+       earlier Z-report, that one was the lunch and this one is dinner. */
+    const earlierToday = await hasEarlierZ(locationId, date, s.z);
+    const merged = !earlierToday && start && end && Number(start[2]) < LUNCH_STARTS_BEFORE_HOUR &&
       (end[1] !== start[1] || Number(end[2]) >= DINNER_ENDS_FROM_HOUR);
     const lunchGross = s.lunchGross ?? null;
     if (merged && lunchGross !== null && lunchGross > 0.005 && lunchGross < sr.grossTotal - 0.005) {
