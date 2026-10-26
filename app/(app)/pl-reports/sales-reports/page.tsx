@@ -1357,7 +1357,18 @@ export default function SalesReportsPage() {
     for (const r of allWebshopRows) add(r.sale_date, r.shift, 'webshop', r.net_cents / 100);
     for (const r of allWoltRows)    add(r.sale_date, r.shift, 'wolt', Number(r.net_final ?? 0));
     for (const r of allLieferandoRows) add(r.sale_date, r.shift, 'lieferando', Number(r.net_final ?? 0));
-    for (const b of allOutgoingBills) if (b.event_date) add(b.event_date, b.shift_type, 'bills', Number(b.net_total ?? 0));
+    for (const b of allOutgoingBills) {
+      if (!b.event_date) continue;
+      add(b.event_date, b.shift_type, 'bills', Number(b.net_total ?? 0));
+      /* A shift worked for a group and billed by invoice is a shift, even
+         though the till was never opened. Saturday 24.10. at Westend was
+         exactly that — KACTUS, 1.750 €, no Z-report — and the week counted
+         five lunches with six worked. On a day that also has a Z-report the
+         set already holds the date, so nothing is counted twice. */
+      if (b.shift_type === 'lunch' || b.shift_type === 'dinner') {
+        at(keyOf(b.event_date)).shifts[b.shift_type].add(b.event_date);
+      }
+    }
 
     /* A Wolt+ credit is income for a whole calendar month, so it is shared out
        over that month's sales and each share lands in the period its own day
