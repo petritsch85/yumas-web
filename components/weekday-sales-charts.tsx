@@ -44,6 +44,9 @@ export function WeekdaySalesCharts({ days, from, title }: {
       <div className="grid gap-3 grid-cols-1 md:grid-cols-2 xl:grid-cols-3">
         {byWeekday.map((points, i) => {
           const open = points.filter(p => p.value > 0);
+          /* A shift that never runs on this weekday — lunch at the weekend — has
+             nothing to show, so it gets no chart rather than an empty one. */
+          if (!open.length) return null;
           const avg = open.length ? open.reduce((t, p) => t + p.value, 0) / open.length : 0;
           const last = open.at(-1);
           return (
@@ -61,7 +64,7 @@ export function WeekdaySalesCharts({ days, from, title }: {
                     <XAxis dataKey="date" tickFormatter={short} tick={{ fontSize: 10, fill: '#9ca3af' }}
                       tickLine={false} axisLine={{ stroke: '#e5e7eb' }} interval="preserveStartEnd" minTickGap={18} />
                     <YAxis domain={[0, max]} width={44} tick={{ fontSize: 10, fill: '#9ca3af' }}
-                      tickLine={false} axisLine={false} tickFormatter={v => `${Math.round(v / 1000)}k`} />
+                      tickLine={false} axisLine={false} tickFormatter={v => v >= 1000 ? `${(v / 1000).toLocaleString('de-DE', { maximumFractionDigits: 1 })}k` : String(Math.round(v))} />
                     <Tooltip cursor={{ fill: 'rgba(15,23,42,0.05)' }}
                       formatter={(v) => [`${eur(Number(v))} €`, 'Total net sales']}
                       labelFormatter={l => new Date(String(l) + 'T12:00:00Z').toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric' })}
