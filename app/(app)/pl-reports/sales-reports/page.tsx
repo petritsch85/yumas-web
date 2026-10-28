@@ -1395,11 +1395,14 @@ export default function SalesReportsPage() {
     [buildChannelSummary],
   );
 
-  /** Total net sales per date, for the weekday charts under the daily table. */
+  /** Net sales per date — lunch, dinner and the whole day — for the weekday charts under the daily table. */
   const dailyTotals = useMemo(() => {
-    const out: Record<string, number> = {};
+    const out = { lunch: {} as Record<string, number>, dinner: {} as Record<string, number>, day: {} as Record<string, number> };
+    const sum = (c: ChannelSums) => c.orderbird + c.webshop + c.wolt + c.lieferando + c.bills;
     for (const [d, m] of Object.entries(buildChannelSummary(d => d))) {
-      out[d] = m.day.orderbird + m.day.webshop + m.day.wolt + m.day.lieferando + m.day.bills;
+      out.lunch[d] = sum(m.lunch);
+      out.dinner[d] = sum(m.dinner);
+      out.day[d] = sum(m.day);
     }
     return out;
   }, [buildChannelSummary]);
@@ -7140,8 +7143,10 @@ export default function SalesReportsPage() {
             </div>
           );
         })()}
-        <WeekdaySalesCharts days={dailyTotals} from="2026-07-01"
-          title={`Total net sales by weekday since 1 July 2026 · ${isGroup ? 'Group — all restaurants' : location?.name ?? ''}`} />
+        {([['day', 'Total net sales · All day'], ['lunch', 'Total net sales · Lunch'], ['dinner', 'Total net sales · Dinner']] as const).map(([sh, label]) => (
+          <WeekdaySalesCharts key={sh} days={dailyTotals[sh]} from="2026-07-01"
+            title={`${label} by weekday since 1 July 2026 · ${isGroup ? 'Group — all restaurants' : location?.name ?? ''}`} />
+        ))}
         </div>
         )}
 
