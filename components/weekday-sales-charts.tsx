@@ -7,7 +7,7 @@ import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Toolti
  *
  * A week mixes a quiet Monday with a full Saturday, so a weekly total hides
  * which day moved. Seven small charts on one scale each show how one weekday
- * runs over the months; the dashed line is that weekday's average over the
+ * runs over the months; the dashed line is that weekday's median over the
  * period, so a day above or below it reads at a glance.
  */
 
@@ -47,14 +47,18 @@ export function WeekdaySalesCharts({ days, from, title }: {
           /* A shift that never runs on this weekday — lunch at the weekend — has
              nothing to show, so it gets no chart rather than an empty one. */
           if (!open.length) return null;
-          const avg = open.length ? open.reduce((t, p) => t + p.value, 0) / open.length : 0;
+          /* The median, not the mean: one big event night (a Thursday at 6k)
+             would otherwise pull the line above every ordinary week. */
+          const sorted = open.map(p => p.value).sort((a, b) => a - b);
+          const mid = Math.floor(sorted.length / 2);
+          const avg = sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
           const last = open.at(-1);
           return (
             <div key={WEEKDAYS[i]} className="border border-gray-200 rounded-xl bg-white shadow-sm px-3 pt-3 pb-1">
               <div className="flex items-baseline justify-between px-1">
                 <span className="text-sm font-bold text-gray-800">{WEEKDAYS[i]}s</span>
                 <span className="text-[11px] text-gray-500 tabular-nums">
-                  Ø {eur(avg)} €{last ? ` · last ${short(last.date)}: ${eur(last.value)} €` : ''}
+                  Median {eur(avg)} €{last ? ` · last ${short(last.date)}: ${eur(last.value)} €` : ''}
                 </span>
               </div>
               <div style={{ height: 170 }}>
