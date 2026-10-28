@@ -10,8 +10,8 @@
 import { createClient } from '@supabase/supabase-js';
 import { readFileSync } from 'node:fs';
 import { extractText, getDocumentProxy } from 'unpdf';
-import { parseAmexStatement } from '../lib/amex-statement.ts';
-import { linkAmexStatement } from '../lib/amex-import.ts';
+import { parseAmexStatement } from '../lib/amex-statement';
+import { linkAmexStatement } from '../lib/amex-import';
 
 for (const line of readFileSync(new URL('../.env.local', import.meta.url), 'utf8').split('\n')) {
   const m = line.match(/^([A-Z0-9_]+)=(.*)$/);
