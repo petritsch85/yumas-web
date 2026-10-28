@@ -8,6 +8,7 @@ import { parseOpenTableCsv, summariseOpenTable, OpenTableParseError } from '@/li
 import { parseShiftCSV, parseNum, parseDate, SECTION_NAMES } from '@/lib/orderbird-shift-csv';
 import type { ShiftCat, ShiftProduct, ShiftParseResult } from '@/lib/orderbird-shift-csv';
 import { OrderbirdSyncBar } from '@/components/orderbird-sync-bar';
+import { WeekdaySalesCharts } from '@/components/weekday-sales-charts';
 import { parseGdpduZip, GdpduParseError } from '@/lib/gdpdu';
 import { isoWeek, isoWeekYear, isoWeekRange, isoWeeksInYear, currentISOWeek } from '@/lib/iso-week';
 import { shiftClosedCheckerFor } from '@/lib/opening-hours';
@@ -1184,9 +1185,9 @@ export default function SalesReportsPage() {
    * time: a restaurant's trend is the thing being looked at, and a year
    * dropdown cuts it exactly where the comparison matters.
    */
-  /* Both the monthly and the weekly summary read every year, so both need the
-     unbounded queries below. */
-  const monthlyTabOn = !!location && activeTab === 'daily' && (subTab === 'monthly' || subTab === 'weekly');
+  /* The monthly and weekly summaries read every year, and so do the weekday
+     charts under the daily table, so all three need the unbounded queries below. */
+  const monthlyTabOn = !!location && activeTab === 'daily';
 
   /**
    * Which restaurants a query covers.
@@ -1393,6 +1394,15 @@ export default function SalesReportsPage() {
     () => buildChannelSummary(d => d.slice(0, 7)),
     [buildChannelSummary],
   );
+
+  /** Total net sales per date, for the weekday charts under the daily table. */
+  const dailyTotals = useMemo(() => {
+    const out: Record<string, number> = {};
+    for (const [d, m] of Object.entries(buildChannelSummary(d => d))) {
+      out[d] = m.day.orderbird + m.day.webshop + m.day.wolt + m.day.lieferando + m.day.bills;
+    }
+    return out;
+  }, [buildChannelSummary]);
 
   /** Keyed "2026-W39", so the same week a year earlier is one string away. */
   const weeklySummary = useMemo(
@@ -5787,7 +5797,7 @@ export default function SalesReportsPage() {
       {activeTab === 'daily' && (
         <div className="flex-1 min-h-0 flex flex-col">
         {subTab === 'daily' && (
-        <div className="flex-1 min-h-0 flex flex-col">
+        <div className="flex-1 min-h-0 flex flex-col overflow-y-auto">
           {/* ── Closures panel ── */}
           {showClosuresPanel && (
             <div className="mb-4 border border-red-200 rounded-xl bg-white shadow-sm overflow-hidden">
@@ -6384,7 +6394,7 @@ export default function SalesReportsPage() {
           );
 
           return (
-            <div className="flex-1 min-h-0 flex flex-col border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+            <div className="shrink-0 flex flex-col border border-gray-200 rounded-xl overflow-hidden shadow-sm" style={{ height: 'calc(100vh - 280px)', minHeight: 480 }}>
               <div ref={dailyScrollRef} className="flex-1 min-h-0 overflow-x-scroll overflow-y-auto scrollbar-always">
                 <table className="text-xs border-collapse" style={{ minWidth: LABEL_W + (dailyCols.length + 1) * COL_W_D }}>
                   {/* Sticky column header */}
@@ -7130,6 +7140,8 @@ export default function SalesReportsPage() {
             </div>
           );
         })()}
+        <WeekdaySalesCharts days={dailyTotals} from="2026-07-01"
+          title={`Total net sales by weekday since 1 July 2026 · ${isGroup ? 'Group — all restaurants' : location?.name ?? ''}`} />
         </div>
         )}
 
