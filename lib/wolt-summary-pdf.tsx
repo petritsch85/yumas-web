@@ -99,3 +99,41 @@ export async function renderWoltSummary(store: string, month: string, rows: Wolt
   );
   return new Uint8Array(await renderToBuffer(doc));
 }
+
+/**
+ * The same sheet for any platform, from plain columns and rows — Lieferando's
+ * weekly statements have different figures from Wolt's, but the page is the
+ * same idea: one line per statement, totals underneath, a note on what is
+ * behind it and what was left out.
+ */
+export async function renderPlatformSummary({ title, columns, rows, note }: {
+  title: string;
+  columns: { label: string; w: number; right?: boolean; sum?: boolean }[];
+  rows: (string | number | null)[][];
+  note: string;
+}): Promise<Uint8Array> {
+  const show = (v: string | number | null) => typeof v === 'number' ? eur(v) : v ?? '—';
+  const line = (values: string[], style: Style) => (
+    <View style={style}>
+      {values.map((v, i) => (
+        <Text key={i} style={{ width: columns[i].w, textAlign: columns[i].right ? 'right' : 'left', paddingRight: 4 }}>{v}</Text>
+      ))}
+    </View>
+  );
+  const totals = columns.map((c, i) => i === 0 ? 'Summe'
+    : c.sum ? eur(rows.reduce((t, r) => t + (typeof r[i] === 'number' ? (r[i] as number) : 0), 0)) : '');
+
+  const doc = (
+    <Document>
+      <Page size="A4" orientation="landscape" style={s.page}>
+        <Text style={s.h1}>{title}</Text>
+        <Text style={s.sub}>Yumas GmbH · Feuerbachstr. 46 · 60325 Frankfurt am Main · alle Beträge in EUR</Text>
+        {line(columns.map(c => c.label), s.head)}
+        {rows.map((r, i) => <View key={i}>{line(r.map(show), s.row)}</View>)}
+        {line(totals, s.total)}
+        <Text style={s.note}>{note}</Text>
+      </Page>
+    </Document>
+  );
+  return new Uint8Array(await renderToBuffer(doc));
+}

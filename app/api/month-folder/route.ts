@@ -11,6 +11,7 @@ import {
 import { findGaps, type Gap } from '@/lib/missing-invoices';
 import { woltDocType, woltForPrint, woltStore } from '@/lib/wolt-docs';
 import { woltSummaries } from '@/lib/wolt-summary';
+import { lieferandoFolder } from '@/lib/lieferando-folder';
 
 export const maxDuration = 300;
 
@@ -286,6 +287,17 @@ async function gather(
     };
   }
 
+  /* Lieferando: page one of each weekly statement is the Rechnung; the order
+     and tip lists behind it carry no tax figure. The pages are cut out when the
+     zip is built (lib/lieferando-folder.ts). */
+  if (key === 'lieferando') {
+    return {
+      missingFiles: 0,
+      detail: rows.length ? `${rows.length} Wochenabrechnung(en) · je nur Seite 1 (Rechnung) · Bestell- und Trinkgeldlisten nur digital · + Zusammenfassung je Restaurant` : undefined,
+      docs: rows.map(r => ({ bucket: r.bucket || 'cashflow-files', path: r.file_path, name: r.filename })),
+    };
+  }
+
   if (key === 'amex') {
     const tx = await page<Record<string, unknown>>((a, b) => admin.from('cashflow_transactions')
       .select('id,description,statement_document_id')
@@ -457,6 +469,15 @@ export async function POST(req: NextRequest) {
     /* Names repeat — two invoices from one supplier on one day — so a counter
        is added rather than letting one silently overwrite the other. */
     const used = new Map<string, number>();
+    /* Lieferando's files are rebuilt — page one only, plus the summary. */
+    if (x.item.key === 'lieferando' && x.docs.length) {
+      try {
+        for (const { name, bytes } of await lieferandoFolder(admin, month)) files[`${x.item.folder}/${name}`] = bytes;
+      } catch (e) {
+        failed.push(`${x.item.folder} (${e instanceof Error ? e.message : 'Fehler'})`);
+      }
+      continue;
+    }
     for (const d of x.docs) {
       const { data, error } = await admin.storage.from(d.bucket).download(d.path);
       if (error || !data) { failed.push(`${x.item.folder}/${d.name}`); continue; }
