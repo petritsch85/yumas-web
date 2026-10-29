@@ -9,6 +9,8 @@ import {
   manifestSummary, type ItemStatus,
 } from '@/lib/month-folder';
 import { findGaps, type Gap } from '@/lib/missing-invoices';
+import { woltDocType, woltForPrint, woltStore } from '@/lib/wolt-docs';
+import { woltSummaries } from '@/lib/wolt-summary';
 
 export const maxDuration = 300;
 
@@ -256,6 +258,34 @@ async function gather(
    * "American Express/VU7041786070/…" — and a merchant is covered once one of
    * its payouts is tied to a filed statement.
    */
+  /**
+   * Wolt: only what carries VAT goes into the folder.
+   *
+   * The two invoices per period — and Eschborn's Auszahlungsbericht, its only
+   * document with the sales VAT. The netting and sales reports stay stored
+   * here; a one-page summary per restaurant (built with the zip) stands in for
+   * them. Each restaurant gets its own subfolder so the pile prints in order.
+   */
+  if (key === 'wolt') {
+    const isZip = (r: { filename: string }) => /\.zip$/i.test(r.filename);
+    const zips = rows.filter(isZip);
+    const pdfs = rows.filter(r => !isZip(r));
+    const print = pdfs.filter(r => woltForPrint(woltDocType(r.filename)));
+    const stores = new Set(print.map(r => woltStore(r.filename)));
+    return {
+      missingFiles: 0,
+      incomplete: zips.length ? `${zips.length} ZIP-Datei(en) noch nicht entpackt` : undefined,
+      detail: pdfs.length
+        ? `${print.length} zum Drucken · ${pdfs.length - print.length} nur digital (Netting-/Umsatzberichte)`
+          + (stores.size ? ` · + Zusammenfassung je Restaurant` : '')
+        : undefined,
+      docs: print
+        .map(r => ({ bucket: r.bucket || 'cashflow-files', path: r.file_path,
+          name: `${woltStore(r.filename)}/${r.filename}` }))
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    };
+  }
+
   if (key === 'amex') {
     const tx = await page<Record<string, unknown>>((a, b) => admin.from('cashflow_transactions')
       .select('id,description,statement_document_id')
@@ -434,6 +464,15 @@ export async function POST(req: NextRequest) {
       used.set(d.name, n);
       const name = n === 1 ? d.name : d.name.replace(/(\.[^.]+)?$/, `_${n}$1`);
       files[`${x.item.folder}/${name}`] = new Uint8Array(await data.arrayBuffer());
+    }
+    if (x.item.key === 'wolt' && x.docs.length) {
+      try {
+        for (const { store, bytes } of await woltSummaries(admin, month)) {
+          files[`${x.item.folder}/${store}/00_Zusammenfassung_Wolt_${store}.pdf`] = bytes;
+        }
+      } catch (e) {
+        failed.push(`${x.item.folder}/Zusammenfassung (${e instanceof Error ? e.message : 'Fehler'})`);
+      }
     }
   }
   if (failed.length) {

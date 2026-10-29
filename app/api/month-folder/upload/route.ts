@@ -6,6 +6,7 @@ import { parsePaypalStatement } from '@/lib/paypal-statement';
 import { importNexiPdf } from '@/lib/nexi-import';
 import { parseAmexStatement, type AmexStatement } from '@/lib/amex-statement';
 import { linkAmexStatement } from '@/lib/amex-import';
+import { unzipSync } from 'fflate';
 
 export const maxDuration = 60;
 
@@ -39,6 +40,34 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: `${item.label} wird automatisch gesammelt.` }, { status: 400 });
   }
 
+  /**
+   * A zip is opened here, not filed as it is.
+   *
+   * The page unpacks zips in the browser, but fourteen of October's Wolt zips
+   * arrived before it did and sat in the folder as zips — nothing in them could
+   * be printed or read. So the server unpacks too, and each PDF inside is filed
+   * on its own, exactly as if it had been dropped one by one.
+   */
+  if (/\.zip$/i.test(file.name)) {
+    if (!item.multi) return NextResponse.json({ error: `${item.label} nimmt nur einzelne Dateien.` }, { status: 400 });
+    const entries = unzipSync(new Uint8Array(await file.arrayBuffer()));
+    const filed: string[] = [], failed: string[] = [];
+    for (const [name, bytes] of Object.entries(entries)) {
+      if (name.startsWith('__MACOSX/') || !/\.pdf$/i.test(name)) continue;
+      const pdf = new File([bytes as BlobPart], name.split('/').pop() ?? name, { type: 'application/pdf' });
+      const res = await fileDocument(pdf, kind, month, item);
+      (res.ok ? filed : failed).push(pdf.name);
+    }
+    return NextResponse.json({ ok: failed.length === 0, unpacked: filed, failed });
+  }
+
+  const res = await fileDocument(file, kind, month, item);
+  return NextResponse.json(res.body, { status: res.status });
+}
+
+async function fileDocument(
+  file: File, kind: string, month: string, item: NonNullable<ReturnType<typeof itemFor>>,
+): Promise<{ ok: boolean; status: number; body: Record<string, unknown> }> {
   const admin = getSupabaseAdmin();
   const safe = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
   const path = `monatsabschluss/${month}/${kind}_${Date.now()}_${safe}`;
@@ -47,7 +76,7 @@ export async function POST(req: NextRequest) {
     .upload(path, await file.arrayBuffer(), {
       contentType: file.type || 'application/octet-stream', upsert: true,
     });
-  if (upErr) return NextResponse.json({ error: `Upload: ${upErr.message}` }, { status: 500 });
+  if (upErr) return { ok: false, status: 500, body: { error: `Upload: ${upErr.message}` } };
 
   /**
    * A position that holds one document replaces; one that holds many adds.
@@ -148,7 +177,7 @@ export async function POST(req: NextRequest) {
     void _w; void _f; void _o; void _c;
     ({ error } = await admin.from('month_documents').upsert(basic, { onConflict: 'kind,month,filename' }));
   }
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return { ok: false, status: 500, body: { error: error.message } };
 
   let amexResult: Awaited<ReturnType<typeof linkAmexStatement>> | null = null;
   if (amex) {
@@ -160,7 +189,7 @@ export async function POST(req: NextRequest) {
   if (superseded.length) {
     await admin.storage.from('cashflow-files').remove(superseded).catch(() => {});
   }
-  return NextResponse.json({ ok: true, filename: file.name, amex: amexResult });
+  return { ok: true, status: 200, body: { ok: true, filename: file.name, amex: amexResult } };
 }
 
 export async function DELETE(req: NextRequest) {
