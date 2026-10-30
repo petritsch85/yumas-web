@@ -35,6 +35,8 @@ const DRIVERS = {
   /* Opened Aug 2025, last year still ramping up; last week −24 %, half weight. */
   Taunus:   { season:  0.00, lastWeek: -0.15 },
 };
+const [MY, MM] = MONTH.split('-').map(Number);
+const MONTH_END = `${MONTH}-${String(new Date(Date.UTC(MY, MM, 0)).getUTCDate()).padStart(2, '0')}`;
 const SOURCE = 'forecast 2026-11 · trimmed mean 01.09.–26.10.2026 · seasonality 2024/25';
 
 const page = async b => { const o = []; for (let p = 0; ; p++) { const { data, error } = await b(p); if (error) throw error; o.push(...data); if (data.length < 1000) return o; } };
@@ -44,7 +46,7 @@ const trimmedMean = a => { const s = [...a].sort((x, y) => x - y); const t = s.l
 
 const { data: locs } = await db.from('locations').select('id,name').eq('type', 'restaurant');
 const { data: settings } = await db.from('forecast_settings').select('location_id,shift_type,closed_weekdays');
-const { data: closures } = await db.from('closure_days').select('location_id,closure_date,shift_type,kind').gte('closure_date', `${MONTH}-01`).lte('closure_date', `${MONTH}-31`);
+const { data: closures } = await db.from('closure_days').select('location_id,closure_date,shift_type,kind').gte('closure_date', `${MONTH}-01`).lte('closure_date', MONTH_END);
 
 const rows = [];
 for (const L of locs) {
@@ -101,7 +103,7 @@ for (const L of locs) {
 console.log(`Gruppe    ${Math.round(rows.reduce((t, r) => t + r.net_total, 0)).toLocaleString('de-DE').padStart(8)} €`);
 
 if (!apply) { console.log('\nProbelauf — mit --apply schreiben.'); process.exit(0); }
-const { error: delErr } = await db.from('sales_forecasts').delete().gte('forecast_date', `${MONTH}-01`).lte('forecast_date', `${MONTH}-31`);
+const { error: delErr } = await db.from('sales_forecasts').delete().gte('forecast_date', `${MONTH}-01`).lte('forecast_date', MONTH_END);
 if (delErr) { console.error(delErr.message); process.exit(1); }
 const { error } = await db.from('sales_forecasts').insert(rows);
 console.log(error ? `FEHLER: ${error.message}` : `\n${rows.length} Zeilen geschrieben.`);
