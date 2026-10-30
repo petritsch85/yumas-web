@@ -4,6 +4,7 @@
  * percentage, keeping the weekday pattern.
  *
  *   node scripts/scale-forecast.mjs Westend lunch 2026-11 1778.73
+ *   node scripts/scale-forecast.mjs Westend dinner 2026-11 total=40500
  */
 import { createClient } from '@supabase/supabase-js';
 import { readFileSync } from 'node:fs';
@@ -11,7 +12,10 @@ for (const l of readFileSync(new URL('../.env.local', import.meta.url), 'utf8').
 const db = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
 const [store, shift, month, target] = process.argv.slice(2);
-const TARGET = Number(target);
+/* "total=40500" aims at the month's forecast total instead of an average —
+   for when reported sales (an invoiced event) already sit in the month. */
+const byTotal = /^total=/.test(target ?? '');
+const TARGET = Number(String(target).replace(/^total=/, ''));
 if (!store || !['lunch', 'dinner'].includes(shift) || !/^\d{4}-\d{2}$/.test(month ?? '') || !(TARGET > 0)) {
   console.log('Aufruf: node scripts/scale-forecast.mjs <Restaurant> <lunch|dinner> <YYYY-MM> <Ziel Ø je Schicht>');
   process.exit(1);
@@ -23,7 +27,7 @@ const { data: loc } = await db.from('locations').select('id').eq('name', store).
 const { data: rows } = await db.from('sales_forecasts').select('id,net_total')
   .eq('location_id', loc.id).eq('shift_type', shift).gte('forecast_date', `${month}-01`).lte('forecast_date', end);
 const total = rows.reduce((t, r) => t + Number(r.net_total), 0);
-const factor = TARGET / (total / rows.length);
+const factor = byTotal ? TARGET / total : TARGET / (total / rows.length);
 console.log(`${store} ${shift} ${month}: vorher ${total.toFixed(2)} € / ${rows.length} Schichten = Ø ${(total / rows.length).toFixed(2)} · Faktor ${((factor - 1) * 100).toFixed(2)} %`);
 
 let after = 0;
