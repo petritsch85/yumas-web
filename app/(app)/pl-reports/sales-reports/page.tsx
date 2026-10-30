@@ -1242,9 +1242,9 @@ export default function SalesReportsPage() {
     enabled: !!location && activeTab === 'daily' && scopeIds.length > 0,
     queryFn: async () => {
       const { data, error } = await supabase.from('sales_forecasts')
-        .select('forecast_date,shift_type,net_total').in('location_id', scopeIds);
+        .select('location_id,forecast_date,shift_type,net_total').in('location_id', scopeIds);
       if (error) return []; // the table arrives with supabase/add_sales_forecasts.sql
-      return (data ?? []) as { forecast_date: string; shift_type: 'lunch' | 'dinner'; net_total: number }[];
+      return (data ?? []) as { location_id: string; forecast_date: string; shift_type: 'lunch' | 'dinner'; net_total: number }[];
     },
   });
   const salesFcst = useMemo(() => {
@@ -1943,8 +1943,24 @@ export default function SalesReportsPage() {
       add(b.event_date, id, b.shift_type, Number(b.net_total ?? 0));
     }
 
+    /* The sales forecast, for days from today on — the same rule as the daily
+       sheet, so a month half reported and half forecast adds the two. */
+    const _now = new Date();
+    const today = `${_now.getFullYear()}-${String(_now.getMonth() + 1).padStart(2, '0')}-${String(_now.getDate()).padStart(2, '0')}`;
+    for (const f of salesForecastRows) {
+      if (f.forecast_date < today) continue;
+      add(f.forecast_date, f.location_id, f.shift_type, Number(f.net_total ?? 0));
+    }
+
     return m;
-  }, [gmShifts, gmWebshop, gmWolt, gmWoltCredits, gmLieferando, gmBills, groupRestaurants]);
+  }, [gmShifts, gmWebshop, gmWolt, gmWoltCredits, gmLieferando, gmBills, groupRestaurants, salesForecastRows]);
+
+  /** Months of the group sheet that carry forecast — their sales figures show in orange. */
+  const groupForecastMonths = useMemo(() => {
+    const _now = new Date();
+    const today = `${_now.getFullYear()}-${String(_now.getMonth() + 1).padStart(2, '0')}-${String(_now.getDate()).padStart(2, '0')}`;
+    return new Set(salesForecastRows.filter(f => f.forecast_date >= today).map(f => f.forecast_date.slice(0, 7)));
+  }, [salesForecastRows]);
 
   /** Months from the first with data to the last, each year closed by an FY column. */
   const groupMonthCols = useMemo(() => {
@@ -7993,7 +8009,9 @@ export default function SalesReportsPage() {
                       className={'text-right tabular-nums ' + (bold ? 'py-1.5 text-xs font-bold' : 'py-1 text-[11px]')}
                       style={{ paddingLeft: 4, paddingRight: fy ? 6 : 8,
                         ...(fy ? { backgroundColor: '#fffbeb', borderLeft: '1px solid #fde68a', borderRight: '1px solid #fde68a' } : {}) }}>
-                      {show(Math.round(pick(get(col.key))))}
+                      {groupForecastMonths.has(col.key) && pick(get(col.key)) !== 0
+                        ? <span className="text-orange-500 italic" title="Includes forecast for days not yet reported">{fmtNum(Math.round(pick(get(col.key))))}</span>
+                        : show(Math.round(pick(get(col.key))))}
                     </td>
                   );
                 })}
