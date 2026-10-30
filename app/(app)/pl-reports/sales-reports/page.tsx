@@ -1299,6 +1299,24 @@ export default function SalesReportsPage() {
     },
   });
 
+  /* Too Good To Go bag sales, spread over the open days on import (supabase/add_tgtg_sales.sql). */
+  const { data: allTgtgRows = [] } = useQuery({
+    queryKey: ['tgtg-sales-all', scopeKey],
+    enabled: monthlyTabOn && scopeIds.length > 0,
+    queryFn: async () => {
+      const all: { sale_date: string; shift: 'lunch' | 'dinner'; net: number }[] = [];
+      for (let pg = 0; ; pg++) {
+        const { data, error } = await supabase.from('tgtg_sales')
+          .select('sale_date,shift,net').in('location_id', scopeIds)
+          .order('sale_date').range(pg * 1000, (pg + 1) * 1000 - 1);
+        if (error || !data?.length) break;
+        all.push(...(data as typeof all));
+        if (data.length < 1000) break;
+      }
+      return all;
+    },
+  });
+
   const { data: allWoltCredits = [] } = useQuery({
     queryKey: ['wolt-month-credits-all', scopeKey],
     enabled: monthlyTabOn && scopeIds.length > 0,
@@ -1353,7 +1371,7 @@ export default function SalesReportsPage() {
    * paid, completed orders; bills are event invoices not settled at the till.
    */
   /** `forecast` is the sales forecast for days not yet reported — shown in orange, counted in the totals. */
-  type ChannelSums = { orderbird: number; webshop: number; wolt: number; lieferando: number; bills: number; forecast: number };
+  type ChannelSums = { orderbird: number; webshop: number; wolt: number; lieferando: number; bills: number; tgtg: number; forecast: number };
   type MonthSummary = {
     lunch: ChannelSums; dinner: ChannelSums; day: ChannelSums;
     /** Days the till ran that shift — the denominator for net sales per shift. */
@@ -1366,7 +1384,7 @@ export default function SalesReportsPage() {
    */
   const buildChannelSummary = useCallback((keyOf: (date: string) => string) => {
     const out: Record<string, MonthSummary> = {};
-    const zero = (): ChannelSums => ({ orderbird: 0, webshop: 0, wolt: 0, lieferando: 0, bills: 0, forecast: 0 });
+    const zero = (): ChannelSums => ({ orderbird: 0, webshop: 0, wolt: 0, lieferando: 0, bills: 0, tgtg: 0, forecast: 0 });
     const at = (key: string) => out[key] ?? (out[key] = {
       lunch: zero(), dinner: zero(), day: zero(),
       shifts: { lunch: new Set(), dinner: new Set() },
@@ -1388,6 +1406,7 @@ export default function SalesReportsPage() {
     for (const r of allWebshopRows) add(r.sale_date, r.shift, 'webshop', r.net_cents / 100);
     for (const r of allWoltRows)    add(r.sale_date, r.shift, 'wolt', Number(r.net_final ?? 0));
     for (const r of allLieferandoRows) add(r.sale_date, r.shift, 'lieferando', Number(r.net_final ?? 0));
+    for (const r of allTgtgRows) add(r.sale_date, r.shift, 'tgtg', Number(r.net ?? 0));
     for (const b of allOutgoingBills) {
       if (!b.event_date) continue;
       add(b.event_date, b.shift_type, 'bills', Number(b.net_total ?? 0));
@@ -1428,7 +1447,7 @@ export default function SalesReportsPage() {
       }
     }
     return out;
-  }, [allShiftRows, allWebshopRows, allWoltRows, allLieferandoRows, allWoltCredits, allOutgoingBills, salesFcst]);
+  }, [allShiftRows, allWebshopRows, allWoltRows, allLieferandoRows, allTgtgRows, allWoltCredits, allOutgoingBills, salesFcst]);
 
   const monthlySummary = useMemo(
     () => buildChannelSummary(d => d.slice(0, 7)),
@@ -1438,7 +1457,7 @@ export default function SalesReportsPage() {
   /** Net sales per date — lunch, dinner and the whole day — for the weekday charts under the daily table. */
   const dailyTotals = useMemo(() => {
     const out = { lunch: {} as Record<string, number>, dinner: {} as Record<string, number>, day: {} as Record<string, number> };
-    const sum = (c: ChannelSums) => c.orderbird + c.webshop + c.wolt + c.lieferando + c.bills;
+    const sum = (c: ChannelSums) => c.orderbird + c.webshop + c.wolt + c.lieferando + c.bills + c.tgtg;
     for (const [d, m] of Object.entries(buildChannelSummary(d => d))) {
       out.lunch[d] = sum(m.lunch);
       out.dinner[d] = sum(m.dinner);
@@ -1498,6 +1517,10 @@ export default function SalesReportsPage() {
   const { data: gmWolt = [] } = useQuery({
     queryKey: ['group-monthly', 'wolt'], enabled: groupMonthlyOn,
     queryFn: () => fetchAllRows('wolt_shift_sales', 'location_id,sale_date,shift,net_sales,net_final', 'sale_date'),
+  });
+  const { data: gmTgtg = [] } = useQuery({
+    queryKey: ['group-monthly', 'tgtg'], enabled: groupMonthlyOn,
+    queryFn: () => fetchAllRows('tgtg_sales', 'location_id,sale_date,shift,net', 'sale_date').catch(() => []),
   });
   const { data: gmWoltCredits = [] } = useQuery({
     queryKey: ['group-monthly', 'wolt-credits'], enabled: groupMonthlyOn,
@@ -1919,6 +1942,7 @@ export default function SalesReportsPage() {
     for (const r of gmWebshop) add(r.sale_date, r.location_id, r.shift, Number(r.net_cents ?? 0) / 100);
     for (const r of gmWolt) add(r.sale_date, r.location_id, r.shift, Number(r.net_final ?? 0));
     for (const r of gmLieferando) add(r.sale_date, r.location_id, r.shift, Number(r.net_final ?? 0));
+    for (const r of gmTgtg) add(r.sale_date, r.location_id, r.shift, Number(r.net ?? 0));
 
     /* Wolt's monthly credit, shared over the month's days by their net sales. */
     for (const c of gmWoltCredits) {
@@ -1953,7 +1977,7 @@ export default function SalesReportsPage() {
     }
 
     return m;
-  }, [gmShifts, gmWebshop, gmWolt, gmWoltCredits, gmLieferando, gmBills, groupRestaurants, salesForecastRows]);
+  }, [gmShifts, gmWebshop, gmWolt, gmWoltCredits, gmLieferando, gmTgtg, gmBills, groupRestaurants, salesForecastRows]);
 
   /** Months of the group sheet that carry forecast — their sales figures show in orange. */
   const groupForecastMonths = useMemo(() => {
@@ -2239,6 +2263,31 @@ export default function SalesReportsPage() {
       return (data ?? []) as WoltShiftRowDb[];
     },
   });
+
+  /* Too Good To Go for the quarter on screen, per shift. */
+  const { data: tgtgQuarterRows = [] } = useQuery({
+    queryKey: ['tgtg-sales', 'pl', location?.id, isGroup, year, quarter],
+    enabled: !!location,
+    queryFn: async () => {
+      const [firstM, , lastM] = QUARTER_MONTHS[quarter - 1];
+      const qStart = `${year}-${String(firstM).padStart(2,'0')}-01`;
+      const qEnd   = `${year}-${String(lastM).padStart(2,'0')}-${String(daysInMonth(year, lastM)).padStart(2,'0')}`;
+      let q = supabase.from('tgtg_sales').select('sale_date,shift,net').gte('sale_date', qStart).lte('sale_date', qEnd);
+      if (!isGroup) q = q.eq('location_id', location!.id);
+      const { data, error } = await q;
+      if (error) return [];
+      return (data ?? []) as { sale_date: string; shift: 'lunch' | 'dinner'; net: number }[];
+    },
+  });
+  const tgtgMaps = useMemo(() => {
+    const out = { lunch: {} as Record<string, number>, dinner: {} as Record<string, number>, day: {} as Record<string, number> };
+    for (const r of tgtgQuarterRows) {
+      const v = Number(r.net ?? 0);
+      out[r.shift][r.sale_date] = (out[r.shift][r.sale_date] ?? 0) + v;
+      out.day[r.sale_date] = (out.day[r.sale_date] ?? 0) + v;
+    }
+    return out;
+  }, [tgtgQuarterRows]);
 
   /** The Lieferando P&L lines, per shift — no monthly credits to spread here. */
   const lieferandoMaps = useMemo(() => {
@@ -6783,14 +6832,6 @@ export default function SalesReportsPage() {
                         </tr>
                       );
 
-                      /** One revenue source inside a Net sales block. */
-                      const netSalesSourceRow = (label: string, shift?: 'lunch' | 'dinner') => (
-                        <tr key={`${shift ?? 'day'}-${label}`} className="border-b border-gray-100 hover:bg-gray-50/60 group" style={{ backgroundColor: '#ffffff' }}>
-                          <td className="sticky left-0 z-10 px-4 py-1 whitespace-nowrap border-r border-gray-100 bg-white group-hover:bg-gray-50 transition-colors text-[11px] text-gray-600 pl-8">{label}</td>
-                          {emptyCells(shift)}
-                        </tr>
-                      );
-
                       /**
                        * A revenue source with figures behind it, laid out exactly like the
                        * placeholder rows so a wired-up source does not shift the block.
@@ -6842,6 +6883,7 @@ export default function SalesReportsPage() {
                         webshopNet: Record<string, number>, woltNet: Record<string, number>,
                         billsMap: Record<string, number>, lieferandoNet: Record<string, number> = {},
                         salesForecast: Record<string, number> = {},
+                        tgtgNet: Record<string, number> = {},
                       ) => {
                         const m: Record<string, number> = {};
                         for (const col of dailyCols) {
@@ -6852,7 +6894,7 @@ export default function SalesReportsPage() {
                             ? actual
                             : (k >= todayKey ? (fcastMap[k] ?? 0) : 0);
                           const total = orderbird + (webshopNet[k] ?? 0) + (woltNet[k] ?? 0) + (lieferandoNet[k] ?? 0) + (billsMap[k] ?? 0)
-                            + (salesForecast[k] ?? 0);
+                            + (salesForecast[k] ?? 0) + (tgtgNet[k] ?? 0);
                           if (total !== 0) m[k] = total;
                         }
                         return m;
@@ -6896,11 +6938,6 @@ export default function SalesReportsPage() {
                         <tr key={key}><td colSpan={totalCols} style={{ height: 10, backgroundColor: '#f9fafb' }} /></tr>
                       );
 
-                      // Bills is rendered by billsRow (live data from Outgoing Bills), so it is
-                      // not in this placeholder list — see the render block below.
-                      // Orderbird is rendered by posRow (live POS data), so it is not in this
-                      // placeholder list — see the render block below.
-                      const NET_SALES_AFTER_BILLS  = ['Too Good To Go'];
 
                       // Lunch + Dinner per date, for the all-day block.
                       const orderbirdDayMap = (() => {
@@ -7127,10 +7164,10 @@ export default function SalesReportsPage() {
                           {netSalesValueRow('Wolt', woltMaps.lunch.net, 'lunch')}
                           {netSalesValueRow('Lieferando', lieferandoMaps.lunch.net, 'lunch')}
                           {billsRow('Bills', billsLunchMap, 'lunch', true)}
-                          {NET_SALES_AFTER_BILLS.map(src => netSalesSourceRow(src, 'lunch'))}
+                          {netSalesValueRow('Too Good To Go', tgtgMaps.lunch, 'lunch')}
                           {netSalesValueRow('Forecast (not yet reported)', salesFcst.lunch, 'lunch', true)}
                           {netSalesTotalRow('total-net-sales-lunch', 'Total net sales · Lunch',
-                            netSalesTotalMap(lunchMap, obLunchFcst, webshopMaps.lunch.net, woltMaps.lunch.net, billsLunchMap, lieferandoMaps.lunch.net, salesFcst.lunch), 'lunch')}
+                            netSalesTotalMap(lunchMap, obLunchFcst, webshopMaps.lunch.net, woltMaps.lunch.net, billsLunchMap, lieferandoMaps.lunch.net, salesFcst.lunch, tgtgMaps.lunch), 'lunch')}
                           {netSalesSpacerRow('net-sales-gap')}
                           {netSalesHeaderRow('Net sales · Dinner', 'dinner')}
                           {posRow('Orderbird', dinnerMap, obDinnerFcst, dinnerQtrTotal, 'dinner', true)}
@@ -7138,10 +7175,10 @@ export default function SalesReportsPage() {
                           {netSalesValueRow('Wolt', woltMaps.dinner.net, 'dinner')}
                           {netSalesValueRow('Lieferando', lieferandoMaps.dinner.net, 'dinner')}
                           {billsRow('Bills', billsDinnerMap, 'dinner', true)}
-                          {NET_SALES_AFTER_BILLS.map(src => netSalesSourceRow(src, 'dinner'))}
+                          {netSalesValueRow('Too Good To Go', tgtgMaps.dinner, 'dinner')}
                           {netSalesValueRow('Forecast (not yet reported)', salesFcst.dinner, 'dinner', true)}
                           {netSalesTotalRow('total-net-sales-dinner', 'Total net sales · Dinner',
-                            netSalesTotalMap(dinnerMap, obDinnerFcst, webshopMaps.dinner.net, woltMaps.dinner.net, billsDinnerMap, lieferandoMaps.dinner.net, salesFcst.dinner), 'dinner')}
+                            netSalesTotalMap(dinnerMap, obDinnerFcst, webshopMaps.dinner.net, woltMaps.dinner.net, billsDinnerMap, lieferandoMaps.dinner.net, salesFcst.dinner, tgtgMaps.dinner), 'dinner')}
                           {netSalesSpacerRow('net-sales-gap-2')}
                           {netSalesHeaderRow('Net sales · Day')}
                           {posRow('Orderbird', orderbirdDayMap, orderbirdDayForecast, orderbirdDayQtr, undefined, true)}
@@ -7149,10 +7186,10 @@ export default function SalesReportsPage() {
                           {netSalesValueRow('Wolt', woltMaps.day.net)}
                           {netSalesValueRow('Lieferando', lieferandoMaps.day.net)}
                           {billsRow('Bills', billsDayMap, undefined, true)}
-                          {NET_SALES_AFTER_BILLS.map(src => netSalesSourceRow(src))}
+                          {netSalesValueRow('Too Good To Go', tgtgMaps.day)}
                           {netSalesValueRow('Forecast (not yet reported)', salesFcst.day, undefined, true)}
                           {netSalesTotalRow('total-net-sales-day', 'Total net sales · All day',
-                            netSalesTotalMap(orderbirdDayMap, orderbirdDayForecast, webshopMaps.day.net, woltMaps.day.net, billsDayMap, lieferandoMaps.day.net, salesFcst.day))}
+                            netSalesTotalMap(orderbirdDayMap, orderbirdDayForecast, webshopMaps.day.net, woltMaps.day.net, billsDayMap, lieferandoMaps.day.net, salesFcst.day, tgtgMaps.day))}
                           {netSalesSpacerRow('net-sales-gap-3')}
                           </>}
 
@@ -7701,12 +7738,12 @@ export default function SalesReportsPage() {
                   </thead>
                   {/* ── Net sales by channel — the same blocks as the monthly view ── */}
                   {(() => {
-                    type Ch = 'orderbird' | 'webshop' | 'wolt' | 'lieferando' | 'bills' | 'forecast';
+                    type Ch = 'orderbird' | 'webshop' | 'wolt' | 'lieferando' | 'bills' | 'tgtg' | 'forecast';
                     type Sh = 'lunch' | 'dinner' | 'day';
                     const wk  = (kw: number, y = year) => `${y}-W${String(kw).padStart(2, '0')}`;
                     const cell = (kw: number, sh: Sh, ch: Ch) => weeklySummary[wk(kw)]?.[sh][ch] ?? 0;
                     const totalOf = (x: ChannelSums) =>
-                      x.orderbird + x.webshop + x.wolt + x.lieferando + x.bills + x.forecast;
+                      x.orderbird + x.webshop + x.wolt + x.lieferando + x.bills + x.tgtg + x.forecast;
                     const cellTotal = (kw: number, sh: Sh, y = year) =>
                       weeklySummary[wk(kw, y)] ? totalOf(weeklySummary[wk(kw, y)][sh]) : 0;
                     const fyCell  = (sh: Sh, ch: Ch) => Object.entries(weeklySummary)
@@ -7778,7 +7815,7 @@ export default function SalesReportsPage() {
                       line(`w-${sh}-wo`, 'Wolt',       kw => cell(kw, sh, 'wolt'),       () => fyCell(sh, 'wolt')),
                       line(`w-${sh}-li`, 'Lieferando', kw => cell(kw, sh, 'lieferando'), () => fyCell(sh, 'lieferando')),
                       line(`w-${sh}-bi`, 'Bills',      kw => cell(kw, sh, 'bills'),      () => fyCell(sh, 'bills')),
-                      line(`w-${sh}-tg`, 'Too Good To Go', () => 0, () => 0),
+                      line(`w-${sh}-tg`, 'Too Good To Go', kw => cell(kw, sh, 'tgtg'), () => fyCell(sh, 'tgtg')),
                       line(`w-${sh}-fc`, 'Forecast (not yet reported)', kw => cell(kw, sh, 'forecast'), () => fyCell(sh, 'forecast'), { forecast: true }),
                       line(`w-${sh}-tot`, totalLabel, kw => cellTotal(kw, sh), () => fyTotal(sh), { total: true }),
                       ...(sh === 'day' ? [
@@ -8852,14 +8889,14 @@ export default function SalesReportsPage() {
                     </thead>
                     {/* ── 1) Summary — the daily net-sales blocks, by month ── */}
                     {(() => {
-                      type Ch = 'orderbird' | 'webshop' | 'wolt' | 'lieferando' | 'bills' | 'forecast';
+                      type Ch = 'orderbird' | 'webshop' | 'wolt' | 'lieferando' | 'bills' | 'tgtg' | 'forecast';
                       type Sh = 'lunch' | 'dinner' | 'day';
                       const cell = (mk: string, sh: Sh, ch: Ch) => monthlySummary[mk]?.[sh][ch] ?? 0;
                       const fyCell = (y: number, sh: Sh, ch: Ch) =>
                         Object.entries(monthlySummary).filter(([k]) => k.startsWith(`${y}-`))
                           .reduce((t, [, m]) => t + m[sh][ch], 0);
                       const totalOf = (sums: ChannelSums) =>
-                        sums.orderbird + sums.webshop + sums.wolt + sums.lieferando + sums.bills + sums.forecast;
+                        sums.orderbird + sums.webshop + sums.wolt + sums.lieferando + sums.bills + sums.tgtg + sums.forecast;
                       const cellTotal = (mk: string, sh: Sh) => monthlySummary[mk] ? totalOf(monthlySummary[mk][sh]) : 0;
                       const fyTotal   = (y: number, sh: Sh) =>
                         Object.entries(monthlySummary).filter(([k]) => k.startsWith(`${y}-`))
@@ -8928,7 +8965,7 @@ export default function SalesReportsPage() {
                         line(`${sh}-wo`,   'Wolt',      mk => cell(mk, sh, 'wolt'),      y => fyCell(y, sh, 'wolt')),
                         line(`${sh}-li`,   'Lieferando', mk => cell(mk, sh, 'lieferando'), y => fyCell(y, sh, 'lieferando')),
                         line(`${sh}-bi`,   'Bills',     mk => cell(mk, sh, 'bills'),     y => fyCell(y, sh, 'bills')),
-                        line(`${sh}-tg`,   'Too Good To Go', () => 0, () => 0, { placeholder: true }),
+                        line(`${sh}-tg`,   'Too Good To Go', mk => cell(mk, sh, 'tgtg'), y => fyCell(y, sh, 'tgtg')),
                         line(`${sh}-fc`,   'Forecast (not yet reported)', mk => cell(mk, sh, 'forecast'), y => fyCell(y, sh, 'forecast'), { forecast: true }),
                         line(`${sh}-tot`,  totalLabel, mk => cellTotal(mk, sh), y => fyTotal(y, sh), { total: true }),
                         /* A month's takings mean little without the shifts behind them: a

@@ -7,6 +7,8 @@ import { importNexiPdf } from '@/lib/nexi-import';
 import { parseAmexStatement, type AmexStatement } from '@/lib/amex-statement';
 import { linkAmexStatement } from '@/lib/amex-import';
 import { unzipSync } from 'fflate';
+import { parseTgtgStatement } from '@/lib/tgtg-statement';
+import { importTgtgMonth } from '@/lib/tgtg-import';
 
 export const maxDuration = 60;
 
@@ -131,6 +133,24 @@ async function fileDocument(
       /* The document still belongs in the folder even when the figures cannot
          be read from it. */
       console.warn('[month-folder] Nexi statement unreadable:', e);
+    }
+  }
+
+  /* Too Good To Go: the bag sales on the statement are our revenue, and exist
+     nowhere else — read them as the statement is filed. */
+  if (kind === 'toogoodtogo') {
+    try {
+      const pdf = await getDocumentProxy(new Uint8Array(await file.arrayBuffer()));
+      const { text } = await extractText(pdf, { mergePages: true });
+      const st = parseTgtgStatement(String(text));
+      if (st.month && st.lines.length) {
+        const r = await importTgtgMonth(admin, st.month, st.lines, file.name);
+        console.log(`[month-folder] TGTG ${st.month}: ${st.lines.length} lines, ${r.gross.toFixed(2)} € gross, ${r.rows} day rows`);
+      } else {
+        console.warn('[month-folder] TGTG statement: no bag sales found');
+      }
+    } catch (e) {
+      console.warn('[month-folder] TGTG statement not read:', e instanceof Error ? e.message : e);
     }
   }
 
