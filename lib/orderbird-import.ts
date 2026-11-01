@@ -39,6 +39,10 @@ export type IncomingShift = {
   end?:  string | null;
   /** For a shift left open from lunch into the evening: gross taken before SPLIT_HOUR that day. */
   lunchGross?: number | null;
+  /** Fetched again because the copy on file may have been taken while the shift was open. */
+  recheck?: boolean;
+  /** Set here: a re-fetched Z-report that turned out unchanged, so it is not reported as new. */
+  quiet?: boolean;
 };
 
 export type ImportedShift = { location: string; z: string; date: string; shift: 'lunch' | 'dinner'; gross: number };
@@ -82,12 +86,52 @@ async function hasEarlierZ(locationId: string, date: string, z: number): Promise
   });
 }
 
-/** Where the bookmark should start for each venue: the last Z number on file. */
+/**
+ * Z-reports that may have been fetched while the shift was still running.
+ *
+ * MY orderbird hands out the CSV of an open shift as readily as a closed one,
+ * and the bookmark used to take it: Westend's Friday lunch (Z 5503) was
+ * fetched fourteen minutes after it opened and filed with nothing in it, and
+ * evening imports caught dinners halfway. Anything imported on the day its
+ * shift ran — or filed with no takings at all — is fetched once more, a day
+ * or more later. Once re-fetched its comment ends "· checked", which takes it
+ * off this list.
+ */
+async function recheckList(locationId: string): Promise<number[]> {
+  const since = new Date(Date.now() - 60 * 864e5).toISOString().slice(0, 10);
+  const { data } = await getSupabaseAdmin().from('shift_reports')
+    .select('z_report_number,report_date,net_total,created_at,comment')
+    .eq('location_id', locationId).gte('report_date', since);
+  const out = new Set<number>();
+  /* Only shifts of past days: tonight's may still be running. */
+  const today = new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Berlin' });
+  for (const r of data ?? []) {
+    if (String(r.report_date) >= today) continue;
+    if (String(r.comment ?? '').includes('· checked')) continue;
+    const importedOn = new Date(r.created_at as string).toLocaleDateString('sv-SE', { timeZone: 'Europe/Berlin' });
+    if (importedOn <= String(r.report_date) || Number(r.net_total ?? 0) === 0) {
+      const n = parseInt(String(r.z_report_number ?? ''), 10);
+      if (Number.isFinite(n)) out.add(n);
+    }
+  }
+  return [...out].sort((a, b) => a - b);
+}
+
+/** Where the bookmark should start for each venue — the last Z number on file — and what to fetch again. */
 export async function venueStatus() {
   return Promise.all(ORDERBIRD_VENUES.map(async v => {
-    const known = await knownZ(await locationIdOf(v.location));
-    return { ...v, lastZ: known.size ? Math.max(...known) : null };
+    const id = await locationIdOf(v.location);
+    const known = await knownZ(id);
+    return { ...v, lastZ: known.size ? Math.max(...known) : null, recheck: await recheckList(id) };
   }));
+}
+
+/** Total net of what is on file for one Z-report (a split one has two rows). */
+async function filedNet(locationId: string, z: number): Promise<number | null> {
+  const { data } = await getSupabaseAdmin().from('shift_reports')
+    .select('net_total').eq('location_id', locationId).eq('z_report_number', String(z));
+  if (!data?.length) return null;
+  return data.reduce((t, r) => t + Number(r.net_total ?? 0), 0);
 }
 
 /** Files the shifts of one venue, skipping any Z-report already on file. */
@@ -99,7 +143,7 @@ export async function importVenueShifts(venueId: string, shifts: IncomingShift[]
   const imported: ImportedShift[] = [];
 
   for (const s of [...shifts].sort((a, b) => a.z - b.z)) {
-    if (known.has(s.z)) continue;
+    if (known.has(s.z) && !s.recheck) continue;
     const sr = parseShiftCSV(s.csv);
     if (sr.error) throw new Error(`${venue.location} Z-report ${s.z}: ${sr.error}`);
     if (parseInt(sr.zReportNumber, 10) !== s.z) {
@@ -108,7 +152,21 @@ export async function importVenueShifts(venueId: string, shifts: IncomingShift[]
 
     const start = s.start?.match(/^(\d{4}-\d{2}-\d{2}) (\d{2}):(\d{2})$/);
     const end   = s.end?.match(/^(\d{4}-\d{2}-\d{2}) (\d{2}):(\d{2})$/);
-    const date = start?.[1] ?? sr.date;
+
+    /* A shift without a closing time is still running: leave it for the next
+       import rather than file what it has taken so far. */
+    if (!start || !end) continue;
+
+    /* A Z-report fetched again replaces what was filed for it. */
+    if (s.recheck && known.has(s.z)) {
+      const before = await filedNet(locationId, s.z);
+      await getSupabaseAdmin().from('shift_reports').delete().eq('location_id', locationId).eq('z_report_number', String(s.z));
+      if (before !== null && Math.abs(before - sr.netTotal) < 0.01) {
+        /* Unchanged — filed again only to carry its times, off the recheck list. */
+        s.quiet = true;
+      }
+    }
+    const date = start[1];
 
     /* Lunch left open into the evening: one Z-report for both shifts. The
        bookmark sends what was taken before SPLIT_HOUR; the rest is dinner.
@@ -120,7 +178,7 @@ export async function importVenueShifts(venueId: string, shifts: IncomingShift[]
        evening were booked as a sliver of lunch. If the day already has an
        earlier Z-report, that one was the lunch and this one is dinner. */
     const earlierToday = await hasEarlierZ(locationId, date, s.z);
-    const merged = !earlierToday && start && end && Number(start[2]) < LUNCH_STARTS_BEFORE_HOUR &&
+    const merged = !earlierToday && Number(start[2]) < LUNCH_STARTS_BEFORE_HOUR &&
       (end[1] !== start[1] || Number(end[2]) >= DINNER_ENDS_FROM_HOUR);
     const lunchGross = s.lunchGross ?? null;
     if (merged && lunchGross !== null && lunchGross > 0.005 && lunchGross < sr.grossTotal - 0.005) {
@@ -130,17 +188,28 @@ export async function importVenueShifts(venueId: string, shifts: IncomingShift[]
         `receipts before ${SPLIT_HOUR}:00 = lunch (${pct} %). Categories and products estimated in that proportion.`;
       await insertShift(locationId, lunch, 'lunch', date, note);
       await insertShift(locationId, dinner, 'dinner', date, note);
-      imported.push({ location: venue.location, z: sr.zReportNumber, date, shift: 'lunch', gross: lunch.grossTotal });
-      imported.push({ location: venue.location, z: sr.zReportNumber, date, shift: 'dinner', gross: dinner.grossTotal });
+      if (!s.quiet) {
+        imported.push({ location: venue.location, z: sr.zReportNumber, date, shift: 'lunch', gross: lunch.grossTotal });
+        imported.push({ location: venue.location, z: sr.zReportNumber, date, shift: 'dinner', gross: dinner.grossTotal });
+      }
     } else {
       const shiftType: 'lunch' | 'dinner' =
-        start && end && end[1] === start[1] && Number(end[2]) < LUNCH_ENDS_BEFORE_HOUR ? 'lunch' : 'dinner';
+        end[1] === start[1] && Number(end[2]) < LUNCH_ENDS_BEFORE_HOUR ? 'lunch' : 'dinner';
       /* The opening and closing time are kept: without them a day whose
          shifts look wrong afterwards (Westend, 30.10.: one Z-report for the
          whole day) cannot be explained from the app at all. */
-      const times = start && end ? `Z ${sr.zReportNumber}: ${start[2]}:${start[3]}–${end[1] !== start[1] ? end[1] + ' ' : ''}${end[2]}:${end[3]}` : null;
+      const times = `Z ${sr.zReportNumber}: ${start[2]}:${start[3]}–${end[1] !== start[1] ? end[1] + ' ' : ''}${end[2]}:${end[3]}`;
       await insertShift(locationId, sr, shiftType, date, times);
-      imported.push({ location: venue.location, z: sr.zReportNumber, date, shift: shiftType, gross: sr.grossTotal });
+      if (!s.quiet) imported.push({ location: venue.location, z: sr.zReportNumber, date, shift: shiftType, gross: sr.grossTotal });
+    }
+    /* Fetched after the shift was surely closed: never on the recheck list again. */
+    if (s.recheck) {
+      const { data: rows } = await getSupabaseAdmin().from('shift_reports')
+        .select('id,comment').eq('location_id', locationId).eq('z_report_number', String(s.z));
+      for (const r of rows ?? []) {
+        await getSupabaseAdmin().from('shift_reports')
+          .update({ comment: `${r.comment ?? `Z ${s.z}`} · checked` }).eq('id', r.id);
+      }
     }
     known.add(s.z);
   }

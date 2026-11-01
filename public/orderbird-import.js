@@ -116,9 +116,26 @@
       if (!r.ok || type.indexOf('csv') === -1) throw new Error('Z-report ' + z + ' could not be fetched (HTTP ' + r.status + ')');
       var csv = await r.text();
       var t = await shiftTimes(z);
+      /* No closing time: the shift is still running. MY orderbird hands out
+         its CSV all the same, with whatever it has taken so far — stop here
+         and fetch it once it is closed. */
+      if (!t.end) break;
       var shift = { z: z, csv: csv, start: t.start, end: t.end };
       if (leftOpen(t)) shift.lunchGross = await lunchGross(t.start);
       shifts.push(shift);
+    }
+    /* Z-reports the app thinks were fetched while still open, fetched again. */
+    var recheck = v.recheck || [];
+    for (var i = 0; i < recheck.length; i++) {
+      var rz = recheck[i];
+      var rr = await fetch('/reports/csv/shift/' + rz, { credentials: 'include' });
+      if (!rr.ok || (rr.headers.get('content-type') || '').indexOf('csv') === -1) continue;
+      var rcsv = await rr.text();
+      var rt = await shiftTimes(rz);
+      if (!rt.end) continue;
+      var again = { z: rz, csv: rcsv, start: rt.start, end: rt.end, recheck: true };
+      if (leftOpen(rt)) again.lunchGross = await lunchGross(rt.start);
+      shifts.push(again);
     }
     return shifts;
   }
