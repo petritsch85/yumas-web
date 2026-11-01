@@ -11,8 +11,13 @@ import { dailySalesActuals } from '@/lib/daily-sales-actuals';
  * month's other documents, and kept.
  */
 
-export type SnapshotRow = { location_id: string; forecast_date: string; /** 'booked': sales already on the books for a day still to come. */
-  shift_type: 'lunch' | 'dinner' | 'booked'; net_total: number };
+export type SnapshotRow = {
+  location_id: string; forecast_date: string;
+  /** 'booked' (older snapshots) or 'day': a sale on the books with no shift set. */
+  shift_type: 'lunch' | 'dinner' | 'booked' | 'day'; net_total: number;
+  /** Sales already on the books for a day still to come, rather than forecast. */
+  booked?: boolean;
+};
 export type Snapshot = { month: string; frozenAt: string; rows: SnapshotRow[] };
 
 const BUCKET = 'cashflow-files';
@@ -47,8 +52,8 @@ export async function freezeMonth(admin: SupabaseClient, month: string, force = 
     const { data: locs } = await admin.from('locations').select('id,name').eq('type', 'restaurant');
     const known = await dailySalesActuals(admin, (locs ?? []) as { id: string; name: string }[], rest, end);
     for (const [k, v] of Object.entries(known)) {
-      const [location_id, forecast_date] = k.split('|');
-      booked.push({ location_id, forecast_date, shift_type: 'booked', net_total: Math.round(v * 100) / 100 });
+      const [location_id, forecast_date, shift] = k.split('|');
+      booked.push({ location_id, forecast_date, shift_type: shift as SnapshotRow['shift_type'], net_total: Math.round(v * 100) / 100, booked: true });
     }
   }
   const snap: Snapshot = { month, frozenAt: new Date().toISOString(), rows: [...(data as SnapshotRow[]), ...booked] };

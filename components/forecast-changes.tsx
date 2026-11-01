@@ -43,6 +43,7 @@ export function ForecastChanges({ locations }: { locations: Loc[] }) {
   const qc = useQueryClient();
   const [month, setMonth] = useState(() => todayKey().slice(0, 7));
   const [scope, setScope] = useState<string>('group');
+  const [shift, setShift] = useState<'day' | 'lunch' | 'dinner'>('day');
   const today = todayKey();
   const [y, mo] = month.split('-').map(Number);
   const days = useMemo(() => {
@@ -62,8 +63,8 @@ export function ForecastChanges({ locations }: { locations: Loc[] }) {
     queryKey: ['sales-forecasts-month', month],
     queryFn: async () => {
       const { data } = await supabase.from('sales_forecasts')
-        .select('location_id,forecast_date,net_total').gte('forecast_date', from).lte('forecast_date', to);
-      return (data ?? []) as { location_id: string; forecast_date: string; net_total: number }[];
+        .select('location_id,forecast_date,shift_type,net_total').gte('forecast_date', from).lte('forecast_date', to);
+      return (data ?? []) as { location_id: string; forecast_date: string; shift_type: string; net_total: number }[];
     },
   });
   const { data: actuals = {}, isFetching: actualsLoading } = useQuery({
@@ -87,13 +88,15 @@ export function ForecastChanges({ locations }: { locations: Loc[] }) {
   const table = useMemo(() => {
     const scopes = [{ id: 'group', name: 'Group' }, ...locations];
     const inScope = (sc: string, loc: string) => sc === 'group' ? locations.some(l => l.id === loc) : sc === loc;
+    /* All day takes everything; a shift only what is booked to it. */
+    const inShift = (s: string) => shift === 'day' || s === shift;
     const build = (sc: string) => {
       const frozen: Record<string, number> = {}, latest: Record<string, number> = {}, actual: Record<string, number> = {};
-      for (const r of snapshot?.rows ?? []) if (inScope(sc, r.location_id)) frozen[r.forecast_date] = (frozen[r.forecast_date] ?? 0) + Number(r.net_total);
-      for (const r of latestRows) if (inScope(sc, r.location_id)) latest[r.forecast_date] = (latest[r.forecast_date] ?? 0) + Number(r.net_total);
+      for (const r of snapshot?.rows ?? []) if (inScope(sc, r.location_id) && inShift(r.shift_type)) frozen[r.forecast_date] = (frozen[r.forecast_date] ?? 0) + Number(r.net_total);
+      for (const r of latestRows) if (inScope(sc, r.location_id) && inShift(r.shift_type)) latest[r.forecast_date] = (latest[r.forecast_date] ?? 0) + Number(r.net_total);
       for (const [k, v] of Object.entries(actuals)) {
-        const [loc, d] = k.split('|');
-        if (!inScope(sc, loc)) continue;
+        const [loc, d, sh] = k.split('|');
+        if (!inScope(sc, loc) || !inShift(sh)) continue;
         /* A day that has passed is actual; for one still to come, sales already
            on the books (an event invoiced ahead) count towards its forecast,
            as the frozen snapshot counts them too. */
@@ -113,7 +116,7 @@ export function ForecastChanges({ locations }: { locations: Loc[] }) {
       };
     };
     return Object.fromEntries(scopes.map(s => [s.id, { name: s.name, ...build(s.id) }]));
-  }, [snapshot, latestRows, actuals, locations, days, today]);
+  }, [snapshot, latestRows, actuals, locations, days, today, shift]);
 
   const sel = table[scope];
   const monthStarted = today >= from;
@@ -151,7 +154,7 @@ export function ForecastChanges({ locations }: { locations: Loc[] }) {
         <table className="w-full text-xs">
           <thead className="bg-gray-900 text-gray-200">
             <tr>
-              <th className="px-3 py-2 text-left font-semibold">{MONTHS[mo - 1]}</th>
+              <th className="px-3 py-2 text-left font-semibold">{MONTHS[mo - 1]}{shift !== 'day' ? ` · ${shift === 'lunch' ? 'Lunch' : 'Dinner'}` : ''}</th>
               <th className={th}>Forecast on the 1st (frozen)</th>
               <th className={th}>Actual to yesterday</th>
               <th className={th}>vs. frozen to yesterday</th>
@@ -178,11 +181,18 @@ export function ForecastChanges({ locations }: { locations: Loc[] }) {
       </div>
 
       {/* Day by day, for the scope picked above */}
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 flex-wrap">
         {Object.entries(table).map(([id, s]) => (
           <button key={id} onClick={() => setScope(id)}
             className={`px-3 py-1.5 rounded-lg text-xs font-semibold border ${scope === id ? 'bg-[#1B5E20] text-white border-[#1B5E20]' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'}`}>
             {s.name}
+          </button>
+        ))}
+        <span className="w-px h-6 bg-gray-200 mx-1" />
+        {([['day', 'All day'], ['lunch', 'Lunch'], ['dinner', 'Dinner']] as const).map(([k, label]) => (
+          <button key={k} onClick={() => setShift(k)}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold border ${shift === k ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'}`}>
+            {label}
           </button>
         ))}
       </div>
