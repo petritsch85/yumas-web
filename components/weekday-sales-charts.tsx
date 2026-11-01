@@ -6,7 +6,7 @@ import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Toolti
  * Total net sales by weekday — every Monday side by side, every Tuesday, and so on.
  *
  * A week mixes a quiet Monday with a full Saturday, so a weekly total hides
- * which day moved. Seven small charts on one scale each show how one weekday
+ * which day moved. Seven small charts, each on its own scale, show how one weekday
  * runs over the months; the dashed line is that weekday's median over the
  * period, so a day above or below it reads at a glance.
  */
@@ -35,8 +35,6 @@ export function WeekdaySalesCharts({ days, from, title }: {
     byWeekday[(t.getUTCDay() + 6) % 7].push({ date: d, value: Math.round(days[d] ?? 0) });
   }
 
-  /* One scale for all seven, so a Saturday bar and a Monday bar compare. */
-  const max = Math.max(1, ...byWeekday.flat().map(p => p.value));
 
   return (
     <div className="mt-4 shrink-0">
@@ -67,7 +65,9 @@ export function WeekdaySalesCharts({ days, from, title }: {
                     <CartesianGrid vertical={false} stroke="#f1f5f9" />
                     <XAxis dataKey="date" tickFormatter={short} tick={{ fontSize: 10, fill: '#9ca3af' }}
                       tickLine={false} axisLine={{ stroke: '#e5e7eb' }} interval="preserveStartEnd" minTickGap={18} />
-                    <YAxis domain={[0, max]} width={44} tick={{ fontSize: 10, fill: '#9ca3af' }}
+                    {/* Each chart on its own scale: one 4k event on a Sunday
+                        must not flatten every other weekday's bars. */}
+                    <YAxis domain={[0, 'auto']} width={44} tick={{ fontSize: 10, fill: '#9ca3af' }}
                       tickLine={false} axisLine={false} tickFormatter={v => v >= 1000 ? `${(v / 1000).toLocaleString('de-DE', { maximumFractionDigits: 1 })}k` : String(Math.round(v))} />
                     <Tooltip cursor={{ fill: 'rgba(15,23,42,0.05)' }}
                       formatter={(v) => [`${eur(Number(v))} €`, 'Total net sales']}
