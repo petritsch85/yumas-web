@@ -135,7 +135,11 @@ export async function importVenueShifts(venueId: string, shifts: IncomingShift[]
     } else {
       const shiftType: 'lunch' | 'dinner' =
         start && end && end[1] === start[1] && Number(end[2]) < LUNCH_ENDS_BEFORE_HOUR ? 'lunch' : 'dinner';
-      await insertShift(locationId, sr, shiftType, date, null);
+      /* The opening and closing time are kept: without them a day whose
+         shifts look wrong afterwards (Westend, 30.10.: one Z-report for the
+         whole day) cannot be explained from the app at all. */
+      const times = start && end ? `Z ${sr.zReportNumber}: ${start[2]}:${start[3]}–${end[1] !== start[1] ? end[1] + ' ' : ''}${end[2]}:${end[3]}` : null;
+      await insertShift(locationId, sr, shiftType, date, times);
       imported.push({ location: venue.location, z: sr.zReportNumber, date, shift: shiftType, gross: sr.grossTotal });
     }
     known.add(s.z);
