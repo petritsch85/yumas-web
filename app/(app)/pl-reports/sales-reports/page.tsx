@@ -9,6 +9,7 @@ import { parseShiftCSV, parseNum, parseDate, SECTION_NAMES } from '@/lib/orderbi
 import type { ShiftCat, ShiftProduct, ShiftParseResult } from '@/lib/orderbird-shift-csv';
 import { OrderbirdSyncBar } from '@/components/orderbird-sync-bar';
 import { WeekdaySalesCharts } from '@/components/weekday-sales-charts';
+import { ForecastChanges } from '@/components/forecast-changes';
 import { parseGdpduZip, GdpduParseError } from '@/lib/gdpdu';
 import { isoWeek, isoWeekYear, isoWeekRange, isoWeeksInYear, currentISOWeek } from '@/lib/iso-week';
 import { shiftClosedCheckerFor } from '@/lib/opening-hours';
@@ -930,7 +931,7 @@ export default function SalesReportsPage() {
   const { t } = useT();
 
   // Tab / sub-tab
-  const [activeTab,   setActiveTab]   = useState<'upload'|'daily'>('daily');
+  const [activeTab,   setActiveTab]   = useState<'upload'|'daily'|'forecast'>('daily');
   const [subTab,      setSubTab]      = useState<'daily'|'weekly'|'monthly'>('daily');
   /**
    * Which numbered section of the daily P&L is on screen. They used to run one
@@ -4312,6 +4313,7 @@ export default function SalesReportsPage() {
           {([
             ['upload', <Upload size={14} />,       'Upload'],
             ['daily',  <CalendarDays size={14} />, 'P&L'],
+            ['forecast', <TrendingUp size={14} />, 'Forecast changes'],
           ] as const).map(([t, icon, label]) => (
             <button key={t} onClick={() => setActiveTab(t)}
               className={`flex items-center gap-2 pb-3 text-sm font-semibold border-b-2 transition-colors ${
@@ -4325,7 +4327,9 @@ export default function SalesReportsPage() {
       </div>
 
       {/* ── Shared controls ── */}
-      {activeTab !== 'upload' && (
+      {activeTab === 'forecast' && <ForecastChanges locations={locations} />}
+
+      {activeTab === 'daily' && (
         <div className="mb-3 space-y-2">
           {/* Row 1: Location + Year + Quarter dropdowns */}
           <div className="flex items-center gap-3 flex-wrap">

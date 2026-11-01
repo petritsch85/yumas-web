@@ -1,0 +1,5 @@
+{
+  "crons": [
+    { "path": "/api/webhooks/freeze-forecast", "schedule": "5 23 * * *" }
+  ]
+}
