@@ -107,12 +107,15 @@ async function recheckList(locationId: string): Promise<number[]> {
   const today = new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Berlin' });
   for (const r of data ?? []) {
     if (String(r.report_date) >= today) continue;
-    if (String(r.comment ?? '').includes('· checked')) continue;
-    const importedOn = new Date(r.created_at as string).toLocaleDateString('sv-SE', { timeZone: 'Europe/Berlin' });
-    if (importedOn <= String(r.report_date) || Number(r.net_total ?? 0) === 0) {
-      const n = parseInt(String(r.z_report_number ?? ''), 10);
-      if (Number.isFinite(n)) out.add(n);
-    }
+    const comment = String(r.comment ?? '');
+    if (comment.includes('· checked')) continue;
+    /* Imported with its opening and closing time: fetched closed, trustworthy.
+       Everything filed before the times were kept is fetched once more — a
+       shift caught while running can look like any other (Taunus Z 640, the
+       Friday lunch, was filed as 14,86 € of Thursday's dinner). */
+    if (/\d{2}:\d{2}–/.test(comment)) continue;
+    const n = parseInt(String(r.z_report_number ?? ''), 10);
+    if (Number.isFinite(n)) out.add(n);
   }
   return [...out].sort((a, b) => a - b);
 }
