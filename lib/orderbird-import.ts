@@ -197,7 +197,13 @@ export async function importVenueShifts(venueId: string, shifts: IncomingShift[]
       }
     } else {
       const shiftType: 'lunch' | 'dinner' =
-        end[1] === start[1] && Number(end[2]) < LUNCH_ENDS_BEFORE_HOUR ? 'lunch' : 'dinner';
+        end[1] === start[1] && (
+          Number(end[2]) < LUNCH_ENDS_BEFORE_HOUR ||
+          /* A lunch run on to 17:00 — Taunus, 23.09., 11:30–17:00, with the
+             evening on its own Z-report from 17:03 — is still lunch: it opened
+             at lunchtime and closed before any evening could have happened. */
+          (Number(start[2]) < LUNCH_STARTS_BEFORE_HOUR && Number(end[2]) < DINNER_ENDS_FROM_HOUR)
+        ) ? 'lunch' : 'dinner';
       /* The opening and closing time are kept: without them a day whose
          shifts look wrong afterwards (Westend, 30.10.: one Z-report for the
          whole day) cannot be explained from the app at all. */
