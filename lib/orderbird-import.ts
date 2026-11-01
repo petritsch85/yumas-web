@@ -9,6 +9,7 @@
  */
 import { getSupabaseAdmin } from './supabase-admin';
 import { parseShiftCSV, type ShiftParseResult } from './orderbird-shift-csv';
+import { buildShiftClosedChecker } from './opening-hours';
 
 /** Orderbird venue → location in this app. */
 export const ORDERBIRD_VENUES: { venueId: string; location: string }[] = [
@@ -143,6 +144,13 @@ export async function importVenueShifts(venueId: string, shifts: IncomingShift[]
   if (!venue) throw new Error(`Unknown Orderbird venue ${venueId}`);
   const locationId = await locationIdOf(venue.location);
   const known = await knownZ(locationId);
+  /* The opening pattern: a shift the restaurant does not run that day cannot
+     have takings, so nothing is split into it or filed under it. */
+  const [{ data: settings }, { data: closures }] = await Promise.all([
+    getSupabaseAdmin().from('forecast_settings').select('location_id,shift_type,closed_weekdays').eq('location_id', locationId),
+    getSupabaseAdmin().from('closure_days').select('location_id,closure_date,shift_type,kind').eq('location_id', locationId),
+  ]);
+  const isClosed = buildShiftClosedChecker(settings ?? [], closures ?? []);
   const imported: ImportedShift[] = [];
 
   for (const s of [...shifts].sort((a, b) => a.z - b.z)) {
@@ -184,7 +192,12 @@ export async function importVenueShifts(venueId: string, shifts: IncomingShift[]
     const merged = !earlierToday && Number(start[2]) < LUNCH_STARTS_BEFORE_HOUR &&
       (end[1] !== start[1] || Number(end[2]) >= DINNER_ENDS_FROM_HOUR);
     const lunchGross = s.lunchGross ?? null;
-    if (merged && lunchGross !== null && lunchGross > 0.005 && lunchGross < sr.grossTotal - 0.005) {
+    /* Exactly one of the two shifts open that day: everything is that shift.
+       Taunus, Monday 12.10. — no Monday evenings — had a lunch left open until
+       the next morning split 154 € lunch / 858 € dinner, all of it lunch. */
+    const lunchShut = isClosed(locationId, date, 'lunch'), dinnerShut = isClosed(locationId, date, 'dinner');
+    const onlyShift: 'lunch' | 'dinner' | null = lunchShut !== dinnerShut ? (lunchShut ? 'dinner' : 'lunch') : null;
+    if (!onlyShift && merged && lunchGross !== null && lunchGross > 0.005 && lunchGross < sr.grossTotal - 0.005) {
       const [lunch, dinner] = splitShift(sr, lunchGross / sr.grossTotal);
       const pct = (100 * lunchGross / sr.grossTotal).toFixed(1).replace('.', ',');
       const note = `Split from Z ${sr.zReportNumber} (${start[2]}:${start[3]}–${end[2]}:${end[3]}, lunch shift not closed): ` +
@@ -196,14 +209,14 @@ export async function importVenueShifts(venueId: string, shifts: IncomingShift[]
         imported.push({ location: venue.location, z: sr.zReportNumber, date, shift: 'dinner', gross: dinner.grossTotal });
       }
     } else {
-      const shiftType: 'lunch' | 'dinner' =
+      const shiftType: 'lunch' | 'dinner' = onlyShift ?? (
         end[1] === start[1] && (
           Number(end[2]) < LUNCH_ENDS_BEFORE_HOUR ||
           /* A lunch run on to 17:00 — Taunus, 23.09., 11:30–17:00, with the
              evening on its own Z-report from 17:03 — is still lunch: it opened
              at lunchtime and closed before any evening could have happened. */
           (Number(start[2]) < LUNCH_STARTS_BEFORE_HOUR && Number(end[2]) < DINNER_ENDS_FROM_HOUR)
-        ) ? 'lunch' : 'dinner';
+        ) ? 'lunch' : 'dinner');
       /* The opening and closing time are kept: without them a day whose
          shifts look wrong afterwards (Westend, 30.10.: one Z-report for the
          whole day) cannot be explained from the app at all. */
