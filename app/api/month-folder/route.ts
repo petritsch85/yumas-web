@@ -384,6 +384,7 @@ export async function GET(req: NextRequest) {
   const admin = getSupabaseAdmin();
   try {
     const st = await statuses(admin, month);
+    if (req.nextUrl.searchParams.get('plan')) return NextResponse.json(printPlan(month, st));
     return NextResponse.json({
       month, label: monthLabel(month),
       items: st.map(({ item, count, missingFiles, detail, gaps, incomplete }) => ({
@@ -402,6 +403,63 @@ export async function GET(req: NextRequest) {
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : 'failed' }, { status: 500 });
   }
+}
+
+/**
+ * The order the month is printed in — "Check Out" builds one PDF from it.
+ *
+ *  1. The Kontoauszug, page by page, each page followed by the incoming
+ *     invoices whose payment is on it; then the invoices paid in no booking
+ *     of this month (unpaid ones, on accrual).
+ *  2. The outgoing invoices.
+ *  3. The PayPal purchases, together.
+ *  4. Every other monthly statement, one after the next, in folder order —
+ *     Wolt and Lieferando each opening on their summary page per restaurant.
+ *
+ * The documents themselves are fetched and joined in the browser: a month is
+ * tens of megabytes, far more than a server response may carry.
+ */
+type PlanPart = {
+  section: string;
+  label: string;
+  bucket?: string; path?: string;
+  /** Built on request rather than stored: a Wolt or Lieferando summary. */
+  generated?: { kind: 'wolt-summary' | 'lieferando'; store?: string };
+  /** Only the first page (Lieferando: the Rechnung, not the order lists). */
+  firstPageOnly?: boolean;
+  /** For an incoming invoice: the statement page it is filed behind. */
+  behindPage?: number;
+};
+function printPlan(month: string, st: (ItemStatus & { docs: Doc[]; gaps?: Gap[] })[]) {
+  const by = (k: string) => st.find(x => x.item.key === k);
+  const parts: PlanPart[] = [];
+  const statement = by('kontoauszug')?.docs[0];
+  const sec1 = '1 Kontoauszug & Eingangsrechnungen';
+  if (statement) parts.push({ section: sec1, label: 'Kontoauszug', bucket: statement.bucket, path: statement.path });
+  for (const d of by('eingangsrechnungen')?.docs ?? []) {
+    parts.push({ section: sec1, label: d.name, bucket: d.bucket, path: d.path, behindPage: d.page });
+  }
+  for (const d of by('ausgangsrechnungen')?.docs ?? []) parts.push({ section: '2 Ausgangsrechnungen', label: d.name, bucket: d.bucket, path: d.path });
+  for (const d of by('paypal_einkaeufe')?.docs ?? []) parts.push({ section: '3 PayPal-Einkäufe', label: d.name, bucket: d.bucket, path: d.path });
+
+  const done = new Set(['kontoauszug', 'eingangsrechnungen', 'ausgangsrechnungen', 'paypal_einkaeufe']);
+  for (const x of st) {
+    if (done.has(x.item.key) || !x.docs.length) continue;
+    const sec = `4 ${x.item.label}`;
+    if (x.item.key === 'lieferando') {
+      parts.push({ section: sec, label: 'Lieferando — Zusammenfassung und Rechnungen', generated: { kind: 'lieferando' } });
+      continue;
+    }
+    let store = '';
+    for (const d of x.docs) {
+      if (x.item.key === 'wolt') {
+        const s = d.name.split('/')[0];
+        if (s !== store) { store = s; parts.push({ section: sec, label: `Wolt — Zusammenfassung ${s}`, generated: { kind: 'wolt-summary', store: s } }); }
+      }
+      parts.push({ section: sec, label: d.name, bucket: d.bucket, path: d.path });
+    }
+  }
+  return { month, label: monthLabel(month), checklist: checklist(month, st), parts };
 }
 
 /** The checklist that travels with the folder, so gaps are visible on paper. */

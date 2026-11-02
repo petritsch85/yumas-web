@@ -15,7 +15,7 @@
 
 import React, { useState, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { FolderDown, Upload, Check, AlertTriangle, Loader2, Trash2 } from 'lucide-react';
+import { FolderDown, Upload, Check, AlertTriangle, Loader2, Trash2, Printer } from 'lucide-react';
 import { monthLabel } from '@/lib/month-folder';
 import { unzipSync } from 'fflate';
 
@@ -146,6 +146,26 @@ export default function MonatsabschlussPage() {
     } finally { setBusy(null); }
   }
 
+  /* "Check Out": the whole month as one PDF in print order (lib/checkout-pdf.ts). */
+  const [checkout, setCheckout] = useState<string | null>(null);
+  async function checkOut() {
+    setBusy('checkout'); setError(null); setCheckout('Druckreihenfolge wird geladen…');
+    try {
+      const { buildCheckoutPdf } = await import('@/lib/checkout-pdf');
+      const { blob, failed, pages } = await buildCheckoutPdf(month, (done, total, label) =>
+        setCheckout(`${done} / ${total} · ${label.slice(0, 60)}`));
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `Yumas_Monatsabschluss_${month}_Druck.pdf`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
+      setCheckout(`Fertig — ${pages} Seiten${failed.length ? ` · ${failed.length} Dokument(e) nicht eingefügt, auf der letzten Seite aufgelistet` : ''}`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Check Out fehlgeschlagen');
+      setCheckout(null);
+    } finally { setBusy(null); }
+  }
+
   const items = data?.items ?? [];
   const months = Array.from({ length: 18 }, (_, i) => {
     const d = new Date(); d.setMonth(d.getMonth() - i);
@@ -173,8 +193,17 @@ export default function MonatsabschlussPage() {
             {busy === 'zip' ? <Loader2 size={13} className="animate-spin" /> : <FolderDown size={13} />}
             ZIP herunterladen
           </button>
+          <button onClick={checkOut} disabled={busy === 'checkout'}
+            title="Der ganze Monat als eine PDF in Druckreihenfolge: Kontoauszug mit den Rechnungen hinter jeder Seite, Ausgangsrechnungen, PayPal-Einkäufe, Monatsabrechnungen"
+            className="inline-flex items-center gap-1.5 bg-gray-900 hover:bg-gray-700 disabled:opacity-50 text-white rounded-lg px-3 py-1.5 text-xs font-semibold">
+            {busy === 'checkout' ? <Loader2 size={13} className="animate-spin" /> : <Printer size={13} />}
+            Check Out
+          </button>
         </div>
       </div>
+      {checkout && (
+        <div className="mb-3 px-3 py-2 rounded-lg bg-gray-50 border border-gray-200 text-xs text-gray-700 tabular-nums">{checkout}</div>
+      )}
 
       {error && (
         <div className="mb-3 px-3 py-2 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">{error}</div>
