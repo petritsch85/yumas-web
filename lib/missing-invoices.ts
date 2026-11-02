@@ -33,6 +33,8 @@ const NO_INVOICE_EXPECTED: [RegExp, string][] = [
   [/^fa ffm|steuernr|lohnst|ums\.st/i, 'Finanzamt'],
   [/berufsgenossenschaft/i, 'Berufsgenossenschaft'],
   [/darl\.-leistung|zinsr[üu]ckzahlung|gesellschafterdarlehen/i, 'Darlehen/Zinsen'],
+  /* Benjamin Peters lends the company money short-term and is repaid: financing, no invoice. */
+  [/^benjamin peters\b/i, 'Gesellschafterdarlehen (kurzfristig)'],
   [/abrechnung \d{2}\.\d{2}\.\d{4}|kontof[üu]hrung|entgelte vom/i, 'Bankentgelte'],
   [/bundeskasse|stadtkasse|gemeinschaftskasse|landeswohlfahrt|rundfunk/i, 'Behörden/Gebühren'],
   /* The landlords bill once in the lease; the Ersatzbelege stand in for it. */
