@@ -1056,6 +1056,24 @@ export default function SalesReportsPage() {
     date: string; shift: 'lunch' | 'dinner'; field: 'bookings' | 'walk_ins'; draft: string;
   } | null>(null);
 
+  /**
+   * Overriding the sales forecast for one shift, straight in the daily sheet.
+   * Saved into sales_forecasts, so it is the forecast from then on — the
+   * Forecast changes tab compares the day against it ("last forecast").
+   */
+  const [salesFcstEdit, setSalesFcstEdit] = useState<{ date: string; shift: 'lunch' | 'dinner'; draft: string } | null>(null);
+  const saveSalesFcst = async (date: string, shift: 'lunch' | 'dinner', draft: string) => {
+    setSalesFcstEdit(null);
+    const v = Number(String(draft).replace(/\./g, '').replace(',', '.'));
+    if (!location || isGroup || !Number.isFinite(v) || v < 0) return;
+    const { error } = await supabase.from('sales_forecasts').upsert(
+      { location_id: location.id, forecast_date: date, shift_type: shift, net_total: Math.round(v * 100) / 100, source: 'manual override' },
+      { onConflict: 'location_id,forecast_date,shift_type' });
+    if (error) { alert(`Forecast not saved: ${error.message}`); return; }
+    queryClient.invalidateQueries({ queryKey: ['sales-forecasts'] });
+    queryClient.invalidateQueries({ queryKey: ['sales-forecasts-month'] });
+  };
+
   const [editingFcstCell, setEditingFcstCell] = useState<{
     date: string; shift: 'lunch' | 'dinner'; field: 'est_guests' | 'spend_per_guest'; draft: string;
   } | null>(null);
@@ -6873,10 +6891,34 @@ export default function SalesReportsPage() {
                             <td className={`sticky left-0 z-10 px-4 py-1 whitespace-nowrap border-r border-gray-100 bg-white group-hover:bg-gray-50 transition-colors text-[11px] pl-8 ${forecast ? 'text-orange-500 italic' : 'text-gray-600'}`}>{label}</td>
                             {dailyCols.map((col, ci) => {
                               if (col.type === 'day') {
+                                /* A shift's forecast can be overridden by hand — one restaurant at a
+                                   time, from today on, while the till has not yet reported it. */
+                                const dk = col.dateKey;
+                                const editable = forecast && !!shift && !isGroup && dk >= todayKey && !closureSet.has(`${shift}:${dk}`)
+                                  && !(shift === 'lunch' ? lunchMap : dinnerMap)[dk];
+                                const editing = editable && salesFcstEdit?.date === dk && salesFcstEdit.shift === shift;
                                 return (
                                   <td key={ci} className="py-1 text-right tabular-nums text-[11px]"
-                                    style={{ paddingLeft: 4, paddingRight: 8, ...colStyle(shift, col.dateKey) }}>
-                                    {show(map[col.dateKey] ?? 0)}
+                                    style={{ paddingLeft: 4, paddingRight: 8, ...colStyle(shift, dk) }}>
+                                    {editing ? (
+                                      <span className="inline-flex items-center gap-1">
+                                        <input autoFocus type="text" inputMode="decimal" value={salesFcstEdit!.draft}
+                                          onChange={e => setSalesFcstEdit(x => x ? { ...x, draft: e.target.value } : x)}
+                                          onKeyDown={e => {
+                                            if (e.key === 'Enter') void saveSalesFcst(dk, shift!, salesFcstEdit!.draft);
+                                            if (e.key === 'Escape') setSalesFcstEdit(null);
+                                          }}
+                                          className="w-16 text-right text-[11px] border border-orange-300 rounded px-1 outline-none focus:ring-1 focus:ring-orange-400" />
+                                        <button onClick={() => void saveSalesFcst(dk, shift!, salesFcstEdit!.draft)}
+                                          className="text-[10px] font-semibold text-white bg-orange-500 hover:bg-orange-600 rounded px-1.5 py-0.5">Save</button>
+                                      </span>
+                                    ) : editable ? (
+                                      <button onClick={() => setSalesFcstEdit({ date: dk, shift: shift!, draft: String(Math.round(map[dk] ?? 0)) })}
+                                        title="Click to override this shift's forecast"
+                                        className="hover:bg-orange-50 rounded px-1 cursor-text">
+                                        {map[dk] ? show(map[dk]) : <span className="text-orange-300">+ add</span>}
+                                      </button>
+                                    ) : show(map[dk] ?? 0)}
                                   </td>
                                 );
                               }
@@ -7530,8 +7572,9 @@ export default function SalesReportsPage() {
                     );
                   })}
 
-                  {/* ── Forecast section ── */}
-                  {forecastSettings.length > 0 && (() => {
+                  {/* ── Forecast section ── the old guests x spend system; it stands down on a day the sales
+                     forecast covers, which is edited in the sheet itself (the orange Forecast row). */}
+                  {forecastSettings.length > 0 && !rawForecastRows.some(r => r.forecast_date === activeDayKey) && (() => {
                     const isEditingFcst = dayFcstDraft != null;
                     const initDayDraft = () => {
                       const lf = dailyFcstMap[`lunch:${activeDayKey}`];
