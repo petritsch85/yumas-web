@@ -149,6 +149,8 @@ export default function MonatsabschlussPage() {
   /* "Check Out": the whole month as one PDF in print order (lib/checkout-pdf.ts). */
   const [checkout, setCheckout] = useState<string | null>(null);
   async function checkOut() {
+    /* It fetches every document of the month and takes minutes: asked once. */
+    if (!window.confirm(`Bist du sicher, dass du ${monthLabel(month)} auschecken willst?\n\nAlle Unterlagen des Monats werden zu einer PDF zusammengefügt — das dauert einige Minuten. Das Fenster bitte so lange offen lassen.`)) return;
     setBusy('checkout'); setError(null); setCheckout('Druckreihenfolge wird geladen…');
     try {
       const { buildCheckoutPdf } = await import('@/lib/checkout-pdf');
