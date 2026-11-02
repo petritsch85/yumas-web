@@ -73,6 +73,17 @@ export function ForecastChanges({ locations }: { locations: Loc[] }) {
     queryFn: () => dailySalesActuals(supabase, locations, from, to),
   });
 
+  /* Which shifts the till has closed: a closed shift is actual, whatever day it is. */
+  const { data: reported = [] } = useQuery({
+    queryKey: ['shift-reports-month', month, locations.map(l => l.id).join(',')],
+    enabled: locations.length > 0,
+    queryFn: async () => {
+      const { data } = await supabase.from('shift_reports').select('location_id,report_date,shift_type')
+        .in('location_id', locations.map(l => l.id)).gte('report_date', from).lte('report_date', to);
+      return (data ?? []) as { location_id: string; report_date: string; shift_type: string }[];
+    },
+  });
+
   const [freezing, setFreezing] = useState(false);
   const freezeNow = async () => {
     setFreezing(true);
@@ -91,26 +102,36 @@ export function ForecastChanges({ locations }: { locations: Loc[] }) {
     /* All day takes everything; a shift only what is booked to it. */
     const inShift = (s: string) => shift === 'day' || s === shift;
     const build = (sc: string) => {
-      /* lastFc: the live forecast for the day as last made before it happened. */
-      const frozen: Record<string, number> = {}, lastFc: Record<string, number> = {}, actual: Record<string, number> = {};
-      for (const r of snapshot?.rows ?? []) if (inScope(sc, r.location_id) && inShift(r.shift_type)) frozen[r.forecast_date] = (frozen[r.forecast_date] ?? 0) + Number(r.net_total);
-      for (const r of latestRows) if (inScope(sc, r.location_id) && inShift(r.shift_type)) lastFc[r.forecast_date] = (lastFc[r.forecast_date] ?? 0) + Number(r.net_total);
-      for (const [k, v] of Object.entries(actuals)) {
-        const [loc, d, sh] = k.split('|');
-        if (!inScope(sc, loc) || !inShift(sh)) continue;
-        /* A day that has passed is actual; for one still to come, sales already
-           on the books (an event invoiced ahead) count towards its forecast,
-           as the frozen snapshot counts them too. */
-        if (d < today) actual[d] = (actual[d] ?? 0) + v;
-        else lastFc[d] = (lastFc[d] ?? 0) + v;
+      /*
+       * Worked out per restaurant and shift, then added up for the day:
+       *  - lastFc: the live forecast as last made for the shift.
+       *  - actual: what was reported — every shift of a past day, and today's
+       *    shifts once the till has closed them (so today's lunch shows as
+       *    soon as it is in).
+       *  - latest: actual for a reported shift, otherwise the forecast plus
+       *    any sale already on the books for it (an event invoiced ahead).
+       *    A reported shift's forecast stands down; adding the two counted
+       *    today's lunch twice.
+       */
+      const closed = new Set(reported.map(r => `${r.location_id}|${r.report_date}|${r.shift_type}`));
+      const frozen: Record<string, number> = {}, lastFc: Record<string, number> = {}, actual: Record<string, number> = {}, latest: Record<string, number> = {};
+      const add = (m: Record<string, number>, d: string, v: number) => { m[d] = (m[d] ?? 0) + v; };
+      for (const r of snapshot?.rows ?? []) if (inScope(sc, r.location_id) && inShift(r.shift_type)) add(frozen, r.forecast_date, Number(r.net_total));
+
+      const fc: Record<string, number> = {}, ac: Record<string, number> = {};
+      for (const r of latestRows) if (inScope(sc, r.location_id) && inShift(r.shift_type)) {
+        const k = `${r.location_id}|${r.forecast_date}|${r.shift_type}`; fc[k] = (fc[k] ?? 0) + Number(r.net_total);
       }
-      /* The latest forecast of a day that has passed is what it took: the
-         month's latest total then moves with every day reported, and equals
-         the latest outlook. */
-      const latest: Record<string, number> = {};
-      for (const d of days) {
-        const v = d < today ? actual[d] : lastFc[d];
-        if (v) latest[d] = v;
+      for (const [k, v] of Object.entries(actuals)) {
+        const [loc, , sh] = k.split('|');
+        if (inScope(sc, loc) && inShift(sh)) ac[k] = (ac[k] ?? 0) + v;
+      }
+      for (const k of new Set([...Object.keys(fc), ...Object.keys(ac)])) {
+        const d = k.split('|')[1];
+        const isActual = d < today || closed.has(k);
+        if (fc[k]) add(lastFc, d, fc[k]);
+        if (isActual) { if (ac[k]) { add(actual, d, ac[k]); add(latest, d, ac[k]); } }
+        else add(latest, d, (fc[k] ?? 0) + (ac[k] ?? 0));
       }
       const past = days.filter(d => d < today), rest = days.filter(d => d >= today);
       const sum = (m: Record<string, number>, ds: string[]) => ds.reduce((t, d) => t + (m[d] ?? 0), 0);
@@ -126,7 +147,7 @@ export function ForecastChanges({ locations }: { locations: Loc[] }) {
       };
     };
     return Object.fromEntries(scopes.map(s => [s.id, { name: s.name, ...build(s.id) }]));
-  }, [snapshot, latestRows, actuals, locations, days, today, shift]);
+  }, [snapshot, latestRows, actuals, reported, locations, days, today, shift]);
 
   const sel = table[scope];
   const monthStarted = today >= from;
@@ -222,6 +243,7 @@ export function ForecastChanges({ locations }: { locations: Loc[] }) {
           <tbody>
             {days.map(d => {
               const fz = sel.frozen[d], lt = sel.latest[d], lf = sel.lastFc[d], ac = d < today ? sel.actual[d] : undefined;
+              const acToday = d === today ? sel.actual[d] : undefined;
               const isToday = d === today;
               return (
                 <tr key={d} className={`border-b border-gray-100 ${isToday ? 'bg-blue-50/50' : ''}`}>
@@ -232,7 +254,11 @@ export function ForecastChanges({ locations }: { locations: Loc[] }) {
                   <td className={`${td} text-gray-700`}>{snapshot && fz ? eur(fz) : <span className="text-gray-300">—</span>}</td>
                   <td className={`${td} ${ac !== undefined ? 'text-blue-700' : 'text-orange-600 italic'}`}>{lt ? eur(lt) : <span className="text-gray-300">—</span>}</td>
                   <td className={td}><Delta v={snapshot && (fz || lt) ? (lt ?? 0) - (fz ?? 0) : null} muted /></td>
-                  <td className={`${td} text-blue-700`}>{ac ? eur(ac) : <span className="text-gray-300">—</span>}</td>
+                  <td className={`${td} text-blue-700`}>
+                    {ac ? eur(ac)
+                      : acToday ? <span title="Reported so far today — the rest of the day is still forecast">{eur(acToday)}<span className="ml-1 text-[10px] text-gray-400">so far</span></span>
+                      : <span className="text-gray-300">—</span>}
+                  </td>
                   <td className={td}><Delta v={snapshot && ac !== undefined ? (ac ?? 0) - (fz ?? 0) : null} /></td>
                   <td className={td}><Delta v={ac !== undefined ? (ac ?? 0) - (lf ?? 0) : null} /></td>
                 </tr>
