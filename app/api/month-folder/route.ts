@@ -335,7 +335,7 @@ async function gather(
 async function gapsFor(admin: Admin, month: string, order: Map<string, Booking>): Promise<Gap[]> {
   const { from, to } = monthRange(month);
   const tx = await page<Record<string, unknown>>((a, b) => admin.from('cashflow_transactions')
-    .select('id,date,direction,counterparty,description,amount_cents,bill_id')
+    .select('id,date,direction,counterparty,description,amount_cents,bill_id,notes')
     .gte('date', from).lte('date', to).order('id').range(a, b));
   const links = await page<Record<string, unknown>>((a, b) => admin.from('transaction_bill_links')
     .select('transaction_id').order('transaction_id').range(a, b));

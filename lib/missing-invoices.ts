@@ -45,6 +45,11 @@ const NO_INVOICE_EXPECTED: [RegExp, string][] = [
   /* Money paid back to a guest charged twice at the till — 'Doppelt Berechnung',
      'Doppel Buchung - Erstattung'. A refund, not a purchase: there is no invoice. */
   [/^matteo russo|^christin wueste|doppelt? ?(berechnung|buchung)/i, 'Erstattung an Gast (Doppelbuchung)'],
+  /* The Steuerberater's own invoice: he issues it, so he has it. */
+  [/^dipl\.?-?\s*kfm\.?\s*r\.?\s*nientiedt/i, 'Steuerberater (eigene Rechnung)'],
+  /* A payment marked on the Cash Flow page as paid twice: the invoice is
+     already behind the first payment, and the money is to come back. */
+  [/doppelzahlung/i, 'Doppelzahlung (Erstattung erwartet)'],
   /**
    * The card acquirers send a monthly statement, never an invoice.
    *
@@ -72,13 +77,14 @@ export function noInvoiceExpected(counterparty: string | null, description: stri
 /** The share of a month's payments that genuinely want an invoice. */
 export function findGaps(
   transactions: { id: string; date: string; direction: string; counterparty: string | null;
-                  description: string | null; amount_cents: number }[],
+                  description: string | null; amount_cents: number; notes?: string | null }[],
   linked: Set<string>,
   place?: (date: string, cents: number) => { page: number; seq: number } | undefined,
 ): Gap[] {
   return transactions
     .filter(t => t.direction !== 'in' && !linked.has(String(t.id)))
-    .filter(t => !noInvoiceExpected(t.counterparty, t.description))
+    /* The booking's own note counts too: "Doppelzahlung" written on it by hand. */
+    .filter(t => !noInvoiceExpected(t.counterparty, `${t.description ?? ''} ${t.notes ?? ''}`))
     .map(t => {
       const at = place?.(t.date, -Math.abs(t.amount_cents));
       return {
