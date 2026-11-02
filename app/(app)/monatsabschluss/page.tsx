@@ -158,7 +158,10 @@ export default function MonatsabschlussPage() {
         setCheckout(`${done} / ${total} · ${label.slice(0, 60)}`));
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
-      a.download = `Yumas_Monatsabschluss_${month}_Druck.pdf`;
+      /* Stamped with when it was made: Check Out is run again as missing bills
+         turn up, and the newest copy has to be told apart from the old ones. */
+      const stamp = new Date().toLocaleString('sv-SE', { timeZone: 'Europe/Berlin' }).slice(0, 16).replace(' ', '_').replace(':', '-');
+      a.download = `Yumas_Monatsabschluss_${month}_Druck_${stamp}.pdf`;
       a.click();
       setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
       setCheckout(`Fertig — ${pages} Seiten${failed.length ? ` · ${failed.length} Dokument(e) nicht eingefügt, auf der letzten Seite aufgelistet` : ''}`);
