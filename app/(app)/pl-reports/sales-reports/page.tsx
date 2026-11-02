@@ -1754,7 +1754,9 @@ export default function SalesReportsPage() {
       if (!value) continue;
       const isIn = t.direction === 'in';
       const narrative = `${t.counterparty ?? ''} ${t.description ?? ''}`;
-      if (FINANCING.test(narrative)) {
+      /* By the bank's wording, or by the category a person set: Benjamin Peters's
+         short-term loan reads like any transfer, and was counted as income. */
+      if (FINANCING.test(narrative) || t.category === 'C - Financing') {
         /* Financing runs both ways and must carry its sign: August took
            65.000 € in from a shareholder and paid 9.206 € out, and summing the
            magnitudes would have called that 74.206 € leaving. */
@@ -8294,7 +8296,7 @@ export default function SalesReportsPage() {
               const hits = (gmFinancing as Record<string, unknown>[]).filter(t => {
                 if (!String(t.date ?? '').startsWith(prefix)) return false;
                 const narrative = `${t.counterparty ?? ''} ${t.description ?? ''}`;
-                const isFin = FINANCING.test(narrative);
+                const isFin = FINANCING.test(narrative) || t.category === 'C - Financing';
                 const isIn = t.direction === 'in';
                 const where = isFin ? 'financing'
                   : isIn ? (String(t.category ?? '').startsWith('S - ') ? 'sales' : 'otherIncome')
