@@ -61,9 +61,11 @@ export default function MonatsabschlussPage() {
    * the table are closed to the browser client, and writing from here directly
    * was refused with "new row violates row-level security policy".
    */
-  async function upload(kind: string, file: File) {
+  async function upload(kind: string, picked: File) {
     setBusy(kind); setError(null);
     try {
+      const file = /\.zip$/i.test(picked.name) ? await oneFromZip(kind, picked) : picked;
+      if (!file) return;
       const body = new FormData();
       body.append('file', file);
       body.append('kind', kind);
@@ -74,6 +76,31 @@ export default function MonatsabschlussPage() {
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Upload fehlgeschlagen');
     } finally { setBusy(null); }
+  }
+
+  /**
+   * A position that takes one document, handed a zip.
+   *
+   * The Sparkasse's "Postfach – Sammeldownload" arrives as a zip, with the
+   * Kontoauszug inside and sometimes other mail from the Postfach next to it.
+   * The zip is opened here; a single PDF is taken as it is, and of several the
+   * one named a statement ("…Auszug…") — asking only when that is not clear.
+   */
+  async function oneFromZip(kind: string, zip: File): Promise<File | null> {
+    const entries = unzipSync(new Uint8Array(await zip.arrayBuffer()));
+    const pdfs = Object.entries(entries)
+      .filter(([n]) => !n.startsWith('__MACOSX/') && /\.pdf$/i.test(n))
+      .map(([n, bytes]) => new File([bytes as BlobPart], n.split('/').pop() ?? n, { type: 'application/pdf' }));
+    if (!pdfs.length) throw new Error(`In ${zip.name} ist keine PDF.`);
+    if (pdfs.length === 1) return pdfs[0];
+    const statements = kind === 'kontoauszug' ? pdfs.filter(f => /auszug/i.test(f.name)) : [];
+    if (statements.length === 1) return statements[0];
+    const list = (statements.length ? statements : pdfs);
+    const answer = window.prompt(
+      `${zip.name} enthält ${list.length} PDFs. Welche soll abgelegt werden? Nummer eingeben:\n\n` +
+      list.map((f, i) => `${i + 1}  ${f.name}`).join('\n'), '1');
+    const i = Number(answer) - 1;
+    return Number.isInteger(i) && list[i] ? list[i] : null;
   }
 
   /**
@@ -350,7 +377,7 @@ export default function MonatsabschlussPage() {
                       {it.source === 'uploaded' ? (
                         <>
                           <input type="file" className="hidden"
-                            accept={it.multi ? '.pdf,.zip' : '.pdf,.jpg,.jpeg,.png,.csv'}
+                            accept={it.multi ? '.pdf,.zip' : '.pdf,.zip,.jpg,.jpeg,.png,.csv'}
                             multiple={!!it.multi}
                             ref={el => { inputs.current[it.key] = el; }}
                             onChange={e => {
