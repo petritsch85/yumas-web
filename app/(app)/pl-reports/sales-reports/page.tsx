@@ -1238,7 +1238,7 @@ export default function SalesReportsPage() {
    * on are shown as forecast; a day that has passed is reported, or empty.
    * Summed over the scope, so the group shows the three restaurants together.
    */
-  const { data: salesForecastRows = [] } = useQuery({
+  const { data: rawForecastRows = [] } = useQuery({
     queryKey: ['sales-forecasts', scopeKey],
     enabled: !!location && activeTab === 'daily' && scopeIds.length > 0,
     queryFn: async () => {
@@ -1248,6 +1248,27 @@ export default function SalesReportsPage() {
       return (data ?? []) as { location_id: string; forecast_date: string; shift_type: 'lunch' | 'dinner'; net_total: number }[];
     },
   });
+  /**
+   * Shifts already closed at the till from today on. Once Orderbird has a
+   * shift, its forecast stands down: today's lunch, closed at 15:00, was shown
+   * as Orderbird and forecast at once — counted twice in the day's total.
+   */
+  const { data: reportedFromToday = [] } = useQuery({
+    queryKey: ['shift-reports-from-today', scopeKey],
+    enabled: !!location && activeTab === 'daily' && scopeIds.length > 0,
+    queryFn: async () => {
+      const _now = new Date();
+      const today = `${_now.getFullYear()}-${String(_now.getMonth() + 1).padStart(2, '0')}-${String(_now.getDate()).padStart(2, '0')}`;
+      const { data } = await supabase.from('shift_reports')
+        .select('location_id,report_date,shift_type').in('location_id', scopeIds).gte('report_date', today);
+      return (data ?? []) as { location_id: string; report_date: string; shift_type: string }[];
+    },
+  });
+  /** The forecast still to count: days from today on, shifts not yet reported. */
+  const salesForecastRows = useMemo(() => {
+    const done = new Set(reportedFromToday.map(r => `${r.location_id}|${r.report_date}|${r.shift_type}`));
+    return rawForecastRows.filter(r => !done.has(`${r.location_id}|${r.forecast_date}|${r.shift_type}`));
+  }, [rawForecastRows, reportedFromToday]);
   const salesFcst = useMemo(() => {
     const _now = new Date();
     const today = `${_now.getFullYear()}-${String(_now.getMonth() + 1).padStart(2, '0')}-${String(_now.getDate()).padStart(2, '0')}`;
