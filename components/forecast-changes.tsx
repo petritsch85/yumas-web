@@ -91,9 +91,10 @@ export function ForecastChanges({ locations }: { locations: Loc[] }) {
     /* All day takes everything; a shift only what is booked to it. */
     const inShift = (s: string) => shift === 'day' || s === shift;
     const build = (sc: string) => {
-      const frozen: Record<string, number> = {}, latest: Record<string, number> = {}, actual: Record<string, number> = {};
+      /* lastFc: the live forecast for the day as last made before it happened. */
+      const frozen: Record<string, number> = {}, lastFc: Record<string, number> = {}, actual: Record<string, number> = {};
       for (const r of snapshot?.rows ?? []) if (inScope(sc, r.location_id) && inShift(r.shift_type)) frozen[r.forecast_date] = (frozen[r.forecast_date] ?? 0) + Number(r.net_total);
-      for (const r of latestRows) if (inScope(sc, r.location_id) && inShift(r.shift_type)) latest[r.forecast_date] = (latest[r.forecast_date] ?? 0) + Number(r.net_total);
+      for (const r of latestRows) if (inScope(sc, r.location_id) && inShift(r.shift_type)) lastFc[r.forecast_date] = (lastFc[r.forecast_date] ?? 0) + Number(r.net_total);
       for (const [k, v] of Object.entries(actuals)) {
         const [loc, d, sh] = k.split('|');
         if (!inScope(sc, loc) || !inShift(sh)) continue;
@@ -101,16 +102,25 @@ export function ForecastChanges({ locations }: { locations: Loc[] }) {
            on the books (an event invoiced ahead) count towards its forecast,
            as the frozen snapshot counts them too. */
         if (d < today) actual[d] = (actual[d] ?? 0) + v;
-        else latest[d] = (latest[d] ?? 0) + v;
+        else lastFc[d] = (lastFc[d] ?? 0) + v;
+      }
+      /* The latest forecast of a day that has passed is what it took: the
+         month's latest total then moves with every day reported, and equals
+         the latest outlook. */
+      const latest: Record<string, number> = {};
+      for (const d of days) {
+        const v = d < today ? actual[d] : lastFc[d];
+        if (v) latest[d] = v;
       }
       const past = days.filter(d => d < today), rest = days.filter(d => d >= today);
       const sum = (m: Record<string, number>, ds: string[]) => ds.reduce((t, d) => t + (m[d] ?? 0), 0);
       return {
-        frozen, latest, actual,
+        frozen, latest, lastFc, actual,
         frozenTotal: sum(frozen, days),
         latestTotal: sum(latest, days),
         actualToDate: sum(actual, past),
         frozenToDate: sum(frozen, past),
+        lastFcToDate: sum(lastFc, past),
         outlookFrozen: sum(actual, past) + sum(frozen, rest),
         outlookLatest: sum(actual, past) + sum(latest, rest),
       };
@@ -206,12 +216,12 @@ export function ForecastChanges({ locations }: { locations: Loc[] }) {
               <th className={th}>Forecast change</th>
               <th className={th}>Actual</th>
               <th className={th}>Actual vs. 1st</th>
-              <th className={th}>Actual vs. latest</th>
+              <th className={th}>Actual vs. last forecast<span className="block font-normal text-[10px] text-gray-400">as forecast the day before</span></th>
             </tr>
           </thead>
           <tbody>
             {days.map(d => {
-              const fz = sel.frozen[d], lt = sel.latest[d], ac = d < today ? sel.actual[d] : undefined;
+              const fz = sel.frozen[d], lt = sel.latest[d], lf = sel.lastFc[d], ac = d < today ? sel.actual[d] : undefined;
               const isToday = d === today;
               return (
                 <tr key={d} className={`border-b border-gray-100 ${isToday ? 'bg-blue-50/50' : ''}`}>
@@ -220,11 +230,11 @@ export function ForecastChanges({ locations }: { locations: Loc[] }) {
                     {d.slice(8)}.{d.slice(5, 7)}.{isToday ? <span className="ml-1.5 text-[10px] text-blue-600 font-semibold">today</span> : null}
                   </td>
                   <td className={`${td} text-gray-700`}>{snapshot && fz ? eur(fz) : <span className="text-gray-300">—</span>}</td>
-                  <td className={`${td} text-orange-600 italic`}>{lt ? eur(lt) : <span className="text-gray-300">—</span>}</td>
+                  <td className={`${td} ${ac !== undefined ? 'text-blue-700' : 'text-orange-600 italic'}`}>{lt ? eur(lt) : <span className="text-gray-300">—</span>}</td>
                   <td className={td}><Delta v={snapshot && (fz || lt) ? (lt ?? 0) - (fz ?? 0) : null} muted /></td>
                   <td className={`${td} text-blue-700`}>{ac ? eur(ac) : <span className="text-gray-300">—</span>}</td>
                   <td className={td}><Delta v={snapshot && ac !== undefined ? (ac ?? 0) - (fz ?? 0) : null} /></td>
-                  <td className={td}><Delta v={ac !== undefined ? (ac ?? 0) - (lt ?? 0) : null} /></td>
+                  <td className={td}><Delta v={ac !== undefined ? (ac ?? 0) - (lf ?? 0) : null} /></td>
                 </tr>
               );
             })}
@@ -237,7 +247,7 @@ export function ForecastChanges({ locations }: { locations: Loc[] }) {
               <td className={td}><Delta v={snapshot ? sel.latestTotal - sel.frozenTotal : null} /></td>
               <td className={`${td} text-blue-700`}>{sel.actualToDate ? eur(sel.actualToDate) : '—'}</td>
               <td className={td}><Delta v={snapshot && sel.actualToDate ? sel.actualToDate - sel.frozenToDate : null} /></td>
-              <td className={td}><Delta v={sel.actualToDate ? sel.actualToDate - days.filter(d => d < today).reduce((t, d) => t + (sel.latest[d] ?? 0), 0) : null} /></td>
+              <td className={td}><Delta v={sel.actualToDate ? sel.actualToDate - sel.lastFcToDate : null} /></td>
             </tr>
           </tfoot>
         </table>
