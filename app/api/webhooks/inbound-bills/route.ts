@@ -276,7 +276,19 @@ async function processBills(billAttachments: Attachment[], email: EmailMeta) {
         }
         const duplicate = await findDuplicate(extracted);
         if (duplicate) {
-          console.log(`[inbound-bills] ${a.Name}: already on file as ${duplicate} — skipped`);
+          /* Already on file — but perhaps only as a photo or with no file at
+             all (NH-4-2026 was filed from a screenshot). The original PDF then
+             takes the place of what is there instead of being dropped. */
+          const { data: existing } = await getSupabaseAdmin().from('bills').select('file_path').eq('id', duplicate).single();
+          const weak = !existing?.file_path || /\.(png|jpe?g)$/i.test(String(existing.file_path));
+          const isPdfFile = /\.pdf$/i.test(a.Name) || a.ContentType === 'application/pdf';
+          if (weak && isPdfFile) {
+            const path = await storeFile(a, 'bills');
+            await getSupabaseAdmin().from('bills').update({ file_path: path }).eq('id', duplicate);
+            console.log(`[inbound-bills] ${a.Name}: already on file as ${duplicate} without its PDF — PDF attached`);
+          } else {
+            console.log(`[inbound-bills] ${a.Name}: already on file as ${duplicate} — skipped`);
+          }
           continue;
         }
         const billId = await saveBillToDB(a, extracted);
