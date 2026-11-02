@@ -48,6 +48,8 @@ const NO_INVOICE_EXPECTED = [
   [/abrechnung \d{2}\.\d{2}\.\d{4}|kontof[üu]hrung|entgelte vom/i, 'Bankentgelte'],
   [/bundeskasse|stadtkasse|gemeinschaftskasse|landeswohlfahrt|rundfunk/i, 'Behörden/Gebühren'],
   [/^wohnraum|^strabag|^patricia wohninveste|^laura klein/i, 'Miete (Ersatzbeleg vorhanden)'],
+  [/^targo leasing|^abcfinance|^vw leasing|^otto payments|^ford bank/i, 'Leasing/Finanzierung (Vertrag)'],
+  [/^suewag|^süwag|^schwarzwald energy/i, 'Energie-Abschlag'],
   /* Die Acquirer schicken eine Monatsabrechnung, nie eine Rechnung — Nexis
      Lastschrift nennt ihre Zahlen selbst im Verwendungszweck. PayPal steht
      bewusst nicht hier: dessen Lastschriften sind Einkäufe bei Händlern, und

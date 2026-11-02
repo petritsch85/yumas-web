@@ -37,6 +37,11 @@ const NO_INVOICE_EXPECTED: [RegExp, string][] = [
   [/bundeskasse|stadtkasse|gemeinschaftskasse|landeswohlfahrt|rundfunk/i, 'Behörden/Gebühren'],
   /* The landlords bill once in the lease; the Ersatzbelege stand in for it. */
   [/^wohnraum|^strabag|^patricia wohninveste|^laura klein/i, 'Miete (Ersatzbeleg)'],
+  /* Leases and financing: one contract, a fixed rate every month, no monthly
+     invoice — the contract is the document. */
+  [/^targo leasing|^abcfinance|^vw leasing|^otto payments|^ford bank/i, 'Leasing/Finanzierung (Vertrag)'],
+  /* Energy: a monthly Abschlag against the yearly bill, which is filed when it comes. */
+  [/^suewag|^süwag|^schwarzwald energy/i, 'Energie-Abschlag'],
   /**
    * The card acquirers send a monthly statement, never an invoice.
    *
