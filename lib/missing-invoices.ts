@@ -42,6 +42,9 @@ const NO_INVOICE_EXPECTED: [RegExp, string][] = [
   [/^targo leasing|^abcfinance|^vw leasing|^otto payments|^ford bank/i, 'Leasing/Finanzierung (Vertrag)'],
   /* Energy: a monthly Abschlag against the yearly bill, which is filed when it comes. */
   [/^suewag|^süwag|^schwarzwald energy/i, 'Energie-Abschlag'],
+  /* Money paid back to a guest charged twice at the till — 'Doppelt Berechnung',
+     'Doppel Buchung - Erstattung'. A refund, not a purchase: there is no invoice. */
+  [/^matteo russo|^christin wueste|doppelt? ?(berechnung|buchung)/i, 'Erstattung an Gast (Doppelbuchung)'],
   /**
    * The card acquirers send a monthly statement, never an invoice.
    *

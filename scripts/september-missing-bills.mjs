@@ -50,6 +50,9 @@ const NO_INVOICE_EXPECTED = [
   [/^wohnraum|^strabag|^patricia wohninveste|^laura klein/i, 'Miete (Ersatzbeleg vorhanden)'],
   [/^targo leasing|^abcfinance|^vw leasing|^otto payments|^ford bank/i, 'Leasing/Finanzierung (Vertrag)'],
   [/^suewag|^süwag|^schwarzwald energy/i, 'Energie-Abschlag'],
+  /* Money paid back to a guest charged twice at the till — 'Doppelt Berechnung',
+     'Doppel Buchung - Erstattung'. A refund, not a purchase: there is no invoice. */
+  [/^matteo russo|^christin wueste|doppelt? ?(berechnung|buchung)/i, 'Erstattung an Gast (Doppelbuchung)'],
   /* Die Acquirer schicken eine Monatsabrechnung, nie eine Rechnung — Nexis
      Lastschrift nennt ihre Zahlen selbst im Verwendungszweck. PayPal steht
      bewusst nicht hier: dessen Lastschriften sind Einkäufe bei Händlern, und
