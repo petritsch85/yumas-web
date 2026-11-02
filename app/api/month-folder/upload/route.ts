@@ -9,6 +9,7 @@ import { linkAmexStatement } from '@/lib/amex-import';
 import { unzipSync } from 'fflate';
 import { parseTgtgStatement } from '@/lib/tgtg-statement';
 import { importTgtgMonth } from '@/lib/tgtg-import';
+import { parseKontoauszug } from '@/lib/kontoauszug.mjs';
 
 export const maxDuration = 60;
 
@@ -151,6 +152,22 @@ async function fileDocument(
       }
     } catch (e) {
       console.warn('[month-folder] TGTG statement not read:', e instanceof Error ? e.message : e);
+    }
+  }
+
+  /* A Kontoauszug filed here carries its own opening and closing balance —
+     the figures the cash flow statement opens and closes on. October's was
+     filed here and the statement stayed blank, because only the Cash Flow
+     page's upload read them. Kept only when the statement balances. */
+  if (kind === 'kontoauszug') {
+    try {
+      const pdf = await getDocumentProxy(new Uint8Array(await file.arrayBuffer()));
+      const { text } = await extractText(pdf, { mergePages: true });
+      const st = parseKontoauszug(String(text)) as { balanced: boolean | null; openingBalance: number | null; closingBalance: number | null };
+      if (st.balanced) { extra.opening_balance = st.openingBalance; extra.closing_balance = st.closingBalance; }
+      else console.warn('[month-folder] Kontoauszug does not balance; balances not kept');
+    } catch (e) {
+      console.warn('[month-folder] Kontoauszug not read:', e instanceof Error ? e.message : e);
     }
   }
 
