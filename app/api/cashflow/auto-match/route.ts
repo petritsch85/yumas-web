@@ -914,6 +914,14 @@ export async function POST(req: NextRequest) {
     console.error('[auto-match] link audit failed (non-fatal):', e);
   }
 
+  /* Only payments from September 2026 on. Everything before has been handed
+     to the Steuerberater, and the data from then is patchy: proposals there
+     are noise. A payment from September on still matches an older bill. */
+  const MATCH_FROM = '2026-09-01';
+  for (const list of [matches, woltMatches, lieferandoMatches, referenceMatches, instalmentMatches, outgoingMatches, suspectLinks] as { txDate: string }[][]) {
+    list.splice(0, list.length, ...list.filter(r => r.txDate >= MATCH_FROM));
+  }
+
   if (!apply) return NextResponse.json({ matches, woltMatches: [...woltMatches, ...lieferandoMatches], referenceMatches, instalmentMatches, outgoingMatches, suspectLinks });
 
   // 5. Apply matches
