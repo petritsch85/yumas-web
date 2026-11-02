@@ -46,7 +46,7 @@ const NO_INVOICE_EXPECTED: [RegExp, string][] = [
      'Doppel Buchung - Erstattung'. A refund, not a purchase: there is no invoice. */
   [/^matteo russo|^christin wueste|doppelt? ?(berechnung|buchung)/i, 'Erstattung an Gast (Doppelbuchung)'],
   /* The Steuerberater's own invoice: he issues it, so he has it. */
-  [/^dipl\.?-?\s*kfm\.?\s*r\.?\s*nientiedt/i, 'Steuerberater (eigene Rechnung)'],
+  [/^dipl\.?-?\s*kfm\.?\s*r\.?\s*nientiedt|^nientiedt\b/i, 'Steuerberater (eigene Rechnung)'],
   /* A payment marked on the Cash Flow page as paid twice: the invoice is
      already behind the first payment, and the money is to come back. */
   [/doppelzahlung/i, 'Doppelzahlung (Erstattung erwartet)'],
