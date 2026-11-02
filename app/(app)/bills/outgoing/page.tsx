@@ -1052,6 +1052,8 @@ export default function OutgoingBillsPage() {
       const { data } = await supabase
         .from('outgoing_bills')
         .select('*')
+        /* Hidden: a sale settled through the till, kept only so the P&L shows it as catering. */
+        .or('bill_data->>hidden.is.null,bill_data->>hidden.neq.true')
         .order('event_date', { ascending: false });
       return (data ?? []) as OutgoingBill[];
     },

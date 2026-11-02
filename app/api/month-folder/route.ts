@@ -218,6 +218,8 @@ async function gather(
      */
     const all = await page<Record<string, unknown>>((a, b) => admin.from('outgoing_bills')
       .select('id,invoice_date,customer_name,invoice_number,file_path')
+      /* Hidden entries were settled through the till — no invoice to file. */
+      .or('bill_data->>hidden.is.null,bill_data->>hidden.neq.true')
       .order('invoice_date').range(a, b));
     const paid = await page<Record<string, unknown>>((a, b) => admin.from('cashflow_transactions')
       .select('outgoing_bill_id,date').not('outgoing_bill_id', 'is', null)
