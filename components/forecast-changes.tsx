@@ -126,17 +126,20 @@ export function ForecastChanges({ locations }: { locations: Loc[] }) {
         const [loc, , sh] = k.split('|');
         if (inScope(sc, loc) && inShift(sh)) ac[k] = (ac[k] ?? 0) + v;
       }
+      /* A day is complete once no shift of it is still waiting on the till. */
+      const pending = new Set<string>();
       for (const k of new Set([...Object.keys(fc), ...Object.keys(ac)])) {
         const d = k.split('|')[1];
         const isActual = d < today || closed.has(k);
         if (fc[k]) add(lastFc, d, fc[k]);
         if (isActual) { if (ac[k]) { add(actual, d, ac[k]); add(latest, d, ac[k]); } }
-        else add(latest, d, (fc[k] ?? 0) + (ac[k] ?? 0));
+        else { add(latest, d, (fc[k] ?? 0) + (ac[k] ?? 0)); if (fc[k]) pending.add(d); }
       }
+      const complete = new Set(days.filter(d => d < today || (d === today && !pending.has(d) && actual[d])));
       const past = days.filter(d => d < today), rest = days.filter(d => d >= today);
       const sum = (m: Record<string, number>, ds: string[]) => ds.reduce((t, d) => t + (m[d] ?? 0), 0);
       return {
-        frozen, latest, lastFc, actual,
+        frozen, latest, lastFc, actual, complete,
         frozenTotal: sum(frozen, days),
         latestTotal: sum(latest, days),
         actualToDate: sum(actual, past),
@@ -242,8 +245,9 @@ export function ForecastChanges({ locations }: { locations: Loc[] }) {
           </thead>
           <tbody>
             {days.map(d => {
-              const fz = sel.frozen[d], lt = sel.latest[d], lf = sel.lastFc[d], ac = d < today ? sel.actual[d] : undefined;
-              const acToday = d === today ? sel.actual[d] : undefined;
+              const done = sel.complete.has(d);
+              const fz = sel.frozen[d], lt = sel.latest[d], lf = sel.lastFc[d], ac = done && (sel.actual[d] || fz) ? (sel.actual[d] ?? 0) : undefined;
+              const acToday = d === today && !done ? sel.actual[d] : undefined;
               const isToday = d === today;
               return (
                 <tr key={d} className={`border-b border-gray-100 ${isToday ? 'bg-blue-50/50' : ''}`}>
@@ -252,7 +256,8 @@ export function ForecastChanges({ locations }: { locations: Loc[] }) {
                     {d.slice(8)}.{d.slice(5, 7)}.{isToday ? <span className="ml-1.5 text-[10px] text-blue-600 font-semibold">today</span> : null}
                   </td>
                   <td className={`${td} text-gray-700`}>{snapshot && fz ? eur(fz) : <span className="text-gray-300">—</span>}</td>
-                  <td className={`${td} ${ac !== undefined ? 'text-blue-700' : 'text-orange-600 italic'}`}>{lt ? eur(lt) : <span className="text-gray-300">—</span>}</td>
+                  {/* Blue once the day is reported in full; orange while any of it is still forecast. */}
+                  <td className={`${td} ${done ? 'text-blue-700' : 'text-orange-600 italic'}`}>{lt ? eur(lt) : <span className="text-gray-300">—</span>}</td>
                   <td className={td}><Delta v={snapshot && (fz || lt) ? (lt ?? 0) - (fz ?? 0) : null} muted /></td>
                   <td className={`${td} text-blue-700`}>
                     {ac ? eur(ac)
