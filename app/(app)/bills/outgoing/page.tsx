@@ -731,9 +731,37 @@ export default function OutgoingBillsPage() {
         documentTotal?:   number;
         eventDate:        string | null;
         issuingLocation:  string | null;
+        receiptNumber?:   string | null;
+        recipient?:       { company?: string | null; contact?: string | null; street?: string | null;
+                            postcode?: string | null; city?: string | null } | null;
         lineItems?:       { name: string; qty: number; unitPrice?: number; total: number;
                             taxCode: 'A' | 'B' | null; category?: 'food' | 'drink' | 'fee' }[];
       };
+
+      /* The Rechnungsempfänger printed on the receipt. A customer already in
+         the registry brings everything saved with it (PO number, Leistungsort);
+         a new one gets what the receipt says. A name already typed in is left
+         alone — the receipt only fills an empty form. */
+      const r = d.recipient;
+      if (r?.company && !company.trim()) {
+        let known: Customer | undefined;
+        try {
+          const res = await fetch(`/api/customers?q=${encodeURIComponent(r.company.split(/\s+/).slice(0, 2).join(' '))}`);
+          const list = (await res.json()) as Customer[] | { customers?: Customer[] };
+          const rows = Array.isArray(list) ? list : (list.customers ?? []);
+          const key = (s: string) => s.toLowerCase().replace(/[^a-z0-9äöüß]/g, '');
+          known = rows.find(c => key(c.company_name) === key(r.company!))
+            ?? rows.find(c => key(r.company!).startsWith(key(c.company_name)) || key(c.company_name).startsWith(key(r.company!)));
+        } catch { /* no registry match: fill from the receipt */ }
+        if (known) applyCustomer(known);
+        else {
+          setCompany(r.company);
+          if (r.contact)  setContactName(r.contact);
+          if (r.street)   setStreet(r.street);
+          if (r.postcode) setPostcode(r.postcode);
+          if (r.city)     setCity(r.city);
+        }
+      }
 
       const items = d.lineItems ?? [];
       // A delivery receipt carries no A/B letter; fall back to the item's category.

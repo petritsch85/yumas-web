@@ -42,6 +42,15 @@ Each line item on the receipt has a letter printed in the RIGHTMOST column (far 
    - Feuerbachstr / Feuerbachstraße / 60325 Frankfurt → "Westend"
    - Taunusstr / Taunusstraße / 60329 Frankfurt → "Taunus"
 
+## Rechnungsempfänger (KIND 1)
+A till receipt printed "auf Rechnung" often carries a block headed **Rechnungsempfänger** below the restaurant's own address — the customer the bill is made out to. Read it line by line, exactly as printed:
+- company: the first line (the firm's name). Where the legal form runs onto the next line ("Enterprise Autovermietung" / "B.V & Co.KG"), join them into one name: "Enterprise Autovermietung B.V & Co.KG".
+- contact: a person's name, if one is printed (often the line after the company).
+- street: street and house number ("Mergenthalerallee 42").
+- postcode and city: from the "65760 Eschborn" line.
+The restaurant's own address at the top (Yumas Restaurant, Rahmannstr. 1 …) is NEVER the recipient. If the receipt has no Rechnungsempfänger block, set "recipient" to null.
+Also read the receipt's own number ("Rechnung Nr. 9-12372") into "receiptNumber".
+
 ## Additional rules
 - The receipt often shows "auf Rechnung (-100%)" and a Total of 0,00 € — this means it was billed to a corporate account. IGNORE the discounted total. Use the **Zwischensumme** (subtotal before discount) as the real gross total.
 - All amounts must be plain numbers with dot as decimal (e.g. 958.00 not 958,00).
@@ -58,6 +67,8 @@ Each line item on the receipt has a letter printed in the RIGHTMOST column (far 
   "documentTotal": number,
   "eventDate": "YYYY-MM-DD or null",
   "issuingLocation": "Westend | Eschborn | Taunus | null",
+  "receiptNumber": "string or null",
+  "recipient": { "company": "string", "contact": "string or null", "street": "string or null", "postcode": "string or null", "city": "string or null" } | null,
   "lineItems": [
     {
       "name": "string — item name as printed on receipt",
