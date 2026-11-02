@@ -3,6 +3,9 @@ import { extractText, getDocumentProxy } from 'unpdf';
 import { getSupabaseAdmin } from '@/lib/supabase-admin';
 // Plain ESM, shared with scripts/ which runs outside the Next.js build.
 import { parseKontoauszug } from '@/lib/kontoauszug.mjs';
+import { splitPayee } from '@/lib/statement-import';
+import { classifyTransaction } from '@/lib/cashflow-categorize';
+import { counterpartyFor } from '@/lib/counterparty-category';
 
 export const maxDuration = 120;
 
@@ -179,5 +182,45 @@ export async function POST(req: NextRequest) {
     const { error } = await admin.from('cashflow_transactions').delete().in('id', remove.map(r => r.id));
     if (error) return NextResponse.json({ ...result, error: error.message }, { status: 500 });
   }
-  return NextResponse.json({ ...result, applied: true });
+
+  /**
+   * The statement replaces the CSV: what the bank booked and the ledger lacks
+   * is added from the statement itself, as the CSV import would have — the
+   * payee split off the booking text, the category from the counterparty or
+   * the keyword rules. One statement a month is then all the ledger needs.
+   */
+  let added = 0;
+  if (missing.length) {
+    const known = new Set<string>();
+    for (let p = 0; ; p++) {
+      const { data } = await admin.from('cashflow_transactions').select('counterparty').order('id').range(p * 1000, p * 1000 + 999);
+      for (const r of data ?? []) if (r.counterparty) known.add(String(r.counterparty));
+      if (!data || data.length < 1000) break;
+    }
+    const { data: cpRows } = await admin.from('counterparties').select('id, name, category, keywords');
+    const { data: upload, error: upErr } = await admin.from('cashflow_uploads')
+      .insert({ filename: file.name, period_label: `Kontoauszug ${number ?? from.slice(0, 7)}`, transaction_count: 0 })
+      .select().single();
+    if (upErr || !upload) return NextResponse.json({ ...result, error: upErr?.message ?? 'upload record failed' }, { status: 500 });
+    const knownList = [...known];
+    const rowsToAdd = missing.map(e => {
+      const { counterparty, description } = splitPayee(e.text, knownList);
+      const direction = e.amount >= 0 ? 'in' : 'out';
+      const guess = classifyTransaction(counterparty, description, direction);
+      const cp = counterpartyFor({ counterparty }, cpRows ?? []);
+      return {
+        upload_id: upload.id, date: e.date,
+        description: description.slice(0, 1000), counterparty: counterparty.slice(0, 300),
+        amount_cents: Math.abs(Math.round(e.amount * 100)), direction,
+        category: cp?.category ?? guess.category, location: 'Other', sales_type: guess.salesType, notes: '',
+      };
+    });
+    for (let i = 0; i < rowsToAdd.length; i += 200) {
+      const { error } = await admin.from('cashflow_transactions').insert(rowsToAdd.slice(i, i + 200));
+      if (error) return NextResponse.json({ ...result, error: error.message }, { status: 500 });
+    }
+    added = rowsToAdd.length;
+    await admin.from('cashflow_uploads').update({ transaction_count: added }).eq('id', upload.id);
+  }
+  return NextResponse.json({ ...result, applied: true, added });
 }

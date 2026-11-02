@@ -1773,9 +1773,10 @@ export default function CashFlowPage() {
             className="text-sm border border-gray-200 rounded-lg px-3 py-2 w-48 outline-none focus:border-[#1B5E20]" />
           <div className="relative">
             <button onClick={() => fileInputRef.current?.click()} disabled={uploading}
-              className="flex items-center gap-2 px-4 py-2 bg-[#1B5E20] text-white text-sm font-semibold rounded-lg hover:bg-[#2E7D32] disabled:opacity-60 transition-colors">
+              title="Only needed for bookings not yet on a monthly Kontoauszug"
+              className="flex items-center gap-2 px-3 py-2 border border-gray-200 text-gray-600 text-sm font-semibold rounded-lg hover:border-gray-400 disabled:opacity-60 transition-colors">
               {uploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
-              {uploading ? 'Importing…' : 'Upload CSV'}
+              {uploading ? 'Importing…' : 'CSV'}
             </button>
           </div>
           {/* The Kontoauszug — the record the CSV exports only approximate. */}
@@ -1789,12 +1790,12 @@ export default function CashFlowPage() {
               else setStmtErr('Drop the Kontoauszug PDF.');
             }}
             onClick={() => stmtInputRef.current?.click()}
-            title="Drop the month's Kontoauszug here — it decides which bookings are real and on what date"
-            className={`flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-lg border-2 border-dashed cursor-pointer transition-colors ${
-              stmtOver ? 'border-[#1B5E20] bg-green-50 text-[#1B5E20]'
-                       : 'border-gray-300 text-gray-600 hover:border-[#1B5E20] hover:text-[#1B5E20]'}`}>
+            title="Drop the month's Kontoauszug here — its bookings become the month's cash flows"
+            className={`flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-lg border-2 cursor-pointer transition-colors ${
+              stmtOver ? 'border-[#1B5E20] bg-green-50 text-[#1B5E20] border-dashed'
+                       : 'border-[#1B5E20] bg-[#1B5E20] text-white hover:bg-[#2E7D32]'}`}>
             {stmtBusy ? <Loader2 size={14} className="animate-spin" /> : <FileText size={14} />}
-            {stmtBusy ? 'Reading…' : 'Kontoauszug PDF'}
+            {stmtBusy ? 'Reading…' : 'Upload Kontoauszug (PDF)'}
           </div>
           <input ref={stmtInputRef} type="file" accept="application/pdf,.pdf" className="hidden"
             onChange={e => { const f = e.target.files?.[0]; if (f) onStatementFile(f); e.target.value = ''; }} />
@@ -2342,7 +2343,7 @@ export default function CashFlowPage() {
                         Booked by the bank but missing here — {stmtCheck.missing.length}
                       </p>
                       <p className="text-[11px] text-gray-500 mb-1.5">
-                        Upload the CSV that covers these; the statement cannot add them itself.
+                        Added to the ledger from the statement when you apply — no CSV needed.
                       </p>
                       <div className="space-y-0.5">
                         {stmtCheck.missing.slice(0, 12).map((m, i) => (
@@ -2358,13 +2359,15 @@ export default function CashFlowPage() {
                     </div>
                   )}
 
-                  {!stmtCheck.applied && (stmtCheck.remove.length > 0 || stmtCheck.redate.length > 0) && (
+                  {!stmtCheck.applied && (stmtCheck.remove.length > 0 || stmtCheck.redate.length > 0 || stmtCheck.missing.length > 0) && (
                     <button
                       onClick={() => { const f = stmtFileRef.current; if (f) void sendStatement(f, true); }}
                       disabled={stmtBusy}
                       className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#1B5E20] text-white text-xs font-bold hover:bg-[#2E7D32] disabled:opacity-60 transition-colors">
                       {stmtBusy ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} strokeWidth={3} />}
-                      Make the ledger match the statement
+                      {stmtCheck.missing.length > 0 && stmtCheck.remove.length === 0 && stmtCheck.redate.length === 0
+                        ? `Add the ${stmtCheck.missing.length} bookings to the ledger`
+                        : 'Make the ledger match the statement'}
                     </button>
                   )}
                 </>
