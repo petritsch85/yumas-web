@@ -250,6 +250,46 @@ function backfill() {
   }
 }
 
+/**
+ * Send one sender's emails again — for bills that went missing.
+ *
+ * Gmail files every FleetCor "Rechnungsübersicht" in one thread, so the
+ * thread's "Imported" label says nothing about each email in it: three of
+ * September's never became bills. Sending them again is safe — the app
+ * recognises a bill it already has and leaves it alone.
+ *
+ * Edit the line below, then choose "resend" in the function menu → Run.
+ */
+const RESEND_QUERY = 'from:fleetcor has:attachment after:2026/08/25 before:2026/09/26';
+
+function resend() {
+  if (RELAY_URL.indexOf('http') !== 0) throw new Error('Paste the webhook address into RELAY_URL first.');
+  const me = Session.getEffectiveUser().getEmail().toLowerCase();
+  const m = RESEND_QUERY.match(/after:(\S+).*before:(\S+)/);
+  const from = m ? new Date(m[1]) : null, to = m ? new Date(m[2]) : null;
+  let sent = 0, failed = 0;
+  for (const thread of GmailApp.search(RESEND_QUERY, 0, 100)) {
+    for (const msg of thread.getMessages()) {
+      const d = msg.getDate();
+      if (msg.isInTrash() || msg.getFrom().toLowerCase().indexOf(me) !== -1) continue;
+      if (from && (d < from || d >= to)) continue;   // the thread can hold other months
+      const files = msg.getAttachments({ includeInlineImages: false })
+        .filter(a => WANTED.test(a.getName()) || a.getContentType() === 'application/pdf');
+      if (files.length === 0) continue;
+      const res = send_({
+        From: msg.getFrom(), Subject: msg.getSubject(), MessageID: msg.getId(), Date: d.toISOString(),
+        Attachments: files.map(a => ({
+          Name: a.getName(), ContentType: a.getContentType(), Content: Utilities.base64Encode(a.getBytes()),
+        })),
+      });
+      if (res.code === 200) sent++; else failed++;
+      Logger.log((res.code === 200 ? 'Sent: ' : 'Failed (' + res.code + '): ')
+        + d.toISOString().slice(0, 10) + ' ' + files.map(a => a.getName()).join(', ') + ' → ' + res.text);
+    }
+  }
+  Logger.log('Resend finished — ' + sent + ' sent, ' + failed + ' failed.');
+}
+
 /** Start the next backfill from the beginning, whatever the last one did. */
 function backfillReset() {
   const props = PropertiesService.getScriptProperties();
