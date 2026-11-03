@@ -47,7 +47,7 @@ const NO_INVOICE_EXPECTED = [
   [/darl\.-leistung|zinsr[üu]ckzahlung|gesellschafterdarlehen/i, 'Darlehen/Zinsen'],
   /* Benjamin Peters lends the company money short-term and is repaid: financing, no invoice. */
   [/^benjamin peters\b/i, 'Gesellschafterdarlehen (kurzfristig)'],
-  [/abrechnung \d{2}\.\d{2}\.\d{4}|kontof[üu]hrung|entgelte vom/i, 'Bankentgelte'],
+  [/abrechnung \d{2}\.\d{2}\.\d{4}|kontof[üu]hrung|entgelte vom|rechnung firmenkundenportal/i, 'Bankentgelte'],
   [/bundeskasse|stadtkasse|gemeinschaftskasse|landeswohlfahrt|rundfunk/i, 'Behörden/Gebühren'],
   [/^wohnraum|^strabag|^patricia wohninveste|^laura klein/i, 'Miete (Ersatzbeleg vorhanden)'],
   [/^targo leasing|^abcfinance|^vw leasing|^otto payments|^ford bank/i, 'Leasing/Finanzierung (Vertrag)'],
