@@ -50,7 +50,7 @@ const NO_INVOICE_EXPECTED = [
   [/abrechnung \d{2}\.\d{2}\.\d{4}|kontof[üu]hrung|entgelte vom|rechnung firmenkundenportal/i, 'Bankentgelte'],
   [/bundeskasse|stadtkasse|gemeinschaftskasse|landeswohlfahrt|rundfunk/i, 'Behörden/Gebühren'],
   [/^wohnraum|^strabag|^patricia wohninveste|^laura klein/i, 'Miete (Ersatzbeleg vorhanden)'],
-  [/^targo leasing|^abcfinance|^vw leasing|^otto payments|^ford bank|^fiylo/i, 'Leasing/Finanzierung (Vertrag)'],
+  [/^targo leasing|^abcfinance|^vw leasing|^otto payments|^ford bank|^fiylo/i, 'Leasing/Finanzierung (Vertrag)'],
   [/^suewag|^süwag|^schwarzwald energy/i, 'Energie-Abschlag'],
   /* Money paid back to a guest charged twice at the till — 'Doppelt Berechnung',
      'Doppel Buchung - Erstattung'. A refund, not a purchase: there is no invoice. */

@@ -41,7 +41,7 @@ const NO_INVOICE_EXPECTED: [RegExp, string][] = [
   [/^wohnraum|^strabag|^patricia wohninveste|^laura klein/i, 'Miete (Ersatzbeleg)'],
   /* Leases and financing: one contract, a fixed rate every month, no monthly
      invoice — the contract is the document. */
-  [/^targo leasing|^abcfinance|^vw leasing|^otto payments|^ford bank|^fiylo/i, 'Leasing/Finanzierung (Vertrag)'],
+  [/^targo leasing|^abcfinance|^vw leasing|^otto payments|^ford bank|^fiylo/i, 'Leasing/Finanzierung (Vertrag)'],
   /* Energy: a monthly Abschlag against the yearly bill, which is filed when it comes. */
   [/^suewag|^süwag|^schwarzwald energy/i, 'Energie-Abschlag'],
   /* Money paid back to a guest charged twice at the till — 'Doppelt Berechnung',
