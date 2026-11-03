@@ -260,7 +260,7 @@ function backfill() {
  *
  * Edit the line below, then choose "resend" in the function menu → Run.
  */
-const RESEND_QUERY = '(fleetcor OR corpay OR Rechnungsübersicht OR 533261) has:attachment after:2026/08/25 before:2026/10/31';
+const RESEND_QUERY = 'fleetcor has:attachment after:2026/11/02 before:2026/11/04';
 
 function resend() {
   if (RELAY_URL.indexOf('http') !== 0) throw new Error('Paste the webhook address into RELAY_URL first.');
