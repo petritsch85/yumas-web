@@ -274,7 +274,9 @@ function resend() {
     for (const msg of thread.getMessages()) {
       const d = msg.getDate();
       Logger.log('Seen: ' + d.toISOString().slice(0, 10) + ' ' + msg.getFrom() + ' — ' + msg.getSubject());
-      if (msg.isInTrash() || msg.getFrom().toLowerCase().indexOf(me) !== -1) continue;
+      /* Our own emails too: a bill forwarded from admin@ to admin@ is one the
+         timer skips, and that is how the 06.09 FleetCor bill went missing. */
+      if (msg.isInTrash()) continue;
       if (from && (d < from || d >= to)) continue;   // the thread can hold other months
       const files = msg.getAttachments({ includeInlineImages: false })
         .filter(a => WANTED.test(a.getName()) || a.getContentType() === 'application/pdf');
