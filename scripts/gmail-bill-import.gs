@@ -260,7 +260,7 @@ function backfill() {
  *
  * Edit the line below, then choose "resend" in the function menu → Run.
  */
-const RESEND_QUERY = '(fleetcor OR corpay OR Rechnungsübersicht) has:attachment after:2026/08/25 before:2026/09/26';
+const RESEND_QUERY = '(fleetcor OR corpay OR Rechnungsübersicht OR 533261) has:attachment after:2026/08/25 before:2026/10/31';
 
 function resend() {
   if (RELAY_URL.indexOf('http') !== 0) throw new Error('Paste the webhook address into RELAY_URL first.');
@@ -273,7 +273,7 @@ function resend() {
   for (const thread of threads) {
     for (const msg of thread.getMessages()) {
       const d = msg.getDate();
-      Logger.log('Seen: ' + d.toISOString().slice(0, 10) + ' ' + msg.getFrom() + ' — ' + msg.getSubject());
+      Logger.log('Seen: ' + d.toISOString().slice(0, 10) + ' ' + msg.getFrom() + ' — ' + msg.getSubject() + ' | ' + msg.getAttachments({ includeInlineImages: false }).map(a => a.getName() + ' (' + a.getContentType() + ')').join(', '));
       /* Our own emails too: a bill forwarded from admin@ to admin@ is one the
          timer skips, and that is how the 06.09 FleetCor bill went missing. */
       if (msg.isInTrash()) continue;
