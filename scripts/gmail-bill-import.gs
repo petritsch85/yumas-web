@@ -21,7 +21,7 @@
  */
 
 // The inbound-relay address, including ?secret=…  (same as the old Postmark webhook URL)
-const RELAY_URL = 'PASTE_WEBHOOK_URL_HERE';
+const RELAY_URL = 'https://mjviztygjgvcblhutusg.supabase.co/functions/v1/inbound-relay?secret=Yumas7kQ92mBills4xTz81pWq5nRv3';
 
 const LABEL_DONE   = 'Yumas/Imported';
 const LABEL_FAILED = 'Yumas/Import failed';
@@ -260,7 +260,7 @@ function backfill() {
  *
  * Edit the line below, then choose "resend" in the function menu → Run.
  */
-const RESEND_QUERY = 'from:fleetcor has:attachment after:2026/08/25 before:2026/09/26';
+const RESEND_QUERY = '(fleetcor OR corpay OR Rechnungsübersicht) has:attachment after:2026/08/25 before:2026/09/26';
 
 function resend() {
   if (RELAY_URL.indexOf('http') !== 0) throw new Error('Paste the webhook address into RELAY_URL first.');
@@ -268,9 +268,12 @@ function resend() {
   const m = RESEND_QUERY.match(/after:(\S+).*before:(\S+)/);
   const from = m ? new Date(m[1]) : null, to = m ? new Date(m[2]) : null;
   let sent = 0, failed = 0;
-  for (const thread of GmailApp.search(RESEND_QUERY, 0, 100)) {
+  const threads = GmailApp.search(RESEND_QUERY, 0, 100);
+  Logger.log(threads.length + ' threads found');
+  for (const thread of threads) {
     for (const msg of thread.getMessages()) {
       const d = msg.getDate();
+      Logger.log('Seen: ' + d.toISOString().slice(0, 10) + ' ' + msg.getFrom() + ' — ' + msg.getSubject());
       if (msg.isInTrash() || msg.getFrom().toLowerCase().indexOf(me) !== -1) continue;
       if (from && (d < from || d >= to)) continue;   // the thread can hold other months
       const files = msg.getAttachments({ includeInlineImages: false })
