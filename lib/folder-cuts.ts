@@ -1,6 +1,16 @@
 import { PDFDocument } from 'pdf-lib';
 import { extractText, getDocumentProxy } from 'unpdf';
 
+/** Amex: page 1 is the Abrechnung; the pages behind it only list its transactions. */
+export async function firstPage(bytes: Uint8Array): Promise<Uint8Array> {
+  const src = await PDFDocument.load(bytes, { ignoreEncryption: true });
+  if (src.getPageCount() <= 1) return bytes;
+  const out = await PDFDocument.create();
+  const [p] = await out.copyPages(src, [0]);
+  out.addPage(p);
+  return out.save();
+}
+
 /**
  * The Webshop Monatsbericht goes into the folder without its order lists.
  *

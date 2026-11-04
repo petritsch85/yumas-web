@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { PDFDocument } from 'pdf-lib';
 import { getSupabaseAdmin } from '@/lib/supabase-admin';
-import { webshopSummary } from '@/lib/webshop-folder';
+import { webshopSummary } from '@/lib/folder-cuts';
 import { woltSummaries } from '@/lib/wolt-summary';
 import { lieferandoFolder } from '@/lib/lieferando-folder';
 

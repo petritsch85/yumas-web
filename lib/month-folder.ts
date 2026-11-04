@@ -95,7 +95,7 @@ export const MANIFEST: ManifestItem[] = [
      restaurant — so the position holds several. */
   { key: 'amex', folder: '06_Amex', label: 'Amex Monatsabrechnung',
     source: 'uploaded', required: true, multi: true,
-    note: 'American Express, monatliche Abrechnung.' },
+    note: 'American Express, monatliche Abrechnung — im Ordner je Händlernummer nur die erste Seite.' },
 
   { key: 'paypal', folder: '07_PayPal_Monatsuebersicht', label: 'PayPal Monatsübersicht',
     source: 'uploaded', required: true,

@@ -10,7 +10,7 @@ import {
 } from '@/lib/month-folder';
 import { findGaps, type Gap } from '@/lib/missing-invoices';
 import { readSequence } from '@/lib/month-sequence';
-import { webshopSummary } from '@/lib/webshop-folder';
+import { webshopSummary, firstPage } from '@/lib/folder-cuts';
 import { woltDocType, woltForPrint, woltStore } from '@/lib/wolt-docs';
 import { woltSummaries } from '@/lib/wolt-summary';
 import { lieferandoFolder } from '@/lib/lieferando-folder';
@@ -462,7 +462,11 @@ function printPlan(month: string, st: (ItemStatus & { docs: Doc[]; gaps?: Gap[] 
         parts.push({ section: sec, label: d.name, generated: { kind: 'webshop' } });
         continue;
       }
-      parts.push({ section: sec, label: d.name, bucket: d.bucket, path: d.path });
+      parts.push({
+        section: sec, label: d.name, bucket: d.bucket, path: d.path,
+        /* Amex: the first page is the Abrechnung, the rest only its transaction lists. */
+        firstPageOnly: x.item.key === 'amex' || undefined,
+      });
     }
   }
   /* The contents page follows the same order as what comes after it. */
@@ -552,8 +556,10 @@ export async function POST(req: NextRequest) {
       used.set(d.name, n);
       const name = n === 1 ? d.name : d.name.replace(/(\.[^.]+)?$/, `_${n}$1`);
       const content = new Uint8Array(await data.arrayBuffer());
-      files[`${x.item.folder}/${name}`] = x.item.key === 'webshop' && /\.pdf$/i.test(d.name)
-        ? await webshopSummary(content) : content;
+      const isPdf = /\.pdf$/i.test(d.name);
+      files[`${x.item.folder}/${name}`] = x.item.key === 'webshop' && isPdf ? await webshopSummary(content)
+        : x.item.key === 'amex' && isPdf ? await firstPage(content)
+        : content;
     }
     if (x.item.key === 'wolt' && x.docs.length) {
       try {
