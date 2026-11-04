@@ -165,13 +165,14 @@ const NETTED_IN_SALES = /\bwolt\b/i;
  * Nexi is not among them: it invoices and debits separately, so its fee is read
  * from nexi_statements instead. These are keys of month_documents.
  */
-const WITHHELD_FEES = ['paypal', 'amex', 'stripe'];
+const WITHHELD_FEES = ['paypal', 'amex', 'stripe', 'pluxee'];
 
 /** How each of those reads in the fold-out under the fee line. */
 const FEE_LABEL: Record<string, string> = {
   paypal: 'PayPal — Gebühren, vom Auszahlungsbetrag einbehalten',
   amex:   'Amex — Gebühren, vom Auszahlungsbetrag einbehalten',
   stripe: 'Stripe — Gebühren, vom Auszahlungsbetrag einbehalten',
+  pluxee: 'Pluxee — Gebühren, von der Auszahlung einbehalten',
 };
 
 /**
@@ -1642,7 +1643,7 @@ export default function SalesReportsPage() {
   const { data: gmBalances = [] } = useQuery({
     queryKey: ['group-monthly', 'balances'], enabled: groupMonthlyOn,
     queryFn: async () => {
-      const kinds = ['kontoauszug', 'paypal', 'amex', 'stripe'];
+      const kinds = ['kontoauszug', 'paypal', 'amex', 'stripe', 'pluxee'];
       const read = (cols: string) =>
         supabase.from('month_documents').select(cols).in('kind', kinds);
 
