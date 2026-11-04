@@ -111,7 +111,7 @@ export const MANIFEST: ManifestItem[] = [
 
   { key: 'webshop', folder: '10_Webshop', label: 'Webshop Monatsbericht',
     source: 'uploaded', required: true,
-    note: 'Monatsbericht des Webshops.' },
+    note: 'Monatsbericht des Webshops — im Ordner ohne die Einzelbestellungen.' },
 
   { key: 'wolt', folder: '11_Wolt', label: 'Wolt Abrechnungen',
     source: 'uploaded', required: true, multi: true,

@@ -10,6 +10,7 @@ import {
 } from '@/lib/month-folder';
 import { findGaps, type Gap } from '@/lib/missing-invoices';
 import { readSequence } from '@/lib/month-sequence';
+import { webshopSummary } from '@/lib/webshop-folder';
 import { woltDocType, woltForPrint, woltStore } from '@/lib/wolt-docs';
 import { woltSummaries } from '@/lib/wolt-summary';
 import { lieferandoFolder } from '@/lib/lieferando-folder';
@@ -425,7 +426,7 @@ type PlanPart = {
   label: string;
   bucket?: string; path?: string;
   /** Built on request rather than stored: a Wolt or Lieferando summary. */
-  generated?: { kind: 'wolt-summary' | 'lieferando'; store?: string };
+  generated?: { kind: 'wolt-summary' | 'lieferando' | 'webshop'; store?: string };
   /** Only the first page (Lieferando: the Rechnung, not the order lists). */
   firstPageOnly?: boolean;
   /** For an incoming invoice: the statement page it is filed behind. */
@@ -456,6 +457,10 @@ function printPlan(month: string, st: (ItemStatus & { docs: Doc[]; gaps?: Gap[] 
       if (x.item.key === 'wolt') {
         const s = d.name.split('/')[0];
         if (s !== store) { store = s; parts.push({ section: sec, label: `Wolt — Zusammenfassung ${s}`, generated: { kind: 'wolt-summary', store: s } }); }
+      }
+      if (x.item.key === 'webshop' && /\.pdf$/i.test(d.name)) {
+        parts.push({ section: sec, label: d.name, generated: { kind: 'webshop' } });
+        continue;
       }
       parts.push({ section: sec, label: d.name, bucket: d.bucket, path: d.path });
     }
@@ -546,7 +551,9 @@ export async function POST(req: NextRequest) {
       const n = (used.get(d.name) ?? 0) + 1;
       used.set(d.name, n);
       const name = n === 1 ? d.name : d.name.replace(/(\.[^.]+)?$/, `_${n}$1`);
-      files[`${x.item.folder}/${name}`] = new Uint8Array(await data.arrayBuffer());
+      const content = new Uint8Array(await data.arrayBuffer());
+      files[`${x.item.folder}/${name}`] = x.item.key === 'webshop' && /\.pdf$/i.test(d.name)
+        ? await webshopSummary(content) : content;
     }
     if (x.item.key === 'wolt' && x.docs.length) {
       try {
