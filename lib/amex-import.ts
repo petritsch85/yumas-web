@@ -14,13 +14,51 @@
  * net is the cost.
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { AmexStatement } from './amex-statement';
+import { extractText, getDocumentProxy } from 'unpdf';
+import { parseAmexStatement, type AmexStatement } from './amex-statement';
 
 const plusDays = (d: string, n: number) => {
   const t = new Date(d + 'T12:00:00Z');
   t.setUTCDate(t.getUTCDate() + n);
   return t.toISOString().slice(0, 10);
 };
+
+/**
+ * One statement per merchant number and month.
+ *
+ * Files in this position are told apart by name, so September's statement
+ * uploaded a second time under another name sat beside the first, and its fee
+ * counted twice in the P&L. An older copy for the same merchant now gives way
+ * to the new one, and hands over the bank credits tied to it.
+ */
+export async function replaceSameMerchant(
+  admin: SupabaseClient, documentId: string, st: AmexStatement, month: string,
+): Promise<string[]> {
+  const { data } = await admin.from('month_documents')
+    .select('id, filename, file_path, bucket').eq('kind', 'amex').eq('month', `${month}-01`).neq('id', documentId);
+  const replaced: string[] = [];
+  for (const old of data ?? []) {
+    const bucket = (old.bucket as string) || 'cashflow-files';
+    const { data: file } = await admin.storage.from(bucket).download(old.file_path as string);
+    if (!file) continue;
+    let merchant: string | null = null;
+    try {
+      const pdf = await getDocumentProxy(new Uint8Array(await file.arrayBuffer()));
+      const { text } = await extractText(pdf, { mergePages: true });
+      merchant = parseAmexStatement(String(text)).merchantNumber;
+    } catch { /* one that cannot be read cannot be said to be the same: it stays */ }
+    if (!merchant || merchant !== st.merchantNumber) continue;
+
+    const { error: moved } = await admin.from('cashflow_transactions')
+      .update({ statement_document_id: documentId }).eq('statement_document_id', old.id as string);
+    if (moved) throw new Error(moved.message);
+    const { error } = await admin.from('month_documents').delete().eq('id', old.id as string);
+    if (error) throw new Error(error.message);
+    await admin.storage.from(bucket).remove([old.file_path as string]);
+    replaced.push(old.filename as string);
+  }
+  return replaced;
+}
 
 export async function linkAmexStatement(
   admin: SupabaseClient, documentId: string, st: AmexStatement,

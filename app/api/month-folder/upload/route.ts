@@ -5,7 +5,7 @@ import { itemFor } from '@/lib/month-folder';
 import { parsePaypalStatement } from '@/lib/paypal-statement';
 import { importNexiPdf } from '@/lib/nexi-import';
 import { parseAmexStatement, type AmexStatement } from '@/lib/amex-statement';
-import { linkAmexStatement } from '@/lib/amex-import';
+import { linkAmexStatement, replaceSameMerchant } from '@/lib/amex-import';
 import { unzipSync } from 'fflate';
 import { parseTgtgStatement } from '@/lib/tgtg-statement';
 import { importTgtgMonth } from '@/lib/tgtg-import';
@@ -236,7 +236,10 @@ async function fileDocument(
   if (amex) {
     const { data: saved } = await admin.from('month_documents').select('id')
       .eq('kind', kind).eq('month', `${month}-01`).eq('filename', file.name).maybeSingle();
-    if (saved?.id) amexResult = await linkAmexStatement(admin, saved.id as string, amex);
+    if (saved?.id) {
+      if (amex.merchantNumber) await replaceSameMerchant(admin, saved.id as string, amex, month);
+      amexResult = await linkAmexStatement(admin, saved.id as string, amex);
+    }
   }
 
   let pluxeeResult: string | null = null;
