@@ -71,8 +71,7 @@ export const MANIFEST: ManifestItem[] = [
 
   { key: 'ausgangsrechnungen', folder: '03_Ausgangsrechnungen', label: 'Ausgangsrechnungen',
     source: 'collected', required: true,
-    note: 'Eigene Rechnungen auf Abgrenzungsbasis: Rechnungsdatum im Monat, auch ohne '
-        + 'Zahlungseingang, zuzüglich älterer Rechnungen, die in diesem Monat bezahlt wurden. '
+    note: 'Eigene Rechnungen mit Rechnungsdatum im Monat, auch ohne Zahlungseingang. '
         + 'Nach Rechnungsdatum sortiert.' },
 
   /**
