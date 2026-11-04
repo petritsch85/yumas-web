@@ -8,7 +8,7 @@ import { parseOpenTableCsv, summariseOpenTable, OpenTableParseError } from '@/li
 import { parseShiftCSV, parseNum, parseDate, SECTION_NAMES } from '@/lib/orderbird-shift-csv';
 import type { ShiftCat, ShiftProduct, ShiftParseResult } from '@/lib/orderbird-shift-csv';
 import { OrderbirdSyncBar } from '@/components/orderbird-sync-bar';
-import { WeekdaySalesCharts } from '@/components/weekday-sales-charts';
+import { SalesCharts } from '@/components/sales-charts';
 import { ForecastChanges } from '@/components/forecast-changes';
 import { parseGdpduZip, GdpduParseError } from '@/lib/gdpdu';
 import { isoWeek, isoWeekYear, isoWeekRange, isoWeeksInYear, currentISOWeek } from '@/lib/iso-week';
@@ -932,7 +932,7 @@ export default function SalesReportsPage() {
   const { t } = useT();
 
   // Tab / sub-tab
-  const [activeTab,   setActiveTab]   = useState<'upload'|'daily'|'forecast'>('daily');
+  const [activeTab,   setActiveTab]   = useState<'upload'|'daily'|'forecast'|'charts'>('daily');
   const [subTab,      setSubTab]      = useState<'daily'|'weekly'|'monthly'>('daily');
   /**
    * Which numbered section of the daily P&L is on screen. They used to run one
@@ -1494,18 +1494,6 @@ export default function SalesReportsPage() {
     () => buildChannelSummary(d => d.slice(0, 7)),
     [buildChannelSummary],
   );
-
-  /** Net sales per date — lunch, dinner and the whole day — for the weekday charts under the daily table. */
-  const dailyTotals = useMemo(() => {
-    const out = { lunch: {} as Record<string, number>, dinner: {} as Record<string, number>, day: {} as Record<string, number> };
-    const sum = (c: ChannelSums) => c.orderbird + c.webshop + c.wolt + c.lieferando + c.bills + c.tgtg;
-    for (const [d, m] of Object.entries(buildChannelSummary(d => d))) {
-      out.lunch[d] = sum(m.lunch);
-      out.dinner[d] = sum(m.dinner);
-      out.day[d] = sum(m.day);
-    }
-    return out;
-  }, [buildChannelSummary]);
 
   /** Keyed "2026-W39", so the same week a year earlier is one string away. */
   const weeklySummary = useMemo(
@@ -4356,6 +4344,7 @@ export default function SalesReportsPage() {
             ['upload', <Upload size={14} />,       'Upload'],
             ['daily',  <CalendarDays size={14} />, 'P&L'],
             ['forecast', <TrendingUp size={14} />, 'Forecast changes'],
+            ['charts', <BarChart3 size={14} />, 'Chart'],
           ] as const).map(([t, icon, label]) => (
             <button key={t} onClick={() => setActiveTab(t)}
               className={`flex items-center gap-2 pb-3 text-sm font-semibold border-b-2 transition-colors ${
@@ -4370,6 +4359,7 @@ export default function SalesReportsPage() {
 
       {/* ── Shared controls ── */}
       {activeTab === 'forecast' && <ForecastChanges locations={locations} />}
+      {activeTab === 'charts' && <SalesCharts locations={locations} />}
 
       {activeTab === 'daily' && (
         <div className="mb-3 space-y-2">
@@ -7315,10 +7305,6 @@ export default function SalesReportsPage() {
             </div>
           );
         })()}
-        {([['day', 'Total net sales · All day'], ['lunch', 'Total net sales · Lunch'], ['dinner', 'Total net sales · Dinner']] as const).map(([sh, label]) => (
-          <WeekdaySalesCharts key={sh} days={dailyTotals[sh]} from="2026-07-01"
-            title={`${label} by weekday since 1 July 2026 · ${isGroup ? 'Group — all restaurants' : location?.name ?? ''}`} />
-        ))}
         </div>
         )}
 
