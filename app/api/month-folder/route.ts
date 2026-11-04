@@ -238,14 +238,20 @@ async function gather(
       missingFiles: bills.length - withFile.length,
       detail: `${bills.length} Rechnungen`
         + (later.length ? ` · davon ${later.length} aus Vormonaten, hier bezahlt` : ''),
-      docs: inStatementOrder(withFile.map(x => {
-        const at = placeOf(String(x.id), keys, order);
-        return {
-          bucket: 'bills', path: String(x.file_path), seq: at?.seq, page: at?.page,
-          name: documentName({ date: x.invoice_date as string, party: x.customer_name as string,
-            number: x.invoice_number as string, fallback: String(x.file_path) }) + '.pdf',
-        };
-      })),
+      /* By issue date, not by the statement page that paid them: they are not
+         filed behind the statement, so that order meant nothing on paper. The
+         booking is kept only to count those with no payment this month. */
+      docs: [...withFile]
+        .sort((a, b) => String(a.invoice_date ?? '').localeCompare(String(b.invoice_date ?? ''))
+          || String(a.invoice_number ?? '').localeCompare(String(b.invoice_number ?? ''), 'de', { numeric: true }))
+        .map(x => {
+          const at = placeOf(String(x.id), keys, order);
+          return {
+            bucket: 'bills', path: String(x.file_path), seq: at?.seq, page: at?.page,
+            name: documentName({ date: x.invoice_date as string, party: x.customer_name as string,
+              number: x.invoice_number as string, fallback: String(x.file_path) }) + '.pdf',
+          };
+        }),
     };
   }
 
@@ -370,7 +376,9 @@ async function statuses(admin: Admin, month: string): Promise<(ItemStatus & { do
       item, count: docs.length, missingFiles, incomplete, docs,
       gaps: item.key === 'eingangsrechnungen' ? gaps
         : item.key === 'paypal_einkaeufe' ? paypalGaps : undefined,
-      detail: detail && item.source === 'collected'
+      detail: detail && item.key === 'ausgangsrechnungen'
+        ? detail + (unplaced ? ` · ${unplaced} ohne Zahlung in diesem Monat` : '') + ' · nach Rechnungsdatum sortiert'
+        : detail && item.source === 'collected'
         ? detail + (order.size === 0
             ? ' · Reihenfolge erst nach Upload des Kontoauszugs'
             : unplaced ? ` · ${unplaced} ohne Zahlung in diesem Monat` : ' · nach Kontoauszug sortiert')

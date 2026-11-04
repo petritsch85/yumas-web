@@ -73,7 +73,7 @@ export const MANIFEST: ManifestItem[] = [
     source: 'collected', required: true,
     note: 'Eigene Rechnungen auf Abgrenzungsbasis: Rechnungsdatum im Monat, auch ohne '
         + 'Zahlungseingang, zuzüglich älterer Rechnungen, die in diesem Monat bezahlt wurden. '
-        + 'Dateiname = Seite und Position im Kontoauszug.' },
+        + 'Nach Rechnungsdatum sortiert.' },
 
   /**
    * The PayPal purchases, kept together.
