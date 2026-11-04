@@ -150,12 +150,15 @@ export interface DueDateInput {
 /**
  * The due date to store.
  *
- * A printed date always wins: it is what the supplier asked for. Otherwise the
+ * A printed date wins: it is what the supplier asked for — unless it falls
+ * before the invoice date, which no real deadline can. That is a date left in
+ * the template from the last invoice (Kovac RE-1009, dated 04.11, "fällig bis
+ * 19.10"), and the bill would show as overdue the day it arrives. Otherwise the
  * condition is read, and where that says nothing the date stays empty rather
  * than being invented.
  */
 export function resolveDueDate({ invoiceDate, dueDate, terms }: DueDateInput): string | null {
-  if (dueDate) return dueDate;
+  if (dueDate && (!invoiceDate || dueDate >= invoiceDate)) return dueDate;
   if (!invoiceDate) return null;
 
   const days = netDays(terms);

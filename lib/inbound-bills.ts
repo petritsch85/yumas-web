@@ -78,7 +78,7 @@ export async function fileBill(
   const terms = (extracted.payment_method as string | null) ?? null;
   let dueDate = resolveDueDate({ invoiceDate, dueDate: printedDue, terms });
   let dueSource: string | null =
-    printedDue ? 'printed' : dueDate ? 'stated-term' : null;
+    printedDue && dueDate === printedDue ? 'printed' : dueDate ? 'stated-term' : null;
   if (!dueDate && settlementAmount !== null && extracted.settlement_date) {
     dueDate = extracted.settlement_date as string;
     dueSource = 'settlement';
