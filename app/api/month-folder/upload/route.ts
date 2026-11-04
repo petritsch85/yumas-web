@@ -10,6 +10,7 @@ import { unzipSync } from 'fflate';
 import { parseTgtgStatement } from '@/lib/tgtg-statement';
 import { importTgtgMonth } from '@/lib/tgtg-import';
 import { parseKontoauszug } from '@/lib/kontoauszug.mjs';
+import { parsePluxeeStatement, linkPluxeeStatement, type PluxeeStatement } from '@/lib/pluxee-statement';
 
 export const maxDuration = 60;
 
@@ -203,6 +204,21 @@ async function fileDocument(
     }
   }
 
+  /* Pluxee: the same — its Gutschrift explains one bank credit, and states the
+     fees withheld from it. A row that does not add up is filed but not used. */
+  let pluxee: PluxeeStatement | null = null;
+  if (kind === 'pluxee') {
+    try {
+      const pdf = await getDocumentProxy(new Uint8Array(await file.arrayBuffer()));
+      const { text } = await extractText(pdf, { mergePages: true });
+      const st = parsePluxeeStatement(String(text));
+      if (st?.balanced) { pluxee = st; extra.fees = st.feesNet; }
+      else console.warn('[month-folder] Pluxee statement not read, or does not add up');
+    } catch (e) {
+      console.warn('[month-folder] Pluxee statement not read:', e instanceof Error ? e.message : e);
+    }
+  }
+
   const row: Record<string, unknown> = {
     kind, month: `${month}-01`, filename: file.name, file_path: path,
     bucket: 'cashflow-files', byte_size: file.size, ...extra,
@@ -223,10 +239,17 @@ async function fileDocument(
     if (saved?.id) amexResult = await linkAmexStatement(admin, saved.id as string, amex);
   }
 
+  let pluxeeResult: string | null = null;
+  if (pluxee) {
+    const { data: saved } = await admin.from('month_documents').select('id')
+      .eq('kind', kind).eq('month', `${month}-01`).eq('filename', file.name).maybeSingle();
+    if (saved?.id) pluxeeResult = await linkPluxeeStatement(admin, saved.id as string, pluxee);
+  }
+
   if (superseded.length) {
     await admin.storage.from('cashflow-files').remove(superseded).catch(() => {});
   }
-  return { ok: true, status: 200, body: { ok: true, filename: file.name, amex: amexResult } };
+  return { ok: true, status: 200, body: { ok: true, filename: file.name, amex: amexResult, pluxee: pluxeeResult } };
 }
 
 export async function DELETE(req: NextRequest) {

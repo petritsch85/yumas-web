@@ -4,10 +4,10 @@ import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from 'pdf
  * "Check Out": the month's whole folder as one PDF, in print order.
  *
  * Built in the browser from the plan the server hands out (GET
- * /api/month-folder?plan=1): a checklist page first, then the Kontoauszug with
- * every incoming invoice filed behind the page its payment is on, the outgoing
- * invoices, the PayPal purchases, and the monthly statements. Whoever receives
- * it presses print once.
+ * /api/month-folder?plan=1): a checklist page first, then the sections in the
+ * order set under "Sequencing" — the Kontoauszug with every incoming invoice
+ * filed behind the page its payment is on, the outgoing invoices, the monthly
+ * statements. Whoever receives it presses print once.
  *
  * Documents arrive one at a time through signed links, so the size of the
  * month does not matter. A file that cannot be read is not skipped silently:
@@ -182,10 +182,15 @@ export async function buildCheckoutPdf(month: string, onProgress: (done: number,
     }
   };
 
-  /* 1. The statement, page by page, each followed by what it paid. */
-  const statement = plan.parts.find(p => p.label === 'Kontoauszug');
-  const invoices = plan.parts.filter(p => p.section.startsWith('1 ') && p !== statement);
-  if (statement) {
+  /* The statement, page by page, each followed by what it paid. */
+  const isStatementSection = (p: Part) => p.section.startsWith('1 ');
+  const statementSection = async () => {
+    const statement = plan.parts.find(p => p.label === 'Kontoauszug');
+    const invoices = plan.parts.filter(p => isStatementSection(p) && p !== statement);
+    if (!statement) {
+      for (const inv of invoices) { await add(inv); tick(inv.label); }
+      return;
+    }
     let src: PDFDocument | null = null;
     try {
       const { bytes } = await fetchBytes(statement, month);
@@ -202,12 +207,17 @@ export async function buildCheckoutPdf(month: string, onProgress: (done: number,
     }
     /* Paid in no booking of this month, or on a page the statement does not have. */
     for (const inv of invoices.filter(x => !x.behindPage || x.behindPage > pageCount)) { await add(inv); tick(inv.label); }
-  } else {
-    for (const inv of invoices) { await add(inv); tick(inv.label); }
-  }
+  };
 
-  /* 2.–4. Everything else, in the plan's order. */
-  for (const p of plan.parts.filter(x => !x.section.startsWith('1 '))) { await add(p); tick(p.label); }
+  /* Everything in the plan's order, which is the one set under "Sequencing". */
+  let statementDone = false;
+  for (const p of plan.parts) {
+    if (isStatementSection(p)) {
+      if (!statementDone) { statementDone = true; await statementSection(); }
+      continue;
+    }
+    await add(p); tick(p.label);
+  }
 
   if (failed.length) textPages(out, mono, 'Nicht eingefügt — bitte von Hand ergänzen', failed);
   const bytes = await out.save();

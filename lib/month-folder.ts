@@ -17,24 +17,23 @@
 export type ItemSource = 'collected' | 'uploaded';
 
 /**
- * The broad order of the Check Out PDF, from the same plan it is built from, so
- * the two cannot disagree. One line per block; the plan's parts run in that
- * order, and a generated summary is not counted as a document.
+ * The sections of the Check Out PDF, in the order they print.
+ *
+ * Every position of the folder is a section, with one exception: the invoices
+ * are filed behind the statement page that paid them, so 'kontoauszug' stands
+ * for the two together. The order is set under "Sequencing" and holds for every
+ * month; this is where it starts.
  */
-export function printSequence(parts: { section: string; label: string; generated?: unknown }[]) {
-  const blocks: { label: string; documents: number }[] = [];
-  let section = '';
-  for (const p of parts) {
-    if (p.section !== section) {
-      section = p.section;
-      blocks.push({
-        label: section.startsWith('1 ') ? 'Kontoauszug + Rechnungen' : section.replace(/^\d+\s+/, ''),
-        documents: 0,
-      });
-    }
-    if (!p.generated && p.label !== 'Kontoauszug') blocks[blocks.length - 1].documents++;
-  }
-  return blocks;
+export const DEFAULT_SEQUENCE = [
+  'kontoauszug', 'ausgangsrechnungen', 'nexi', 'amex', 'paypal', 'paypal_einkaeufe',
+  'stripe', 'toogoodtogo', 'webshop', 'wolt', 'lieferando', 'pluxee',
+];
+
+/** A saved order, made safe: unknown keys dropped, and a position added since goes last. */
+export function normalizeSequence(saved: unknown): string[] {
+  const list = Array.isArray(saved) ? saved.filter((k): k is string => DEFAULT_SEQUENCE.includes(k)) : [];
+  const known = [...new Set(list)];
+  return [...known, ...DEFAULT_SEQUENCE.filter(k => !known.includes(k))];
 }
 
 
@@ -121,6 +120,12 @@ export const MANIFEST: ManifestItem[] = [
   { key: 'lieferando', folder: '12_Lieferando', label: 'Lieferando Abrechnungen',
     source: 'uploaded', required: true, multi: true,
     note: 'Lieferando Abrechnungen des Monats — Lieferbelege.' },
+
+  /* Filed under the month of its Leistungsdatum, which Pluxee's own "08-26"
+     reference follows; the money reaches the bank a little later. */
+  { key: 'pluxee', folder: '13_Pluxee', label: 'Pluxee Monatsbericht',
+    source: 'uploaded', required: true,
+    note: 'Pluxee Gutschriftsanzeige — eingelöste Essensschecks, Gebühren und Auszahlung.' },
 ];
 
 export const itemFor = (key: string) => MANIFEST.find(i => i.key === key) ?? null;

@@ -15,8 +15,8 @@
 
 import React, { useState, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { FolderDown, Upload, Check, AlertTriangle, Loader2, Trash2, Printer, ListOrdered } from 'lucide-react';
-import { monthLabel, printSequence } from '@/lib/month-folder';
+import { FolderDown, Upload, Check, AlertTriangle, Loader2, Trash2, Printer, ListOrdered, ChevronUp, ChevronDown } from 'lucide-react';
+import { monthLabel } from '@/lib/month-folder';
 import { unzipSync } from 'fflate';
 
 type Gap = {
@@ -198,18 +198,29 @@ export default function MonatsabschlussPage() {
     } finally { setBusy(null); }
   }
 
-  /* "Sequencing": the broad order of the Check Out PDF, from the same plan. */
-  const [sequence, setSequence] = useState<{ label: string; documents: number }[] | null>(null);
+  /* "Sequencing": the order of the Check Out PDF's sections, for every month. */
+  const [sequence, setSequence] = useState<string[] | null>(null);
   async function showSequence() {
     setBusy('sequence'); setError(null);
     try {
-      const r = await fetch(`/api/month-folder?month=${month}&plan=1`);
-      const plan = await r.json();
-      if (!r.ok) throw new Error(plan.error ?? `HTTP ${r.status}`);
-      setSequence(printSequence(plan.parts));
+      const r = await fetch('/api/month-folder/sequence');
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error ?? `HTTP ${r.status}`);
+      setSequence(j.order);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Reihenfolge nicht geladen');
     } finally { setBusy(null); }
+  }
+  async function moveSection(index: number, by: -1 | 1) {
+    if (!sequence) return;
+    const before = sequence;
+    const next = [...sequence];
+    [next[index], next[index + by]] = [next[index + by], next[index]];
+    setSequence(next);
+    const r = await fetch('/api/month-folder/sequence', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ order: next }),
+    }).catch(() => null);
+    if (!r?.ok) { setSequence(before); setError('Reihenfolge nicht gespeichert'); }
   }
 
   const items = data?.items ?? [];
@@ -240,13 +251,13 @@ export default function MonatsabschlussPage() {
             ZIP herunterladen
           </button>
           <button onClick={checkOut} disabled={busy === 'checkout'}
-            title="Der ganze Monat als eine PDF in Druckreihenfolge: Kontoauszug mit den Rechnungen hinter jeder Seite, Ausgangsrechnungen, PayPal-Einkäufe, Monatsabrechnungen"
+            title="Der ganze Monat als eine PDF, in der Reihenfolge unter Sequencing"
             className="inline-flex items-center gap-1.5 bg-gray-900 hover:bg-gray-700 disabled:opacity-50 text-white rounded-lg px-3 py-1.5 text-xs font-semibold">
             {busy === 'checkout' ? <Loader2 size={13} className="animate-spin" /> : <Printer size={13} />}
             Check Out
           </button>
           <button onClick={showSequence} disabled={busy === 'sequence'}
-            title="Die grobe Reihenfolge der Check-Out-PDF"
+            title="Reihenfolge der Abschnitte in der Check-Out-PDF ändern"
             className="inline-flex items-center gap-1.5 border border-gray-200 bg-white hover:bg-gray-50 disabled:opacity-50 text-gray-800 rounded-lg px-3 py-1.5 text-xs font-semibold">
             {busy === 'sequence' ? <Loader2 size={13} className="animate-spin" /> : <ListOrdered size={13} />}
             Sequencing
@@ -264,27 +275,62 @@ export default function MonatsabschlussPage() {
       {sequence && (
         <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-6"
           onClick={() => setSequence(null)}>
-          <div className="bg-white rounded-2xl shadow-2xl w-[460px] max-w-full max-h-[85vh] flex flex-col"
+          <div className="bg-white rounded-2xl shadow-2xl w-[520px] max-w-full max-h-[85vh] flex flex-col"
             onClick={e => e.stopPropagation()}>
             <div className="px-5 py-3 border-b border-gray-200 flex items-start justify-between">
               <div>
-                <h2 className="text-sm font-bold text-gray-900">Sequencing · {monthLabel(month)}</h2>
-                <p className="text-[11px] text-gray-500 mt-0.5">In dieser Reihenfolge stehen die Unterlagen in der Check-Out-PDF.</p>
+                <h2 className="text-sm font-bold text-gray-900">Sequencing</h2>
+                <p className="text-[11px] text-gray-500 mt-0.5">
+                  In dieser Reihenfolge stehen die Abschnitte in der Check-Out-PDF. Änderungen werden sofort gespeichert und gelten für alle Monate.
+                </p>
               </div>
               <button onClick={() => setSequence(null)}
                 className="text-gray-400 hover:text-gray-700 text-lg leading-none px-2">✕</button>
             </div>
-            <ol className="overflow-auto px-5 py-3 text-xs text-gray-800">
-              {[{ label: 'Inhalt / Checkliste', documents: 0 }, ...sequence].map((b, i) => (
-                <li key={b.label} className="flex items-baseline gap-3 py-1.5 border-b border-gray-100 last:border-0">
-                  <span className="w-5 text-right text-gray-400 tabular-nums">{i + 1}.</span>
-                  <span className="flex-1 font-medium">{b.label}</span>
-                  {b.documents > 0 && (
-                    <span className="text-gray-500 tabular-nums">{b.documents} {b.documents === 1 ? 'Dokument' : 'Dokumente'}</span>
-                  )}
-                </li>
-              ))}
-            </ol>
+            <div className="overflow-auto px-5 py-2">
+              <table className="w-full text-xs text-gray-800">
+                <thead>
+                  <tr className="text-[10px] uppercase tracking-wide text-gray-500 border-b border-gray-200">
+                    <th className="py-1.5 w-7 text-right font-semibold">#</th>
+                    <th className="py-1.5 pl-3 text-left font-semibold">Abschnitt</th>
+                    <th className="py-1.5 pr-3 text-right font-semibold whitespace-nowrap">Dateien {monthLabel(month)}</th>
+                    <th className="py-1.5 w-14" />
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr className="border-b border-gray-100 text-gray-500">
+                    <td className="py-1.5 text-right tabular-nums">1</td>
+                    <td className="py-1.5 pl-3">Inhalt / Checkliste</td>
+                    <td />
+                    <td className="py-1.5 text-center text-[10px]">fest</td>
+                  </tr>
+                  {sequence.map((key, i) => {
+                    const count = key === 'kontoauszug'
+                      ? items.filter(x => x.key === key || x.key === 'eingangsrechnungen').reduce((s, x) => s + x.count, 0)
+                      : items.find(x => x.key === key)?.count ?? 0;
+                    return (
+                      <tr key={key} className="border-b border-gray-100 last:border-0">
+                        <td className="py-1.5 text-right text-gray-400 tabular-nums">{i + 2}</td>
+                        <td className="py-1.5 pl-3 font-medium">
+                          {key === 'kontoauszug' ? 'Kontoauszug + Rechnungen' : items.find(x => x.key === key)?.label ?? key}
+                        </td>
+                        <td className="py-1.5 pr-3 text-right text-gray-500 tabular-nums">{count || '—'}</td>
+                        <td className="py-1 text-center whitespace-nowrap">
+                          <button onClick={() => moveSection(i, -1)} disabled={i === 0} aria-label="Nach oben"
+                            className="p-1 rounded hover:bg-gray-100 disabled:opacity-25 disabled:hover:bg-transparent">
+                            <ChevronUp size={14} />
+                          </button>
+                          <button onClick={() => moveSection(i, 1)} disabled={i === sequence.length - 1} aria-label="Nach unten"
+                            className="p-1 rounded hover:bg-gray-100 disabled:opacity-25 disabled:hover:bg-transparent">
+                            <ChevronDown size={14} />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       )}
