@@ -107,7 +107,7 @@ export const MANIFEST: ManifestItem[] = [
 
   { key: 'toogoodtogo', folder: '09_TooGoodToGo', label: 'Too Good To Go Abrechnung',
     source: 'uploaded', required: true,
-    note: 'Too Good To Go, monatliche Abrechnung.' },
+    note: 'Too Good To Go, monatliche Abrechnung — im Ordner ohne die Bestellübersichten.' },
 
   { key: 'webshop', folder: '10_Webshop', label: 'Webshop Monatsbericht',
     source: 'uploaded', required: true,

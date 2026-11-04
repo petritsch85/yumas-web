@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { PDFDocument } from 'pdf-lib';
 import { getSupabaseAdmin } from '@/lib/supabase-admin';
-import { webshopSummary } from '@/lib/folder-cuts';
+import { hasOrderLists, withoutOrderLists } from '@/lib/folder-cuts';
 import { woltSummaries } from '@/lib/wolt-summary';
 import { lieferandoFolder } from '@/lib/lieferando-folder';
 
@@ -45,12 +45,12 @@ export async function GET(req: NextRequest) {
           } catch { /* an unreadable one is listed by the browser as missing */ }
         }
         bytes = out.getPageCount() ? await out.save() : null;
-      } else if (generated === 'webshop') {
+      } else if (hasOrderLists(generated)) {
         const { data: doc } = await admin.from('month_documents')
-          .select('file_path,bucket').eq('kind', 'webshop').eq('month', `${month}-01`).ilike('filename', '%.pdf').limit(1).maybeSingle();
+          .select('file_path,bucket').eq('kind', generated).eq('month', `${month}-01`).ilike('filename', '%.pdf').limit(1).maybeSingle();
         if (doc) {
           const { data: file } = await admin.storage.from(doc.bucket || 'cashflow-files').download(doc.file_path);
-          if (file) bytes = await webshopSummary(new Uint8Array(await file.arrayBuffer()));
+          if (file) bytes = await withoutOrderLists(generated, new Uint8Array(await file.arrayBuffer()));
         }
       }
       if (!bytes) return NextResponse.json({ error: 'Nothing to build' }, { status: 404 });

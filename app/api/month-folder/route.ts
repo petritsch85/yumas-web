@@ -10,7 +10,7 @@ import {
 } from '@/lib/month-folder';
 import { findGaps, type Gap } from '@/lib/missing-invoices';
 import { readSequence } from '@/lib/month-sequence';
-import { webshopSummary, firstPage } from '@/lib/folder-cuts';
+import { hasOrderLists, withoutOrderLists, firstPage } from '@/lib/folder-cuts';
 import { woltDocType, woltForPrint, woltStore } from '@/lib/wolt-docs';
 import { woltSummaries } from '@/lib/wolt-summary';
 import { lieferandoFolder } from '@/lib/lieferando-folder';
@@ -426,7 +426,7 @@ type PlanPart = {
   label: string;
   bucket?: string; path?: string;
   /** Built on request rather than stored: a Wolt or Lieferando summary. */
-  generated?: { kind: 'wolt-summary' | 'lieferando' | 'webshop'; store?: string };
+  generated?: { kind: 'wolt-summary' | 'lieferando' | 'webshop' | 'toogoodtogo'; store?: string };
   /** Only the first page (Lieferando: the Rechnung, not the order lists). */
   firstPageOnly?: boolean;
   /** For an incoming invoice: the statement page it is filed behind. */
@@ -458,8 +458,8 @@ function printPlan(month: string, st: (ItemStatus & { docs: Doc[]; gaps?: Gap[] 
         const s = d.name.split('/')[0];
         if (s !== store) { store = s; parts.push({ section: sec, label: `Wolt — Zusammenfassung ${s}`, generated: { kind: 'wolt-summary', store: s } }); }
       }
-      if (x.item.key === 'webshop' && /\.pdf$/i.test(d.name)) {
-        parts.push({ section: sec, label: d.name, generated: { kind: 'webshop' } });
+      if (hasOrderLists(x.item.key) && /\.pdf$/i.test(d.name)) {
+        parts.push({ section: sec, label: d.name, generated: { kind: x.item.key as 'webshop' | 'toogoodtogo' } });
         continue;
       }
       parts.push({
@@ -557,7 +557,7 @@ export async function POST(req: NextRequest) {
       const name = n === 1 ? d.name : d.name.replace(/(\.[^.]+)?$/, `_${n}$1`);
       const content = new Uint8Array(await data.arrayBuffer());
       const isPdf = /\.pdf$/i.test(d.name);
-      files[`${x.item.folder}/${name}`] = x.item.key === 'webshop' && isPdf ? await webshopSummary(content)
+      files[`${x.item.folder}/${name}`] = hasOrderLists(x.item.key) && isPdf ? await withoutOrderLists(x.item.key, content)
         : x.item.key === 'amex' && isPdf ? await firstPage(content)
         : content;
     }

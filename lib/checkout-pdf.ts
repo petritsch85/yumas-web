@@ -17,7 +17,7 @@ import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from 'pdf
 type Part = {
   section: string; label: string;
   bucket?: string; path?: string;
-  generated?: { kind: 'wolt-summary' | 'lieferando' | 'webshop'; store?: string };
+  generated?: { kind: 'wolt-summary' | 'lieferando' | 'webshop' | 'toogoodtogo'; store?: string };
   firstPageOnly?: boolean;
   behindPage?: number;
 };
