@@ -1,4 +1,4 @@
-import { PDFDocument, StandardFonts, rgb, type PDFFont } from 'pdf-lib';
+import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from 'pdf-lib';
 
 /**
  * "Check Out": the month's whole folder as one PDF, in print order.
@@ -64,19 +64,97 @@ async function fetchBytes(part: Part, month: string): Promise<{ bytes: Uint8Arra
   return { bytes: new Uint8Array(await f.arrayBuffer()), type: f.headers.get('content-type') ?? '' };
 }
 
+/**
+ * An encrypted PDF, as pictures of its pages.
+ *
+ * Hills protects its invoices with an owner password. They open normally, but
+ * pdf-lib copies the still-encrypted contents across without decrypting them,
+ * and every page came out blank. pdf.js can read them, so the pages are drawn
+ * from there, at a resolution that prints sharply.
+ */
+const ENCRYPTED_DPI = 200;
+async function flattenEncrypted(bytes: Uint8Array): Promise<PDFDocument> {
+  const { getDocumentProxy, renderPageAsImage } = await import('unpdf');
+  const pdf = await getDocumentProxy(bytes.slice());
+  const flat = await PDFDocument.create();
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const vp = (await pdf.getPage(i)).getViewport({ scale: 1 });
+    const png = await renderPageAsImage(bytes.slice(), i, { scale: ENCRYPTED_DPI / 72 });
+    const img = await flat.embedPng(new Uint8Array(png));
+    flat.addPage([vp.width, vp.height]).drawImage(img, { x: 0, y: 0, width: vp.width, height: vp.height });
+  }
+  return flat;
+}
+
+/**
+ * Till receipts print at about their real width, not across a whole A4 sheet.
+ *
+ * A receipt is told by its shape: longer than any paper format (A4 is 1.41).
+ * A long one continues in the next column, repeating a line so that the cut
+ * never falls through the text; two columns fit on a sheet.
+ */
+const RECEIPT_RATIO = 1.55;
+const RECEIPT_WIDTH = 80 * 72 / 25.4; // 80 mm till roll
+const RECEIPT_GAP = 24, RECEIPT_MARGIN = 28, RECEIPT_OVERLAP = 12;
+const isReceiptShape = (w: number, h: number) => h / w >= RECEIPT_RATIO;
+
+async function addReceipts(out: PDFDocument, pages: PDFPage[]) {
+  const usable = A4[1] - 2 * RECEIPT_MARGIN;
+  let sheet: PDFPage | null = null, col = 2;
+  for (const page of pages) {
+    const box = page.getMediaBox();
+    const s = RECEIPT_WIDTH / box.width;
+    const step = (usable - RECEIPT_OVERLAP) / s;
+    const bottom = box.y, top = box.y + box.height;
+    for (let at = top; ; at -= step) {
+      const low = Math.max(bottom, at - usable / s);
+      if (col === 2) { sheet = out.addPage(A4); col = 0; }
+      const part = await out.embedPage(page, { left: box.x, right: box.x + box.width, bottom: low, top: at });
+      const height = (at - low) * s;
+      sheet!.drawPage(part, {
+        x: RECEIPT_MARGIN + col * (RECEIPT_WIDTH + RECEIPT_GAP),
+        y: A4[1] - RECEIPT_MARGIN - height,
+        width: RECEIPT_WIDTH, height,
+      });
+      col++;
+      if (low <= bottom) break;
+    }
+  }
+}
+
 /** Appends one document; images become a page of their own, scaled to A4. */
-async function append(out: PDFDocument, bytes: Uint8Array, type: string, name: string, firstPageOnly = false, pages?: number[]) {
+export async function append(out: PDFDocument, bytes: Uint8Array, type: string, name: string, firstPageOnly = false, pages?: number[]) {
   const isPdf = bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46; // %PDF
   if (isPdf || /pdf/i.test(type)) {
-    const src = await PDFDocument.load(bytes, { ignoreEncryption: true });
+    let src = await PDFDocument.load(bytes, { ignoreEncryption: true });
+    if (src.isEncrypted) src = await flattenEncrypted(bytes);
     const idx = pages ?? (firstPageOnly ? [0] : src.getPageIndices());
-    for (const p of await out.copyPages(src, idx)) out.addPage(p);
+    /* In document order: runs of receipts share sheets, anything else stays as it is. */
+    let run: PDFPage[] = [];
+    const flush = async () => { if (run.length) await addReceipts(out, run); run = []; };
+    for (const i of idx) {
+      const page = src.getPage(i);
+      const { width, height } = page.getSize();
+      if (page.getRotation().angle === 0 && isReceiptShape(width, height)) { run.push(page); continue; }
+      await flush();
+      const [copy] = await out.copyPages(src, [i]);
+      out.addPage(copy);
+    }
+    await flush();
     return;
   }
   const isPng = bytes[0] === 0x89 && bytes[1] === 0x50;
   const isJpg = bytes[0] === 0xff && bytes[1] === 0xd8;
   if (!isPng && !isJpg) throw new Error(`kein PDF/Bild (${type || name})`);
   const img = isPng ? await out.embedPng(bytes) : await out.embedJpg(bytes);
+  if (isReceiptShape(img.width, img.height)) {
+    const tmp = await PDFDocument.create();
+    const pic = isPng ? await tmp.embedPng(bytes) : await tmp.embedJpg(bytes);
+    const page = tmp.addPage([img.width, img.height]);
+    page.drawImage(pic, { x: 0, y: 0, width: img.width, height: img.height });
+    await addReceipts(out, [page]);
+    return;
+  }
   const page = out.addPage(A4);
   const m = 28, s = Math.min((A4[0] - 2 * m) / img.width, (A4[1] - 2 * m) / img.height);
   page.drawImage(img, { x: (A4[0] - img.width * s) / 2, y: A4[1] - m - img.height * s, width: img.width * s, height: img.height * s });

@@ -16,6 +16,27 @@
 
 export type ItemSource = 'collected' | 'uploaded';
 
+/**
+ * The broad order of the Check Out PDF, from the same plan it is built from, so
+ * the two cannot disagree. One line per block; the plan's parts run in that
+ * order, and a generated summary is not counted as a document.
+ */
+export function printSequence(parts: { section: string; label: string; generated?: unknown }[]) {
+  const blocks: { label: string; documents: number }[] = [];
+  let section = '';
+  for (const p of parts) {
+    if (p.section !== section) {
+      section = p.section;
+      blocks.push({
+        label: section.startsWith('1 ') ? 'Kontoauszug + Rechnungen' : section.replace(/^\d+\s+/, ''),
+        documents: 0,
+      });
+    }
+    if (!p.generated && p.label !== 'Kontoauszug') blocks[blocks.length - 1].documents++;
+  }
+  return blocks;
+}
+
 
 export interface ManifestItem {
   /** Stable key — also the `kind` stored in month_documents. */

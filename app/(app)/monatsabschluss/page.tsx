@@ -15,8 +15,8 @@
 
 import React, { useState, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { FolderDown, Upload, Check, AlertTriangle, Loader2, Trash2, Printer } from 'lucide-react';
-import { monthLabel } from '@/lib/month-folder';
+import { FolderDown, Upload, Check, AlertTriangle, Loader2, Trash2, Printer, ListOrdered } from 'lucide-react';
+import { monthLabel, printSequence } from '@/lib/month-folder';
 import { unzipSync } from 'fflate';
 
 type Gap = {
@@ -198,6 +198,20 @@ export default function MonatsabschlussPage() {
     } finally { setBusy(null); }
   }
 
+  /* "Sequencing": the broad order of the Check Out PDF, from the same plan. */
+  const [sequence, setSequence] = useState<{ label: string; documents: number }[] | null>(null);
+  async function showSequence() {
+    setBusy('sequence'); setError(null);
+    try {
+      const r = await fetch(`/api/month-folder?month=${month}&plan=1`);
+      const plan = await r.json();
+      if (!r.ok) throw new Error(plan.error ?? `HTTP ${r.status}`);
+      setSequence(printSequence(plan.parts));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Reihenfolge nicht geladen');
+    } finally { setBusy(null); }
+  }
+
   const items = data?.items ?? [];
   const months = Array.from({ length: 18 }, (_, i) => {
     const d = new Date(); d.setMonth(d.getMonth() - i);
@@ -231,6 +245,12 @@ export default function MonatsabschlussPage() {
             {busy === 'checkout' ? <Loader2 size={13} className="animate-spin" /> : <Printer size={13} />}
             Check Out
           </button>
+          <button onClick={showSequence} disabled={busy === 'sequence'}
+            title="Die grobe Reihenfolge der Check-Out-PDF"
+            className="inline-flex items-center gap-1.5 border border-gray-200 bg-white hover:bg-gray-50 disabled:opacity-50 text-gray-800 rounded-lg px-3 py-1.5 text-xs font-semibold">
+            {busy === 'sequence' ? <Loader2 size={13} className="animate-spin" /> : <ListOrdered size={13} />}
+            Sequencing
+          </button>
         </div>
       </div>
       {checkout && (
@@ -239,6 +259,34 @@ export default function MonatsabschlussPage() {
 
       {error && (
         <div className="mb-3 px-3 py-2 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">{error}</div>
+      )}
+
+      {sequence && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-6"
+          onClick={() => setSequence(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-[460px] max-w-full max-h-[85vh] flex flex-col"
+            onClick={e => e.stopPropagation()}>
+            <div className="px-5 py-3 border-b border-gray-200 flex items-start justify-between">
+              <div>
+                <h2 className="text-sm font-bold text-gray-900">Sequencing · {monthLabel(month)}</h2>
+                <p className="text-[11px] text-gray-500 mt-0.5">In dieser Reihenfolge stehen die Unterlagen in der Check-Out-PDF.</p>
+              </div>
+              <button onClick={() => setSequence(null)}
+                className="text-gray-400 hover:text-gray-700 text-lg leading-none px-2">✕</button>
+            </div>
+            <ol className="overflow-auto px-5 py-3 text-xs text-gray-800">
+              {[{ label: 'Inhalt / Checkliste', documents: 0 }, ...sequence].map((b, i) => (
+                <li key={b.label} className="flex items-baseline gap-3 py-1.5 border-b border-gray-100 last:border-0">
+                  <span className="w-5 text-right text-gray-400 tabular-nums">{i + 1}.</span>
+                  <span className="flex-1 font-medium">{b.label}</span>
+                  {b.documents > 0 && (
+                    <span className="text-gray-500 tabular-nums">{b.documents} {b.documents === 1 ? 'Dokument' : 'Dokumente'}</span>
+                  )}
+                </li>
+              ))}
+            </ol>
+          </div>
+        </div>
       )}
 
       {showGaps && (
