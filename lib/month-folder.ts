@@ -71,8 +71,8 @@ export const MANIFEST: ManifestItem[] = [
 
   { key: 'ausgangsrechnungen', folder: '03_Ausgangsrechnungen', label: 'Ausgangsrechnungen',
     source: 'collected', required: true,
-    note: 'Eigene Rechnungen mit Rechnungsdatum im Monat, auch ohne Zahlungseingang. '
-        + 'Nach Rechnungsdatum sortiert.' },
+    note: 'Eigene Rechnungen mit Rechnungsdatum im Monat, auch ohne Zahlungseingang, '
+        + 'ohne Bewirtungsbelege. Nach Rechnungsdatum sortiert.' },
 
   /**
    * The PayPal purchases, kept together.

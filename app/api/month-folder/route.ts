@@ -215,12 +215,14 @@ async function gather(
      * An older invoice the customer settled this month stays in the month it
      * was issued: it was printed there already.
      */
-    const bills = await page<Record<string, unknown>>((a, b) => admin.from('outgoing_bills')
-      .select('id,invoice_date,customer_name,invoice_number,file_path')
+    const rows = await page<Record<string, unknown>>((a, b) => admin.from('outgoing_bills')
+      .select('id,invoice_date,customer_name,invoice_number,file_path,docKind:bill_data->>docKind')
       /* Hidden entries were settled through the till — no invoice to file. */
       .or('bill_data->>hidden.is.null,bill_data->>hidden.neq.true')
       .gte('invoice_date', from).lte('invoice_date', to)
       .order('invoice_date').range(a, b));
+    /* A Bewirtungsbeleg (BB series) restates a receipt already paid at the till. */
+    const bills = rows.filter(x => x.docKind !== 'bewirtung');
     const withFile = bills.filter(x => x.file_path);
     return {
       missingFiles: bills.length - withFile.length,
