@@ -11,8 +11,8 @@ import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Toolti
  * period, so a day above or below it reads at a glance.
  *
  * The forecast runs on from today in orange, the colour forecasts have
- * everywhere in the app. It never enters the median or the mean: those say what
- * has happened, and a forecast built from them would only be quoting itself.
+ * everywhere in the app. It never enters the median, the mean or the swing: those
+ * say what has happened, and a forecast built from them would only be quoting itself.
  */
 
 const WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
@@ -69,12 +69,21 @@ export function WeekdaySalesCharts({ days, forecast = {}, from, today, title }: 
           const mid = Math.floor(sorted.length / 2);
           const avg = !sorted.length ? 0 : sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
           const mean = sorted.length ? sorted.reduce((t, v) => t + v, 0) / sorted.length : 0;
+          /* Swing: the typical distance from the median, as a share of it (the
+             median absolute deviation). Like the line, it holds still for an event
+             night, so it says how much an ordinary day varies. */
+          const gaps = sorted.map(v => Math.abs(v - avg)).sort((a, b) => a - b);
+          const gapMid = Math.floor(gaps.length / 2);
+          const mad = !gaps.length ? 0 : gaps.length % 2 ? gaps[gapMid] : (gaps[gapMid - 1] + gaps[gapMid]) / 2;
+          const swing = avg > 0 ? (mad / avg) * 100 : 0;
           return (
             <div key={WEEKDAYS[i]} className="border border-gray-200 rounded-xl bg-white shadow-sm px-3 pt-3 pb-1">
               <div className="flex items-baseline justify-between px-1">
                 <span className="text-sm font-bold text-gray-800">{WEEKDAYS[i]}s</span>
                 <span className="text-[11px] text-gray-500 tabular-nums">
-                  {sorted.length ? <>Median {eur(avg)} € · Mean {eur(mean)} €</> : 'Forecast only'}
+                  {sorted.length
+                    ? <>Median {eur(avg)} € · Mean {eur(mean)} € · <span title="How far a typical completed day lands from the median (median absolute deviation ÷ median)">Swing ±{Math.round(swing)}%</span></>
+                    : 'Forecast only'}
                 </span>
               </div>
               <div style={{ height: 170 }}>
