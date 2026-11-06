@@ -110,6 +110,11 @@ function cleanResponse(text: string): string {
 }
 
 
+/** Sole traders, by their name on the invoice (as nameKey gives it) → the name we file them under. */
+const TRADING_NAMES: Record<string, string> = {
+  axelhuhn: 'Mezcaleria',
+};
+
 /** Case, accents and punctuation removed — two spellings of one name match here. */
 const nameKey = (s: string) => s.toLowerCase()
   .replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue').replace(/ß/g, 'ss')
@@ -193,6 +198,10 @@ export async function extractFromAttachment(attachment: Attachment): Promise<Rec
         console.log(`[inbound-bills] supplier corrected: ${extracted.supplier_name} -> ${fixed}`);
         extracted.supplier_name = fixed;
       }
+      /* A sole trader invoices under the owner's name, and we know the business
+         by its trading name. Whole name only, so nobody else's bill is caught. */
+      const trading = TRADING_NAMES[nameKey(extracted.supplier_name as string)];
+      if (trading) extracted.supplier_name = trading;
       /* Then to the spelling this supplier already uses here. The model copies
          the name off the page and the page is not consistent — Leleithner
          invoices its own name in six different casings — so a bill would
