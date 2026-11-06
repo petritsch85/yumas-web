@@ -9,36 +9,73 @@ import { WeekdaySalesCharts } from '@/components/weekday-sales-charts';
 
 /**
  * All the sales charts in one place: pick a restaurant or the group, then a
- * shift. Reported sales only, from the same figures as "Total net sales" on the
- * daily sheet, so a forecast never shows up as a bar.
+ * shift. Reported sales come from the same figures as "Total net sales" on the
+ * daily sheet, and the forecast runs on from today in orange.
+ *
+ * Today counts a shift as reported once its Z-report is in. Until then a webshop
+ * order or two on the books is not the shift's result, so its forecast stands.
  */
 
 const FROM = '2026-07-01';
+const berlinToday = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Berlin' });
 type Loc = { id: string; name: string };
 type Shift = 'day' | 'lunch' | 'dinner';
 const SHIFTS: [Shift, string][] = [['day', 'All day'], ['lunch', 'Lunch'], ['dinner', 'Dinner']];
+type ForecastRow = { location_id: string; forecast_date: string; shift_type: string; net_total: number };
 
 export function SalesCharts({ locations }: { locations: Loc[] }) {
   const [scope, setScope] = useState('group');
   const [shift, setShift] = useState<Shift>('day');
+  const today = berlinToday();
+  const ids = locations.map(l => l.id);
 
-  const { data: actuals, isLoading, error } = useQuery({
-    queryKey: ['sales-charts', FROM, locations.map(l => l.id).join()],
+  const { data, isLoading, error } = useQuery({
+    queryKey: ['sales-charts', FROM, today, ids.join()],
     enabled: locations.length > 0,
-    queryFn: () => dailySalesActuals(supabase, locations, FROM, new Date().toISOString().slice(0, 10)),
+    queryFn: async () => {
+      const [actuals, forecasts, reported] = await Promise.all([
+        dailySalesActuals(supabase, locations, FROM, today),
+        (async () => {
+          const rows: ForecastRow[] = [];
+          for (let p = 0; ; p++) {
+            const { data: page, error: e } = await supabase.from('sales_forecasts')
+              .select('location_id,forecast_date,shift_type,net_total')
+              .in('location_id', ids).gte('forecast_date', today)
+              .order('forecast_date').range(p * 1000, p * 1000 + 999);
+            if (e) throw new Error(e.message);
+            rows.push(...((page ?? []) as ForecastRow[]));
+            if ((page ?? []).length < 1000) return rows;
+          }
+        })(),
+        supabase.from('shift_reports').select('location_id,shift_type')
+          .in('location_id', ids).eq('report_date', today),
+      ]);
+      return {
+        actuals, forecasts,
+        reported: new Set((reported.data ?? []).map(r => `${r.location_id}|${r.shift_type}`)),
+      };
+    },
   });
 
-  const days = useMemo(() => {
-    const out: Record<string, number> = {};
-    for (const [key, v] of Object.entries(actuals ?? {})) {
+  const { days, forecast } = useMemo(() => {
+    const days: Record<string, number> = {}, forecast: Record<string, number> = {};
+    if (!data) return { days, forecast };
+    for (const [key, v] of Object.entries(data.actuals)) {
       const [loc, date, sh] = key.split('|');
       if (scope !== 'group' && loc !== scope) continue;
       /* A sale with no shift set counts towards the whole day only. */
       if (shift !== 'day' && sh !== shift) continue;
-      out[date] = (out[date] ?? 0) + v;
+      if (date === today && !data.reported.has(`${loc}|${sh}`)) continue;
+      days[date] = (days[date] ?? 0) + v;
     }
-    return out;
-  }, [actuals, scope, shift]);
+    for (const r of data.forecasts) {
+      if (scope !== 'group' && r.location_id !== scope) continue;
+      if (shift !== 'day' && r.shift_type !== shift) continue;
+      if (r.forecast_date === today && data.reported.has(`${r.location_id}|${r.shift_type}`)) continue;
+      forecast[r.forecast_date] = (forecast[r.forecast_date] ?? 0) + Number(r.net_total);
+    }
+    return { days, forecast };
+  }, [data, scope, shift, today]);
 
   const scopeName = scope === 'group' ? 'Group — all restaurants' : locations.find(l => l.id === scope)?.name ?? '';
   const shiftName = SHIFTS.find(([k]) => k === shift)![1];
@@ -71,7 +108,7 @@ export function SalesCharts({ locations }: { locations: Loc[] }) {
           <Loader2 size={14} className="animate-spin" /> Loading sales…
         </div>
       ) : (
-        <WeekdaySalesCharts days={days} from={FROM}
+        <WeekdaySalesCharts days={days} forecast={forecast} from={FROM} today={today}
           title={`Total net sales · ${shiftName} by weekday since 1 July 2026 · ${scopeName}`} />
       )}
     </div>
