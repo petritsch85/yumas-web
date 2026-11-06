@@ -1127,8 +1127,7 @@ export default function BillsPage() {
   const sortedPayable = useMemo(() => {
     const { col, dir } = paySort;
     const sign = dir === 'asc' ? 1 : -1;
-    const party = (b: Bill) => (matchedCpByBill.get(b.id)?.account_holder
-      ?? matchedCpByBill.get(b.id)?.name ?? b.supplier_name ?? '').toLowerCase();
+    const party = (b: Bill) => (matchedCpByBill.get(b.id)?.name ?? b.supplier_name ?? '').toLowerCase();
 
     return [...payableRows].sort((a, b) => {
       switch (col) {
@@ -2608,7 +2607,11 @@ export default function BillsPage() {
                             className="w-4 h-4 accent-green-600 disabled:opacity-30" />
                         </td>
                         <td className="px-3 py-1.5 text-gray-800 font-medium max-w-[200px] truncate">
-                          {cp?.account_holder ?? cp?.name ?? b.supplier_name}
+                          {cp?.name ?? b.supplier_name}
+                          {/* The transfer itself goes to the name on the account. */}
+                          {cp?.account_holder && cp.account_holder !== cp.name && (
+                            <span className="block text-[10px] font-normal text-gray-400 truncate">Konto: {cp.account_holder}</span>
+                          )}
                         </td>
                         <td className="px-3 py-1.5 text-gray-500 whitespace-nowrap">
                           {b.invoice_number ?? '—'}
