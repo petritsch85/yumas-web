@@ -205,6 +205,7 @@ const STAFF_CATEGORY = 'Labour';
  */
 const STAFF_PLACEHOLDER: Record<string, number> = {
   '2026-09': 110000,
+  '2026-10': 103000,
 };
 
 /**
@@ -218,6 +219,7 @@ const STAFF_PLACEHOLDER: Record<string, number> = {
  */
 const SGA_PLACEHOLDER: Record<string, number> = {
   'utilities|2026-09': 5000,
+  'utilities|2026-10': 5000,
 };
 
 /** What SG&A came to in one month, split by line. */
