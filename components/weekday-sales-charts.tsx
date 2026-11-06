@@ -50,13 +50,13 @@ export function WeekdaySalesCharts({ days, from, title }: {
           const sorted = open.map(p => p.value).sort((a, b) => a - b);
           const mid = Math.floor(sorted.length / 2);
           const avg = sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
-          const last = open.at(-1);
+          const mean = sorted.reduce((t, v) => t + v, 0) / sorted.length;
           return (
             <div key={WEEKDAYS[i]} className="border border-gray-200 rounded-xl bg-white shadow-sm px-3 pt-3 pb-1">
               <div className="flex items-baseline justify-between px-1">
                 <span className="text-sm font-bold text-gray-800">{WEEKDAYS[i]}s</span>
                 <span className="text-[11px] text-gray-500 tabular-nums">
-                  Median {eur(avg)} €{last ? ` · last ${short(last.date)}: ${eur(last.value)} €` : ''}
+                  Median {eur(avg)} € · Mean {eur(mean)} €
                 </span>
               </div>
               <div style={{ height: 170 }}>
