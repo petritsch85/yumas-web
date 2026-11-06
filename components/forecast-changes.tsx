@@ -154,7 +154,7 @@ export function ForecastChanges({ locations }: { locations: Loc[] }) {
 
   const sel = table[scope];
   const monthStarted = today >= from;
-  const th = 'px-3 py-2 text-right font-semibold whitespace-nowrap';
+  const th = 'px-3 py-2 text-right font-semibold align-bottom';
   const td = 'px-3 py-1.5 text-right tabular-nums whitespace-nowrap';
 
   return (
@@ -185,10 +185,10 @@ export function ForecastChanges({ locations }: { locations: Loc[] }) {
 
       {/* The month at a glance, every scope */}
       <div className="border border-gray-200 rounded-xl overflow-x-auto bg-white shadow-sm">
-        <table className="w-full text-xs">
+        <table className="w-full min-w-[900px] table-fixed text-xs">
           <thead className="bg-gray-900 text-gray-200">
             <tr>
-              <th className="px-3 py-2 text-left font-semibold">{MONTHS[mo - 1]}{shift !== 'day' ? ` · ${shift === 'lunch' ? 'Lunch' : 'Dinner'}` : ''}</th>
+              <th className="px-3 py-2 text-left font-semibold align-bottom">{MONTHS[mo - 1]}{shift !== 'day' ? ` · ${shift === 'lunch' ? 'Lunch' : 'Dinner'}` : ''}</th>
               <th className={th}>Forecast on the 1st (frozen)</th>
               <th className={th}>Actual to yesterday</th>
               <th className={th}>vs. frozen to yesterday</th>
@@ -231,10 +231,10 @@ export function ForecastChanges({ locations }: { locations: Loc[] }) {
         ))}
       </div>
       <div className="border border-gray-200 rounded-xl overflow-x-auto bg-white shadow-sm">
-        <table className="w-full text-xs">
+        <table className="w-full min-w-[900px] table-fixed text-xs">
           <thead className="bg-gray-900 text-gray-200 sticky top-0">
             <tr>
-              <th className="px-3 py-2 text-left font-semibold">Day</th>
+              <th className="px-3 py-2 text-left font-semibold align-bottom">Day</th>
               <th className={th}>Forecast on the 1st</th>
               <th className={th}>Latest forecast</th>
               <th className={th}>Forecast change</th>
@@ -252,7 +252,7 @@ export function ForecastChanges({ locations }: { locations: Loc[] }) {
               return (
                 <tr key={d} className={`border-b border-gray-100 ${isToday ? 'bg-blue-50/50' : ''}`}>
                   <td className="px-3 py-1.5 text-left whitespace-nowrap text-gray-700">
-                    <span className="text-gray-400 w-6 inline-block">{WD[new Date(d + 'T12:00:00Z').getUTCDay()]}</span>
+                    <span className="text-gray-400 w-8 inline-block">{WD[new Date(d + 'T12:00:00Z').getUTCDay()]}</span>
                     {d.slice(8)}.{d.slice(5, 7)}.{isToday ? <span className="ml-1.5 text-[10px] text-blue-600 font-semibold">today</span> : null}
                   </td>
                   <td className={`${td} text-gray-700`}>{snapshot && fz ? eur(fz) : <span className="text-gray-300">—</span>}</td>
