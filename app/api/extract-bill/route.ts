@@ -2,6 +2,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { NextRequest, NextResponse } from 'next/server';
 import { canonicalizeSupplierName, getKnownTerms } from '@/lib/canonical-supplier';
 import { resolveDueDate } from '@/lib/payment-terms';
+import { settleLines } from '@/lib/bill-lines';
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -48,6 +49,8 @@ Return this exact JSON structure:
     "city": "string or null",
     "full": "string or null"
   },
+  "prices_include_vat": "boolean — true when the amounts on the lines are printed including VAT (till receipts, web shops, invoices whose lines add up to the gross)",
+  "invoice_discount_amount": "number or null — a Rabatt taken off the whole invoice below the lines, as printed. Not Skonto",
   "lines": [
     {
       "description": "string",
@@ -70,6 +73,9 @@ Rules:
 - Suggest category based on supplier type and line item descriptions
 - If a discount is applied, reflect it in the net_amount (post-discount)
 - Line items: read each number from the column it sits under. Menge / G-Menge / Anzahl is the quantity, E-Preis / Einzelpreis the unit price; Kolli and Inhalt are packaging counts, not the quantity. Check that quantity × unit_price equals line_total for every line and re-read the row if it does not
+- Lines are copied as printed, including a discount printed on the line itself. A Rabatt on the whole invoice is not a line: put it in invoice_discount_amount
+- Only what was bought or charged is a line. Include freight (Porto, Versand, Fracht) as a line of its own. Leave out anything that is a way of paying: Leergut vouchers ("Leergutc. abgerufen"), advance payments, card payments. A Warengutschein that lowers the net amount is a line, at its net value
+- Empties listed as given and returned ("Gel Lg +" and "Zur Lg ./."): one line per item, line_total being the two added together, so 70.00 out and 70.00 back is 0
 - billing_period_start / billing_period_end: if the invoice shows a billing/service period (Abrechnungszeitraum, Leistungszeitraum, "period: X – Y", etc.), extract the start and end dates of that period in YYYY-MM-DD format. Set both to null if no billing period is stated.
 - delivery_address: extract the delivery/ship-to address from the invoice (Lieferadresse / Lieferanschrift / Warenempfänger). This is the address where goods were delivered TO, NOT the supplier's address. Set to null fields if not found
 
@@ -223,6 +229,7 @@ export async function POST(req: NextRequest) {
       extracted = arithmeticOk(second) ? second : (arithmeticOk(extracted) ? extracted : second);
     }
     const ok = arithmeticOk(extracted);
+    settleLines(extracted);
     if (!ok) {
       console.error('[extract-bill] totals still inconsistent after retry:', {
         net: extracted.net_amount, vat: extracted.vat_amount, gross: extracted.gross_amount,

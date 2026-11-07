@@ -54,7 +54,7 @@ const NON_FOOD = /reinig|hygiene|spulmittel|putz|handschuh|mullbeutel|folie|serv
 /** Things you do not sell: cleaning, bin bags, kitchen tools, crates. */
 const NON_FOOD_GOODS = /mulls|toilettenpap|klorix|waschmittel|wischset|microfaser|burste|loffel|gabel\b|messer|mixer|siegelrand|trennbod|mehrwegkiste|kiste\b|tuch\b|spul/;
 /** Freight, not goods — part of the cost, but not a thing on a shelf. */
-const CHARGES = /versandkosten|liefergebuhr|shipping|fracht|zuschlag/;
+const CHARGES = /versandkosten|\bversand\b|\bporto\b|liefergebuhr|shipping|fracht|zuschlag/;
 const DRINKS = /bier|beer|cerveza|pils|lager|fass|cola|fanta|spezi|limo|schorle|wasser|water|selters|azur|mineral|saft|juice|tonic|mate\b|red bull|energy|wein|wine|vino|burgunder|riesling|tequila|mezcal|rum\b|vodka|gin\b|whisk|likor|prosecco|sekt|frizz|valmarone|espresso|kaffee|coffee|jever|paloma|corona|modelo|pacifico|cranberry|dpg|kasten|tray|pfand/;
 /* \bol\b, not a bare "ol": "40% vol." would otherwise read as cooking oil. */
 const OILS = /\bol\b|olivenol|rapsol|sonnenblumenol|speiseol|balsamico|condimento|essig|senf|mayonnaise|ketchup/;

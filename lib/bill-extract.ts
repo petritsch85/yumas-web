@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { getSupabaseAdmin } from '@/lib/supabase-admin';
 import { canonicalizeSupplierName, getKnownTerms } from '@/lib/canonical-supplier';
+import { settleLines } from '@/lib/bill-lines';
 
 /**
  * Reading a bill: the model call and the supplier-name clean-up after it.
@@ -51,6 +52,8 @@ Return this exact JSON structure:
   "discount_amount": "number or null — the Skonto in euros, as printed",
   "discount_percent": "number or null — the Skonto rate, as printed",
   "suggested_category": "one of: Food Cost | Drinks Cost | Packaging | Software & Technology | Delivery Platform Fees | Repairs & Maintenance | Cleaning Services | Utilities | Rent | Labour | Marketing | Other",
+  "prices_include_vat": "boolean — true when the amounts on the lines are printed including VAT (till receipts, web shops, invoices whose lines add up to the gross)",
+  "invoice_discount_amount": "number or null — a Rabatt taken off the whole invoice below the lines, as printed. Not Skonto",
   "lines": [
     {
       "description": "string",
@@ -85,6 +88,9 @@ Rules:
 - If a discount is applied, reflect it in the net_amount (post-discount)
 - Skonto: many German suppliers print exactly what they will collect, e.g. "Der Rechnungsbetrag wird am 02.10.26 per Lastschrift abzüglich 2.00 % / 14.46 EUR Skonto = 756.24 EUR abgebucht". Copy those figures into settlement_amount (756.24), discount_amount (14.46), discount_percent (2.00) and settlement_date (2026-10-02). gross_amount stays the invoice total (770.70) — never reduce it by the Skonto. Leave all four null when the invoice offers no discount, and never calculate them yourself: the discount runs on the supplier's own base, which excludes Pfand and Leergut, so it is not a fixed percentage of the gross
 - Line items: read each number from the column it sits under. Menge / G-Menge / Anzahl is the quantity, E-Preis / Einzelpreis the unit price; Kolli and Inhalt are packaging counts, not the quantity. Check that quantity × unit_price equals line_total for every line and re-read the row if it does not
+- Lines are copied as printed, including a discount printed on the line itself. A Rabatt on the whole invoice is not a line: put it in invoice_discount_amount
+- Only what was bought or charged is a line. Include freight (Porto, Versand, Fracht) as a line of its own. Leave out anything that is a way of paying: Leergut vouchers ("Leergutc. abgerufen"), advance payments, card payments. A Warengutschein that lowers the net amount is a line, at its net value
+- Empties listed as given and returned ("Gel Lg +" and "Zur Lg ./."): one line per item, line_total being the two added together, so 70.00 out and 70.00 back is 0
 
 supplier_name accuracy (important — this field is frequently misread):
 - Yumas GmbH (any company named Yumas) is the CUSTOMER on an ordinary invoice — not the supplier. The one exception is a self-billing invoice (Gutschrift / Gutschriftverfahren) issued in Yumas's name, where Yumas is the seller. Its name sits in the address window (the recipient block, usually top-left under a small sender line); that block is the recipient, not the letterhead. If you find yourself about to answer "Yumas", read the small sender line above the address window, the footer and the bank details instead
@@ -188,6 +194,7 @@ export async function extractFromAttachment(attachment: Attachment): Promise<Rec
   const raw = response.content[0].type === 'text' ? response.content[0].text : '';
   const jsonStr = cleanResponse(raw);
   const extracted = JSON.parse(jsonStr) as Record<string, unknown>;
+  settleLines(extracted);
 
   // Snap OCR near-misses in the supplier name to the canonical spelling on file.
   try {
