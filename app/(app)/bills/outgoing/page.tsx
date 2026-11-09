@@ -251,6 +251,11 @@ export default function OutgoingBillsPage() {
   const [inputMode,         setInputMode]         = useState<'brutto' | 'netto' | 'pauschale' | 'catering' | 'adhoc'>('brutto');
   /** 'bewirtung' = Bewirtungsbeleg: own BB sequence, gross positions, already paid. */
   const [docKind,           setDocKind]           = useState<'invoice' | 'bewirtung'>('invoice');
+  /* Ad hoc positions can be typed gross or net. A Bewirtungsbeleg copies a
+     receipt that is priced gross, so it starts on Brutto; an invoice on Netto.
+     Either way the bill is stored in net terms. */
+  const [adHocGross,        setAdHocGross]        = useState(false);
+  useEffect(() => { setAdHocGross(docKind === 'bewirtung'); }, [docKind]);
 
   /* Checking which of our own invoices the bank already paid. The matching
      happens on the server, where the cash flows are; this holds what it found
@@ -581,8 +586,8 @@ export default function OutgoingBillsPage() {
      downstream — MwSt, totals, the stored bill — stays in net terms. */
   const adHocNet = useCallback((l: { amount: string; vat: AdHocVat }) => {
     const v = parseFloat(l.amount) || 0;
-    return docKind === 'bewirtung' ? netFromGross(v, l.vat) : v;
-  }, [docKind]);
+    return adHocGross ? netFromGross(v, l.vat) : v;
+  }, [adHocGross]);
 
   const { net0: ahNetto0, net7: ahNetto7, net19: ahNetto19 } = splitAdHocNet(
     adHocLines.map(l => ({ amountNetto: adHocNet(l), vat: l.vat })),
@@ -1134,7 +1139,7 @@ export default function OutgoingBillsPage() {
        essenBruttoN, getraenkeBruttoN, essenN, getraenkeN, mwstEssen, mwstGetraenke, trinkgeldN, compactTotals,
        anzahlungBruttoN, anzahlungNettoN, anzahlungBill, ermaessigungN,
        includeReceipt, receiptDataUrl, stornoSourceBill,
-       inputMode, cateringNettoN, cateringBruttoN, cateringDesc, cateringLines, adHocLines,
+       inputMode, cateringNettoN, cateringBruttoN, cateringDesc, cateringLines, adHocLines, adHocNet,
        ahNetto7, ahNetto19, ahTotalNetto, ahTotalBrutto]);
 
   // Auto-populate next invoice number when bills load
@@ -2965,7 +2970,21 @@ export default function OutgoingBillsPage() {
               {inputMode === 'adhoc' && (
                 <div className="mb-4 p-3 bg-violet-50 rounded-lg border border-violet-200 space-y-4">
                   <div>
-                    <label className={labelCls}>Positionen (erscheinen auf der Rechnung)</label>
+                    <div className="flex items-center justify-between gap-3">
+                      <label className={labelCls}>Positionen (erscheinen auf der Rechnung)</label>
+                      <div className="flex rounded-lg border border-gray-300 overflow-hidden text-xs font-semibold flex-shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => setAdHocGross(false)}
+                          className={`px-2.5 py-1.5 transition-colors ${!adHocGross ? 'bg-[#1B5E20] text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}
+                        >Netto</button>
+                        <button
+                          type="button"
+                          onClick={() => setAdHocGross(true)}
+                          className={`px-2.5 py-1.5 transition-colors border-l border-gray-300 ${adHocGross ? 'bg-[#1B5E20] text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}
+                        >Brutto</button>
+                      </div>
+                    </div>
                     <div className="space-y-2 mt-1">
                       {adHocLines.map((line, idx) => (
                         <div key={line.id} className="flex gap-2 items-center">
@@ -2980,7 +2999,7 @@ export default function OutgoingBillsPage() {
                             type="number"
                             step="0.01"
                             className="flex-shrink-0 w-32 bg-white border border-gray-300 rounded-lg px-3 py-2.5 text-sm text-gray-900 text-right placeholder:text-gray-400 shadow-sm focus:outline-none focus:ring-2 focus:ring-[#1B5E20]/40 focus:border-[#1B5E20] transition-colors"
-                            placeholder={docKind === 'bewirtung' ? '0,00 Brutto' : '0,00 Netto'}
+                            placeholder={adHocGross ? '0,00 Brutto' : '0,00 Netto'}
                             value={line.amount}
                             onChange={e => setAdHocLines(ls => ls.map(l => l.id === line.id ? { ...l, amount: e.target.value } : l))}
                           />
@@ -3070,7 +3089,9 @@ export default function OutgoingBillsPage() {
                     />
                   </div>
                   <p className="text-xs text-violet-700">
-                    Netto-Beträge eingeben · MwSt wird automatisch berechnet · Negative Beträge = Rabatte
+                    {adHocGross
+                      ? 'Brutto-Beträge eingeben · Netto und MwSt werden automatisch berechnet'
+                      : 'Netto-Beträge eingeben · MwSt wird automatisch berechnet'} · Negative Beträge = Rabatte
                   </p>
                   <p className="text-xs text-violet-700 mt-0.5">
                     0% = ohne MwSt · Event = Pauschale 70% Essen (7%) / 30% Getränke (19%) ={' '}
