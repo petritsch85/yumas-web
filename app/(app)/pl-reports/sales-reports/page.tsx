@@ -1263,10 +1263,18 @@ export default function SalesReportsPage() {
     queryKey: ['sales-forecasts', scopeKey],
     enabled: !!location && activeTab === 'daily' && scopeIds.length > 0,
     queryFn: async () => {
-      const { data, error } = await supabase.from('sales_forecasts')
-        .select('location_id,forecast_date,shift_type,net_total').in('location_id', scopeIds);
-      if (error) return []; // the table arrives with supabase/add_sales_forecasts.sql
-      return (data ?? []) as { location_id: string; forecast_date: string; shift_type: 'lunch' | 'dinner'; net_total: number }[];
+      /* Paged: the forecast runs a year ahead, well past PostgREST's 1000-row
+         cap — read in one go, the last restaurant written fell off the sheet. */
+      type Row = { location_id: string; forecast_date: string; shift_type: 'lunch' | 'dinner'; net_total: number };
+      const out: Row[] = [];
+      for (let p = 0; ; p++) {
+        const { data, error } = await supabase.from('sales_forecasts')
+          .select('location_id,forecast_date,shift_type,net_total').in('location_id', scopeIds)
+          .order('id').range(p * 1000, p * 1000 + 999);
+        if (error) return out; // the table arrives with supabase/add_sales_forecasts.sql
+        out.push(...((data ?? []) as Row[]));
+        if ((data ?? []).length < 1000) return out;
+      }
     },
   });
   /**
