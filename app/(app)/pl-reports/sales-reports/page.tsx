@@ -222,6 +222,22 @@ const SGA_PLACEHOLDER: Record<string, number> = {
   'utilities|2026-10': 5000,
 };
 
+/**
+ * Gross margin assumed for months still to come, in % of net sales.
+ *
+ * The driver of the cost forecast: COGS for such a month is its net sales ×
+ * (1 − margin), and gross profit what is left. Red, as a figure somebody set;
+ * the COGS and gross profit worked out from it are orange, like the sales
+ * forecast they rest on. Once a month's supplier bills are in, those win.
+ * No split into food, drinks and packaging yet (agreed 09.11.2026).
+ */
+const GM_FORECAST: Record<string, number> = {
+  '2027-01': 72.5, '2027-02': 72.5, '2027-03': 72.5,
+  '2027-04': 73.5, '2027-05': 73.5, '2027-06': 73.5,
+  '2027-07': 74.5, '2027-08': 74.5, '2027-09': 74.5,
+  '2027-10': 75.0, '2027-11': 75.0, '2027-12': 75.0,
+};
+
 /** What SG&A came to in one month, split by line. */
 type OpexBucket = { lines: Record<string, number>; total: number };
 
@@ -8147,6 +8163,33 @@ export default function SalesReportsPage() {
               return months.reduce<CogsBucket>((acc, [, v]) => add(acc, v), { food: 0, drinks: 0, packaging: 0, total: 0 });
             };
 
+            /* ── The cost forecast: a margin per month drives COGS ──────────── */
+            /** The margin set for a month, unless its bills are in — they win. */
+            const gmDriver = (colKey: string): number | null =>
+              colKey.startsWith('FY') || groupCogs[colKey] ? null : (GM_FORECAST[colKey] ?? null);
+            const cogsForecastMonth = (month: string): number | null => {
+              const g = gmDriver(month);
+              return g === null ? null : grandTotal(month).total * (1 - g / 100);
+            };
+            const forecastCogsMonths = (year: string) =>
+              Object.keys(GM_FORECAST).filter(m => m.startsWith(year + '-') && gmDriver(m) !== null);
+            /** COGS in total: the bills where they are in, the margin's figure where not. */
+            const cogsTotal = (colKey: string): number | null => {
+              if (!colKey.startsWith('FY')) {
+                const f = cogsForecastMonth(colKey);
+                if (f !== null) return f;
+                const c = cogsFor(colKey);
+                return c ? c.total : null;
+              }
+              const actual = cogsFor(colKey)?.total ?? null;
+              const fc = forecastCogsMonths(colKey.slice(2)).map(cogsForecastMonth).filter((v): v is number => v !== null);
+              if (actual === null && !fc.length) return null;
+              return (actual ?? 0) + fc.reduce((t, v) => t + v, 0);
+            };
+            /** Whether a column's COGS rests on the margin forecast, wholly or in part. */
+            const cogsIsForecast = (colKey: string) =>
+              colKey.startsWith('FY') ? forecastCogsMonths(colKey.slice(2)).length > 0 : gmDriver(colKey) !== null;
+
             /** A row whose cells are plain numbers, blank where there is nothing to say. */
             const valueLine = (
               rowKey: string, label: string, get: (colKey: string) => number | null,
@@ -8156,6 +8199,8 @@ export default function SalesReportsPage() {
                  bills or the till produced. */
               opts: { bold?: boolean; indent?: boolean; pct?: boolean; drill?: string;
                       assumed?: (colKey: string) => boolean;
+                      /** Orange: worked out from the forecast, like the forecast sales above. */
+                      forecast?: (colKey: string) => boolean;
                       drillAssumed?: boolean;
                       /** A zero here is a check that passed, and says so. */
                       zeroIsReconciled?: boolean;
@@ -8176,11 +8221,13 @@ export default function SalesReportsPage() {
                   const v = get(col.key);
                   const open = !!opts.drill && cogsDrill?.part === opts.drill && cogsDrill.colKey === col.key;
                   const red = !!opts.assumed?.(col.key);
+                  const fcst = !red && !!opts.forecast?.(col.key);
                   /* A figure entered by hand has no bills to open — unless the
                      line mixes one with real bills, as staff costs does, where
-                     the fold-out names the placeholder among them. */
-                  const canDrill = !!opts.drill && v !== null && v !== 0 && (!red || !!opts.drillAssumed);
-                  const tone = red ? 'text-red-600' : opts.reported ? 'text-blue-700' : 'text-gray-800';
+                     the fold-out names the placeholder among them. A forecast
+                     has none either. */
+                  const canDrill = !!opts.drill && v !== null && v !== 0 && !fcst && (!red || !!opts.drillAssumed);
+                  const tone = red ? 'text-red-600' : fcst ? 'text-orange-500 italic' : opts.reported ? 'text-blue-700' : 'text-gray-800';
                   const body = v === null
                     ? <span className="text-gray-300">—</span>
                     : opts.zeroIsReconciled && v === 0
@@ -8651,14 +8698,16 @@ export default function SalesReportsPage() {
 
             /** What the group kept: everything sold, less what the goods cost. */
             const grossProfit = (colKey: string) => {
-              const c = cogsFor(colKey);
-              return c ? grandTotal(colKey).total - c.total : null;
+              const c = cogsTotal(colKey);
+              return c === null ? null : grandTotal(colKey).total - c;
             };
             const grossMarginPct = (colKey: string) => {
-              const c = cogsFor(colKey);
+              const set = gmDriver(colKey);
+              if (set !== null) return set;
+              const c = cogsTotal(colKey);
               const sales = grandTotal(colKey).total;
-              if (!c || sales <= 0) return null;
-              return ((sales - c.total) / sales) * 100;
+              if (c === null || sales <= 0) return null;
+              return ((sales - c) / sales) * 100;
             };
 
             /**
@@ -8812,12 +8861,12 @@ export default function SalesReportsPage() {
                       {drillRows('drinks')}
                       {valueLine('cogs-packaging', 'Packaging',   cogsPart(c => c.packaging), { indent: true, drill: 'packaging' })}
                       {drillRows('packaging')}
-                      {valueLine('cogs-total',     'Total',       cogsPart(c => c.total),     { bold: true, drill: 'total' })}
+                      {valueLine('cogs-total',     'Total',       cogsTotal,                  { bold: true, drill: 'total', forecast: cogsIsForecast })}
                       {drillRows('total')}
                       {spacerRow('cogs-gap')}
                       {headingRow('gm-head', 'Gross margin')}
-                      {valueLine('gm-abs', 'Gross profit',   grossProfit,    { bold: true })}
-                      {valueLine('gm-pct', 'Gross margin %', grossMarginPct, { indent: true, pct: true })}
+                      {valueLine('gm-abs', 'Gross profit',   grossProfit,    { bold: true, forecast: cogsIsForecast })}
+                      {valueLine('gm-pct', 'Gross margin %', grossMarginPct, { indent: true, pct: true, assumed: c => gmDriver(c) !== null, forecast: cogsIsForecast })}
                       {spacerRow('gm-gap')}
 
                       {headingRow('staff-head', 'Staff costs')}
