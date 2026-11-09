@@ -18,6 +18,12 @@ import { WeekdaySalesCharts } from '@/components/weekday-sales-charts';
 
 const FROM = '2026-07-01';
 const berlinToday = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Berlin' });
+/* The forecast now runs a year ahead; the charts show it to the end of next
+   month, so the history keeps its width. */
+const forecastUntil = (today: string) => {
+  const [y, m] = today.split('-').map(Number);
+  return new Date(Date.UTC(y, m + 1, 0)).toISOString().slice(0, 10);
+};
 type Loc = { id: string; name: string };
 type Shift = 'day' | 'lunch' | 'dinner';
 const SHIFTS: [Shift, string][] = [['day', 'All day'], ['lunch', 'Lunch'], ['dinner', 'Dinner']];
@@ -40,7 +46,7 @@ export function SalesCharts({ locations }: { locations: Loc[] }) {
           for (let p = 0; ; p++) {
             const { data: page, error: e } = await supabase.from('sales_forecasts')
               .select('location_id,forecast_date,shift_type,net_total')
-              .in('location_id', ids).gte('forecast_date', today)
+              .in('location_id', ids).gte('forecast_date', today).lte('forecast_date', forecastUntil(today))
               .order('forecast_date').range(p * 1000, p * 1000 + 999);
             if (e) throw new Error(e.message);
             rows.push(...((page ?? []) as ForecastRow[]));
