@@ -209,9 +209,17 @@ const MONTHS_2027 = Array.from({ length: 12 }, (_, i) => `2027-${String(i + 1).p
 const STAFF_PLACEHOLDER: Record<string, number> = {
   '2026-09': 110000,
   '2026-10': 103000,
-  /* 2027: the year's expected average, every month (agreed 10.11.2026). */
+  /* 2027: the year's expected average, every month — then held between the
+     bounds in STAFF_BAND_2027 against that month's sales. */
   ...Object.fromEntries(MONTHS_2027.map(m => [m, 107500])),
 };
+
+/**
+ * Staff costs in a forecast month stay between these shares of its net sales
+ * (agreed 10.11.2026): a strong month needs more people, so never under 45 %;
+ * a weak one — August, December — is managed down, so never over 50 %.
+ */
+const STAFF_BAND_2027 = { floor: 0.45, cap: 0.50 };
 
 /**
  * SG&A figures standing in until the real ones arrive, keyed line|month.
@@ -8684,7 +8692,13 @@ export default function SalesReportsPage() {
               const filed = groupPayroll[month];
               if (filed !== undefined) return { value: filed, filed: true };
               const typed = STAFF_PLACEHOLDER[month];
-              return typed !== undefined ? { value: typed, filed: false } : null;
+              if (typed === undefined) return null;
+              if (!MONTHS_2027.includes(month)) return { value: typed, filed: false };
+              const sales = grandTotal(month).total;
+              const value = sales > 0
+                ? Math.min(Math.max(typed, sales * STAFF_BAND_2027.floor), sales * STAFF_BAND_2027.cap)
+                : typed;
+              return { value, filed: false };
             };
             /** Every month a column covers that has a payroll figure of either kind. */
             const payrollMonths = (colKey: string) => {
