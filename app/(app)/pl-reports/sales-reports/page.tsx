@@ -219,7 +219,9 @@ const STAFF_PLACEHOLDER: Record<string, number> = {
  * (agreed 10.11.2026): a strong month needs more people, so never under 45 %;
  * a weak one — August, December — is managed down, so never over 50 %.
  */
-const STAFF_BAND_2027 = { floor: 0.45, cap: 0.50 };
+/* …and never under 100.000 € in any month: there is only so far a team can be
+   cut back, which the 50 % cap would overrun in December. */
+const STAFF_BAND_2027 = { floor: 0.45, cap: 0.50, minEur: 100000 };
 
 /**
  * SG&A figures standing in until the real ones arrive, keyed line|month.
@@ -8696,7 +8698,8 @@ export default function SalesReportsPage() {
               if (!MONTHS_2027.includes(month)) return { value: typed, filed: false };
               const sales = grandTotal(month).total;
               const value = sales > 0
-                ? Math.min(Math.max(typed, sales * STAFF_BAND_2027.floor), sales * STAFF_BAND_2027.cap)
+                ? Math.max(STAFF_BAND_2027.minEur,
+                    Math.min(Math.max(typed, sales * STAFF_BAND_2027.floor), sales * STAFF_BAND_2027.cap))
                 : typed;
               return { value, filed: false };
             };
