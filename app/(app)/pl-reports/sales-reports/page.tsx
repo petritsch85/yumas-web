@@ -203,9 +203,14 @@ const STAFF_CATEGORY = 'Labour';
  * so the one assumption EBITDA rests on is visible at a glance rather than
  * hiding inside a total.
  */
+/** The twelve months of 2027, for the cost forecast below. */
+const MONTHS_2027 = Array.from({ length: 12 }, (_, i) => `2027-${String(i + 1).padStart(2, '0')}`);
+
 const STAFF_PLACEHOLDER: Record<string, number> = {
   '2026-09': 110000,
   '2026-10': 103000,
+  /* 2027: the year's expected average, every month (agreed 10.11.2026). */
+  ...Object.fromEntries(MONTHS_2027.map(m => [m, 107500])),
 };
 
 /**
@@ -217,10 +222,30 @@ const STAFF_PLACEHOLDER: Record<string, number> = {
  * Energy is the case in point: Süwag and schwarzwald energy are collected by
  * direct debit and send no invoice we file, so the bills show nothing.
  */
+/**
+ * The 2027 cost forecast per SG&A line, per month (agreed 10.11.2026).
+ * Rent is 2026's monthly net — Strabag, Wohnraum, Patricia, Laura Klein, less
+ * the central kitchen's sublet, 28.886,02 € — plus 3 %. Software drops as
+ * Gastromatic is replaced. Cleaning has no figure yet.
+ */
+const SGA_FORECAST_2027: Record<string, number> = {
+  rent:      Math.round(28886.02 * 1.03 * 100) / 100,
+  utilities: 5000,
+  software:  1500,
+  delivery:  750,
+  marketing: 1500,
+  repairs:   4000,
+  other:     2000,
+};
+
 const SGA_PLACEHOLDER: Record<string, number> = {
   'utilities|2026-09': 5000,
   'utilities|2026-10': 5000,
+  ...Object.fromEntries(MONTHS_2027.flatMap(m => Object.entries(SGA_FORECAST_2027).map(([k, v]) => [`${k}|${m}`, v]))),
 };
+
+/** Payment provider fees forecast as a share of net sales, in %, per month. */
+const PAYMENT_FEE_FORECAST_PCT: Record<string, number> = Object.fromEntries(MONTHS_2027.map(m => [m, 1]));
 
 /**
  * Gross margin assumed for months still to come, in % of net sales.
@@ -8607,14 +8632,29 @@ export default function SalesReportsPage() {
             };
 
             /** The providers' cut for a month, or a year's worth of months. */
+            /* A month still to come: its share of the forecast sales, until the
+               providers' statements are in. */
+            const feeForecast = (month: string): number | null => {
+              const pct = PAYMENT_FEE_FORECAST_PCT[month];
+              if (pct === undefined || groupPaymentFees[month] !== undefined) return null;
+              return grandTotal(month).total * pct / 100;
+            };
             const paymentFees = (colKey: string): number | null => {
               if (!colKey.startsWith('FY')) {
+                const f = feeForecast(colKey);
+                if (f !== null) return f;
                 return colKey >= COGS_FROM ? (groupPaymentFees[colKey] ?? null) : null;
               }
+              const year = colKey.slice(2);
               const hits = Object.entries(groupPaymentFees)
-                .filter(([k]) => k.startsWith(colKey.slice(2)) && k >= COGS_FROM);
-              return hits.length ? hits.reduce((t, [, v]) => t + v, 0) : null;
+                .filter(([k]) => k.startsWith(year) && k >= COGS_FROM).map(([, v]) => v);
+              const fc = Object.keys(PAYMENT_FEE_FORECAST_PCT).filter(m => m.startsWith(year)).map(feeForecast).filter((v): v is number => v !== null);
+              const all = [...hits, ...fc];
+              return all.length ? all.reduce((t, v) => t + v, 0) : null;
             };
+            const feesAreForecast = (colKey: string) => colKey.startsWith('FY')
+              ? Object.keys(PAYMENT_FEE_FORECAST_PCT).some(m => m.startsWith(colKey.slice(2)) && feeForecast(m) !== null)
+              : feeForecast(colKey) !== null;
 
             /* Blank, not zero, where no bill carried the category: see SGA_LINES.
                A placeholder stands in for the whole line, not beside it. */
@@ -8872,7 +8912,7 @@ export default function SalesReportsPage() {
                       {headingRow('staff-head', 'Staff costs')}
                       {valueLine('staff-abs', 'Staff costs',   staffCost, { bold: true, assumed: staffIsAssumed, drill: 'staff', drillAssumed: true })}
                       {drillRows('staff')}
-                      {valueLine('staff-pct', 'as % of sales', staffPct,  { indent: true, pct: true })}
+                      {valueLine('staff-pct', 'as % of sales', staffPct,  { indent: true, pct: true, forecast: cogsIsForecast })}
                       {spacerRow('staff-gap')}
 
                       {headingRow('sga-head', 'SG&A')}
@@ -8882,19 +8922,20 @@ export default function SalesReportsPage() {
                           /* A placeholder has no bills behind it to open. */
                           drill: 'sga-' + l.key,
                           assumed: colKey => sgaPlaceholder(l.key, colKey) !== null,
+                          forecast: l.key === 'payment_fees' ? feesAreForecast : undefined,
                         }),
                         ...drillRows('sga-' + l.key),
                       ])}
-                      {valueLine('sga-total', 'Total SG&A', sgaTotal, { bold: true, drill: 'sga-total' })}
+                      {valueLine('sga-total', 'Total SG&A', sgaTotal, { bold: true, drill: 'sga-total', forecast: cogsIsForecast })}
                       {drillRows('sga-total')}
                       {valueLine('sga-adj', 'Adjustments', sgaAdjustment, { indent: true, drill: 'sga-adj' })}
                       {drillRows('sga-adj')}
-                      {valueLine('sga-adjusted', 'Total adjusted SG&A', sgaAdjusted, { bold: true })}
+                      {valueLine('sga-adjusted', 'Total adjusted SG&A', sgaAdjusted, { bold: true, forecast: cogsIsForecast })}
                       {spacerRow('sga-gap')}
 
                       {headingRow('ebitda-head', 'EBITDA')}
-                      {valueLine('ebitda-abs', 'EBITDA',          ebitda,    { bold: true })}
-                      {valueLine('ebitda-pct', 'EBITDA margin %', ebitdaPct, { indent: true, pct: true })}
+                      {valueLine('ebitda-abs', 'EBITDA',          ebitda,    { bold: true, forecast: cogsIsForecast })}
+                      {valueLine('ebitda-pct', 'EBITDA margin %', ebitdaPct, { indent: true, pct: true, forecast: cogsIsForecast })}
                       {spacerRow('ebitda-gap')}
 
                       {headingRow('cf-head', 'Cash Flow Statement')}
