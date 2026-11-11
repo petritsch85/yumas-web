@@ -176,18 +176,59 @@ const viewBillPdf = async (bill: OutgoingBill) => {
     alert(e instanceof Error ? e.message : 'PDF could not be loaded');
   }
 };
+/**
+ * "162-26 Deutsche Boerse": the invoice number and the recipient, umlauts
+ * spelled out and the legal form dropped, as a file name should read.
+ */
+const billFileName = (bill: OutgoingBill) => {
+  const name = String(bill.customer_name ?? '')
+    .replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue')
+    .replace(/Ä/g, 'Ae').replace(/Ö/g, 'Oe').replace(/Ü/g, 'Ue').replace(/ß/g, 'ss')
+    .replace(/\b(gmbh\s*&\s*co\.?\s*kg|gmbh|mbh|ag|se|kg|kgaa|ug|e\.\s?v\.|e\.\s?k\.|ohg|gbr|ltd\.?|inc\.?|bv|b\.v\.)(?=\s|$|,)/gi, '')
+    .replace(/[\\/:*?"<>|,]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return `${[bill.invoice_number ?? '', name].filter(Boolean).join(' ')}.pdf`;
+};
+
+type SavePicker = (o: { suggestedName: string; types: { description: string; accept: Record<string, string[]> }[] }) =>
+  Promise<{ createWritable: () => Promise<{ write: (b: Blob) => Promise<void>; close: () => Promise<void> }> }>;
+
+/**
+ * Save asks where to put the file and does nothing else — viewing is the eye's
+ * job. The browser's own Save dialog is used where there is one (Chrome, Edge);
+ * elsewhere the file goes to the downloads folder under the same name.
+ */
 const downloadBillPdf = async (bill: OutgoingBill) => {
+  const suggestedName = billFileName(bill);
+  const picker = (window as unknown as { showSaveFilePicker?: SavePicker }).showSaveFilePicker;
   try {
+    if (picker) {
+      /* The dialog first, while the click still counts; the file after. */
+      let handle;
+      try {
+        handle = await picker({ suggestedName, types: [{ description: 'PDF', accept: { 'application/pdf': ['.pdf'] } }] });
+      } catch (e) {
+        if (e instanceof DOMException && e.name === 'AbortError') return; // cancelled
+        throw e;
+      }
+      const res = await fetch(billPdfUrl(bill), { cache: 'no-store' });
+      if (!res.ok) throw new Error(`PDF could not be loaded (HTTP ${res.status})`);
+      const out = await handle.createWritable();
+      await out.write(await res.blob());
+      await out.close();
+      return;
+    }
     const url = await fetchBillPdf(bill);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `Rechnung ${bill.invoice_number ?? bill.id}.pdf`;
+    a.download = suggestedName;
     document.body.appendChild(a);
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 60_000);
   } catch (e) {
-    alert(e instanceof Error ? e.message : 'PDF could not be loaded');
+    alert(e instanceof Error ? e.message : 'PDF could not be saved');
   }
 };
 
