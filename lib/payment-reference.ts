@@ -29,6 +29,12 @@ const NOISE = /\b(?:datum|uhr|ref)\b/gi;
  * So the label is stripped together with the number it introduces, rather
  * than the label alone.
  */
+/* A SEPA creditor id — "Gläubiger-ID: DE13ZZZ00000426826" — closes almost
+   every direct debit. Country, check digits and "ZZZ" in front of the digits
+   put it outside LABELLED_NON_INVOICE's shape, so its tail was read as an
+   invoice number and vetoed OpenTable's own invoice. */
+const CREDITOR_ID = /gl(?:ä|ae)ubiger\s*-?\s*id\.?\s*:?\s*[A-Z]{2}\d{2}[A-Z0-9]{3}[A-Z0-9]+/gi;
+
 const LABELLED_NON_INVOICE =
   /\b(?:kd|knd|kunden?|kundennummer|auftrag|auftrags?best(?:ä|ae)tigung|order|vertrag|mandat|gl(?:ä|ae)ubiger|iban|bic|ust|steuer)\.?(?:\s*-?\s*(?:nr|nummer|id)\.?)?\s*[:#-]?\s*[A-Za-z]{0,3}[-/]?\d{4,12}/gi;
 
@@ -47,6 +53,7 @@ export function referenceTokens(text: string | null | undefined): string[] {
     .replace(/\b\d{1,2}[.:]\d{2}\s*uhr\b/gi, ' ')
     // Labelled non-invoice numbers go before the bare-word noise, so the
     // label is still there to identify them.
+    .replace(CREDITOR_ID, ' ')
     .replace(LABELLED_NON_INVOICE, ' ')
     .replace(NOISE, ' ');
   const out = new Set<string>();
