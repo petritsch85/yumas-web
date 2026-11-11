@@ -150,6 +150,47 @@ const billPdfUrl = (bill: OutgoingBill) => {
   return v ? `${base}?v=${encodeURIComponent(v)}` : base;
 };
 
+/**
+ * View and save without leaving the table.
+ *
+ * The PDF sits on the storage domain, not the app's. A plain link to it obeys
+ * neither target="_blank" in the installed app nor `download` — browsers ignore
+ * that attribute across domains — so both ended up replacing the table. The
+ * file is fetched instead and handed over as a local copy: opened in a window
+ * of its own, or saved under the invoice number.
+ */
+const fetchBillPdf = async (bill: OutgoingBill) => {
+  const res = await fetch(billPdfUrl(bill), { cache: 'no-store' });
+  if (!res.ok) throw new Error(`PDF could not be loaded (HTTP ${res.status})`);
+  return URL.createObjectURL(await res.blob());
+};
+const viewBillPdf = async (bill: OutgoingBill) => {
+  /* Opened before the fetch, while the click still counts — a window opened
+     after waiting is taken for a pop-up and blocked. */
+  const win = window.open('', '_blank');
+  try {
+    const url = await fetchBillPdf(bill);
+    if (win) win.location.href = url; else window.open(url, '_blank');
+  } catch (e) {
+    win?.close();
+    alert(e instanceof Error ? e.message : 'PDF could not be loaded');
+  }
+};
+const downloadBillPdf = async (bill: OutgoingBill) => {
+  try {
+    const url = await fetchBillPdf(bill);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Rechnung ${bill.invoice_number ?? bill.id}.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  } catch (e) {
+    alert(e instanceof Error ? e.message : 'PDF could not be loaded');
+  }
+};
+
 const today = () => {
   const d = new Date();
   return `${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')}.${d.getFullYear()}`;
@@ -3612,16 +3653,14 @@ export default function OutgoingBillsPage() {
                         <div className="flex items-center gap-3">
                           {bill.file_path && (
                             <>
-                              <a href={billPdfUrl(bill)}
-                                target="_blank" rel="noopener noreferrer"
-                                className="text-gray-400 hover:text-blue-500 transition-colors" title="View PDF">
+                              <button type="button" onClick={() => viewBillPdf(bill)}
+                                className="text-gray-400 hover:text-blue-500 transition-colors" title="View PDF (new window)">
                                 <Eye size={16} />
-                              </a>
-                              <a href={billPdfUrl(bill)}
-                                download
+                              </button>
+                              <button type="button" onClick={() => downloadBillPdf(bill)}
                                 className="text-gray-400 hover:text-green-500 transition-colors" title="Download PDF">
                                 <Download size={16} />
-                              </a>
+                              </button>
                             </>
                           )}
                           <button
@@ -3710,16 +3749,14 @@ export default function OutgoingBillsPage() {
                             <div className="flex items-center gap-2">
                               {bill.file_path && (
                                 <>
-                                  <a href={billPdfUrl(bill)}
-                                    target="_blank" rel="noopener noreferrer"
-                                    className="text-gray-300 hover:text-blue-500 transition-colors" title="View PDF">
+                                  <button type="button" onClick={() => viewBillPdf(bill)}
+                                    className="text-gray-300 hover:text-blue-500 transition-colors" title="View PDF (new window)">
                                     <Eye size={14} />
-                                  </a>
-                                  <a href={billPdfUrl(bill)}
-                                    download
+                                  </button>
+                                  <button type="button" onClick={() => downloadBillPdf(bill)}
                                     className="text-gray-300 hover:text-green-500 transition-colors" title="Download PDF">
                                     <Download size={14} />
-                                  </a>
+                                  </button>
                                 </>
                               )}
                               <button
