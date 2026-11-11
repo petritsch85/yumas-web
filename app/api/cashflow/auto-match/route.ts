@@ -459,6 +459,33 @@ export async function POST(req: NextRequest) {
     push(tx, [bill], 'amount');
   }
 
+  /* 4c. One payment for two or three bills of one supplier — a shop that
+     invoices each parcel of a single basket (hygi.de: 121,86 + 202,69 paid as
+     324,55 €). Held to the same standard as 4b: the supplier beyond doubt,
+     every bill dated in the fortnight before the payment, the sum to the
+     cent, exactly one way of making it, and none of those bills fitting any
+     other payment on its own. */
+  const near = (tx: any, b: any) =>
+    /* linkObjection also refuses an invoice dated after the payment. */
+    !!b.invoice_date && days(b.invoice_date, tx.date) <= 14 &&
+    Number(b.gross_amount) > 0 && definitelySameSupplier(tx, b) && !linkObjection(tx, b);
+  const stillOpen = txs.filter(tx => !usedTxIds.has(tx.id) && tx.direction === 'out');
+  for (const tx of stillOpen) {
+    const pool = availableBills.filter(b => !usedBillIds.has(b.id) && near(tx, b)).slice(0, 12);
+    if (pool.length < 2) continue;
+    const target = Math.abs(tx.amount_cents);
+    const ways: any[][] = [];
+    for (let i = 0; i < pool.length; i++) for (let j = i + 1; j < pool.length; j++) {
+      if (cents(pool[i].gross_amount) + cents(pool[j].gross_amount) === target) ways.push([pool[i], pool[j]]);
+      for (let k = j + 1; k < pool.length; k++)
+        if (cents(pool[i].gross_amount) + cents(pool[j].gross_amount) + cents(pool[k].gross_amount) === target) ways.push([pool[i], pool[j], pool[k]]);
+    }
+    if (ways.length !== 1) continue;
+    const set = ways[0];
+    if (set.some(b => stillOpen.some(other => other.id !== tx.id && !usedTxIds.has(other.id) && fits(other, b)))) continue;
+    push(tx, set, 'amount');
+  }
+
   /* ── Wolt payouts are evidenced by their settlement period, not a bill ──
      Wolt sends no invoice we file under incoming bills; the netting report in
      Sales Reports is the document, and its Nettoauszahlung is exactly what
@@ -937,7 +964,9 @@ export async function POST(req: NextRequest) {
     // One transfer for several bills is recorded as links, the way the Cash Flow page does it
     const { error } = m.bills.length > 1
       ? await admin.from('transaction_bill_links').upsert(
-          m.bills.map(b => ({ transaction_id: m.txId, bill_id: b.id, note: 'Auto-matched by invoice numbers in the transfer' })),
+          m.bills.map(b => ({ transaction_id: m.txId, bill_id: b.id, note: m.via === 'invoice'
+            ? 'Auto-matched by invoice numbers in the transfer'
+            : `Auto-matched: ${m.bills.length} bills of one supplier add up to the payment` })),
           { onConflict: 'transaction_id,bill_id', ignoreDuplicates: true })
       : await admin.from('cashflow_transactions').update({ bill_id: m.billId }).eq('id', m.txId).is('bill_id', null);
     if (error) errors.push(error.message);

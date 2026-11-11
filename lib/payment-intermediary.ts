@@ -44,8 +44,22 @@ export const foldName = (s: string | null | undefined): string =>
 const INTERMEDIARY = /\bpaypal\b/i;
 
 /* "Ihr Einkauf bei X" — X runs to the end, since a merchant name may hold
-   commas of its own ("BAUHAUS E-Business … mbH & Co. KG"). */
-const PURCHASE_AT = /ihr\s+einkauf\s+bei\s+(.+)$/i;
+   commas of its own ("BAUHAUS E-Business … mbH & Co. KG"). The bank breaks
+   its lines wherever it likes, so the phrase arrives as "Ihr E inkauf bei",
+   "Ihr Einkau f bei" or "Ihr Einkauf b ei" as often as whole: a space is
+   allowed between any two of its letters. */
+const PURCHASE_AT = /ihr\s+e\s*i\s*n\s*k\s*a\s*u\s*f\s+b\s*e\s*i\s+(.+)$/i;
+
+/* PayPal closes every narrative the same way: its transaction id again, the
+   mandate reference of the account's direct debit, and PayPal's creditor id —
+     … ARNOWA GmbH 1053589255592 5JK222556DYM8 Gläubiger-ID: LU96ZZZ0000000000000000058
+   None of it is the merchant's, and the mandate and creditor ids, read as
+   invoice numbers, vetoed every PayPal match in October. Everything from the
+   repeated id on goes; where the id is not repeated, the mandate and creditor
+   id still do. */
+const PAYPAL_TRAILER = /\s+\d{10,}\s+[A-Z0-9]{8,20}\s+Gl[äa]ubiger-?\s*ID:?\s*\S+.*$/i;
+const CREDITOR_ID = /\s*(?:[A-Z0-9]{8,20}\s+)?Gl[äa]ubiger-?\s*ID:?\s*\S+.*$/i;
+const withoutTrailer = (s: string) => s.replace(PAYPAL_TRAILER, '').replace(CREDITOR_ID, '').trim();
 
 /**
  * The merchant behind an intermediary's debit, or null when there is none.
@@ -60,7 +74,7 @@ export function merchantBehind(tx: {
   if (!INTERMEDIARY.test(tx.counterparty ?? '')) return null;
   const hit = PURCHASE_AT.exec(String(tx.description ?? '').trim());
   if (!hit) return null;
-  const name = hit[1].trim();
+  const name = withoutTrailer(hit[1]);
   /* PayPal masks some merchants as "..........." — a name made only of
      punctuation identifies nobody and would match on nothing anyway. */
   if (!/[a-zà-ÿ0-9]/i.test(name)) return null;
@@ -102,5 +116,6 @@ export function narrativeWithoutOwnRef(tx: {
 }): string {
   const d = String(tx.description ?? '');
   if (!INTERMEDIARY.test(tx.counterparty ?? '')) return d;
-  return d.replace(OWN_REFERENCE, '');
+  /* The closing ids go too (PAYPAL_TRAILER): PayPal's, not the merchant's. */
+  return withoutTrailer(d.replace(OWN_REFERENCE, ''));
 }

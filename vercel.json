@@ -1,5 +1,6 @@
 {
   "crons": [
-    { "path": "/api/webhooks/freeze-forecast", "schedule": "5 23 * * *" }
+    { "path": "/api/webhooks/freeze-forecast", "schedule": "5 23 * * *" },
+    { "path": "/api/webhooks/auto-match-bills", "schedule": "30 4 * * *" }
   ]
 }
