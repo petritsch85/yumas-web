@@ -1561,6 +1561,9 @@ export default function OutgoingBillsPage() {
           adHocLines: editAmounts.adHocLines
             .filter(l => l.description.trim() || parseFloat(l.amountNetto))
             .map(l => ({ description: l.description.trim(), amountNetto: round2(parseFloat(l.amountNetto) || 0), vat: l.vat })),
+          /* Written every time, removed when zero: left out, the stored layout's
+             old tip came back onto the rebuilt PDF while the table showed none. */
+          trinkgeld: d.tips > 0 ? round2(d.tips) : undefined,
         } : editAmounts.mode === 'catering' ? {
           cateringNetto:  round2(parseFloat(editAmounts.cateringNetto) || 0),
           cateringBrutto: round2((parseFloat(editAmounts.cateringNetto) || 0) * 1.07),
