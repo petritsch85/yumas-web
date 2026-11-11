@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase-admin';
 import { matchByReference, normaliseRef } from '@/lib/payment-reference';
 import type { RefBill, TakenBill } from '@/lib/payment-reference';
-import { linkObjection } from '@/lib/match-rules';
+import { linkObjection, standsAcrossBreak } from '@/lib/match-rules';
 import { payableAmounts } from '@/lib/skonto';
 import { markBillsPaid, unmarkBillsIfUnlinked } from '@/lib/bill-payment-status';
 import { partyPaid, foldName } from '@/lib/payment-intermediary';
@@ -122,9 +122,21 @@ function quotes(text: string, invoiceNumber: string | null): boolean {
   if (!invoiceNumber) return false;
   const whole = alnum(invoiceNumber);
   const core = (invoiceNumber.match(/\d+/g) ?? []).sort((a, b) => b.length - a.length)[0];
-  if (!core || core.length < 5 || whole.length < 5) return false;
+  if (!core || whole.length < 4) return false;
+  /* A short number with a prefix or a second segment — "Y-006", "2026-007",
+     "26-1743" — is too short to stand on its digits alone, but written out in
+     full, as its own word, it is the supplier's number and nothing else. */
+  const parts = String(invoiceNumber).match(/[a-z]+|\d+/gi) ?? [];
+  if (parts.length >= 2 && /\d/.test(invoiceNumber)) {
+    const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const written = new RegExp(`(?<![a-z0-9])${parts.map(esc).join('[\\s./-]*')}(?![a-z0-9])`, 'i');
+    if (written.test(text)) return true;
+  }
+  if (core.length < 5 || whole.length < 5) return false;
   if (!alnum(text).includes(whole)) return false;
-  return new RegExp(`(?<!\\d)${core}(?!\\d)`).test(text);
+  /* The bank breaks its lines mid-number — "RG-Nr. 151180888 779" — so the
+     digits are also looked for with those breaks closed. */
+  return standsAcrossBreak(text, core);
 }
 
 /* The old REFERENCE regex lived here. It required a keyword before the number

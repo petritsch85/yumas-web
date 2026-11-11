@@ -53,6 +53,21 @@ export function postdatesPayment(invoiceDate: string | null, txDate: string): bo
  *
  * Returns the number the bank named, or null when there is no contradiction.
  */
+/**
+ * Whether these digits stand on their own in the text, allowing for one line
+ * break inside them. Breaks are closed one at a time: closing them all at once
+ * runs the invoice number into the customer number printed after it.
+ */
+export function standsAcrossBreak(text: string, digits: string): boolean {
+  const alone = new RegExp(`(?<!\\d)${digits}(?!\\d)`);
+  if (alone.test(text)) return true;
+  for (const m of text.matchAll(/\d\s+(?=\d)/g)) {
+    const at = (m.index ?? 0) + 1;
+    if (alone.test(text.slice(0, at) + text.slice(at).replace(/^\s+/, ''))) return true;
+  }
+  return false;
+}
+
 export function contradictingNumber(text: string, invoiceNumber: string | null): string | null {
   const mine = normaliseRef(invoiceNumber);
   if (mine.length < 4) return null;
@@ -62,6 +77,11 @@ export function contradictingNumber(text: string, invoiceNumber: string | null):
      tail is what its references have to be judged against. */
   const tail = tailSegment(invoiceNumber);
   const myForms = [digitsOf(mine), ...(tail ? [digitsOf(tail)] : [])];
+
+  /* The bank breaks lines mid-number ("RG-Nr. 151180888 779"). Where the
+     bill's own number reads straight once those breaks are closed, the bank
+     has named this bill, and no other number in the line contradicts it. */
+  if (myForms.some(f => f.length >= 6 && standsAcrossBreak(text, f))) return null;
 
   const tokens = referenceTokens(text).map(raw => ({ raw, digits: digitsOf(normaliseRef(raw)) }));
 
