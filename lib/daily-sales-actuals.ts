@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { DEPOSIT_COLUMNS, supersededDeposits, type DepositRow } from '@/lib/deposit-invoices';
 
 /**
  * Reported net sales per restaurant and day — the daily sheet's "Total net
@@ -62,10 +63,13 @@ export async function dailySalesActuals(
 
   /* Event invoices, filed under the restaurant's name. */
   const idByName = new Map(locations.map(l => [l.name.toLowerCase(), l.id]));
-  const { data: bills } = await db.from('outgoing_bills').select('issuing_location,event_date,shift_type,net_total,invoice_number')
+  const { data: bills } = await db.from('outgoing_bills').select(`issuing_location,shift_type,${DEPOSIT_COLUMNS}`)
     .in('issuing_location', locations.map(l => l.name)).eq('paid_in_store', false).gte('event_date', from).lte('event_date', to);
-  for (const b of bills ?? []) {
+  /* A deposit a final invoice already includes is not sales a second time. */
+  const counted = supersededDeposits((bills ?? []) as unknown as DepositRow[]);
+  for (const b of (bills ?? []) as unknown as (DepositRow & { issuing_location: string; shift_type: string; event_date: string })[]) {
     if (/^BB/i.test(String(b.invoice_number ?? ''))) continue;
+    if (counted.has(b.id)) continue;
     add(idByName.get(String(b.issuing_location).toLowerCase()), b.event_date, Number(b.net_total ?? 0), b.shift_type);
   }
   return out;

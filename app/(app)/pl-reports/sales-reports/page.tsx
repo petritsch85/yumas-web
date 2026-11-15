@@ -3,6 +3,7 @@
 import { useState, useMemo, useCallback, useRef, useEffect, Fragment } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase-browser';
+import { DEPOSIT_COLUMNS, supersededDeposits, type DepositRow } from '@/lib/deposit-invoices';
 import { useActiveLocations, restaurantsOnly } from '@/lib/use-locations';
 import { parseOpenTableCsv, summariseOpenTable, OpenTableParseError } from '@/lib/opentable-csv';
 import { parseShiftCSV, parseNum, parseDate, SECTION_NAMES } from '@/lib/orderbird-shift-csv';
@@ -1719,7 +1720,12 @@ export default function SalesReportsPage() {
   });
   const { data: gmBills = [] } = useQuery({
     queryKey: ['group-monthly', 'bills'], enabled: groupMonthlyOn,
-    queryFn: () => fetchAllRows('outgoing_bills', 'issuing_location,event_date,shift_type,net_total', 'event_date'),
+    queryFn: async () => {
+      const rows = await fetchAllRows('outgoing_bills', `issuing_location,shift_type,${DEPOSIT_COLUMNS}`, 'event_date');
+      /* A deposit a final invoice already includes is not sales a second time. */
+      const counted = supersededDeposits(rows as unknown as DepositRow[]);
+      return (rows as unknown as DepositRow[]).filter(r => !counted.has(r.id)) as unknown as typeof rows;
+    },
   });
 
   /**
@@ -2180,7 +2186,7 @@ export default function SalesReportsPage() {
       const qEnd   = `${year}-${String(lastM).padStart(2,'0')}-${String(daysInMonth(year, lastM)).padStart(2,'0')}`;
       let q = supabase
         .from('outgoing_bills')
-        .select('id,event_date,shift_type,net_total,issuing_location')
+        .select(`shift_type,issuing_location,${DEPOSIT_COLUMNS}`)
         // Settled at the till, so the money is already in a Z-report. Counting
         // it here as well would double the evening.
         .eq('paid_in_store', false)
@@ -2192,7 +2198,10 @@ export default function SalesReportsPage() {
         .lte('event_date', qEnd);
       if (!isGroup) q = q.eq('issuing_location', location!.name);
       const { data } = await q;
-      return (data ?? []) as { id: string; event_date: string | null; shift_type: 'lunch' | 'dinner' | null; net_total: number }[];
+      /* A deposit a final invoice already includes is not sales a second time. */
+      const counted = supersededDeposits((data ?? []) as unknown as DepositRow[]);
+      return ((data ?? []) as unknown as (DepositRow & { shift_type: 'lunch' | 'dinner' | null })[])
+        .filter(r => !counted.has(r.id)) as unknown as { id: string; event_date: string | null; shift_type: 'lunch' | 'dinner' | null; net_total: number }[];
     },
   });
 
