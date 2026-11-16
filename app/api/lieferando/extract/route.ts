@@ -7,6 +7,7 @@ import {
   parseLieferandoStatement, buildLieferandoBreakdown, LieferandoParseError,
 } from '@/lib/lieferando-statement';
 import type { LieferandoStatement, LieferandoSetResult } from '@/lib/lieferando-statement';
+import { buildShiftClosedChecker, type ClosedWeekdayRow, type ClosureRow } from '@/lib/opening-hours';
 
 // pdf text extraction needs the Node runtime, not the edge one.
 export const runtime = 'nodejs';
@@ -50,9 +51,19 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'No PDFs found — drop the Lieferando statement PDFs.' }, { status: 400 });
   }
 
-  const { data: locationRows } = await getSupabaseAdmin()
+  const admin = getSupabaseAdmin();
+  const { data: locationRows } = await admin
     .from('locations').select('id, name').eq('is_active', true);
   const locations = (locationRows ?? []) as { id: string; name: string }[];
+
+  /* Closed shifts, as the Wolt import has them: an order timed into a shift
+     the restaurant did not run — 12:30 on a Saturday, when only dinner opens —
+     was cooked by the shift that was open, and is booked there. */
+  const [{ data: settings }, { data: closures }] = await Promise.all([
+    admin.from('forecast_settings').select('location_id, shift_type, closed_weekdays'),
+    admin.from('closure_days').select('location_id, closure_date, shift_type, kind'),
+  ]);
+  const isClosed = buildShiftClosedChecker((settings ?? []) as ClosedWeekdayRow[], (closures ?? []) as ClosureRow[]);
 
   const sets: LieferandoSetResult[] = [];
   for (const pdf of pdfs) {
@@ -84,6 +95,19 @@ export async function POST(req: Request) {
       });
       continue;
     }
+
+    /* The opening pattern is today's; a shift the till shows as run that day
+       stays as it is — Eschborn opened Friday lunches in 2025. */
+    const { data: zRows } = await admin.from('shift_reports').select('report_date,shift_type')
+      .eq('location_id', location.id).gte('report_date', data.periodStart).lte('report_date', data.periodEnd);
+    const ran = new Set((zRows ?? []).map(z => `${z.report_date}|${z.shift_type}`));
+    let moved = 0;
+    for (const o of data.orders) {
+      const other = o.shift === 'lunch' ? 'dinner' : 'lunch';
+      if (ran.has(`${o.saleDate}|${o.shift}`)) continue;
+      if (isClosed(location.id, o.saleDate, o.shift) && !isClosed(location.id, o.saleDate, other)) { o.shift = other; moved++; }
+    }
+    if (moved) data.warnings.push(`${moved} order${moved === 1 ? '' : 's'} timed into a closed shift booked to the shift that was open.`);
 
     sets.push({
       source: pdf.name,
