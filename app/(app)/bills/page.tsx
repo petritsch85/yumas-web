@@ -638,7 +638,9 @@ function BillLocationPicker({ bill, options, onSave }: {
             ? 'bg-indigo-50 border-indigo-200 text-indigo-700 hover:bg-indigo-100'
             : 'bg-white border-dashed border-gray-300 text-gray-400 hover:border-gray-500 hover:text-gray-600'
         }`}>
-        <MapPin size={9} />{bill.location_label || 'Standort'}
+        {/* Unset, the pin alone: the word took a column's worth of width on
+            every row and pushed the action icons off the table. */}
+        <MapPin size={bill.location_label ? 9 : 11} />{bill.location_label || null}
       </button>
 
       {open && (
@@ -1572,7 +1574,9 @@ export default function BillsPage() {
     return (
               <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
                 {pager('top')}
-                <div>
+                {/* Scrolls rather than clips: on a narrow window the action
+                    icons at the right end were cut off and could not be reached. */}
+                <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="bg-gray-50 border-b border-gray-200">
@@ -1695,7 +1699,7 @@ export default function BillsPage() {
                               onSave={label => patchBillLocation(bill.id, label)}
                             />
                           </td>
-                          <td className="px-1.5 py-1.5 max-w-[110px]">
+                          <td className="px-1.5 py-1.5 max-w-[96px]">
                             {bill.category && (
                               <span className="inline-block px-1.5 py-0.5 bg-gray-100 text-gray-600 text-xs rounded-full whitespace-nowrap truncate max-w-full">
                                 {bill.category}
