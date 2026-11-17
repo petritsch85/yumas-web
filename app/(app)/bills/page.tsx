@@ -2388,7 +2388,7 @@ export default function BillsPage() {
                       <FileX size={13} className="text-gray-400" />
                       Not imported — not a bill
                       <span className="bg-gray-100 text-gray-600 font-bold px-1.5 py-0.5 rounded-full">{skippedDocs.length}</span>
-                      <span className="font-normal text-gray-400 truncate">Lieferscheine, order confirmations … check in case one is a bill after all</span>
+                      <span className="font-normal text-gray-400 truncate">Lieferscheine, order confirmations … check in case one is a bill after all · files are deleted after 30 days</span>
                       {skippedOpen ? <ChevronUp size={13} className="ml-auto flex-shrink-0" /> : <ChevronDown size={13} className="ml-auto flex-shrink-0" />}
                     </button>
                     {skippedOpen && (
