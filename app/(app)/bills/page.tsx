@@ -191,6 +191,11 @@ const fmt = (n: number) =>
 const fmtDate = (d: string | null) =>
   d ? new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
 
+/** Status as the bill tables show it — short, so the column stays narrow. */
+const STATUS_SHORT: Record<string, string> = {
+  pending: 'Pending', approved: 'SEPA', to_be_paid: 'To pay', paid: 'Paid',
+};
+
 /** "17-Nov-26": the short form the bill tables use, to leave room for the action icons. */
 const fmtDay = (d: string | null) => {
   if (!d) return '—';
@@ -1731,10 +1736,14 @@ export default function BillsPage() {
                             })()}
                           </td>
                           <td className="px-1.5 py-1.5">
+                            {/* Compact: short labels and no arrow. A native select is as
+                                wide as its longest option, and "Upcoming SEPA ⌄" took
+                                the room the action icons needed. */}
                             <select value={bill.status} onChange={(e) => updateStatus(bill.id, e.target.value)}
-                              className={`text-xs font-semibold pl-2 pr-1 py-0.5 rounded-full border cursor-pointer focus:outline-none ${STATUS_STYLES[bill.status]}`}>
+                              title={`${STATUS_LABELS[bill.status] ?? bill.status} — click to change`}
+                              className={`appearance-none text-[11px] font-semibold px-2 py-0.5 rounded-full border cursor-pointer text-center focus:outline-none ${STATUS_STYLES[bill.status]}`}>
                               {Object.entries(STATUS_LABELS).map(([value, label]) => (
-                                <option key={value} value={value}>{label}</option>
+                                <option key={value} value={value}>{STATUS_SHORT[value] ?? label}</option>
                               ))}
                             </select>
                           </td>
