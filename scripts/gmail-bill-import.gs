@@ -260,7 +260,7 @@ function backfill() {
  *
  * Edit the line below, then choose "resend" in the function menu → Run.
  */
-const RESEND_QUERY = 'fleetcor has:attachment after:2026/11/02 before:2026/11/04';
+const RESEND_QUERY = 'from:abraham.b.musica@gmail.com has:attachment after:2026/10/01 before:2026/11/18';
 
 function resend() {
   if (RELAY_URL.indexOf('http') !== 0) throw new Error('Paste the webhook address into RELAY_URL first.');
