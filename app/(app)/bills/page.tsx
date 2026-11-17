@@ -191,6 +191,13 @@ const fmt = (n: number) =>
 const fmtDate = (d: string | null) =>
   d ? new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
 
+/** "17-Nov-26": the short form the bill tables use, to leave room for the action icons. */
+const fmtDay = (d: string | null) => {
+  if (!d) return '—';
+  const t = new Date(d + 'T00:00:00');
+  return `${String(t.getDate()).padStart(2, '0')}-${t.toLocaleDateString('en-GB', { month: 'short' })}-${String(t.getFullYear()).slice(2)}`;
+};
+
 /** Page buttons to show: always first/last and the neighbours of the current page. */
 function pageNumbers(current: number, total: number): (number | '…')[] {
   if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
@@ -495,8 +502,8 @@ function BillPeriodPicker({ bill, onSave }: {
             ? bill.period_start.slice(0, 4)
             : `${shortMonth(bill.period_start)} – ${bill.period_end ? shortMonth(bill.period_end) : '?'}`)
       : bill.period_type === 'custom'
-        ? `${fmtDate(bill.period_start)} – ${fmtDate(bill.period_end)}`
-      : fmtDate(bill.period_start)
+        ? `${fmtDay(bill.period_start)} – ${fmtDay(bill.period_end)}`
+      : fmtDay(bill.period_start)
     : '';
 
   /** A period someone chose, as against the invoice date a bill is born with. */
@@ -1635,7 +1642,7 @@ export default function BillsPage() {
                               )}
                             </div>
                           </td>
-                          <td className="px-1.5 py-1.5 text-gray-600 whitespace-nowrap text-xs">{fmtDate(bill.invoice_date)}</td>
+                          <td className="px-1.5 py-1.5 text-gray-600 whitespace-nowrap text-xs">{fmtDay(bill.invoice_date)}</td>
                           <td className="px-1.5 py-1.5 whitespace-nowrap text-xs">
                             {editingDueId === bill.id ? (
                               <input type="date" autoFocus defaultValue={bill.due_date ?? ''}
@@ -1669,12 +1676,12 @@ export default function BillsPage() {
                                   {/* The note sits under the date, so the column stays one date wide */}
                                   {d.kind === 'auto' ? (
                                     <span className="leading-tight text-left block">
-                                      {d.date && <span className="block">{fmtDate(d.date)}</span>}
+                                      {d.date && <span className="block">{fmtDay(d.date)}</span>}
                                       <span className={`block text-[10px] ${d.date ? 'font-normal text-gray-400' : ''}`}>Lastschrift</span>
                                     </span>
                                   ) : d.date ? (
                                     <span className="leading-tight text-left block">
-                                      <span className="block">{fmtDate(d.date)}</span>
+                                      <span className="block">{fmtDay(d.date)}</span>
                                       {d.kind === 'sofort' && <span className="block text-[10px] font-normal text-gray-400">sofort</span>}
                                       {d.kind !== 'sofort' && derived && (
                                         <span className={`block text-[10px] font-normal ${bill.due_date_source === 'default' ? 'text-orange-500' : 'text-gray-400'}`}>
