@@ -999,7 +999,8 @@ export default function BillsPage() {
       case 'invoice_date': av = a.invoice_date ?? ''; bv = b.invoice_date ?? ''; break;
       case 'period_start': av = a.period_start ?? a.invoice_date ?? ''; bv = b.period_start ?? b.invoice_date ?? ''; break;
       case 'location':     av = a.location_label ?? '';             bv = b.location_label ?? '';             break;
-      case 'category':     av = a.category ?? '';                   bv = b.category ?? '';                   break;
+      /* Numerically where both are numbers, so 2261885405 does not sort before 99. */
+      case 'invoice_number': av = a.invoice_number ?? ''; bv = b.invoice_number ?? ''; break;
       case 'net':          av = a.net_amount;                       bv = b.net_amount;                       break;
       case 'vat_pct':      av = a.net_amount > 0 ? a.vat_amount / a.net_amount : 0;
                            bv = b.net_amount > 0 ? b.vat_amount / b.net_amount : 0; break;
@@ -1011,7 +1012,7 @@ export default function BillsPage() {
       case 'status':       av = a.status ?? '';                     bv = b.status ?? '';                     break;
       default:             av = '';                                  bv = '';
     }
-    const cmp = typeof av === 'string' ? av.localeCompare(bv as string) : (av as number) - (bv as number);
+    const cmp = typeof av === 'string' ? av.localeCompare(bv as string, undefined, { numeric: true }) : (av as number) - (bv as number);
     return sortDir === 'asc' ? cmp : -cmp;
   }), [filtered, sortCol, sortDir, displayName, cfByBill]);
 
@@ -1586,7 +1587,7 @@ export default function BillsPage() {
                         { col: 'deadline',     label: 'Due Date',    align: 'left'  },
                         { col: 'period_start', label: 'Period',       align: 'left'  },
                         { col: 'location',     label: 'Location',    align: 'left'  },
-                        { col: 'category',     label: 'Category',    align: 'left'  },
+                        { col: 'invoice_number', label: 'Bill #',    align: 'left'  },
                         { col: 'net',          label: 'Net',         align: 'left' },
                         { col: 'vat_pct',      label: 'VAT %',       align: 'left' },
                         { col: 'vat_eur',      label: 'VAT €',       align: 'left' },
@@ -1699,12 +1700,10 @@ export default function BillsPage() {
                               onSave={label => patchBillLocation(bill.id, label)}
                             />
                           </td>
-                          <td className="px-1.5 py-1.5 max-w-[96px]">
-                            {bill.category && (
-                              <span className="inline-block px-1.5 py-0.5 bg-gray-100 text-gray-600 text-xs rounded-full whitespace-nowrap truncate max-w-full">
-                                {bill.category}
-                              </span>
-                            )}
+                          {/* The Rechnungsnummer. Long ones (METRO's segmented numbers)
+                              are cut short here and shown whole on hover. */}
+                          <td className="px-1.5 py-1.5 max-w-[120px] text-xs text-gray-700 font-mono" title={bill.invoice_number ?? undefined}>
+                            <span className="block truncate">{bill.invoice_number ?? <span className="text-gray-300">—</span>}</span>
                           </td>
                           <td className="px-1.5 py-1.5 tabular-nums text-xs text-gray-900 whitespace-nowrap">{fmt(bill.net_amount)}</td>
                           <td className="px-1.5 py-1.5 tabular-nums text-xs text-gray-500 whitespace-nowrap">{vatPct.toFixed(1)}%</td>
@@ -1739,9 +1738,6 @@ export default function BillsPage() {
                                   className="text-sky-500 hover:text-amber-600 transition-colors">
                                   <ArrowDownToLine size={14} />
                                 </button>
-                              )}
-                              {bill.invoice_number && (
-                                <span title={`Invoice #${bill.invoice_number}`} className="text-gray-300 cursor-default text-[10px] font-mono leading-none">#</span>
                               )}
                               {bill.file_path && (
                                 <a href={`${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/bills/${bill.file_path}`}
