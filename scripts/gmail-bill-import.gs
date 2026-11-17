@@ -86,8 +86,7 @@ function run_() {
       if (msg.getDate().getTime() < start || msg.isInTrash()) continue;
       if (msg.getFrom().toLowerCase().indexOf(me) !== -1) { seen[id] = Date.now(); continue; } // our own
 
-      const files = msg.getAttachments({ includeInlineImages: false })
-        .filter(a => WANTED.test(a.getName()) || a.getContentType() === 'application/pdf' || a.getContentType() === 'message/rfc822');
+      const files = billFiles_(msg);
       if (files.length === 0) { seen[id] = Date.now(); continue; }
 
       const payload = {
@@ -216,10 +215,7 @@ function backfill() {
            messages from outside the range. Check each one. */
         if (d < new Date(BACKFILL_FROM) || d >= new Date(BACKFILL_TO)) continue;
 
-        const files = msg.getAttachments({ includeInlineImages: false })
-          .filter(a => WANTED.test(a.getName())
-            || a.getContentType() === 'application/pdf'
-            || a.getContentType() === 'message/rfc822');
+        const files = billFiles_(msg);
         if (files.length === 0) { skipped++; continue; }
 
         const res = send_({
@@ -273,13 +269,12 @@ function resend() {
   for (const thread of threads) {
     for (const msg of thread.getMessages()) {
       const d = msg.getDate();
-      Logger.log('Seen: ' + d.toISOString().slice(0, 10) + ' ' + msg.getFrom() + ' — ' + msg.getSubject() + ' | ' + msg.getAttachments({ includeInlineImages: false }).map(a => a.getName() + ' (' + a.getContentType() + ')').join(', '));
+      Logger.log('Seen: ' + d.toISOString().slice(0, 10) + ' ' + msg.getFrom() + ' — ' + msg.getSubject() + ' | ' + billFiles_(msg).map(a => a.getName() + ' (' + a.getContentType() + ')').join(', '));
       /* Our own emails too: a bill forwarded from admin@ to admin@ is one the
          timer skips, and that is how the 06.09 FleetCor bill went missing. */
       if (msg.isInTrash()) continue;
       if (from && (d < from || d >= to)) continue;   // the thread can hold other months
-      const files = msg.getAttachments({ includeInlineImages: false })
-        .filter(a => WANTED.test(a.getName()) || a.getContentType() === 'application/pdf');
+      const files = billFiles_(msg);
       if (files.length === 0) continue;
       const res = send_({
         From: msg.getFrom(), Subject: msg.getSubject(), MessageID: msg.getId(), Date: d.toISOString(),
@@ -324,6 +319,33 @@ function authorize() {
   GmailApp.getUserLabels();
   PropertiesService.getScriptProperties().deleteProperty('tries');
   Logger.log('All permissions granted.');
+}
+
+/**
+ * The files in an email that could be a bill.
+ *
+ * Some mail programs put a PDF into the body inline instead of attaching it —
+ * Abraham Breton's Y-013 on 14.11.2026 came that way. Gmail shows it as an
+ * attachment, but getAttachments({ includeInlineImages: false }) leaves every
+ * inline part out, PDFs included, so the email looked empty and was passed
+ * over without a label or a trace. Inline parts now count too: a PDF always,
+ * an inline picture only when it is large enough to be a scanned bill rather
+ * than a signature logo.
+ */
+const INLINE_IMAGE_MIN_BYTES = 150 * 1024;
+function billFiles_(msg) {
+  const attached = msg.getAttachments({ includeInlineImages: false });
+  const key = a => a.getName() + '|' + a.getSize();
+  const plain = {};
+  attached.forEach(a => { plain[key(a)] = true; });
+  return msg.getAttachments({ includeInlineImages: true }).filter(a => {
+    const type = a.getContentType();
+    const wanted = WANTED.test(a.getName()) || type === 'application/pdf' || type === 'message/rfc822';
+    if (!wanted) return false;
+    if (plain[key(a)]) return true;                       // an ordinary attachment
+    if (type === 'application/pdf' || /\.pdf$/i.test(a.getName())) return true;  // a PDF placed inline
+    return a.getSize() >= INLINE_IMAGE_MIN_BYTES;         // a scan, not a logo
+  });
 }
 
 function label_(name) {
