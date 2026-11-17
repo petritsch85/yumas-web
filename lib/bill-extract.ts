@@ -119,6 +119,8 @@ function cleanResponse(text: string): string {
 /** Sole traders, by their name on the invoice (as nameKey gives it) → the name we file them under. */
 const TRADING_NAMES: Record<string, string> = {
   axelhuhn: 'Mezcaleria',
+  yeldaibethgarciagonzalez: 'Käserei Südamerika',
+  yeldaibethgarciagonzalezkaesereisuedamerika: 'Käserei Südamerika',
 };
 
 /** Case, accents and punctuation removed — two spellings of one name match here. */
