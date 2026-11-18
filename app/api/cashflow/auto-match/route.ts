@@ -247,7 +247,7 @@ export async function POST(req: NextRequest) {
     try {
       bills = await fetchAll((page, size) =>
         admin.from('bills')
-          .select(`${billColumns}, settlement_amount`)
+          .select(`${billColumns}, settlement_amount, discount_percent`)
           .order('invoice_date', { ascending: false })
           .range(page * size, (page + 1) * size - 1)
       );

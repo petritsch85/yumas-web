@@ -12,6 +12,7 @@ import {
 import { buildPain001, painFilename, validateOrder, isValidIban, normaliseIban } from '@/lib/sepa-credit-transfer';
 import { resolveDueDate, SOFORT_DAYS, isAutoCollected } from '@/lib/payment-terms';
 import { STATUS_LABELS } from '@/lib/bill-status';
+import { skontoOffer, skontoDeadline } from '@/lib/skonto';
 import { DOCUMENT_TYPE_LABELS } from '@/lib/document-types';
 import type { SepaTransfer } from '@/lib/sepa-credit-transfer';
 
@@ -126,6 +127,10 @@ type Bill = {
   /** The account printed on the invoice itself, where the extraction found one. */
   creditor_iban?: string | null;
   creditor_name?: string | null;
+  /** Skonto: the reduced amount as printed, its last day, the rate. See lib/skonto.ts. */
+  settlement_amount?: number | null;
+  settlement_date?:   string | null;
+  discount_percent?:  number | null;
 };
 
 /* By when a bill has to be paid. The date printed on the invoice where there
@@ -190,6 +195,72 @@ const fmt = (n: number) =>
 
 const fmtDate = (d: string | null) =>
   d ? new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
+
+const todayIso = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Berlin' });
+
+/** A bill's Skonto: what it saves and until when, or null. */
+const skontoOf = (b: Bill) => skontoOffer(b, AUTO_PAYMENT);
+
+/**
+ * The date that matters for paying: the last Skonto day while it is still
+ * ahead and ours to take, the due date otherwise.
+ */
+const payByOf = (b: Bill, due: string | null): string | null => {
+  const s = skontoOf(b);
+  return s && !s.auto && s.until && s.until >= todayIso() ? s.until : due;
+};
+
+/**
+ * Under the due date: green while the discount can still be taken, grey once
+ * its day has passed. A supplier that collects and deducts it itself gets a
+ * quiet note, since there is nothing to do.
+ */
+function SkontoChip({ bill }: { bill: Bill }) {
+  const s = skontoOf(bill);
+  if (!s) return null;
+  const pct = s.percent !== null ? `${String(s.percent).replace('.', ',')}% ` : '';
+  const saving = `−${s.saving.toFixed(2).replace('.', ',')} €`;
+  const tip = `Skonto ${pct}${saving}: ${s.amount.toFixed(2).replace('.', ',')} € statt ${Number(bill.gross_amount).toFixed(2).replace('.', ',')} €`
+    + (s.until ? ` bei Zahlung bis ${fmtDate(s.until)}` : '')
+    + (s.computed ? ' (aus dem Satz berechnet — die Rechnung nennt keinen Betrag)' : '');
+  if (s.auto) {
+    return <span title={tip} className="block text-[10px] text-gray-400 leading-tight">abzgl. {pct}Skonto</span>;
+  }
+  const open = !s.until || s.until >= todayIso();
+  return (
+    <span title={tip}
+      className={`mt-0.5 inline-block px-1.5 py-px rounded-full text-[10px] font-semibold leading-tight whitespace-nowrap ${
+        open ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-400 line-through'}`}>
+      Skonto {pct}{saving}{s.until ? ` bis ${fmtDay(s.until).slice(0, 6)}` : ''}
+    </span>
+  );
+}
+
+/**
+ * The Skonto columns for a bill read on upload — the same rules as the email
+ * import: a printed reduced amount only when it agrees with the gross, a rate
+ * on its own with its last day worked out from "innerhalb N Tagen", and an
+ * offer the reader saw but could not read written into the notes.
+ */
+function skontoColumns(d: Record<string, unknown>): Record<string, unknown> {
+  const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+  const gross = Number(d.gross_amount ?? 0);
+  let amount = num(d.settlement_amount);
+  if (amount !== null && !(amount > 0 && amount < gross + 0.01 && amount >= gross * 0.85)) amount = null;
+  const rate = num(d.discount_percent);
+  const rateOk = rate !== null && rate > 0 && rate < 15;
+  const until = (typeof d.settlement_date === 'string' ? d.settlement_date : null)
+    ?? skontoDeadline((d.invoice_date as string | null) ?? null, num(d.discount_days));
+  if (amount === null && !rateOk) {
+    return d.skonto_mentioned === true ? { notes: 'Skonto angeboten, aber nicht gelesen — bitte auf der Rechnung prüfen.' } : {};
+  }
+  return {
+    settlement_amount: amount,
+    settlement_date:   until,
+    discount_amount:   amount !== null ? Math.round((gross - amount) * 100) / 100 : null,
+    discount_percent:  rateOk ? rate : null,
+  };
+}
 
 /** Status as the bill tables show it — short, so the column stays narrow. */
 const STATUS_SHORT: Record<string, string> = {
@@ -316,6 +387,7 @@ async function saveBillToDB(item: QueueItem, userId: string | null): Promise<voi
       creditor_iban:  d.creditor_iban   ?? null,
       creditor_bic:   d.creditor_bic    ?? null,
       creditor_name:  d.creditor_name   ?? null,
+      ...skontoColumns(d as unknown as Record<string, unknown>),
       status:         'pending',
       file_path,
       uploaded_by:    userId,
@@ -752,7 +824,7 @@ export default function BillsPage() {
     queryFn: async () => {
       // PostgREST caps a single response at 1000 rows, so page through the full
       // table — otherwise older bills silently vanish and the totals under-report.
-      const BASE = 'id, created_at, supplier_name, invoice_number, invoice_date, due_date, due_date_source, payment_method, gross_amount, net_amount, vat_amount, category, location_label, period_type, period_start, period_end, status, file_path, creditor_iban, creditor_name';
+      const BASE = 'id, created_at, supplier_name, invoice_number, invoice_date, due_date, due_date_source, payment_method, gross_amount, net_amount, vat_amount, category, location_label, period_type, period_start, period_end, status, file_path, creditor_iban, creditor_name, settlement_amount, settlement_date, discount_percent';
       // is_new arrives with supabase/add_bill_inbox.sql; the page works without it until then
       let COLS = `${BASE}, is_new`;
       const PAGE = 1000;
@@ -1019,7 +1091,8 @@ export default function BillsPage() {
       case 'vat_eur':      av = a.vat_amount;                       bv = b.vat_amount;                       break;
       case 'gross':        av = a.gross_amount;                     bv = b.gross_amount;                     break;
       // Bills with no date to pay by sort last either way
-      case 'deadline':     av = deadlineOf(a).date ?? (sortDir === 'asc' ? '9999' : ''); bv = deadlineOf(b).date ?? (sortDir === 'asc' ? '9999' : ''); break;
+      /* By the date that matters for paying: a Skonto still open comes first. */
+      case 'deadline':     av = payByOf(a, deadlineOf(a).date) ?? (sortDir === 'asc' ? '9999' : ''); bv = payByOf(b, deadlineOf(b).date) ?? (sortDir === 'asc' ? '9999' : ''); break;
       case 'cf':           av = cfByBill.has(a.id) ? 1 : 0;          bv = cfByBill.has(b.id) ? 1 : 0;          break;
       case 'status':       av = a.status ?? '';                     bv = b.status ?? '';                     break;
       default:             av = '';                                  bv = '';
@@ -1180,20 +1253,36 @@ export default function BillsPage() {
     } finally { setPaySaving(false); }
   }, [matchedCpByBill, queryClient]);
 
-  const payTransfers = useMemo<(SepaTransfer & { billId: string })[]>(() =>
-    payableRows.filter(b => paySel.has(b.id)).map(b => ({
-      billId: b.id,
-      reference: (b.invoice_number ?? b.id).slice(0, 35),
-      creditorName: matchedCpByBill.get(b.id)?.account_holder
-        ?? matchedCpByBill.get(b.id)?.name
-        ?? b.creditor_name ?? b.supplier_name,
-      creditorIban: ibanFor(b),
-      creditorBic:  matchedCpByBill.get(b.id)?.bic ?? null,
-      amount: Math.round(b.gross_amount * 100) / 100,
-      remittance: `${b.invoice_number ? `RG ${b.invoice_number}` : 'Rechnung'}${b.invoice_date ? ` v. ${fmtDate(b.invoice_date)}` : ''} - Yumas GmbH`,
-    })), [payableRows, paySel, matchedCpByBill, ibanFor]);
+  /**
+   * The Skonto a run can take for a bill: only when the run is executed on or
+   * before the discount's last day. Without a known last day it is shown but
+   * not taken — paying short on a guess would leave the supplier chasing.
+   */
+  const skontoTaken = useCallback((b: Bill) => {
+    const s = skontoOf(b);
+    return s && !s.auto && s.until && payDate && payDate <= s.until ? s : null;
+  }, [payDate]);
+
+  const payTransfers = useMemo<(SepaTransfer & { billId: string; saving: number })[]>(() =>
+    payableRows.filter(b => paySel.has(b.id)).map(b => {
+      const s = skontoTaken(b);
+      const pct = s?.percent != null ? `${String(s.percent).replace('.', ',')}% ` : '';
+      return {
+        billId: b.id,
+        reference: (b.invoice_number ?? b.id).slice(0, 35),
+        creditorName: matchedCpByBill.get(b.id)?.account_holder
+          ?? matchedCpByBill.get(b.id)?.name
+          ?? b.creditor_name ?? b.supplier_name,
+        creditorIban: ibanFor(b),
+        creditorBic:  matchedCpByBill.get(b.id)?.bic ?? null,
+        amount: Math.round((s ? s.amount : b.gross_amount) * 100) / 100,
+        saving: s ? s.saving : 0,
+        remittance: `${b.invoice_number ? `RG ${b.invoice_number}` : 'Rechnung'}${b.invoice_date ? ` v. ${fmtDate(b.invoice_date)}` : ''}${s ? ` abzgl. ${pct}Skonto` : ''} - Yumas GmbH`.slice(0, 140),
+      };
+    }), [payableRows, paySel, matchedCpByBill, ibanFor, skontoTaken]);
 
   const payTotal    = payTransfers.reduce((t, x) => t + x.amount, 0);
+  const skontoSaved = payTransfers.reduce((t, x) => t + x.saving, 0);
   const payProblems = payTransfers.length > 0
     ? validateOrder({ debtorName: debtor.name, debtorIban: debtor.iban, executionDate: payDate, transfers: payTransfers })
     : [];
@@ -1698,6 +1787,7 @@ export default function BillsPage() {
                                 </button>
                               );
                             })()}
+                            <SkontoChip bill={bill} />
                           </td>
                           <td className="px-1.5 py-1.5 whitespace-nowrap">
                             <BillPeriodPicker
@@ -2553,6 +2643,9 @@ export default function BillsPage() {
                 <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Summe</p>
                 <p className="text-lg font-bold text-gray-900 tabular-nums">{fmt(payTotal)}</p>
                 <p className="text-[11px] text-gray-400">{payTransfers.length} of {payableRows.length} bills</p>
+                {skontoSaved > 0.004 && (
+                  <p className="text-[11px] font-semibold text-green-700">davon Skonto gespart: {fmt(skontoSaved)}</p>
+                )}
               </div>
             </div>
 
@@ -2675,7 +2768,18 @@ export default function BillsPage() {
                           )}
                         </td>
                         <td className="px-3 py-1.5 text-right tabular-nums font-semibold text-gray-900 whitespace-nowrap">
-                          {fmt(b.gross_amount)}
+                          {(() => {
+                            /* With Skonto: the reduced amount that will be sent, the
+                               invoice total struck through beside it. */
+                            const s = skontoTaken(b);
+                            if (!s) return <>{fmt(b.gross_amount)}<SkontoChip bill={b} /></>;
+                            return (
+                              <span className="leading-tight block">
+                                <span className="text-green-700">{fmt(s.amount)}</span>
+                                <span className="block text-[10px] font-normal text-gray-400 line-through">{fmt(b.gross_amount)}</span>
+                              </span>
+                            );
+                          })()}
                         </td>
                       </tr>
                     );

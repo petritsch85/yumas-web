@@ -81,9 +81,68 @@ export function parseSettlement(text: string, gross?: number | null): Settlement
  * discounted figure when the supplier takes Skonto. Used by matching, which
  * should accept either.
  */
-export function payableAmounts(bill: { gross_amount: number; settlement_amount?: number | null }): number[] {
+/**
+ * The Skonto a bill offers, as the payment lists show and use it.
+ *
+ * Two kinds reach the bills: a supplier who collects by direct debit and takes
+ * the discount itself (Leleithner — nothing to do but know), and one who allows
+ * it when we pay by a date (serviettengastro: "460,65 € bis 07.11.2026 mit
+ * Skonto von 2 %"). For the second the printed reduced amount is used; where
+ * the invoice gives only the rate, the amount is worked out from the gross and
+ * says so, since a supplier's base can exclude Pfand.
+ */
+export interface SkontoOffer {
+  percent: number | null;
+  /** What to pay with the discount. */
+  amount: number;
+  /** Gross less amount. */
+  saving: number;
+  /** The last day the discount holds, ISO, when known. */
+  until: string | null;
+  /** The supplier collects and deducts it itself; nothing for us to act on. */
+  auto: boolean;
+  /** Worked out from the rate, not printed. */
+  computed: boolean;
+}
+
+export function skontoOffer(bill: {
+  gross_amount: number;
+  settlement_amount?: number | null;
+  settlement_date?: string | null;
+  discount_percent?: number | null;
+  payment_method?: string | null;
+}, autoPayment: RegExp): SkontoOffer | null {
+  const gross = Number(bill.gross_amount);
+  const printed = typeof bill.settlement_amount === 'number' && bill.settlement_amount > 0
+    && bill.settlement_amount < gross - 0.005 ? bill.settlement_amount : null;
+  const pct = typeof bill.discount_percent === 'number' && bill.discount_percent > 0 && bill.discount_percent < 15
+    ? bill.discount_percent : null;
+  if (printed === null && pct === null) return null;
+  const amount = printed ?? Math.round(gross * (1 - pct! / 100) * 100) / 100;
+  return {
+    percent: pct, amount, saving: Math.round((gross - amount) * 100) / 100,
+    until: bill.settlement_date ?? null,
+    auto: autoPayment.test(bill.payment_method ?? ''),
+    computed: printed === null,
+  };
+}
+
+export function payableAmounts(bill: { gross_amount: number; settlement_amount?: number | null; discount_percent?: number | null }): number[] {
   const out = [Number(bill.gross_amount)];
   const s = bill.settlement_amount;
   if (typeof s === 'number' && s > 0 && Math.abs(s - Number(bill.gross_amount)) > 0.005) out.push(s);
+  /* A rate without a printed amount: the transfer paid with Skonto is the
+     gross less that rate, which is what the Sammelüberweisung sends. */
+  else if (typeof bill.discount_percent === 'number' && bill.discount_percent > 0 && bill.discount_percent < 15) {
+    out.push(Math.round(Number(bill.gross_amount) * (1 - bill.discount_percent / 100) * 100) / 100);
+  }
   return out;
+}
+
+/** "2% Skonto innerhalb von 10 Tagen": the last day, from the invoice date. */
+export function skontoDeadline(invoiceDate: string | null, days: number | null): string | null {
+  if (!invoiceDate || !days || days <= 0 || days > 60) return null;
+  const t = new Date(invoiceDate + 'T12:00:00Z');
+  t.setUTCDate(t.getUTCDate() + Math.round(days));
+  return t.toISOString().slice(0, 10);
 }

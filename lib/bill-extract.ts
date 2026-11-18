@@ -47,10 +47,12 @@ Return this exact JSON structure:
   "net_amount": number,
   "vat_amount": number,
   "gross_amount": number,
-  "settlement_amount": "number or null — what the supplier will actually collect, when the invoice prints it",
-  "settlement_date": "YYYY-MM-DD or null — the date the invoice says the debit falls",
+  "settlement_amount": "number or null — the reduced amount the invoice prints for paying with Skonto (collected by debit, or to transfer by a date)",
+  "settlement_date": "YYYY-MM-DD or null — the date the debit falls, or the last day the Skonto may be taken",
   "discount_amount": "number or null — the Skonto in euros, as printed",
   "discount_percent": "number or null — the Skonto rate, as printed",
+  "discount_days": "number or null — when the Skonto is given only as a number of days (\"2 % Skonto bei Zahlung innerhalb von 10 Tagen\" → 10)",
+  "skonto_mentioned": "boolean — true whenever the invoice offers any Skonto at all, even if its figures could not be read",
   "suggested_category": "one of: Food Cost | Drinks Cost | Packaging | Software & Technology | Delivery Platform Fees | Repairs & Maintenance | Cleaning Services | Utilities | Rent | Labour | Marketing | Other",
   "prices_include_vat": "boolean — true when the amounts on the lines are printed including VAT (till receipts, web shops, invoices whose lines add up to the gross)",
   "invoice_discount_amount": "number or null — a Rabatt taken off the whole invoice below the lines, as printed. Not Skonto",
@@ -87,6 +89,7 @@ Rules:
 - Suggest category based on supplier type and line item descriptions
 - If a discount is applied, reflect it in the net_amount (post-discount)
 - Skonto: many German suppliers print exactly what they will collect, e.g. "Der Rechnungsbetrag wird am 02.10.26 per Lastschrift abzüglich 2.00 % / 14.46 EUR Skonto = 756.24 EUR abgebucht". Copy those figures into settlement_amount (756.24), discount_amount (14.46), discount_percent (2.00) and settlement_date (2026-10-02). gross_amount stays the invoice total (770.70) — never reduce it by the Skonto. Leave all four null when the invoice offers no discount, and never calculate them yourself: the discount runs on the supplier's own base, which excludes Pfand and Leergut, so it is not a fixed percentage of the gross
+- Skonto, by transfer: an invoice may allow a discount for paying early, e.g. "460,65 € bis 07.11.2026 mit Skonto von 2 %" → settlement_amount 460.65, settlement_date 2026-11-07, discount_percent 2, discount_amount as printed. When only a rate and a number of days are given ("2 % Skonto innerhalb 10 Tagen, 30 Tage netto"), fill discount_percent and discount_days and leave settlement_amount and settlement_date null. Never put the Skonto into gross_amount or due_date: due_date stays the date the full amount is due
 - Line items: read each number from the column it sits under. Menge / G-Menge / Anzahl is the quantity, E-Preis / Einzelpreis the unit price; Kolli and Inhalt are packaging counts, not the quantity. Check that quantity × unit_price equals line_total for every line and re-read the row if it does not
 - Lines are copied as printed, including a discount printed on the line itself. A Rabatt on the whole invoice is not a line: put it in invoice_discount_amount
 - Only what was bought or charged is a line. Include freight (Porto, Versand, Fracht) as a line of its own. Leave out anything that is a way of paying: Leergut vouchers ("Leergutc. abgerufen"), advance payments, card payments. A Warengutschein that lowers the net amount is a line, at its net value

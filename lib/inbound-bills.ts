@@ -6,6 +6,7 @@ import { getSupabaseAdmin } from './supabase-admin';
 import { resolveDueDate, addDaysTo, DEFAULT_DAYS } from './payment-terms';
 import { isRemitter } from './remitters';
 import { BILL_TYPES } from './document-types';
+import { skontoDeadline } from './skonto';
 
 /* What a document is decides whether it becomes a bill. The inbox also
    receives Lieferscheine, order confirmations and the like; filing those
@@ -79,7 +80,18 @@ export async function fileBill(
   let dueDate = resolveDueDate({ invoiceDate, dueDate: printedDue, terms });
   let dueSource: string | null =
     printedDue && dueDate === printedDue ? 'printed' : dueDate ? 'stated-term' : null;
-  if (!dueDate && settlementAmount !== null && extracted.settlement_date) {
+  /* Skonto offered as a rate and a number of days, with no amount printed:
+     the rate is kept and its last day worked out from the invoice date. */
+  const rate = num(extracted.discount_percent);
+  const rateOnly = settlementAmount === null && rate !== null && rate > 0 && rate < 15;
+  const skontoUntil = (extracted.settlement_date as string | null)
+    ?? skontoDeadline(invoiceDate, num(extracted.discount_days));
+  /* An offer the reader saw but could not read is said, not lost. */
+  const skontoUnread = extracted.skonto_mentioned === true && settlementAmount === null && !rateOnly;
+
+  /* The debit date only stands in for a due date when the supplier collects;
+     a transfer Skonto's last day is not when the full amount is due. */
+  if (!dueDate && settlementAmount !== null && extracted.settlement_date && /lastschrift|abgebucht|einzug/i.test(terms ?? '')) {
     dueDate = extracted.settlement_date as string;
     dueSource = 'settlement';
   }
@@ -116,6 +128,7 @@ export async function fileBill(
     period_type:    'single_date',
     period_start:   invoiceDate,
     period_end:     invoiceDate,
+    notes:          skontoUnread ? 'Skonto angeboten, aber nicht gelesen — bitte auf der Rechnung prüfen.' : null,
   };
 
   /* The gross stays the invoice total; this is what the bank will show. The
@@ -125,9 +138,9 @@ export async function fileBill(
   const optionalCols: Record<string, unknown> = {
     due_date_source:   dueSource,
     settlement_amount: settlementAmount,
-    settlement_date:   settlementAmount !== null ? ((extracted.settlement_date as string | null) ?? null) : null,
+    settlement_date:   settlementAmount !== null || rateOnly ? skontoUntil : null,
     discount_amount:   discountAmount,
-    discount_percent:  settlementAmount !== null ? num(extracted.discount_percent) : null,
+    discount_percent:  settlementAmount !== null || rateOnly ? rate : null,
     is_new:            isNew,
   };
   let { data: bill, error: billErr } = await admin.from('bills')
