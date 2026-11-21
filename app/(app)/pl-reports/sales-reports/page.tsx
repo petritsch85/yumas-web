@@ -1603,7 +1603,8 @@ export default function SalesReportsPage() {
   });
   const { data: gmWebshop = [] } = useQuery({
     queryKey: ['group-monthly', 'webshop'], enabled: groupMonthlyOn,
-    queryFn: () => fetchAllRows('webshop_orders', 'location_id,sale_date,shift,net_cents', 'sale_date'),
+    /* Unpaid checkouts are not sales — the daily sheet and Forecast changes skip them too. */
+    queryFn: async () => (await fetchAllRows('webshop_orders', 'location_id,sale_date,shift,net_cents,counts', 'sale_date')).filter(r => r.counts === true),
   });
   const { data: gmWolt = [] } = useQuery({
     queryKey: ['group-monthly', 'wolt'], enabled: groupMonthlyOn,
