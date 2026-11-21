@@ -29,13 +29,13 @@ export interface Gap {
 /** Payments that never have an invoice, and what they are instead. */
 const NO_INVOICE_EXPECTED: [RegExp, string][] = [
   [/lohn|gehalt|abschlag|vorschuss|finale? zahlung gehalt/i, 'Lohn/Gehalt'],
-  [/aok|techniker krankenkasse|barmer|dak|ikk |bkk |hkk |knappschaft|meine krankenkasse|hek -/i, 'Krankenkasse'],
+  [/aok|techniker krankenkasse|barmer|dak|ikk |bkk |hkk |knappschaft|meine krankenkasse|hek -|knappsc ?haft|rentenversicherung|minijob-zentrale/i, 'Krankenkasse/Sozialversicherung'],
   [/^fa ffm|steuernr|lohnst|ums\.st/i, 'Finanzamt'],
   [/berufsgenossenschaft/i, 'Berufsgenossenschaft'],
   [/darl\.-leistung|zinsr[üu]ckzahlung|gesellschafterdarlehen/i, 'Darlehen/Zinsen'],
   /* Benjamin Peters lends the company money short-term and is repaid: financing, no invoice. */
   [/^benjamin peters\b/i, 'Gesellschafterdarlehen (kurzfristig)'],
-  [/abrechnung \d{2}\.\d{2}\.\d{4}|kontof[üu]hrung|entgelte vom|rechnung firmenkundenportal/i, 'Bankentgelte'],
+  [/abrechnung \d{2}\.\d{2}\.\d{4}|kontof[üu]hrung|entgelte vom|rechnung firmenkundenportal|^firmenkundenportal|avalprovision/i, 'Bankentgelte'],
   [/bundeskasse|stadtkasse|gemeinschaftskasse|landeswohlfahrt|rundfunk/i, 'Behörden/Gebühren'],
   /* The landlords bill once in the lease; the Ersatzbelege stand in for it. */
   [/^wohnraum|^strabag|^patricia wohninveste|^laura klein/i, 'Miete (Ersatzbeleg)'],
