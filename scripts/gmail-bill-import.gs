@@ -256,7 +256,7 @@ function backfill() {
  *
  * Edit the line below, then choose "resend" in the function menu → Run.
  */
-const RESEND_QUERY = 'from:abraham.b.musica@gmail.com has:attachment after:2026/10/01 before:2026/11/18';
+const RESEND_QUERY = 'subject:(Mike Bill) after:2026/11/17 before:2026/11/20';
 
 function resend() {
   if (RELAY_URL.indexOf('http') !== 0) throw new Error('Paste the webhook address into RELAY_URL first.');
@@ -332,7 +332,11 @@ function authorize() {
  * an inline picture only when it is large enough to be a scanned bill rather
  * than a signature logo.
  */
-const INLINE_IMAGE_MIN_BYTES = 150 * 1024;
+/* Mike Balakiryev's October bill (17.11.2026) was a photo pasted into the
+   email, well under the old 150 KB floor. Logos and signature pictures stay
+   below 40 KB; anything larger is sent, and the app's bill / not-a-bill check
+   sets aside a banner that slips through. */
+const INLINE_IMAGE_MIN_BYTES = 40 * 1024;
 function billFiles_(msg) {
   const attached = msg.getAttachments({ includeInlineImages: false });
   const key = a => a.getName() + '|' + a.getSize();
@@ -340,7 +344,8 @@ function billFiles_(msg) {
   attached.forEach(a => { plain[key(a)] = true; });
   return msg.getAttachments({ includeInlineImages: true }).filter(a => {
     const type = a.getContentType();
-    const wanted = WANTED.test(a.getName()) || type === 'application/pdf' || type === 'message/rfc822';
+    /* An inline picture is often named without an extension ("image", "ii_m3x…"), so its type counts as much as its name. */
+    const wanted = WANTED.test(a.getName()) || type === 'application/pdf' || type === 'message/rfc822' || /^image/(jpe?g|png)$/i.test(type);
     if (!wanted) return false;
     if (plain[key(a)]) return true;                       // an ordinary attachment
     if (type === 'application/pdf' || /\.pdf$/i.test(a.getName())) return true;  // a PDF placed inline
