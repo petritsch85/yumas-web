@@ -345,7 +345,7 @@ function billFiles_(msg) {
   return msg.getAttachments({ includeInlineImages: true }).filter(a => {
     const type = a.getContentType();
     /* An inline picture is often named without an extension ("image", "ii_m3x…"), so its type counts as much as its name. */
-    const wanted = WANTED.test(a.getName()) || type === 'application/pdf' || type === 'message/rfc822' || /^image/(jpe?g|png)$/i.test(type);
+    const wanted = WANTED.test(a.getName()) || type === 'application/pdf' || type === 'message/rfc822' || /^image\/(jpe?g|png)$/i.test(type);
     if (!wanted) return false;
     if (plain[key(a)]) return true;                       // an ordinary attachment
     if (type === 'application/pdf' || /\.pdf$/i.test(a.getName())) return true;  // a PDF placed inline
