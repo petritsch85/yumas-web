@@ -256,7 +256,7 @@ function backfill() {
  *
  * Edit the line below, then choose "resend" in the function menu → Run.
  */
-const RESEND_QUERY = 'subject:(Mike Bill) after:2026/11/17 before:2026/11/20';
+const RESEND_QUERY = '{from:selection-prestige.de from:sirup from:metro-markets} after:2026/09/25 before:2026/11/01';
 
 function resend() {
   if (RELAY_URL.indexOf('http') !== 0) throw new Error('Paste the webhook address into RELAY_URL first.');
