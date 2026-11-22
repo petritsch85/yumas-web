@@ -114,9 +114,20 @@ async function storeFile(attachment: Attachment, folder: 'bills' | 'skipped'): P
   const bytes = Buffer.from(attachment.Content, 'base64');
   const fileName = attachment.Name.replace(/[^a-zA-Z0-9._-]/g, '_');
   const path = `${folder}/${Date.now()}_${fileName}`;
+  /* The bucket takes PDFs and pictures only. Sélection Prestige's invoice of
+     22.10.2026 came labelled "application/octet-stream": the upload was
+     refused, the bill appeared nowhere, and Gmail still showed it Imported.
+     The type is therefore worked out from the file, not taken from the label. */
+  const label = (attachment.ContentType ?? '').toLowerCase().split(';')[0].trim();
+  const name = attachment.Name.toLowerCase();
+  const contentType =
+    isPdf(label, name, attachment.Content) ? 'application/pdf'
+    : /\.png$/.test(name) || label === 'image/png' ? 'image/png'
+    : isImage(label, name) ? 'image/jpeg'
+    : label || 'application/pdf';
   const { error } = await getSupabaseAdmin().storage
     .from('bills')
-    .upload(path, bytes, { contentType: attachment.ContentType || 'application/pdf' });
+    .upload(path, bytes, { contentType });
   if (error) throw new Error(`Storage upload failed: ${error.message}`);
   return path;
 }
