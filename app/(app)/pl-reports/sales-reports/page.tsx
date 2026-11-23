@@ -154,6 +154,19 @@ const SGA_LINES: { key: string; label: string; categories: string[] }[] = [
  * Kept narrow on purpose: each pattern is the provider's own name and nothing
  * a food supplier could share. See groupOpex for why it matters.
  */
+/**
+ * Bills whose P&L cost is not their invoice net.
+ *
+ * G + K Automobile Eschborn, RE 633071843 (30.09.2026): a vehicle invoice of
+ * 23.484,92 € gross. Yumas paid 4.049,69 € on 30.10 — the VAT of 3.749,69 €,
+ * which is reclaimable, plus 300 € net; the rest was not paid by Yumas. Only
+ * the 300 € is a cost of the business, so the 19.735 € net would have
+ * overstated October's repairs line roughly twentyfold.
+ */
+const PL_NET_OVERRIDE: Record<string, number> = {
+  '49addac9-9898-4549-a687-43cbf250b00b': 300,
+};
+
 const PAYMENT_PROVIDER = /\bnexi\b|\bpaypal\b|american\s+express|\bamex\b|\bstripe\b/i;
 
 /** Platforms whose charges are already deducted inside their own sales figure. */
@@ -1648,7 +1661,7 @@ export default function SalesReportsPage() {
     return m;
   }, [gmPayrollLines]);
   const billNet = useCallback(
-    (b: Record<string, unknown>) => Number(b.net_amount ?? 0) - (inPayroll.get(String(b.id)) ?? 0),
+    (b: Record<string, unknown>) => PL_NET_OVERRIDE[String(b.id)] ?? Number(b.net_amount ?? 0) - (inPayroll.get(String(b.id)) ?? 0),
     [inPayroll]);
 
   /* The payroll's reconciled monthly figure, from the FiBu-Journal. Read via
@@ -2593,7 +2606,7 @@ export default function SalesReportsPage() {
       const startY = pStart.getFullYear(), startM = pStart.getMonth();
       const endY   = pEnd.getFullYear(),   endM   = pEnd.getMonth();
       const totalMonths = Math.max(1, (endY - startY) * 12 + (endM - startM) + 1);
-      const monthlyAmt  = bill.net_amount / totalMonths;
+      const monthlyAmt  = (PL_NET_OVERRIDE[bill.id] ?? bill.net_amount) / totalMonths;
       // Spread over every month the bill's own period covers, whatever year
       // that falls in: the monthly P&L is a continuous history, not one year.
       for (let y = startY; y <= endY; y++) {
