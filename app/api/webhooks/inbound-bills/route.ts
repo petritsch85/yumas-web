@@ -4,6 +4,7 @@ import { createHash } from 'crypto';
 import { getSupabaseAdmin } from '@/lib/supabase-admin';
 import { extractFromAttachment, type Attachment } from '@/lib/bill-extract';
 import { fileBill, findDuplicate, isBillDocument } from '@/lib/inbound-bills';
+import { fileAmexStatement } from '@/lib/amex-file';
 
 const SECRET = process.env.INBOUND_BILLS_WEBHOOK_SECRET ?? '';
 
@@ -274,6 +275,14 @@ async function processBills(billAttachments: Attachment[], email: EmailMeta) {
         continue;
       }
       try {
+        /* An Amex statement goes to the month-end folder, not the bills (lib/amex-file.ts). */
+        if (isPdf((a.ContentType ?? '').toLowerCase(), a.Name.toLowerCase(), a.Content)) {
+          const amex = await fileAmexStatement(getSupabaseAdmin(), new Uint8Array(Buffer.from(a.Content, 'base64')), a.Name);
+          if (amex) {
+            console.log(`[inbound-bills] ${a.Name}: Amex statement ${amex.merchant} for ${amex.month} — filed in month-end, fee ${amex.fees.toFixed(2)} €, ${amex.linked} payouts linked${amex.unmatched.length ? `, ${amex.unmatched.length} still open` : ''}`);
+            continue;
+          }
+        }
         const extracted = await extractFromAttachment(a);
         if (isWoltSettlement(a.Name, extracted)) {
           await setAside(a, { ...extracted, document_type: 'platform_statement' }, email);

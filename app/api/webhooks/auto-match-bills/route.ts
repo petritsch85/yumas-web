@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { POST as autoMatch } from '@/app/api/cashflow/auto-match/route';
+import { getSupabaseAdmin } from '@/lib/supabase-admin';
+import { relinkAmexStatements } from '@/lib/amex-file';
 
 /**
  * Vercel cron, every night (vercel.json): link incoming bills to the payments
@@ -19,13 +21,16 @@ export async function GET(req: NextRequest) {
   const call = (body: unknown) => autoMatch(new Request('http://internal/api/cashflow/auto-match', {
     method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
   }) as unknown as NextRequest);
+  /* Amex statements arrive by email before the bank statement showing their
+     payouts; tie those payouts to them once the bank side is in. */
+  const amexLinked = await relinkAmexStatements(getSupabaseAdmin()).catch(() => 0);
   try {
     const preview = await (await call({ apply: false })).json() as { matches?: { txId: string }[]; error?: string };
     if (preview.error) throw new Error(preview.error);
     const only = (preview.matches ?? []).map(m => m.txId);
-    if (!only.length) return NextResponse.json({ applied: 0 });
+    if (!only.length) return NextResponse.json({ applied: 0, amexLinked });
     const result = await (await call({ apply: true, only })).json();
-    return NextResponse.json(result);
+    return NextResponse.json({ ...result, amexLinked });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : 'failed' }, { status: 500 });
   }
